@@ -7,297 +7,182 @@ struct request {
    std::optional<peer_id> target_peer;
    dht::options options;
    std::vector<dht::peer> seeds;
+   std::size_t requested_provider_count = 0;
+   bool collect_value_responses = false;
 };
 
 struct result {
    dht::query_result query;
    std::vector<peer_id> queried;
    std::vector<peer_id> failed;
+   std::vector<dht::record> records;
+   std::vector<std::pair<peer_id, std::optional<dht::record>>> value_responses;
+   bool converged = false;
 };
 
-[[nodiscard]] inline bool has_endpoint(const dht::peer& value) noexcept {
-   return !value.endpoints.empty();
-}
+[[nodiscard]] bool has_endpoint(const dht::peer& value) noexcept;
+void merge_peer(dht::peer& target, const dht::peer& source);
+void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t limit);
+void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value);
+[[nodiscard]] std::vector<dht::peer> sorted_peers(const std::map<peer_id, dht::peer>& known, const dht::key& target);
+[[nodiscard]] std::optional<dht::peer> next_peer(const std::map<peer_id, dht::peer>& known,
+                                                 const std::set<peer_id>& attempted, const dht::key& target);
+[[nodiscard]] bool closest_peers_queried(const std::map<peer_id, dht::peer>& known, const std::set<peer_id>& queried,
+                                         const std::set<peer_id>& failed, const dht::key& target,
+                                         std::size_t replication);
 
-inline void merge_peer(dht::peer& target, const dht::peer& source) {
-   if (target.id.value.empty()) {
-      target.id = source.id;
-   }
-   target.connection = source.connection;
-   for (const auto& endpoint : source.endpoints) {
-      const auto exists = std::ranges::any_of(
-          target.endpoints, [&](const auto& current) { return current.to_string() == endpoint.to_string(); });
-      if (!exists) {
-         target.endpoints.push_back(endpoint);
-      }
-   }
-}
-
-inline void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value) {
-   if (!valid_peer_id(value.id)) {
-      return;
-   }
-   auto& item = known[value.id];
-   merge_peer(item, value);
-}
-
-inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value) {
-   if (!valid_peer_id(value.id)) {
-      return;
-   }
-   const auto found = std::ranges::find_if(providers, [&](const auto& current) { return current.id == value.id; });
-   if (found == providers.end()) {
-      providers.push_back(value);
-      return;
-   }
-   merge_peer(*found, value);
-}
-
-[[nodiscard]] inline std::vector<dht::peer> sorted_peers(const std::map<peer_id, dht::peer>& known,
-                                                         const dht::key& target) {
-   auto out = std::vector<dht::peer>{};
-   out.reserve(known.size());
-   for (const auto& [_, peer] : known) {
-      out.push_back(peer);
-   }
-   std::ranges::sort(out, [&](const auto& left, const auto& right) {
-      const auto left_distance = distance_between(left.id.to_bytes(), target.bytes);
-      const auto right_distance = distance_between(right.id.to_bytes(), target.bytes);
-      if (left_distance != right_distance) {
-         return left_distance < right_distance;
-      }
-      return left.id.to_string() < right.id.to_string();
-   });
-   return out;
-}
-
-[[nodiscard]] inline std::vector<dht::peer> next_batch(const std::map<peer_id, dht::peer>& known,
-                                                       const std::set<peer_id>& queried,
-                                                       const std::set<peer_id>& failed, const dht::key& target,
-                                                       std::size_t alpha) {
-   auto out = std::vector<dht::peer>{};
-   if (alpha == 0) {
-      return out;
-   }
-   for (const auto& peer : sorted_peers(known, target)) {
-      if (out.size() >= alpha) {
-         break;
-      }
-      if (!has_endpoint(peer) || queried.contains(peer.id) || failed.contains(peer.id)) {
-         continue;
-      }
-      out.push_back(peer);
-   }
-   return out;
-}
-
-[[nodiscard]] inline bool closest_peers_queried(const std::map<peer_id, dht::peer>& known,
-                                                const std::set<peer_id>& queried, const std::set<peer_id>& failed,
-                                                const dht::key& target, std::size_t replication) {
-   auto considered = std::size_t{};
-   for (const auto& peer : sorted_peers(known, target)) {
-      if (!has_endpoint(peer) || failed.contains(peer.id)) {
-         continue;
-      }
-      if (considered >= replication) {
-         break;
-      }
-      ++considered;
-      if (!queried.contains(peer.id)) {
-         return false;
-      }
-   }
-   return considered > 0;
-}
-
-struct batch_response {
+struct query_response {
    dht::peer peer;
    std::optional<dht::message> response;
    std::exception_ptr local_error;
    bool failed = false;
 };
 
-template <typename Query, typename IsPeerFailure>
-struct query_callables {
+template <typename Query, typename IsPeerFailure> struct query_callables {
    Query query;
    IsPeerFailure is_peer_failure;
 };
 
-template <typename Query, typename IsPeerFailure>
-boost::asio::awaitable<std::vector<batch_response>>
-query_batch_on_strand(std::vector<dht::peer> batch,
-                      std::shared_ptr<query_callables<Query, IsPeerFailure>> callables,
-                      boost::asio::strand<boost::asio::any_io_executor> strand) {
-   namespace asio = boost::asio;
-
-   struct state {
-      explicit state(asio::strand<asio::any_io_executor> executor, std::vector<dht::peer> peers)
-          : remaining(peers.size()), timer(std::move(executor)) {
-         items.reserve(peers.size());
-         children_cancellation.reserve(peers.size());
-         for (auto& peer : peers) {
-            items.push_back(batch_response{.peer = std::move(peer)});
-         }
-      }
-
-      std::vector<batch_response> items;
-      std::size_t remaining;
-      asio::steady_timer timer;
-      std::vector<std::unique_ptr<asio::cancellation_signal>> children_cancellation;
-   };
-
-   auto shared = std::make_shared<state>(strand, std::move(batch));
-   for (auto index = std::size_t{}; index < shared->items.size(); ++index) {
-      const auto peer = shared->items[index].peer;
-      auto child_cancellation = std::make_unique<asio::cancellation_signal>();
-      const auto child_cancellation_slot = child_cancellation->slot();
-      shared->children_cancellation.push_back(std::move(child_cancellation));
-      asio::co_spawn(
-          strand,
-          [shared, callables, index, peer]() mutable -> asio::awaitable<void> {
-             auto response = std::optional<dht::message>{};
-             auto local_error = std::exception_ptr{};
-             auto failed = false;
-             try {
-                response = co_await callables->query(peer);
-             } catch (const forge::exceptions::base& error) {
-                try {
-                   failed = callables->is_peer_failure(peer, error);
-                   if (!failed) {
-                      local_error = std::current_exception();
-                   }
-                } catch (...) {
-                   local_error = std::current_exception();
-                }
-             } catch (...) {
-                local_error = std::current_exception();
-             }
-             shared->items[index].response = std::move(response);
-             shared->items[index].local_error = std::move(local_error);
-             shared->items[index].failed = failed;
-             --shared->remaining;
-             shared->timer.cancel(); // on_strand
-          },
-          asio::bind_cancellation_slot(child_cancellation_slot, asio::detached));
-   }
-
-   auto cancellation_failure = std::exception_ptr{};
-   const auto cancel_children = [&shared] {
-      for (const auto& cancellation : shared->children_cancellation) {
-         cancellation->emit(asio::cancellation_type::all);
-      }
-   };
-   while (true) {
-      if (shared->remaining == 0) {
-         if (cancellation_failure) {
-            std::rethrow_exception(cancellation_failure);
-         }
-         co_return std::move(shared->items);
-      }
-      shared->timer.expires_after(std::chrono::minutes{10});
-      auto error = boost::system::error_code{};
-      auto caught_cancellation = false;
-      try {
-         co_await shared->timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
-      } catch (...) {
-         if (!cancellation_failure) {
-            cancellation_failure = std::current_exception();
-            cancel_children();
-            caught_cancellation = true;
-         }
-      }
-      if (caught_cancellation) {
-         co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
-      }
-      if (!cancellation_failure) {
-         const auto cancellation = co_await asio::this_coro::cancellation_state;
-         if (cancellation.cancelled() != asio::cancellation_type::none) {
-            cancellation_failure =
-                std::make_exception_ptr(boost::system::system_error{asio::error::operation_aborted});
-            cancel_children();
-            co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
-         }
-      }
-   }
-}
-
-template <typename Query, typename IsPeerFailure>
-boost::asio::awaitable<std::vector<batch_response>>
-query_batch(std::vector<dht::peer> batch, std::shared_ptr<query_callables<Query, IsPeerFailure>> callables) {
-   namespace asio = boost::asio;
-   auto executor = asio::any_io_executor{co_await asio::this_coro::executor};
-   auto strand = asio::make_strand(executor);
-   co_return co_await asio::co_spawn(
-       strand,
-       [batch = std::move(batch), callables,
-        strand]() mutable -> asio::awaitable<std::vector<batch_response>> {
-          co_return co_await query_batch_on_strand(std::move(batch), std::move(callables), strand);
-       },
-       asio::use_awaitable);
-}
-
 template <typename Query, typename Postprocess, typename IsPeerFailure>
-boost::asio::awaitable<result> run(request value, Query query, Postprocess postprocess, IsPeerFailure is_peer_failure) {
+boost::asio::awaitable<result>
+run_on_strand(request value, std::shared_ptr<query_callables<Query, IsPeerFailure>> callables, Postprocess postprocess,
+              boost::asio::strand<boost::asio::any_io_executor> strand) {
+   namespace asio = boost::asio;
+   using completion_channel = asio::experimental::concurrent_channel<void(boost::system::error_code, query_response)>;
+
+   if (value.options.alpha == 0 || value.options.max_query_peers == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "DHT query concurrency and discovered-peer limits must be positive");
+   }
    auto known = std::map<peer_id, dht::peer>{};
    for (const auto& peer : value.seeds) {
-      merge_known(known, peer);
+      merge_known(known, peer, value.options.max_query_peers);
    }
 
+   auto attempted = std::set<peer_id>{};
    auto queried = std::set<peer_id>{};
    auto failed = std::set<peer_id>{};
+   auto active = std::map<peer_id, std::unique_ptr<asio::cancellation_signal>>{};
    auto out = result{.query = dht::query_result{.target = value.target}};
-   const auto alpha = std::max<std::size_t>(1, value.options.alpha);
-   const auto max_seen =
-       std::max({value.options.replication, value.options.max_closer_peers, value.options.max_provider_peers, alpha}) *
-       8U;
-   auto callables = std::make_shared<query_callables<Query, IsPeerFailure>>(std::move(query),
-                                                                           std::move(is_peer_failure));
+   const auto alpha = value.options.alpha;
+   auto completions = std::make_shared<completion_channel>(strand, alpha);
 
-   while (queried.size() + failed.size() < max_seen) {
-      const auto batch = next_batch(known, queried, failed, value.target, alpha);
-      if (batch.empty()) {
-         break;
+   const auto launch = [&](dht::peer peer) {
+      auto child_cancellation = std::make_unique<asio::cancellation_signal>();
+      const auto child_cancellation_slot = child_cancellation->slot();
+      const auto id = peer.id;
+      active.emplace(id, std::move(child_cancellation));
+      try {
+         asio::co_spawn(
+             strand,
+             [callables, completions, peer = std::move(peer)]() mutable -> asio::awaitable<void> {
+                auto completed = query_response{.peer = peer};
+                try {
+                   completed.response = co_await callables->query(peer);
+                } catch (const forge::exceptions::base& error) {
+                   try {
+                      completed.failed = callables->is_peer_failure(peer, error);
+                      if (!completed.failed) {
+                         completed.local_error = std::current_exception();
+                      }
+                   } catch (...) {
+                      completed.local_error = std::current_exception();
+                   }
+                } catch (...) {
+                   completed.local_error = std::current_exception();
+                }
+                static_cast<void>(completions->try_send(boost::system::error_code{}, std::move(completed)));
+             },
+             asio::bind_cancellation_slot(child_cancellation_slot, asio::detached));
+      } catch (...) {
+         active.erase(id);
+         throw;
       }
+   };
 
-      for (const auto& peer : batch) {
-         queried.insert(peer.id);
+   const auto cancel_children = [&active]() noexcept {
+      for (const auto& [_, cancellation] : active) {
+         try {
+            cancellation->emit(asio::cancellation_type::all);
+         } catch (...) {
+            // Completion remains the ownership barrier even if a cancellation callback rejects the signal.
+         }
       }
-      auto responses = co_await query_batch(std::move(batch), callables);
-      for (const auto& item : responses) {
+   };
+
+   auto terminal_error = std::exception_ptr{};
+   try {
+      while (true) {
+         while (active.size() < alpha) {
+            auto candidate = next_peer(known, attempted, value.target);
+            if (!candidate) {
+               break;
+            }
+            attempted.insert(candidate->id);
+            launch(std::move(*candidate));
+         }
+
+         if (active.empty()) {
+            break;
+         }
+
+         auto item = co_await completions->async_receive(asio::use_awaitable);
+         active.erase(item.peer.id);
+         auto application_complete = false;
          if (item.local_error) {
             std::rethrow_exception(item.local_error);
          }
-      }
-      for (auto& item : responses) {
-         if (item.response && !item.failed) {
-            co_await postprocess(item.peer, *item.response);
-         }
-      }
-      for (const auto& item : responses) {
          if (item.failed || !item.response) {
             failed.insert(item.peer.id);
-            continue;
-         }
-         if (value.target_peer && item.peer.id == *value.target_peer) {
-            out.query.complete = true;
-         }
-         for (const auto& closer : item.response->closer_peers) {
-            merge_known(known, closer);
-            if (value.target_peer && closer.id == *value.target_peer) {
+         } else {
+            queried.insert(item.peer.id);
+            if (value.target_peer && item.peer.id == *value.target_peer) {
                out.query.complete = true;
             }
+            if (item.response->record_value) {
+               out.records.push_back(*item.response->record_value);
+            }
+            if (value.collect_value_responses) {
+               out.value_responses.emplace_back(item.peer.id, item.response->record_value);
+            }
+            application_complete = co_await postprocess(item.peer, *item.response);
+            if (!application_complete) {
+               for (const auto& closer : item.response->closer_peers) {
+                  merge_known(known, closer, value.options.max_query_peers);
+                  if (value.target_peer && closer.id == *value.target_peer) {
+                     out.query.complete = true;
+                  }
+               }
+               for (const auto& provider : item.response->provider_peers) {
+                  merge_provider(out.query.provider_peers, provider);
+               }
+            }
          }
-         for (const auto& provider : item.response->provider_peers) {
-            merge_provider(out.query.provider_peers, provider);
-         }
-      }
 
-      if (out.query.complete || !out.query.provider_peers.empty()) {
-         break;
+         if (out.query.complete || application_complete ||
+             (value.requested_provider_count != 0 &&
+              out.query.provider_peers.size() >= value.requested_provider_count)) {
+            break;
+         }
+         if (closest_peers_queried(known, queried, failed, value.target, value.options.replication)) {
+            out.converged = true;
+            break;
+         }
       }
-      if (closest_peers_queried(known, queried, failed, value.target, value.options.replication)) {
-         break;
+   } catch (...) {
+      terminal_error = std::current_exception();
+   }
+
+   if (!active.empty()) {
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+      cancel_children();
+      while (!active.empty()) {
+         auto item = co_await completions->async_receive(asio::use_awaitable);
+         active.erase(item.peer.id);
       }
+   }
+   if (terminal_error) {
+      std::rethrow_exception(terminal_error);
    }
 
    for (const auto& peer : failed) {
@@ -313,9 +198,25 @@ boost::asio::awaitable<result> run(request value, Query query, Postprocess postp
    co_return out;
 }
 
+template <typename Query, typename Postprocess, typename IsPeerFailure>
+boost::asio::awaitable<result> run(request value, Query query, Postprocess postprocess, IsPeerFailure is_peer_failure) {
+   namespace asio = boost::asio;
+   auto executor = asio::any_io_executor{co_await asio::this_coro::executor};
+   auto strand = asio::make_strand(executor);
+   auto callables =
+       std::make_shared<query_callables<Query, IsPeerFailure>>(std::move(query), std::move(is_peer_failure));
+   co_return co_await asio::co_spawn(
+       strand,
+       [value = std::move(value), callables, postprocess = std::move(postprocess),
+        strand]() mutable -> asio::awaitable<result> {
+          co_return co_await run_on_strand(std::move(value), std::move(callables), std::move(postprocess), strand);
+       },
+       asio::use_awaitable);
+}
+
 template <typename Query, typename IsPeerFailure>
 boost::asio::awaitable<result> run(request value, Query query, IsPeerFailure is_peer_failure) {
-   auto postprocess = [](const dht::peer&, dht::message&) -> boost::asio::awaitable<void> { co_return; };
+   auto postprocess = [](const dht::peer&, dht::message&) -> boost::asio::awaitable<bool> { co_return false; };
    co_return co_await run(std::move(value), std::move(query), std::move(postprocess), std::move(is_peer_failure));
 }
 

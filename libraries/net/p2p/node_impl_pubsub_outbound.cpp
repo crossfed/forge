@@ -316,7 +316,9 @@ void node::impl::record_pubsub_send_failure(const peer_id& peer, const forge::ex
       return;
    }
    store.mark_failure(peer);
-   routing.mark_failure(peer);
+   for (auto& [_, state] : dht_profiles) {
+      state->routing.mark_failure(peer);
+   }
 }
 
 boost::asio::awaitable<void> node::impl::announce_pubsub_subscriptions(const peer_id& peer) {

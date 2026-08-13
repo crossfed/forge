@@ -3,6 +3,9 @@
 #include "connection_manager.hxx"
 #include "connection_singleflight_registry.hxx"
 #include "direct_transport.hxx"
+#include "dht_profile_state.hxx"
+#include "dht_provider_registry.hxx"
+#include "dht_routing_refresh.hxx"
 #include "host_addresses.hxx"
 #include "identify_service.hxx"
 #include "libp2p_identity_material.hxx"
@@ -185,10 +188,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
    detail::identify_service identify_service;
    std::shared_ptr<detail::bootstrap_service> bootstrap;
    forge::asio::gate session_admission_gate;
+   forge::asio::gate peer_state_hydration_gate;
 
    mutable std::mutex mutex;
    peer_store store;
-   dht::routing_table routing;
+   std::map<protocol_id, std::unique_ptr<detail::dht_profile_state>> dht_profiles;
+   std::shared_ptr<detail::dht_routing_refresh> routing_refresh;
+   std::shared_ptr<detail::dht_provider_registry> provider_registry;
    mutable connection_manager connections{connection_policy_for(options.limits)};
    std::map<protocol_id, node::protocol_handler> handlers;
    std::map<std::uint64_t, std::shared_ptr<session_state>> sessions;
@@ -206,8 +212,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::metrics_snapshot metrics_value;
    std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
+   bool peer_state_hydrated = false;
 
    void initialize_lifecycle();
+   void initialize_dht_routing_refresh();
+   void initialize_dht_provider_registry();
    [[nodiscard]] bool launch_tracked(std::function<boost::asio::awaitable<void>()> operation) noexcept;
    void request_lifecycle_stop() noexcept;
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
@@ -352,6 +361,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void increment_dht_response();
 
+   [[nodiscard]] detail::dht_profile_state& dht_profile(const protocol_id& protocol);
+   [[nodiscard]] const detail::dht_profile_state& dht_profile(const protocol_id& protocol) const;
+   boost::asio::awaitable<bool> async_refresh_dht_routing(protocol_id protocol, dht::key target);
+   void notify_dht_routing_refresh() noexcept;
+
    void increment_rendezvous_registration();
 
    void increment_rendezvous_discover();
@@ -432,9 +446,10 @@ struct node::impl : std::enable_shared_from_this<impl> {
                         std::size_t max_direct_endpoints = node::open_options{}.max_direct_endpoints,
                         std::chrono::milliseconds direct_attempt_timeout = node::open_options{}.direct_attempt_timeout);
 
-   boost::asio::awaitable<dht::message> exchange_dht(const peer_id& peer, dht::message request,
-                                                     std::chrono::milliseconds timeout);
-   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request, std::chrono::milliseconds timeout);
+   boost::asio::awaitable<dht::message> exchange_dht(const protocol_id& profile, const peer_id& peer,
+                                                     dht::message request, std::chrono::milliseconds timeout);
+   boost::asio::awaitable<void> send_dht(const protocol_id& profile, const peer_id& peer, dht::message request,
+                                         std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<relay::reservation::info>
    request_relay_reservation(const peer_id& relay_peer, relay::reservation::options reservation_options,
@@ -509,7 +524,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> handle_dcutr(std::shared_ptr<session_state> session, forge::net::p2p::stream stream);
 
-   boost::asio::awaitable<void> handle_dht(std::shared_ptr<session_state> session, forge::net::p2p::stream stream);
+   boost::asio::awaitable<void> handle_dht(std::shared_ptr<session_state> session, protocol_id profile,
+                                           forge::net::p2p::stream stream);
 
    boost::asio::awaitable<void> handle_rendezvous(std::shared_ptr<session_state> session,
                                                   forge::net::p2p::stream stream);

@@ -24,14 +24,12 @@ and autonomous topology are complete.
 
 The following surfaces are not production claims yet:
 
-- Kademlia, Rendezvous, Peer Exchange, Ping sampling and AutoNAT are explicit or
-  inbound operations without complete node-owned maintenance;
-- Kademlia now has bounded node-owned k-buckets, DHT-exchange-verified server
-  admission and failure eviction; Identify and hydrated records remain
-  candidates until a valid DHT response, while autonomous refresh and the
-  standard value profile are still Stage 4 work;
-- standard Kademlia value operations do not have a value store or validation
-  policy;
+- Kademlia now provides isolated Amino and product profiles, bounded node-owned
+  k-buckets, autonomous refresh, durable validated values, owned provider
+  registration and `/pk`/`/ipns` interoperability; it remains `partial` until
+  Stage 5 topology and complete production-host evidence are finished;
+- Rendezvous, Peer Exchange, Ping sampling and AutoNAT still lack the complete
+  unified topology lifecycle planned for Stage 5+;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
   reachability feed;
 - GossipSub scoring and autonomous topology remain incomplete.
@@ -69,7 +67,8 @@ donor run.
   `forge.net.p2p.lifecycle`.
 - `forge.net.p2p.protocol`, `forge.net.p2p.message`, `forge.net.p2p.negotiation`.
 - `forge.net.p2p.peer_store`, `forge.net.p2p.discovery`, `forge.net.p2p.dht`,
-  `forge.net.p2p.rendezvous`.
+  `forge.net.p2p.dht.record_store`, `forge.net.p2p.ipns`,
+  `forge.net.p2p.provider_registration`, `forge.net.p2p.rendezvous`.
 - `forge.net.p2p.pubsub`.
 - `forge.net.p2p.relay`, `forge.net.p2p.scoring`,
   `forge.net.p2p.resource_manager`.
@@ -80,7 +79,8 @@ Target: `forge_net_p2p`.
 Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`,
 `forge_net_tcp`, `forge_net_quic`, `forge_net_yamux`, `forge_multiformats` and
 Boost.Asio. The library has no database dependency; durable state is supplied
-through the asynchronous `peer_store::persistence` port.
+through the asynchronous `peer_store::persistence` and
+`dht::record_store::persistence` ports.
 
 Foundation compatibility modules below P2P live in `forge_multiformats`:
 `forge.multiformats.varint`, `forge.multiformats.multicodec`,
@@ -213,7 +213,7 @@ must use the same private direct profile boundary.
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint
 compatibility convenience for older single-listen consumers.
 
-### Peer State Persistence
+### Peer And DHT Record Persistence
 
 The low-level node requires `peer_store::persistence` outside explicit insecure
 tests. The backend-neutral asynchronous contract provides paged hydration,
@@ -248,6 +248,20 @@ The official P2P plugin supplies the production ObjectDB adapter. Direct users
 may implement the persistence port over their own lifecycle owner. The memory
 implementation is deterministic but intended only for tests and explicit local
 experiments.
+
+Peer state and DHT records are intentionally separate operational domains even
+when the official plugin stores them in one physical ObjectDB store. Each DHT
+profile owns an isolated routing table, value/provider record store, query and
+maintenance lifecycle. The Amino profile fixes `/ipfs/kad/1.0.0`, `k=20`,
+`alpha=10`, `/pk` and `/ipns`; product validators/selectors require a distinct
+product protocol ID.
+
+`async_provide()` returns a move-only `provider_registration`. Its first
+publication is acknowledged only after the local record is durable and the
+requested remote quorum succeeds. The node renews that exact endpoint snapshot
+with jitter while an owner remains; the last withdrawal removes local
+ownership. Restart never resumes publication without a fresh product-owned
+registration.
 
 For a mutation requesting durable acknowledgement, persistence distinguishes a
 failed commit from a commit whose subsequent durable flush could not be

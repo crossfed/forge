@@ -112,7 +112,8 @@ void verify_libp2p_certificate_extension(const forge::crypto::pki::x509::certifi
    }
 }
 
-[[nodiscard]] peer_id peer_id_from_libp2p_certificate_extension(const forge::crypto::pki::x509::certificate& certificate) {
+[[nodiscard]] peer_id
+peer_id_from_libp2p_certificate_extension(const forge::crypto::pki::x509::certificate& certificate) {
    const auto value = certificate.extension("1.3.6.1.4.1.53594.1.1");
    if (value.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity,
@@ -228,10 +229,12 @@ public_key decode_public_key(std::span<const std::uint8_t> bytes) {
    if (!saw_type || !saw_data || out.data.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::codec_error, "libp2p public key is incomplete");
    }
+   validate_public_key(out);
    return out;
 }
 
 peer_id make_peer_id(const public_key& key) {
+   validate_public_key(key);
    auto encoded = encode_public_key(key);
    if (encoded.size() <= 42) {
       return peer_id_from_multihash(forge::multiformats::multihash::identity(encoded));

@@ -1,0 +1,322 @@
+module;
+
+#include <boost/asio/awaitable.hpp>
+
+#include <forge/exceptions/macros.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <exception>
+#include <iterator>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+module forge.net.p2p.dht.record_store;
+
+import forge.asio.gate;
+import forge.net.p2p.exceptions;
+
+#include "details/dht_record_store_impl.hxx"
+
+namespace forge::net::p2p {
+
+void dht::record_store::impl::mark_persistence_failure_locked(std::string message) {
+   degraded_ = true;
+   ++persistence_failures_;
+   last_failure_ = std::move(message);
+}
+
+void dht::record_store::impl::mark_durability_uncertain_locked(std::string message) {
+   durability_uncertain_ = true;
+   mark_persistence_failure_locked(std::move(message));
+}
+
+void dht::record_store::impl::mark_persistence_healthy_locked(bool durability_confirmed) {
+   if (durability_confirmed) {
+      durability_uncertain_ = false;
+   }
+   if (durability_uncertain_) {
+      return;
+   }
+   degraded_ = false;
+   last_failure_.clear();
+}
+
+void dht::record_store::impl::apply_durability_result_locked(const dht::record_store::apply_result& result) {
+   if (result.durability_confirmed) {
+      mark_persistence_healthy_locked(true);
+   } else {
+      mark_durability_uncertain_locked(durability_failure_message(result));
+   }
+}
+
+boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono::system_clock::time_point now) {
+   auto admission = admit_operation();
+   auto ticket = co_await persistence_gate_.acquire();
+   auto hydrated_values = std::vector<dht::record_store::value_record>{};
+   auto hydrated_providers = std::vector<dht::record_store::provider_record>{};
+
+   const auto hydrate_kind = [this, &hydrated_values,
+                              &hydrated_providers](dht::record_store::hydration_kind kind,
+                                                   std::size_t maximum) -> boost::asio::awaitable<void> {
+      auto cursor = std::optional<std::vector<std::byte>>{};
+      auto loaded = std::size_t{};
+      while (true) {
+         const auto remaining = maximum - loaded;
+         if (remaining == 0) {
+            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
+         }
+         const auto limit = std::min(remaining, options_.hydration_page_limit);
+         auto page = co_await persistence_->async_hydrate(
+             dht::record_store::hydration_request{.kind = kind, .cursor = cursor, .limit = limit});
+         const auto page_size = page.values.size() + page.providers.size();
+         const auto wrong_kind = (kind != dht::record_store::hydration_kind::values && !page.values.empty()) ||
+                                 (kind != dht::record_store::hydration_kind::providers && !page.providers.empty());
+         if (page_size > limit || wrong_kind || (page.cursor && (page.cursor == cursor || page_size == 0))) {
+            FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid hydration page");
+         }
+         loaded += page_size;
+         hydrated_values.insert(hydrated_values.end(), std::make_move_iterator(page.values.begin()),
+                                std::make_move_iterator(page.values.end()));
+         hydrated_providers.insert(hydrated_providers.end(), std::make_move_iterator(page.providers.begin()),
+                                   std::make_move_iterator(page.providers.end()));
+         if (!page.cursor) {
+            co_return;
+         }
+         if (loaded == maximum) {
+            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
+         }
+         cursor = std::move(page.cursor);
+      }
+   };
+
+   try {
+      co_await hydrate_kind(dht::record_store::hydration_kind::values, options_.max_values);
+      co_await hydrate_kind(dht::record_store::hydration_kind::providers, options_.max_providers);
+   } catch (...) {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_failure_locked(current_failure_message());
+      throw;
+   }
+
+   auto values = std::map<value_key, dht::record_store::value_record>{};
+   auto providers = std::map<provider_map_key, dht::record_store::provider_record>{};
+   auto providers_by_key = std::map<value_key, std::set<peer_id>>{};
+   auto total_bytes = std::size_t{};
+   auto expiry_updates = std::vector<dht::record_store::value_record>{};
+   auto stale_local_providers = std::vector<dht::record_store::provider_key>{};
+   for (auto& value : hydrated_values) {
+      if (expired(value.expires_at, now)) {
+         continue;
+      }
+      const auto persisted_expiry = value.expires_at;
+      static_cast<void>(prepare_value(value, now));
+      if (value.expires_at != persisted_expiry) {
+         expiry_updates.push_back(value);
+      }
+      const auto bytes = value_bytes(value);
+      if (!values.emplace(value.record.key_value.bytes, value).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence hydrated a duplicate value key");
+      }
+      if (exceeds(total_bytes, 0, bytes, options_.max_total_bytes)) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration byte capacity reached");
+      }
+      total_bytes += bytes;
+   }
+   for (auto& value : hydrated_providers) {
+      if (value.local_owned) {
+         stale_local_providers.push_back(dht::record_store::provider_key{.key = value.key, .provider = value.provider});
+         continue;
+      }
+      if (expired(value.provider_expires_at, now)) {
+         continue;
+      }
+      if (expired(value.addresses_expires_at, now)) {
+         value.endpoints.clear();
+         value.addresses_expires_at = {};
+      }
+      validate_provider(value, now);
+      const auto key = provider_map_key{value.key.bytes, value.provider};
+      if (!providers.emplace(key, value).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence hydrated a duplicate provider key");
+      }
+      auto& per_key = providers_by_key[value.key.bytes];
+      if (per_key.size() >= options_.max_providers_per_key) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration provider per-key capacity reached");
+      }
+      per_key.insert(value.provider);
+      const auto bytes = provider_bytes(value);
+      if (exceeds(total_bytes, 0, bytes, options_.max_total_bytes)) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration byte capacity reached");
+      }
+      total_bytes += bytes;
+   }
+
+   auto cleanup_result = std::optional<dht::record_store::apply_result>{};
+   if (!expiry_updates.empty() || !stale_local_providers.empty()) {
+      auto batch = dht::record_store::mutation_batch{};
+      batch.value_upserts = std::move(expiry_updates);
+      batch.provider_removals = std::move(stale_local_providers);
+      try {
+         cleanup_result = co_await persistence_->async_apply(std::move(batch));
+      } catch (...) {
+         auto lock = std::scoped_lock{mutex_};
+         mark_persistence_failure_locked(current_failure_message());
+         throw;
+      }
+   }
+
+   {
+      auto lock = std::scoped_lock{mutex_};
+      ensure_open_locked();
+      values_.swap(values);
+      providers_.swap(providers);
+      providers_by_key_.swap(providers_by_key);
+      local_providers_ = 0;
+      total_bytes_ = total_bytes;
+      if (cleanup_result) {
+         apply_durability_result_locked(*cleanup_result);
+      } else {
+         mark_persistence_healthy_locked();
+      }
+   }
+   if (cleanup_result && !cleanup_result->durability_confirmed) {
+      throw_durability_uncertain(*cleanup_result);
+   }
+}
+
+void dht::record_store::impl::apply_prune_locked(const dht::record_store::prune_result& result) {
+   for (const auto& key : result.values) {
+      erase_value_locked(key);
+   }
+   for (const auto& key : result.providers) {
+      erase_provider_locked(key);
+   }
+   for (const auto& value : result.provider_address_updates) {
+      const auto key = provider_map_key{value.key.bytes, value.provider};
+      if (providers_.contains(key)) {
+         publish_provider_locked(value);
+      }
+   }
+}
+
+boost::asio::awaitable<dht::record_store::prune_result>
+dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_point now) {
+   auto admission = admit_operation();
+   auto ticket = co_await persistence_gate_.acquire();
+   auto result = dht::record_store::prune_result{};
+   try {
+      result = co_await persistence_->async_prune_expired(now, options_.prune_page_limit);
+   } catch (...) {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_failure_locked(current_failure_message());
+      throw;
+   }
+   if (result.values.size() + result.providers.size() + result.provider_address_updates.size() >
+       options_.prune_page_limit) {
+      FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence exceeded the prune result bound");
+   }
+   {
+      auto lock = std::scoped_lock{mutex_};
+      apply_prune_locked(result);
+      apply_durability_result_locked(result.durability);
+   }
+   if (!result.durability.durability_confirmed) {
+      throw_durability_uncertain(result.durability);
+   }
+   co_return result;
+}
+
+boost::asio::awaitable<void> dht::record_store::impl::async_flush() {
+   auto admission = admit_operation();
+   auto ticket = co_await persistence_gate_.acquire();
+   try {
+      co_await persistence_->async_flush();
+   } catch (...) {
+      auto result = dht::record_store::apply_result{
+          .durability_confirmed = false,
+          .durability_failure = current_failure_message(),
+      };
+      {
+         auto lock = std::scoped_lock{mutex_};
+         mark_durability_uncertain_locked(durability_failure_message(result));
+      }
+      throw_durability_uncertain(result);
+   }
+   auto lock = std::scoped_lock{mutex_};
+   mark_persistence_healthy_locked(true);
+}
+
+boost::asio::awaitable<void> dht::record_store::impl::async_close() {
+   auto admission = admit_close();
+   if (!admission) {
+      co_return;
+   }
+   co_await wait_for_operations();
+   auto ticket = co_await persistence_gate_.acquire();
+   {
+      auto lock = std::scoped_lock{mutex_};
+      if (closed_) {
+         co_return;
+      }
+   }
+   try {
+      co_await persistence_->async_flush();
+   } catch (...) {
+      auto result = dht::record_store::apply_result{
+          .durability_confirmed = false,
+          .durability_failure = current_failure_message(),
+      };
+      auto failure = std::exception_ptr{};
+      try {
+         throw_durability_uncertain(result);
+      } catch (...) {
+         failure = std::current_exception();
+      }
+      {
+         auto lock = std::scoped_lock{mutex_};
+         mark_durability_uncertain_locked(durability_failure_message(result));
+      }
+      std::rethrow_exception(failure);
+   }
+   {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_healthy_locked(true);
+   }
+   try {
+      co_await persistence_->async_close();
+   } catch (...) {
+      auto failure = std::current_exception();
+      {
+         auto lock = std::scoped_lock{mutex_};
+         mark_persistence_failure_locked(current_failure_message());
+      }
+      std::rethrow_exception(failure);
+   }
+   {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_healthy_locked(true);
+      closed_ = true;
+      closing_ = false;
+   }
+}
+
+dht::record_store::persistence_status dht::record_store::impl::persistence_state() const {
+   auto lock = std::scoped_lock{mutex_};
+   return dht::record_store::persistence_status{
+       .failure_count = persistence_failures_,
+       .degraded = degraded_,
+       .durability_uncertain = durability_uncertain_,
+       .closing = closing_,
+       .closed = closed_,
+       .last_failure = last_failure_,
+   };
+}
+
+} // namespace forge::net::p2p

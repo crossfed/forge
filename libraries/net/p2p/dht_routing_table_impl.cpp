@@ -6,6 +6,7 @@ module;
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -78,6 +79,10 @@ template <typename Bucket> void promote_replacement(Bucket& bucket) {
 dht::routing_table::impl::impl(peer_id local_peer, dht::options options_value)
     : local(std::move(local_peer)), options(std::move(options_value)) {}
 
+void dht::routing_table::impl::advance_generation(bucket& value) noexcept {
+   value.generation = value.generation == (std::numeric_limits<std::uint64_t>::max)() ? 1 : value.generation + 1;
+}
+
 std::size_t dht::routing_table::impl::bucket_for(const peer_id& peer) const {
    return common_prefix_bits(distance_between(local.to_bytes(), peer.to_bytes()));
 }
@@ -110,6 +115,7 @@ void dht::routing_table::impl::upsert(dht::peer value, dht::routing_admission ad
                                                [&](const auto& current) { return current.value.id == entry.value.id; }),
                                 bucket.replacements.end());
       bucket.active.push_back(std::move(entry));
+      advance_generation(bucket);
       return;
    }
    insert_replacement(bucket, std::move(entry), options.replacement_cache_size);
@@ -124,6 +130,7 @@ void dht::routing_table::impl::mark_failure(const peer_id& peer) {
       }
       bucket.active.erase(current);
       promote_replacement(bucket);
+      advance_generation(bucket);
       return;
    }
    const auto replacement = find_entry(bucket.replacements, peer);
@@ -135,6 +142,7 @@ void dht::routing_table::impl::mark_failure(const peer_id& peer) {
 void dht::routing_table::impl::remove(const peer_id& peer) {
    auto lock = std::scoped_lock{mutex};
    auto& bucket = buckets[bucket_for(peer)];
+   const auto removed_active = find_entry(bucket.active, peer) != bucket.active.end();
    bucket.active.erase(std::remove_if(bucket.active.begin(), bucket.active.end(),
                                       [&](const auto& current) { return current.value.id == peer; }),
                        bucket.active.end());
@@ -142,6 +150,9 @@ void dht::routing_table::impl::remove(const peer_id& peer) {
                                             [&](const auto& current) { return current.value.id == peer; }),
                              bucket.replacements.end());
    promote_replacement(bucket);
+   if (removed_active) {
+      advance_generation(bucket);
+   }
 }
 
 std::vector<dht::peer> dht::routing_table::impl::closest(std::span<const std::uint8_t> target,
@@ -232,6 +243,51 @@ dht::routing_status dht::routing_table::impl::status() const {
    return out;
 }
 
+std::vector<dht::routing_refresh_bucket>
+dht::routing_table::impl::plan_refresh(std::chrono::steady_clock::time_point now,
+                                       std::chrono::milliseconds stale_after) const {
+   auto out = std::vector<dht::routing_refresh_bucket>{};
+   if (stale_after <= std::chrono::milliseconds::zero()) {
+      return out;
+   }
+   auto lock = std::scoped_lock{mutex};
+   auto highest_tracked = std::size_t{};
+   auto any_tracked = false;
+   for (auto index = std::size_t{}; index < buckets.size(); ++index) {
+      if (!buckets[index].active.empty()) {
+         highest_tracked = index;
+         any_tracked = true;
+      }
+   }
+   if (!any_tracked) {
+      return out;
+   }
+   if (highest_tracked + 1 < buckets.size()) {
+      ++highest_tracked;
+   }
+   for (auto index = std::size_t{}; index <= highest_tracked; ++index) {
+      const auto& bucket = buckets[index];
+      if (bucket.refreshed_at == std::chrono::steady_clock::time_point{} || now - bucket.refreshed_at >= stale_after) {
+         out.push_back(dht::routing_refresh_bucket{.common_prefix_length = index, .generation = bucket.generation});
+      }
+   }
+   return out;
+}
+
+bool dht::routing_table::impl::mark_refreshed(dht::routing_refresh_bucket value,
+                                              std::chrono::steady_clock::time_point refreshed_at) {
+   if (value.common_prefix_length >= buckets.size()) {
+      return false;
+   }
+   auto lock = std::scoped_lock{mutex};
+   auto& bucket = buckets[value.common_prefix_length];
+   if (bucket.generation != value.generation) {
+      return false;
+   }
+   bucket.refreshed_at = std::max(bucket.refreshed_at, refreshed_at);
+   return true;
+}
+
 dht::routing_table::routing_table(peer_id local_peer, dht::options options_value)
     : impl_(std::make_unique<impl>(std::move(local_peer), std::move(options_value))) {
    if (impl_->options.replication == 0 || impl_->options.replacement_cache_size == 0 ||
@@ -270,6 +326,16 @@ std::vector<dht::peer> dht::routing_table::snapshot() const {
 
 dht::routing_status dht::routing_table::status() const {
    return impl_->status();
+}
+
+std::vector<dht::routing_refresh_bucket> dht::routing_table::plan_refresh(std::chrono::steady_clock::time_point now,
+                                                                          std::chrono::milliseconds stale_after) const {
+   return impl_->plan_refresh(now, stale_after);
+}
+
+bool dht::routing_table::mark_refreshed(routing_refresh_bucket bucket,
+                                        std::chrono::steady_clock::time_point refreshed_at) {
+   return impl_->mark_refreshed(bucket, refreshed_at);
 }
 
 } // namespace forge::net::p2p

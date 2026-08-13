@@ -6,9 +6,33 @@ add_library(
    endpoint.cpp
    envelope.cpp
    identify.cpp
+   ipns.cpp
+   ipns_cbor.cpp
+   details/ipns_cbor.hxx
+   ipns_protobuf.cpp
+   details/ipns_protobuf.hxx
    dht.cpp
+      dht_profile.cpp
+      dht_query.cpp
    dht_routing_table_impl.cpp
    details/dht_routing_table_impl.hxx
+   dht_routing_refresh.cpp
+   details/dht_routing_refresh.hxx
+   dht_record_store.cpp
+   dht_record_store_impl.cpp
+   dht_record_store_impl_values.cpp
+   dht_record_store_impl_providers.cpp
+   dht_record_store_impl_persistence.cpp
+   details/dht_record_store_impl.hxx
+   memory_dht_record_store_persistence.cpp
+   details/memory_dht_record_store_persistence.hxx
+   dht_profile_state.cpp
+   details/dht_profile_state.hxx
+   dht_provider_registry.cpp
+   details/dht_provider_registry.hxx
+   provider_registration.cpp
+   provider_registration_impl.cpp
+   details/provider_registration_impl.hxx
    rendezvous.cpp
    pubsub.cpp
    scoring.cpp
@@ -26,6 +50,9 @@ add_library(
    negotiation.cpp
    peer_store.cpp
    peer_store_impl.cpp
+   peer_store_impl_mutations.cpp
+   peer_store_impl_persistence.cpp
+   peer_store_impl_queries.cpp
    details/peer_store_impl.hxx
    memory_peer_store_persistence.cpp
    details/memory_peer_store_persistence.hxx
@@ -54,6 +81,7 @@ add_library(
    node_impl_sessions.cpp
    node_impl_relay.cpp
    node_impl_dht.cpp
+   node_impl_dht_maintenance.cpp
    node_impl_identify.cpp
    node_impl_lifecycle.cpp
    details/node_impl.hxx
@@ -69,6 +97,8 @@ add_library(
    details/identify_service.hxx
    dht_exchange.cpp
    details/dht_exchange.hxx
+   dht_fanout.cpp
+   details/dht_fanout.hxx
    connection_singleflight_registry.cpp
    details/connection_singleflight_registry.hxx
    operation_deadline.cpp

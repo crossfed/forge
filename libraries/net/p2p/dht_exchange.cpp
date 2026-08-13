@@ -56,11 +56,20 @@ boost::asio::awaitable<std::vector<std::uint8_t>> async_read_dht_message(forge::
 
 } // namespace
 
-void validate_dht_request(const dht::message& request, const peer_id& remote) {
-   if (request.type == dht::message_type::put_value || request.type == dht::message_type::get_value) {
-      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT value operations require a validated value store");
+void validate_dht_request(const dht::message& request, const peer_id& remote, const dht::profile& profile) {
+   if ((request.type == dht::message_type::put_value || request.type == dht::message_type::get_value) &&
+       !profile.capabilities.values) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable value operations");
    }
-   if (request.record_value) {
+   if ((request.type == dht::message_type::add_provider || request.type == dht::message_type::get_providers) &&
+       !profile.capabilities.providers) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable provider operations");
+   }
+   if (request.type == dht::message_type::put_value) {
+      if (!request.record_value || request.record_value->key_value != request.key_value) {
+         FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT PUT_VALUE requires a matching value record");
+      }
+   } else if (request.record_value) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT request contains an unexpected value record");
    }
    if (!request.closer_peers.empty()) {
@@ -70,19 +79,33 @@ void validate_dht_request(const dht::message& request, const peer_id& remote) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT request contains unexpected provider peers");
    }
    if (request.type == dht::message_type::add_provider &&
-       std::ranges::any_of(request.provider_peers, [&](const auto& provider) { return provider.id != remote; })) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT provider does not match the authenticated peer");
+       std::ranges::none_of(request.provider_peers, [&](const auto& provider) { return provider.id == remote; })) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT ADD_PROVIDER has no authenticated sender entry");
    }
 }
 
-void validate_dht_response(const dht::message& request, const dht::message& response) {
+void validate_dht_response(const dht::message& request, const dht::message& response, const dht::profile& profile) {
    // rust-libp2p omits the request key in responses, while go-libp2p echoes it.
    if (response.type != request.type ||
        (!response.key_value.bytes.empty() && response.key_value != request.key_value)) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT response does not match its request");
    }
-   if (response.record_value) {
+   if (response.record_value && request.type != dht::message_type::get_value &&
+       request.type != dht::message_type::put_value) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT response contains an unexpected value record");
+   }
+   if (response.record_value && response.record_value->key_value != request.key_value) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT response value record key does not match its request");
+   }
+   if (request.type == dht::message_type::put_value &&
+       (!request.record_value || !response.record_value ||
+        response.record_value->key_value != request.record_value->key_value ||
+        response.record_value->value != request.record_value->value)) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT PUT_VALUE response did not echo the incoming key/value");
+   }
+   if ((request.type == dht::message_type::get_value || request.type == dht::message_type::put_value) &&
+       !profile.capabilities.values) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable value operations");
    }
    if (request.type == dht::message_type::find_node && !response.provider_peers.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT FIND_NODE response contains provider peers");
@@ -94,14 +117,15 @@ void validate_dht_response(const dht::message& request, const dht::message& resp
 }
 
 boost::asio::awaitable<dht::message> async_exchange_dht(forge::net::p2p::stream stream, dht::message request,
-                                                        const dht::options& options, boost::asio::io_context& context,
+                                                        const dht::profile& profile, boost::asio::io_context& context,
                                                         std::chrono::milliseconds timeout) {
    auto deadline = operation_deadline{context, timeout};
    deadline.arm([&stream] { stream.cancel(); });
    try {
-      co_await stream.async_write(dht::codec::encode(request, options));
-      auto response = dht::codec::decode(co_await async_read_dht_message(stream, options.max_message_size), options);
-      validate_dht_response(request, response);
+      co_await stream.async_write(dht::codec::encode(request, profile));
+      auto response =
+          dht::codec::decode(co_await async_read_dht_message(stream, profile.limits.max_inbound_message_size), profile);
+      validate_dht_response(request, response, profile);
       co_await stream.async_close();
       if (!deadline.finish()) {
          throw_operation_timeout("P2P DHT exchange");
@@ -118,12 +142,12 @@ boost::asio::awaitable<dht::message> async_exchange_dht(forge::net::p2p::stream 
 }
 
 boost::asio::awaitable<void> async_send_dht(forge::net::p2p::stream stream, dht::message request,
-                                            const dht::options& options, boost::asio::io_context& context,
+                                            const dht::profile& profile, boost::asio::io_context& context,
                                             std::chrono::milliseconds timeout) {
    auto deadline = operation_deadline{context, timeout};
    deadline.arm([&stream] { stream.cancel(); });
    try {
-      co_await stream.async_write(dht::codec::encode(request, options));
+      co_await stream.async_write(dht::codec::encode(request, profile));
       co_await stream.async_close();
       if (!deadline.finish()) {
          throw_operation_timeout("P2P DHT send");

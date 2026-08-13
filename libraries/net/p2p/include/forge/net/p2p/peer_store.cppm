@@ -100,15 +100,6 @@ class peer_store {
       std::chrono::system_clock::time_point expires_at{};
    };
 
-   struct provider_record {
-      dht::key key;
-      dht::peer provider;
-      discovery::source discovered_by = discovery::source::dht;
-      std::chrono::system_clock::time_point expires_at{};
-      std::uint64_t successes = 0;
-      std::uint64_t failures = 0;
-   };
-
    struct rendezvous_key {
       std::string namespace_name;
       peer_id peer;
@@ -117,7 +108,6 @@ class peer_store {
    struct mutation_batch {
       std::vector<record> peer_upserts;
       std::vector<peer_id> peer_removals;
-      std::vector<provider_record> provider_upserts;
       std::vector<rendezvous::registration> rendezvous_upserts;
       std::vector<rendezvous_key> rendezvous_removals;
       std::uint64_t rendezvous_sequence_high_watermark = 0;
@@ -126,7 +116,6 @@ class peer_store {
 
    enum class hydration_kind : std::uint8_t {
       peers,
-      providers,
       rendezvous,
    };
 
@@ -138,7 +127,6 @@ class peer_store {
 
    struct hydration_page {
       std::vector<record> peers;
-      std::vector<provider_record> providers;
       std::vector<rendezvous::registration> rendezvous_registrations;
       std::uint64_t rendezvous_sequence_high_watermark = 0;
       std::optional<std::vector<std::byte>> cursor;
@@ -151,7 +139,6 @@ class peer_store {
 
    struct prune_result {
       std::vector<peer_id> peers;
-      std::vector<provider_record> providers;
       std::vector<rendezvous::registration> rendezvous_registrations;
       bool may_have_more = false;
    };
@@ -168,7 +155,6 @@ class peer_store {
    struct options {
       std::shared_ptr<persistence> persistence;
       std::size_t max_peers = 4'096;
-      std::size_t max_providers = 16'384;
       std::size_t max_rendezvous = 16'384;
       std::size_t max_pending = 4'096;
       std::size_t max_endpoints_per_peer = 64;
@@ -198,10 +184,9 @@ class peer_store {
    [[nodiscard]] std::optional<record> apply_discovery(const peer_id& peer, discovery_update update);
    void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
    void upsert_relay_reservation(relay_record value);
-   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer,
-                                             std::chrono::system_clock::time_point backoff_until);
-   [[nodiscard]] std::size_t prune_expired_relay_reservations(
-      const peer_id& peer, std::chrono::system_clock::time_point now);
+   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
+   [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,
+                                                              std::chrono::system_clock::time_point now);
    void learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities = {});
    void mark_reachability(peer_id peer, reachability::state state,
                           std::optional<forge::net::p2p::endpoint> observed = std::nullopt);
@@ -211,10 +196,9 @@ class peer_store {
                               std::chrono::milliseconds latency);
    void mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                               std::chrono::system_clock::time_point backoff_until);
-   void upsert_routing_peer(dht::peer value, discovery::source source,
+   void upsert_routing_peer(protocol_id protocol, dht::peer value, discovery::source source,
                             std::chrono::system_clock::time_point expires_at);
 
-   boost::asio::awaitable<void> async_upsert_provider(provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
    boost::asio::awaitable<void> async_register_rendezvous(rendezvous::registration value,
                                                           std::size_t max_registrations_per_peer);
@@ -226,9 +210,9 @@ class peer_store {
    boost::asio::awaitable<void> async_close();
 
    [[nodiscard]] std::optional<record> find(const peer_id& peer) const;
+   [[nodiscard]] std::optional<public_key> find_public_key(const peer_id& peer) const;
    [[nodiscard]] std::vector<record> snapshot(std::size_t limit) const;
    [[nodiscard]] std::vector<record> candidates(std::uint64_t capability, std::size_t limit) const;
-   [[nodiscard]] std::vector<provider_record> find_providers(const dht::key& key, std::size_t limit) const;
    [[nodiscard]] std::vector<rendezvous::registration>
    discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence, std::size_t limit) const;
    [[nodiscard]] persistence_status persistence_state() const;
