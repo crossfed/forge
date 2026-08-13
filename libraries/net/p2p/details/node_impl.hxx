@@ -4,10 +4,13 @@
 #include "connection_singleflight_registry.hxx"
 #include "direct_transport.hxx"
 #include "host_addresses.hxx"
+#include "identify_service.hxx"
 #include "libp2p_identity_material.hxx"
+#include "lifecycle_tracker.hxx"
 #include "operation_deadline.hxx"
 #include "path_selector.hxx"
 #include "peer_exchange_codec.hxx"
+#include "pubsub_backoff.hxx"
 #include "pubsub_outbound_budget.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
@@ -15,9 +18,18 @@
 
 namespace forge::net::p2p {
 
+namespace detail {
+
+class bootstrap_service;
+class lifecycle_wakeup;
+class resource_stream;
+
+} // namespace detail
+
 [[nodiscard]] exceptions::code p2p_code(const forge::exceptions::base& error);
 [[noreturn]] void rethrow_transport_as_p2p(const forge::exceptions::base& error);
 [[nodiscard]] bool is_orderly_stream_close(const forge::exceptions::base& error) noexcept;
+[[nodiscard]] bool is_clean_stream_eof(const forge::exceptions::base& error) noexcept;
 [[nodiscard]] std::uint64_t random_nonce();
 [[nodiscard]] std::string bytes_key(std::span<const std::uint8_t> bytes);
 boost::asio::awaitable<std::vector<std::uint8_t>> async_read_length_delimited(forge::net::p2p::stream& stream,
@@ -28,6 +40,7 @@ boost::asio::awaitable<std::vector<std::uint8_t>> async_read_length_delimited(fo
                                                                 std::size_t max_payload_size);
 [[nodiscard]] peer_exchange_codec::options codec_for(const node::options& options) noexcept;
 void validate_operation_timeout(std::chrono::milliseconds timeout, std::string_view name);
+void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty);
 [[nodiscard]] std::chrono::milliseconds remaining_timeout(std::chrono::steady_clock::time_point started,
                                                           std::chrono::milliseconds timeout,
                                                           std::string_view operation);
@@ -38,14 +51,38 @@ attempt_timeout(std::chrono::milliseconds remaining, std::chrono::milliseconds c
 void validate(const node::options& options);
 
 struct node::impl : std::enable_shared_from_this<impl> {
+   struct admitted_stream {
+      protocol_id protocol;
+      forge::net::p2p::stream stream;
+      std::shared_ptr<detail::resource_stream> resource;
+   };
+
    struct session_state {
       std::uint64_t id = 0;
       node::session_info info;
       forge::net::transport::session connection;
+      resource_manager::session_reservation resource;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
       std::optional<forge::net::p2p::endpoint> remote_endpoint;
       connection_manager::direction direction = connection_manager::direction::outbound;
+      std::string identify_error;
+      std::uint64_t identify_push_attempted_generation = 0;
+      std::uint64_t identify_push_delivered_generation = 0;
+      bool identify_push_supported = false;
       std::atomic_bool closed = false;
+   };
+
+   struct identify_snapshot {
+      std::uint64_t generation = 0;
+      identify::document document;
+   };
+
+   struct identify_push_state {
+      std::uint64_t generation = 1;
+      mutable std::uint64_t cached_generation = 0;
+      mutable std::uint64_t peer_record_sequence = 0;
+      mutable identify::document cached_document;
+      bool coordinator_running = false;
    };
 
    struct relay_reservation_state {
@@ -57,8 +94,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::uint64_t max_bytes = 0;
       std::size_t max_queued_bytes = 0;
       std::size_t active_streams = 0;
-      std::uint64_t bytes = 0;
       bool canceled = false;
+      resource_manager::relay_reservation resource;
+   };
+
+   struct relay_admission {
+      resource_manager::stream_reservation resource;
+      std::optional<std::uint64_t> reservation_id;
    };
 
    struct pubsub_state {
@@ -66,6 +108,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
          std::uint64_t session_id = 0;
          std::shared_ptr<forge::asio::gate> write_gate;
          std::shared_ptr<forge::net::p2p::stream> stream;
+         bool snapshot_pending = true;
       };
 
       struct validation {
@@ -102,6 +145,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
       std::map<std::string, pubsub::handler> handlers;
       std::map<peer_id, std::set<std::string>> peer_topics;
+      std::map<peer_id, std::map<std::uint64_t, std::uint64_t>> inbound;
       std::map<std::string, std::set<peer_id>> mesh;
       std::map<std::string, pubsub::message> cache;
       std::deque<std::string> history;
@@ -111,9 +155,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::map<peer_id, outbound_generation> outbound;
       detail::connection_singleflight_registry connection_gates;
       detail::pubsub_outbound_budget outbound_budget;
+      detail::pubsub_backoff backoffs;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
+      std::uint64_t next_inbound_generation = 1;
       std::uint64_t next_seqno = 1;
       bool heartbeat_started = false;
    };
@@ -129,10 +175,16 @@ struct node::impl : std::enable_shared_from_this<impl> {
    impl(forge::asio::runtime& runtime_value, node::options options_value);
    forge::asio::runtime& runtime;
    node::options options;
-   peer_id local;
    libp2p_identity_material identity;
+   peer_id local;
+   resource_manager resources;
    direct::registry direct_registry;
    detail::session_teardown teardown;
+   detail::lifecycle_tracker lifecycle;
+   std::shared_ptr<detail::lifecycle_wakeup> lifecycle_wakeup;
+   detail::identify_service identify_service;
+   std::shared_ptr<detail::bootstrap_service> bootstrap;
+   forge::asio::gate session_admission_gate;
 
    mutable std::mutex mutex;
    peer_store store;
@@ -147,17 +199,27 @@ struct node::impl : std::enable_shared_from_this<impl> {
    std::uint64_t next_reservation_id = 1;
    std::uint64_t next_session_id = 1;
    std::uint64_t next_protocol_open_deadline_id = 1;
-   resource_manager resources{resource_limits_for(options.limits)};
    pubsub_state pubsub_value;
    relay_discovery_state relay_discovery_value;
    discovery_state discovery_value;
+   mutable identify_push_state identify_push_value;
    node::metrics_snapshot metrics_value;
-   std::size_t active_ping_streams = 0;
    std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
 
+   void initialize_lifecycle();
+   [[nodiscard]] bool launch_tracked(std::function<boost::asio::awaitable<void>()> operation) noexcept;
+   void request_lifecycle_stop() noexcept;
+   boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
+   boost::asio::awaitable<void> async_hydrate_peer_state();
+   void listen(forge::net::p2p::endpoint endpoint);
+
    void invalidate_pubsub_outbound_locked(const peer_id& peer,
-                                          std::optional<std::uint64_t> owner_session_id = std::nullopt);
+                                          std::optional<std::uint64_t> owner_session_id = std::nullopt,
+                                          const std::shared_ptr<forge::asio::gate>& owner_write_gate = {},
+                                          const std::shared_ptr<forge::net::p2p::stream>& owner_stream = {});
+   void forget_pubsub_peer_locked(const peer_id& peer);
+   void finish_pubsub_inbound(const peer_id& peer, std::uint64_t generation);
    void clear_pubsub_outbound_locked();
 
    void reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes);
@@ -167,13 +229,47 @@ struct node::impl : std::enable_shared_from_this<impl> {
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control() const;
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control_locked() const;
 
-   [[nodiscard]] identify::document local_identify_document() const;
+   [[nodiscard]] identify::document
+   local_identify_document(std::optional<forge::net::p2p::endpoint> observed_endpoint = std::nullopt) const;
 
-   void learn_from_identify(const peer_id& peer, const identify::document& document,
-                            std::optional<forge::net::p2p::endpoint> remote_endpoint = std::nullopt);
+   void validate_local_identify_document() const;
 
-   [[nodiscard]] std::vector<std::shared_ptr<session_state>> remember_session(std::shared_ptr<session_state> session,
-                                                                              connection_manager::direction direction);
+   [[nodiscard]] identify_snapshot local_identify_snapshot() const;
+
+   void register_protocol_handler(protocol_id protocol, node::protocol_handler handler);
+
+   [[nodiscard]] bool unregister_protocol_handler(const protocol_id& protocol);
+
+   void set_advertised_endpoints(std::vector<forge::net::p2p::endpoint> endpoints);
+
+   void notify_listen_endpoints_changed();
+
+   void learn_from_identify(const std::shared_ptr<session_state>& session, const identify::document& document,
+                            bool received_push = false);
+
+   boost::asio::awaitable<void> identify_session(const std::shared_ptr<session_state>& session);
+
+   void launch_identify(const std::shared_ptr<session_state>& session);
+
+   [[nodiscard]] bool advance_identify_generation_locked() noexcept;
+
+   [[nodiscard]] bool schedule_identify_push_locked() noexcept;
+
+   void launch_identify_pushes();
+
+   boost::asio::awaitable<void> run_identify_pushes();
+
+   boost::asio::awaitable<void> send_identify_push(const std::shared_ptr<session_state>& session,
+                                                   std::uint64_t generation,
+                                                   std::shared_ptr<const identify::document> document);
+
+   boost::asio::awaitable<std::optional<identify::document>>
+   identify_peer_for_discovery(const peer_id& peer, discovery::source source, std::chrono::milliseconds timeout);
+
+   boost::asio::awaitable<void> remember_session(std::shared_ptr<session_state> session,
+                                                 connection_manager::direction direction);
+
+   void launch_pruned_session_teardown(const std::shared_ptr<session_state>& session) noexcept;
 
    void forget_session(const peer_id& peer);
 
@@ -181,8 +277,15 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    [[nodiscard]] std::shared_ptr<session_state> session_for(const peer_id& peer) const;
    [[nodiscard]] std::shared_ptr<session_state> session_for_locked(const peer_id& peer) const;
+   [[nodiscard]] std::shared_ptr<session_state>
+   session_for_path(const peer_id& peer, path::kind kind, std::optional<peer_id> relay_peer = std::nullopt) const;
+   [[nodiscard]] std::shared_ptr<session_state> session_for_path_locked(const peer_id& peer, path::kind kind,
+                                                                        const std::optional<peer_id>& relay_peer) const;
+   [[nodiscard]] node::session_info session_info_for(const std::shared_ptr<session_state>& session) const;
 
    [[nodiscard]] std::optional<node::protocol_handler> handler_for(const protocol_id& protocol) const;
+
+   [[nodiscard]] std::vector<protocol_id> supported_protocols_locked() const;
 
    [[nodiscard]] std::vector<protocol_id> supported_protocols() const;
 
@@ -200,10 +303,6 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void increment_peer_exchange();
 
-   [[nodiscard]] bool begin_ping_stream();
-
-   void finish_ping_stream();
-
    void increment_reachability_check(reachability::state state);
 
    void cleanup_expired_relay_reservations_locked();
@@ -220,18 +319,19 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void remember_relay_reservation_in_store(const relay::reservation::info& info);
 
-   [[nodiscard]] std::optional<relay_reservation_state>
-   remember_inbound_relay_reservation(const peer_id& owner, relay::reservation::options request);
+   [[nodiscard]] bool remember_inbound_relay_reservation(const peer_id& owner, relay::reservation::options request);
 
    bool cancel_inbound_relay_reservation(const peer_id& owner, std::uint64_t reservation_id);
 
-   relay::status begin_relay(const peer_id& owner);
+   [[nodiscard]] std::optional<relay_admission> begin_relay(const peer_id& owner, relay::status& status);
 
    [[nodiscard]] std::uint64_t relay_byte_limit(const peer_id& owner);
 
-   void finish_relay(const peer_id& owner);
+   void finish_relay(const peer_id& owner, std::optional<std::uint64_t> reservation_id);
 
-   bool add_relay_bytes(const peer_id& owner, std::uint64_t bytes);
+   void erase_inbound_relay_reservation_locked(const peer_id& owner) noexcept;
+
+   void record_relay_bytes(std::uint64_t bytes) noexcept;
 
    void record_path_open(path::kind kind);
 
@@ -266,6 +366,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void increment_pubsub_invalid(const peer_id& peer);
 
+   void penalize_pubsub_backoff_violation(const peer_id& peer);
+
    void increment_pubsub_control();
 
    [[nodiscard]] std::vector<std::uint8_t> next_pubsub_seqno();
@@ -297,6 +399,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    [[nodiscard]] bool should_request_pubsub_message_locked(const std::string& key, const peer_id& source,
                                                            std::chrono::steady_clock::time_point now);
 
+   [[nodiscard]] bool record_pubsub_subscription_locked(const peer_id& peer, const std::string& topic);
+
    [[nodiscard]] bool can_serve_pubsub_message_locked(const std::string& key) const;
 
    void remember_local_pubsub_message_locked(const std::string& key, pubsub::message value);
@@ -309,8 +413,10 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> pubsub_heartbeat_once();
 
-   boost::asio::awaitable<std::shared_ptr<session_state>> connect_direct(forge::net::p2p::endpoint endpoint,
-                                                                         node::connect_options connect_options_value);
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
+                  resource_manager::dial_reservation* dial = nullptr,
+                  std::shared_ptr<cancellation_latch> cancellation = {});
 
    boost::asio::awaitable<std::shared_ptr<session_state>> ensure_direct_session(
        const peer_id& peer, std::chrono::milliseconds timeout = node::connect_options{}.timeout,
@@ -328,8 +434,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<dht::message> exchange_dht(const peer_id& peer, dht::message request,
                                                      std::chrono::milliseconds timeout);
-   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request,
-                                         std::chrono::milliseconds timeout);
+   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<relay::reservation::info>
    request_relay_reservation(const peer_id& relay_peer, relay::reservation::options reservation_options,
@@ -345,6 +450,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
    open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std::chrono::milliseconds timeout);
 
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   ensure_relay_session(const peer_id& peer, const peer_id& relay_peer, std::chrono::milliseconds timeout);
+
    boost::asio::awaitable<forge::net::p2p::stream> open_protocol_via_relay(const peer_id& peer,
                                                                            const protocol_id& protocol,
                                                                            const peer_id& relay_peer,
@@ -354,16 +462,29 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void launch_accept_loop(forge::net::p2p::endpoint local_endpoint);
 
-   boost::asio::awaitable<void> handle_inbound_connection(direct::connection connection);
+   boost::asio::awaitable<void> handle_inbound_connection(direct::connection connection,
+                                                          resource_manager::session_reservation reservation);
+
+   boost::asio::awaitable<forge::net::p2p::stream> open_session_stream(const std::shared_ptr<session_state>& session,
+                                                                       const protocol_id& protocol, bool relay = false);
+
+   boost::asio::awaitable<forge::net::p2p::stream>
+   open_yamux_stream(const peer_id& peer, const std::shared_ptr<forge::net::yamux::session>& yamux,
+                     const protocol_id& protocol, bool relay = true);
+
+   boost::asio::awaitable<admitted_stream> accept_resource_stream(const peer_id& peer,
+                                                                  forge::net::transport::stream stream,
+                                                                  resource_manager::stream_reservation reservation);
 
    void launch_session_accept_loop(std::shared_ptr<session_state> session);
 
    boost::asio::awaitable<void> handle_incoming_stream(std::shared_ptr<session_state> session,
-                                                       forge::net::transport::stream raw);
+                                                       forge::net::transport::stream raw,
+                                                       resource_manager::stream_reservation reservation);
 
    boost::asio::awaitable<void> handle_ping(forge::net::p2p::stream stream);
 
-   boost::asio::awaitable<void> handle_identify(forge::net::p2p::stream stream);
+   boost::asio::awaitable<void> handle_identify(std::shared_ptr<session_state> session, forge::net::p2p::stream stream);
 
    boost::asio::awaitable<void> handle_identify_push(std::shared_ptr<session_state> session,
                                                      forge::net::p2p::stream stream);
@@ -377,7 +498,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    boost::asio::awaitable<void> handle_autonat_v1(forge::net::p2p::stream stream);
 
    boost::asio::awaitable<void> handle_relayed_yamux_stream(std::shared_ptr<session_state> session,
-                                                            forge::net::p2p::stream stream);
+                                                            forge::net::transport::stream stream,
+                                                            resource_manager::stream_reservation reservation);
 
    boost::asio::awaitable<void> handle_relay_stop(std::shared_ptr<session_state> session,
                                                   forge::net::p2p::stream stream);
@@ -393,21 +515,19 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                   forge::net::p2p::stream stream);
 
    boost::asio::awaitable<void> handle_pubsub(std::shared_ptr<session_state> session, forge::net::p2p::stream stream);
+   boost::asio::awaitable<void> handle_pubsub_stream(std::shared_ptr<session_state> session,
+                                                     forge::net::p2p::stream stream);
 
    boost::asio::awaitable<bool> wait_for_direct_session(const peer_id& peer, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<hole_punch::status> run_dcutr_initiator(const peer_id& peer,
-                                                                  std::shared_ptr<forge::net::yamux::session> yamux,
+                                                                  const std::shared_ptr<session_state>& session,
                                                                   std::chrono::milliseconds timeout);
-
-   boost::asio::awaitable<hole_punch::status>
-   serve_relayed_streams_until_hole_punch(peer_id peer, std::optional<peer_id> relay_peer,
-                                          std::shared_ptr<forge::net::yamux::session> yamux,
-                                          std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<void> handle_peer_exchange(forge::net::p2p::stream stream, std::uint64_t request_id);
 
-   void launch_relay_pumps(peer_id owner, forge::net::p2p::stream left, forge::net::p2p::stream right);
+   void launch_relay_pumps(peer_id owner, forge::net::p2p::stream left, forge::net::p2p::stream right,
+                           relay_admission admission);
 
    boost::asio::awaitable<hole_punch::status> attempt_hole_punch(peer_id peer, std::optional<peer_id> relay_peer,
                                                                  std::chrono::milliseconds timeout);

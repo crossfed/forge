@@ -5,6 +5,7 @@ module;
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -27,6 +28,7 @@ import forge.asio.runtime;
 import forge.crypto.asymmetric;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.net.p2p.resource_manager;
 import forge.net.p2p.stream;
 import forge.net.tcp.connection;
 import forge.net.tcp.connector;
@@ -39,6 +41,7 @@ import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/direct_transport.hxx"
+#include "details/cancellation_latch.hxx"
 #include "details/libp2p_tls.hxx"
 #include "details/operation_deadline.hxx"
 #include "details/stream_upgrade.hxx"
@@ -96,36 +99,40 @@ struct cancel_current_scope {
 
    ~cancel_current_scope() {
       if (value) {
-         value->clear();
+         static_cast<void>(value->finish());
       }
    }
 };
 
 class tcp_profile final {
    struct listener_entry {
-      std::unique_ptr<forge::net::tcp::listener> value;
+      std::shared_ptr<forge::net::tcp::listener> value;
+      forge::net::p2p::endpoint local;
       bool active = true;
    };
 
  public:
    tcp_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
-               const libp2p_identity_material& identity_value)
-       : runtime_(runtime_value), options_(options_value), identity_(identity_value) {}
+               const libp2p_identity_material& identity_value, resource_manager resources_value)
+       : runtime_(runtime_value), options_(options_value), identity_(identity_value),
+         resources_(std::move(resources_value)) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_tcp();
    }
 
    [[nodiscard]] bool listening() const noexcept {
+      auto lock = std::scoped_lock{listeners_mutex_};
       return std::ranges::any_of(listeners_, [](const auto& item) { return item.second.active; });
    }
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints() const {
       auto out = std::vector<forge::net::p2p::endpoint>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
       out.reserve(listeners_.size());
       for (const auto& [_, listener] : listeners_) {
-         if (listener.active && listener.value->valid()) {
-            out.push_back(p2p_endpoint_for(listener.value->local_endpoint()));
+         if (listener.active) {
+            out.push_back(listener.local);
          }
       }
       return out;
@@ -135,22 +142,47 @@ class tcp_profile final {
       if (!endpoint.is_direct_tcp()) {
          FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "P2P endpoint is not a direct TCP endpoint");
       }
-      if (endpoint.transport.port != 0) {
-         auto found = listeners_.find(listener_key(endpoint));
-         if (found != listeners_.end() && found->second.active) {
-            FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P TCP direct listener endpoint is already active");
+      const auto requested_key = listener_key(endpoint);
+      {
+         auto lock = std::scoped_lock{listeners_mutex_};
+         if (listeners_stopped_) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P TCP direct listener is stopped");
+         }
+         if (endpoint.transport.port != 0) {
+            auto found = listeners_.find(requested_key);
+            if (found != listeners_.end() && found->second.active) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P TCP direct listener endpoint is already active");
+            }
          }
       }
       try {
          auto listener =
-             std::make_unique<forge::net::tcp::listener>(runtime_.context().get_executor(), endpoint.transport);
+             std::make_shared<forge::net::tcp::listener>(runtime_.context().get_executor(), endpoint.transport);
          auto local = p2p_endpoint_for(listener->local_endpoint());
          const auto key = listener_key(local);
-         auto found = listeners_.find(key);
-         if (found != listeners_.end() && found->second.active) {
+         auto stopped = false;
+         auto duplicate = false;
+         {
+            auto lock = std::scoped_lock{listeners_mutex_};
+            stopped = listeners_stopped_;
+            const auto found = listeners_.find(key);
+            duplicate = found != listeners_.end() && found->second.active;
+            if (!stopped && !duplicate) {
+               listeners_.emplace(key, listener_entry{.value = listener, .local = local, .active = true});
+            }
+         }
+         if (stopped || duplicate) {
+            try {
+               listener->close();
+            } catch (...) {
+            }
+         }
+         if (stopped) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P TCP direct listener is stopped");
+         }
+         if (duplicate) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P TCP direct listener endpoint is already active");
          }
-         listeners_[key] = listener_entry{.value = std::move(listener), .active = true};
          return local;
       } catch (const forge::exceptions::base& error) {
          rethrow_tcp_as_p2p(error);
@@ -158,9 +190,12 @@ class tcp_profile final {
    }
 
    void stop() {
-      for (auto& [_, listener] : listeners_) {
-         listener.active = false;
-         listener.value->close();
+      auto listeners = stop_listeners();
+      for (const auto& listener : listeners) {
+         try {
+            listener->close();
+         } catch (...) {
+         }
       }
       auto active = std::vector<std::shared_ptr<cancellation_latch>>{};
       {
@@ -176,42 +211,54 @@ class tcp_profile final {
          }
       }
       for (const auto& operation : active) {
-         operation->cancel();
+         operation->request_stop();
       }
    }
 
    boost::asio::awaitable<void> async_stop() {
       stop();
-      for (auto& [_, listener] : listeners_) {
-         co_await listener.value->async_close();
+      auto listeners = listener_snapshot();
+      for (const auto& listener : listeners) {
+         co_await listener->async_close();
       }
    }
 
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
-                                                    const node::connect_options& options) {
+                                                    const node::connect_options& options,
+                                                    std::shared_ptr<cancellation_latch> cancellation) {
       if (!endpoint.is_direct_tcp()) {
          FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "P2P endpoint is not a direct TCP endpoint");
       }
       auto expected_peer = expected_peer_for(endpoint, options);
       auto remote_transport = endpoint.transport;
       auto connector = forge::net::tcp::connector{runtime_.context().get_executor()};
-      auto cancel_current = std::make_shared<cancellation_latch>();
+      auto cancel_current = cancellation ? std::move(cancellation) : std::make_shared<cancellation_latch>();
       track(cancel_current);
-      cancel_current->set([&connector] { connector.cancel(); });
+      cancel_current->arm([&connector] { connector.cancel(); });
       auto deadline = operation_deadline{runtime_.context(), options.timeout};
       auto cancel_scope = cancel_current_scope{cancel_current};
-      deadline.arm([cancel_current] { cancel_current->cancel(); });
+      deadline.arm([cancel_current] { cancel_current->request_stop(); });
       try {
-         auto tcp = co_await connector.async_connect_connection(std::move(remote_transport));
-         cancel_current->set([&tcp] { tcp.cancel(); });
-         const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
-         const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
-         auto upgraded = co_await upgrade_outbound_tcp(std::move(tcp), options_, identity_, std::move(expected_peer),
+         auto tcp = std::make_shared<forge::net::tcp::connection>(
+             co_await connector.async_connect_connection(std::move(remote_transport)));
+         cancel_current->arm([tcp] { tcp->cancel(); });
+         const auto local_endpoint = p2p_endpoint_for(tcp->local_endpoint());
+         const auto remote_endpoint = p2p_endpoint_for(tcp->remote_endpoint());
+         cancel_current->clear();
+         auto upgraded = co_await upgrade_outbound_tcp(std::move(*tcp), options_, identity_, std::move(expected_peer),
                                                        tcp_upgrade_deadline{.context = &runtime_.context(),
                                                                             .timeout = options.timeout,
                                                                             .cancel_current = cancel_current});
-         if (!deadline.finish()) {
+         const auto deadline_completed = deadline.finish();
+         const auto operation_completed = cancel_current->finish();
+         if (!deadline_completed || !operation_completed) {
+            upgraded.session->cancel();
+         }
+         if (!deadline_completed) {
             throw_operation_timeout("P2P TCP direct connect");
+         }
+         if (!operation_completed) {
+            FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P TCP direct connect canceled");
          }
          co_return connection{
              .peer = std::move(upgraded.peer),
@@ -223,37 +270,72 @@ class tcp_profile final {
          if (deadline.timed_out()) {
             throw_operation_timeout("P2P TCP direct connect");
          }
+         if (!cancel_current->finish()) {
+            FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P TCP direct connect canceled");
+         }
          rethrow_tcp_as_p2p(error);
       }
    }
 
    boost::asio::awaitable<connection> async_accept(forge::net::p2p::endpoint endpoint) {
-      auto found = listeners_.find(listener_key(std::move(endpoint)));
-      if (found == listeners_.end() || !found->second.active || !found->second.value->valid()) {
+      const auto key = listener_key(std::move(endpoint));
+      auto listener = std::shared_ptr<forge::net::tcp::listener>{};
+      {
+         auto lock = std::scoped_lock{listeners_mutex_};
+         const auto found = listeners_.find(key);
+         if (found != listeners_.end() && found->second.active) {
+            listener = found->second.value;
+         }
+      }
+      if (!listener || !listener->valid()) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "P2P TCP direct listener is not active");
       }
       try {
-         auto tcp = co_await found->second.value->async_accept_connection();
-         const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
-         const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
+         auto tcp = std::make_shared<forge::net::tcp::connection>(co_await listener->async_accept_connection());
+         if (!listener_is_current(key, listener)) {
+            try {
+               tcp->cancel();
+            } catch (...) {
+            }
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P TCP direct listener stopped during accept");
+         }
+         auto admission = resources_.reserve_session(resource_manager::session_direction::inbound);
+         if (!admission) {
+            tcp->cancel();
+            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P inbound session limit reached");
+         }
+         const auto local_endpoint = p2p_endpoint_for(tcp->local_endpoint());
+         const auto remote_endpoint = p2p_endpoint_for(tcp->remote_endpoint());
          auto cancel_current = std::make_shared<cancellation_latch>();
          track(cancel_current);
-         cancel_current->set([&tcp] { tcp.cancel(); });
+         cancel_current->arm([tcp] { tcp->cancel(); });
          auto deadline = operation_deadline{runtime_.context(), node::connect_options{}.timeout};
          auto cancel_scope = cancel_current_scope{cancel_current};
-         deadline.arm([cancel_current] { cancel_current->cancel(); });
+         deadline.arm([cancel_current] { cancel_current->request_stop(); });
          auto upgraded = upgraded_session{};
          try {
-            upgraded = co_await upgrade_inbound_tcp(std::move(tcp), options_, identity_, std::nullopt,
+            cancel_current->clear();
+            upgraded = co_await upgrade_inbound_tcp(std::move(*tcp), options_, identity_, std::nullopt,
                                                     tcp_upgrade_deadline{.context = &runtime_.context(),
                                                                          .timeout = node::connect_options{}.timeout,
                                                                          .cancel_current = cancel_current});
-            if (!deadline.finish()) {
+            const auto deadline_completed = deadline.finish();
+            const auto operation_completed = cancel_current->finish();
+            if (!deadline_completed || !operation_completed) {
+               upgraded.session->cancel();
+            }
+            if (!deadline_completed) {
                throw_operation_timeout("P2P TCP direct accept");
+            }
+            if (!operation_completed) {
+               FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P TCP direct accept canceled");
             }
          } catch (const forge::exceptions::base&) {
             if (deadline.timed_out()) {
                throw_operation_timeout("P2P TCP direct accept");
+            }
+            if (!cancel_current->finish()) {
+               FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P TCP direct accept canceled");
             }
             throw;
          }
@@ -262,6 +344,7 @@ class tcp_profile final {
              .session = std::move(*upgraded.session).as_transport(),
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
+             .admission = std::move(admission),
          };
       } catch (const forge::exceptions::base& error) {
          rethrow_tcp_as_p2p(error);
@@ -269,6 +352,36 @@ class tcp_profile final {
    }
 
  private:
+   [[nodiscard]] bool listener_is_current(const std::string& key,
+                                          const std::shared_ptr<forge::net::tcp::listener>& listener) const {
+      auto lock = std::scoped_lock{listeners_mutex_};
+      const auto found = listeners_.find(key);
+      return !listeners_stopped_ && found != listeners_.end() && found->second.active &&
+             found->second.value == listener;
+   }
+
+   [[nodiscard]] std::vector<std::shared_ptr<forge::net::tcp::listener>> stop_listeners() {
+      auto listeners = std::vector<std::shared_ptr<forge::net::tcp::listener>>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
+      listeners_stopped_ = true;
+      listeners.reserve(listeners_.size());
+      for (auto& [_, listener] : listeners_) {
+         listener.active = false;
+         listeners.push_back(listener.value);
+      }
+      return listeners;
+   }
+
+   [[nodiscard]] std::vector<std::shared_ptr<forge::net::tcp::listener>> listener_snapshot() const {
+      auto listeners = std::vector<std::shared_ptr<forge::net::tcp::listener>>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
+      listeners.reserve(listeners_.size());
+      for (const auto& [_, listener] : listeners_) {
+         listeners.push_back(listener.value);
+      }
+      return listeners;
+   }
+
    void track(const std::shared_ptr<cancellation_latch>& operation) {
       auto cancel_now = false;
       {
@@ -282,14 +395,17 @@ class tcp_profile final {
          }
       }
       if (cancel_now) {
-         operation->cancel();
+         operation->request_stop();
       }
    }
 
    forge::asio::runtime& runtime_;
    const node::options& options_;
    const libp2p_identity_material& identity_;
+   resource_manager resources_;
+   mutable std::mutex listeners_mutex_;
    std::map<std::string, listener_entry> listeners_;
+   bool listeners_stopped_ = false;
    std::mutex active_mutex_;
    std::vector<std::weak_ptr<cancellation_latch>> active_;
    bool stopped_ = false;
@@ -298,8 +414,8 @@ class tcp_profile final {
 } // namespace
 
 void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
-                          const libp2p_identity_material& identity) {
-   auto owned = std::make_shared<tcp_profile>(runtime, options, identity);
+                          const libp2p_identity_material& identity, resource_manager resources) {
+   auto owned = std::make_shared<tcp_profile>(runtime, options, identity, std::move(resources));
    value.add(profile{
        .supports = [owned](const forge::net::p2p::endpoint& endpoint) { return owned->supports(endpoint); },
        .listening = [owned] { return owned->listening(); },
@@ -308,8 +424,9 @@ void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const 
        .stop = [owned] { owned->stop(); },
        .async_stop = [owned] { return owned->async_stop(); },
        .async_connect =
-           [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options) {
-              return owned->async_connect(std::move(endpoint), options);
+           [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options,
+                   std::shared_ptr<cancellation_latch> cancellation) {
+              return owned->async_connect(std::move(endpoint), options, std::move(cancellation));
            },
        .async_accept = [owned](forge::net::p2p::endpoint endpoint) { return owned->async_accept(std::move(endpoint)); },
    });

@@ -605,6 +605,15 @@ add_executable(test_forge_crypto_core unit/main.cpp crypto/test_core.cpp)
 target_link_libraries(test_forge_crypto_core forge_crypto_core Boost::included_unit_test_framework)
 add_test(NAME test_forge_crypto_core COMMAND test_forge_crypto_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
+target_link_libraries(
+   test_forge_crypto_signer
+   forge_asio
+   forge_crypto_signer
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_signer COMMAND test_forge_crypto_signer WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(
    test_forge_crypto_digest
    unit/main.cpp
@@ -710,6 +719,7 @@ add_executable(
    asio/affine_tests.cpp
    asio/compute_tests.cpp
    asio/gate_tests.cpp
+   asio/notification_tests.cpp
    asio/task_tests.cpp
 )
 target_link_libraries(test_forge_asio forge_asio Boost::included_unit_test_framework)
@@ -874,12 +884,14 @@ add_executable(
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/quic_tests.cpp
+   quic_p2p/p2p_lifecycle_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
 )
 target_link_libraries(test_forge_quic_p2p forge Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 add_test(NAME test_forge_quic_p2p COMMAND test_forge_quic_p2p WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+set_tests_properties(test_forge_quic_p2p PROPERTIES TIMEOUT 300)
 
 add_executable(
    forge_interop_fixture
@@ -954,6 +966,26 @@ add_executable(
 )
 target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_p2p_managed_remote
+   unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
+   plugins/p2p_managed_remote_tests.cpp
+)
+target_link_libraries(
+   test_forge_p2p_managed_remote
+   forge_plugins_p2p_resolver
+   forge_plugins_p2p_node
+   forge_plugins_crypto_secrets
+   forge_asio
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_p2p_managed_remote
+   COMMAND test_forge_p2p_managed_remote
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 
 add_executable(
    test_forge_plugins_db_store
@@ -1792,6 +1824,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_plugins_p2p_node
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_plugins_p2p_resolver
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_p2p_resolver
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-p2p-resolver
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_p2p_resolver
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2714,6 +2757,17 @@ add_test(
       --test-command forge_package_plugins_p2p_node
 )
 set_tests_properties(test_forge_package_plugins_p2p_node PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_p2p_resolver
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_p2p_resolver
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-p2p-resolver
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_p2p_resolver
+)
+set_tests_properties(test_forge_package_plugins_p2p_resolver PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_plugins_crypto_signer
    COMMAND ${CMAKE_CTEST_COMMAND}

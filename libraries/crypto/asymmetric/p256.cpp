@@ -22,6 +22,8 @@ module;
 
 module forge.crypto.asymmetric.p256;
 
+import forge.crypto.core.secret_bytes;
+
 import forge.crypto.core.random;
 import forge.crypto.digest.sha256;
 import forge.crypto.digest.sha512;
@@ -36,6 +38,11 @@ class public_key_impl {
 
 class private_key_impl {
  public:
+   ~private_key_impl() {
+      forge::crypto::core::secure_erase(
+          std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(_key.data()), _key.data_size()});
+   }
+
    private_key_secret _key;
 };
 } // namespace detail
@@ -441,7 +448,8 @@ public_key public_key::add(const forge::crypto::digest::sha256& digest) const {
 
 private_key::private_key() : my(std::make_unique<detail::private_key_impl>()) {}
 
-private_key private_key::generate_from_seed(const forge::crypto::digest::sha256& seed, const forge::crypto::digest::sha256& offset) {
+private_key private_key::generate_from_seed(const forge::crypto::digest::sha256& seed,
+                                            const forge::crypto::digest::sha256& offset) {
    ssl_bignum z = bignum_from_bytes(offset.data(), offset.data_size());
    const ec_group& group = get_curve();
    bn_ctx ctx(BN_CTX_new());
@@ -487,7 +495,8 @@ signature private_key::sign(const forge::crypto::digest::sha256& digest) const {
    return sig;
 }
 
-bool public_key::verify(const forge::crypto::digest::sha256& digest, const forge::crypto::asymmetric::p256::signature& sig) {
+bool public_key::verify(const forge::crypto::digest::sha256& digest,
+                        const forge::crypto::asymmetric::p256::signature& sig) {
    if (is_empty(my->_key))
       return false;
    const auto der_size = der_signature_size(sig);
@@ -518,7 +527,8 @@ public_key::public_key(const public_key_data& dat) : my(std::make_unique<detail:
       my->_key = normalize_public_key_data(dat.data(), dat.size());
 }
 
-bool private_key::verify(const forge::crypto::digest::sha256& digest, const forge::crypto::asymmetric::p256::signature& sig) {
+bool private_key::verify(const forge::crypto::digest::sha256& digest,
+                         const forge::crypto::asymmetric::p256::signature& sig) {
    return get_public_key().verify(digest, sig);
 }
 

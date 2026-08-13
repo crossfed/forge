@@ -72,22 +72,13 @@ std::vector<candidate> select_candidates(std::span<const peer_store::record> rec
 }
 
 void backoff_candidate(peer_store& store, const peer_id& peer, std::chrono::system_clock::time_point until) {
-   auto record = store.find(peer).value_or(peer_store::record{.peer = peer});
-   record.discovery_backoff_until = until;
-   ++record.failures;
-   store.upsert(std::move(record));
+   static_cast<void>(store.mark_discovery_failure(peer, until));
 }
 
 void prune_expired_reservations(peer_store& store, std::chrono::system_clock::time_point now,
                                 std::size_t limit) {
-   for (auto record : store.snapshot(limit)) {
-      const auto before = record.relay_reservations.size();
-      std::erase_if(record.relay_reservations, [&](const peer_store::relay_record& value) {
-         return value.expires_at != std::chrono::system_clock::time_point{} && value.expires_at <= now;
-      });
-      if (record.relay_reservations.size() != before) {
-         store.upsert(std::move(record));
-      }
+   for (const auto& record : store.snapshot(limit)) {
+      static_cast<void>(store.prune_expired_relay_reservations(record.peer, now));
    }
 }
 

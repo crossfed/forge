@@ -12,6 +12,7 @@ class private_key_impl {
  public:
    private_key_impl() noexcept;
    private_key_impl(const private_key_impl& cpy) noexcept;
+   ~private_key_impl();
 
    private_key_impl& operator=(const private_key_impl& pk) noexcept;
 

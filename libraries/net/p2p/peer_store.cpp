@@ -38,6 +38,32 @@ void peer_store::upsert(record value) {
    impl_->upsert(std::move(value));
 }
 
+peer_store::record peer_store::apply_identify(const peer_id& peer, identify_update update) {
+   return impl_->apply_identify(peer, std::move(update));
+}
+
+std::optional<peer_store::record> peer_store::apply_discovery(const peer_id& peer, discovery_update update) {
+   return impl_->apply_discovery(peer, std::move(update));
+}
+
+void peer_store::apply_peer_exchange(const peer_id& peer, capability_set capabilities) {
+   impl_->apply_peer_exchange(peer, capabilities);
+}
+
+void peer_store::upsert_relay_reservation(relay_record value) {
+   impl_->upsert_relay_reservation(std::move(value));
+}
+
+bool peer_store::mark_discovery_failure(const peer_id& peer,
+                                        std::chrono::system_clock::time_point backoff_until) {
+   return impl_->mark_discovery_failure(peer, backoff_until);
+}
+
+std::size_t peer_store::prune_expired_relay_reservations(const peer_id& peer,
+                                                         std::chrono::system_clock::time_point now) {
+   return impl_->prune_expired_relay_reservations(peer, now);
+}
+
 void peer_store::learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities) {
    impl_->learn_endpoint(std::move(peer), std::move(endpoint), capabilities);
 }
@@ -55,13 +81,13 @@ void peer_store::mark_failure(const peer_id& peer) {
    impl_->mark_failure(peer);
 }
 
-void peer_store::mark_endpoint_success(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
-                                       path::kind kind, std::chrono::milliseconds latency) {
+void peer_store::mark_endpoint_success(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
+                                       std::chrono::milliseconds latency) {
    impl_->mark_endpoint_success(peer, endpoint, kind, latency);
 }
 
-void peer_store::mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
-                                       path::kind kind, std::chrono::system_clock::time_point backoff_until) {
+void peer_store::mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
+                                       std::chrono::system_clock::time_point backoff_until) {
    impl_->mark_endpoint_failure(peer, endpoint, kind, backoff_until);
 }
 
@@ -78,9 +104,8 @@ boost::asio::awaitable<void> peer_store::async_upsert_rendezvous(rendezvous::reg
    co_await impl_->async_upsert_rendezvous(std::move(value));
 }
 
-boost::asio::awaitable<void>
-peer_store::async_register_rendezvous(rendezvous::registration value,
-                                      std::size_t max_registrations_per_peer) {
+boost::asio::awaitable<void> peer_store::async_register_rendezvous(rendezvous::registration value,
+                                                                   std::size_t max_registrations_per_peer) {
    co_await impl_->async_register_rendezvous(std::move(value), max_registrations_per_peer);
 }
 
@@ -117,14 +142,13 @@ std::vector<peer_store::record> peer_store::candidates(std::uint64_t capability,
    return impl_->candidates(capability, limit);
 }
 
-std::vector<peer_store::provider_record> peer_store::find_providers(const dht::key& key,
-                                                                    std::size_t limit) const {
+std::vector<peer_store::provider_record> peer_store::find_providers(const dht::key& key, std::size_t limit) const {
    return impl_->find_providers(key, limit);
 }
 
-std::vector<rendezvous::registration>
-peer_store::discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence,
-                                std::size_t limit) const {
+std::vector<rendezvous::registration> peer_store::discover_rendezvous(std::string_view namespace_name,
+                                                                      std::uint64_t after_sequence,
+                                                                      std::size_t limit) const {
    return impl_->discover_rendezvous(namespace_name, after_sequence, limit);
 }
 

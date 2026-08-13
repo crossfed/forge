@@ -42,6 +42,10 @@ namespace {
    return left.to_string() == right.to_string();
 }
 
+[[nodiscard]] bool has_endpoint_source(const peer_store::endpoint_sources& sources) noexcept {
+   return sources.learned || sources.identify_unsigned || sources.identify_signed;
+}
+
 void refresh_endpoint_score(peer_store::endpoint_record& endpoint) {
    endpoint.score = score_path(path::observation{
        .kind = endpoint.kind,
@@ -104,6 +108,9 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
       add(protocol.value.size());
    }
    for (const auto& endpoint : value.endpoints) {
+      if (!has_endpoint_source(endpoint.sources)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P endpoint record has no provenance");
+      }
       add(endpoint.endpoint.to_string().size());
    }
    if (value.observed_endpoint) {
@@ -122,8 +129,7 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
 
 void validate_provider_record(const peer_store::provider_record& value, const peer_store::options& options) {
    if (value.provider.endpoints.size() > options.max_endpoints_per_peer) {
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
-                            "P2P provider record exceeds endpoint limit");
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P provider record exceeds endpoint limit");
    }
 
    auto bytes = std::size_t{};
@@ -137,8 +143,7 @@ void validate_provider_record(const peer_store::provider_record& value, const pe
 
 void validate_rendezvous_record(const rendezvous::registration& value, const peer_store::options& options) {
    if (value.endpoints.size() > options.max_endpoints_per_peer) {
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
-                            "P2P Rendezvous record exceeds endpoint limit");
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P Rendezvous record exceeds endpoint limit");
    }
 
    auto bytes = std::size_t{};
@@ -164,6 +169,38 @@ void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint
    refresh_endpoint_score(*iterator);
 }
 
+void replace_identify_endpoint_snapshot(peer_store::record& record,
+                                        const std::vector<forge::net::p2p::endpoint>& endpoints,
+                                        bool signed_snapshot) {
+   for (auto& current : record.endpoints) {
+      if (signed_snapshot) {
+         current.sources.identify_signed = false;
+      } else {
+         current.sources.identify_unsigned = false;
+      }
+   }
+   std::erase_if(record.endpoints, [](const auto& current) { return !has_endpoint_source(current.sources); });
+
+   for (const auto& endpoint : endpoints) {
+      const auto existing = std::ranges::find_if(
+          record.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
+      if (existing == record.endpoints.end()) {
+         auto sources = peer_store::endpoint_sources{.learned = false};
+         sources.identify_signed = signed_snapshot;
+         sources.identify_unsigned = !signed_snapshot;
+         record.endpoints.push_back(peer_store::endpoint_record{
+             .endpoint = endpoint,
+             .kind = path::kind::direct,
+             .sources = sources,
+         });
+      } else if (signed_snapshot) {
+         existing->sources.identify_signed = true;
+      } else {
+         existing->sources.identify_unsigned = true;
+      }
+   }
+}
+
 [[nodiscard]] std::string current_failure_message() {
    try {
       throw;
@@ -176,7 +213,7 @@ void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint
 
 [[nodiscard]] std::string durability_failure_message(const peer_store::apply_result& result) {
    return result.durability_failure.empty() ? "persistence commit completed without durable acknowledgement"
-                                             : result.durability_failure;
+                                            : result.durability_failure;
 }
 
 [[noreturn]] void throw_durability_uncertain(const peer_store::apply_result& result) {
@@ -416,12 +453,17 @@ void peer_store::impl::commit_peer_mutation_locked(peer_store::record value) {
    stage.commit();
 }
 
-void peer_store::impl::mutate_peer(const peer_id& peer, const std::function<void(peer_store::record&)>& mutation) {
+peer_store::record
+peer_store::impl::mutate_peer(const peer_id& peer, const std::function<void(peer_store::record&)>& mutation) {
    auto lock = std::scoped_lock{mutex_};
    ensure_open_locked();
    auto value = record_for_mutation_locked(peer);
    mutation(value);
+   value.peer = peer;
+   normalize_for_storage(value);
+   auto result = value;
    commit_peer_mutation_locked(std::move(value));
+   return result;
 }
 
 void peer_store::impl::upsert(peer_store::record value) {
@@ -429,49 +471,162 @@ void peer_store::impl::upsert(peer_store::record value) {
    commit_peer_mutation(std::move(value));
 }
 
+peer_store::record peer_store::impl::apply_identify(const peer_id& peer, peer_store::identify_update update) {
+   if (update.signed_endpoints.has_value() != update.signed_peer_record.has_value() ||
+       (update.signed_endpoints && update.unsigned_endpoints)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P Identify update has inconsistent endpoint sources");
+   }
+
+   return mutate_peer(peer, [&](peer_store::record& value) {
+      if (update.protocol_version) {
+         value.protocol_version = std::move(*update.protocol_version);
+      }
+      if (update.agent_version) {
+         value.agent_version = std::move(*update.agent_version);
+      }
+      if (update.public_key) {
+         value.public_key = std::move(*update.public_key);
+      }
+      if (update.protocols) {
+         value.protocols = std::move(*update.protocols);
+      }
+      if (update.capabilities) {
+         value.capabilities = *update.capabilities;
+      }
+      if (update.replace_observed_endpoint) {
+         value.observed_endpoint = std::move(update.observed_endpoint);
+      }
+      if (update.signed_endpoints) {
+         value.signed_peer_record = std::move(*update.signed_peer_record);
+         replace_identify_endpoint_snapshot(value, *update.signed_endpoints, true);
+      } else if (update.unsigned_endpoints) {
+         replace_identify_endpoint_snapshot(value, *update.unsigned_endpoints, false);
+      }
+   });
+}
+
+std::optional<peer_store::record> peer_store::impl::apply_discovery(const peer_id& peer,
+                                                                    peer_store::discovery_update update) {
+   auto lock = std::scoped_lock{mutex_};
+   ensure_open_locked();
+   const auto current = records_.find(peer);
+   if (current == records_.end()) {
+      return std::nullopt;
+   }
+   auto value = current->second;
+   value.discovered_by = update.source;
+   value.discovered_at = update.observed_at;
+   value.discovery_expires_at = update.expires_at;
+   normalize_for_storage(value);
+   auto result = value;
+   commit_peer_mutation_locked(std::move(value));
+   return result;
+}
+
+void peer_store::impl::apply_peer_exchange(const peer_id& peer, capability_set capabilities) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
+      value.capabilities.bits |= capabilities.bits;
+   }));
+}
+
+void peer_store::impl::upsert_relay_reservation(peer_store::relay_record value) {
+   const auto peer = value.relay;
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& record) {
+      const auto current = std::ranges::find_if(
+          record.relay_reservations, [&](const auto& reservation) { return reservation.relay == peer; });
+      if (current == record.relay_reservations.end()) {
+         record.relay_reservations.push_back(std::move(value));
+      } else {
+         *current = std::move(value);
+      }
+      record.capabilities.add(capabilities::relay);
+      record.capabilities.add(capabilities::relay_reservation);
+   }));
+}
+
+bool peer_store::impl::mark_discovery_failure(const peer_id& peer,
+                                              std::chrono::system_clock::time_point backoff_until) {
+   auto lock = std::scoped_lock{mutex_};
+   ensure_open_locked();
+   const auto current = records_.find(peer);
+   if (current == records_.end()) {
+      return false;
+   }
+   auto value = current->second;
+   value.discovery_backoff_until = backoff_until;
+   ++value.failures;
+   normalize_for_storage(value);
+   commit_peer_mutation_locked(std::move(value));
+   return true;
+}
+
+std::size_t peer_store::impl::prune_expired_relay_reservations(
+   const peer_id& peer, std::chrono::system_clock::time_point now) {
+   auto lock = std::scoped_lock{mutex_};
+   ensure_open_locked();
+   const auto current = records_.find(peer);
+   if (current == records_.end()) {
+      return 0;
+   }
+   auto value = current->second;
+   const auto before = value.relay_reservations.size();
+   std::erase_if(value.relay_reservations, [&](const peer_store::relay_record& reservation) {
+      return reservation.expires_at != std::chrono::system_clock::time_point{} && reservation.expires_at <= now;
+   });
+   const auto removed = before - value.relay_reservations.size();
+   if (removed == 0) {
+      return 0;
+   }
+   normalize_for_storage(value);
+   commit_peer_mutation_locked(std::move(value));
+   return removed;
+}
+
 void peer_store::impl::learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       value.peer = peer;
       value.capabilities.bits |= capabilities.bits;
-      const auto exists = std::ranges::any_of(
+      const auto existing = std::ranges::find_if(
           value.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
-      if (!exists) {
+      if (existing == value.endpoints.end()) {
          value.endpoints.push_back(peer_store::endpoint_record{.endpoint = std::move(endpoint)});
+      } else {
+         existing->sources.learned = true;
       }
-      normalize_for_storage(value);
-   });
+   }));
 }
 
 void peer_store::impl::mark_reachability(peer_id peer, reachability::state state,
                                          std::optional<forge::net::p2p::endpoint> observed) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       value.peer = peer;
       value.reachability = state;
       value.observed_endpoint = std::move(observed);
       value.reachability_expires_at = std::chrono::system_clock::now() + std::chrono::minutes{5};
-   });
+   }));
 }
 
 void peer_store::impl::mark_success(const peer_id& peer, path::kind kind, std::chrono::milliseconds latency) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       ++value.successes;
       value.last_latency = latency;
       refresh_record_score(value, kind, true);
-   });
+   }));
 }
 
 void peer_store::impl::mark_failure(const peer_id& peer) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       ++value.failures;
       const auto kind = value.endpoints.empty() ? path::kind::direct : value.endpoints.front().kind;
       refresh_record_score(value, kind, false);
-   });
+   }));
 }
 
 void peer_store::impl::mark_endpoint_success(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
                                              path::kind kind, std::chrono::milliseconds latency) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       mutate_endpoint(value, endpoint, kind, [&](peer_store::endpoint_record& current) {
+         current.sources.learned = true;
          current.last_latency = latency;
          current.backoff_until = {};
          ++current.successes;
@@ -479,25 +634,25 @@ void peer_store::impl::mark_endpoint_success(const peer_id& peer, const forge::n
       ++value.successes;
       value.last_latency = latency;
       refresh_record_score(value, kind, true);
-   });
+   }));
 }
 
 void peer_store::impl::mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
                                              path::kind kind, std::chrono::system_clock::time_point backoff_until) {
-   mutate_peer(peer, [&](peer_store::record& value) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       mutate_endpoint(value, endpoint, kind, [&](peer_store::endpoint_record& current) {
          current.backoff_until = backoff_until;
          ++current.failures;
       });
       ++value.failures;
       refresh_record_score(value, kind, false);
-   });
+   }));
 }
 
 void peer_store::impl::upsert_routing_peer(dht::peer value, discovery::source source,
                                            std::chrono::system_clock::time_point expires_at) {
    const auto peer = value.id;
-   mutate_peer(peer, [&](peer_store::record& record) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& record) {
       record.peer = peer;
       record.capabilities.add(capabilities::dht);
       record.discovered_by = source;
@@ -505,14 +660,15 @@ void peer_store::impl::upsert_routing_peer(dht::peer value, discovery::source so
       record.discovery_expires_at = expires_at;
       for (auto endpoint : value.endpoints) {
          endpoint.peer = peer;
-         const auto exists = std::ranges::any_of(
+         const auto existing = std::ranges::find_if(
              record.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
-         if (!exists) {
+         if (existing == record.endpoints.end()) {
             record.endpoints.push_back(peer_store::endpoint_record{.endpoint = std::move(endpoint)});
+         } else {
+            existing->sources.learned = true;
          }
       }
-      normalize_for_storage(record);
-   });
+   }));
 }
 
 void peer_store::impl::mark_persistence_failure_locked(std::string message) {
@@ -782,12 +938,10 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvou
    co_await async_store_rendezvous(std::move(value), std::nullopt);
 }
 
-boost::asio::awaitable<void>
-peer_store::impl::async_register_rendezvous(rendezvous::registration value,
-                                            std::size_t max_registrations_per_peer) {
+boost::asio::awaitable<void> peer_store::impl::async_register_rendezvous(rendezvous::registration value,
+                                                                         std::size_t max_registrations_per_peer) {
    if (max_registrations_per_peer == 0) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
-                            "peer store Rendezvous per-peer capacity must be positive");
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "peer store Rendezvous per-peer capacity must be positive");
    }
    co_await async_store_rendezvous(std::move(value), max_registrations_per_peer);
 }
@@ -808,8 +962,7 @@ peer_store::impl::async_store_rendezvous(rendezvous::registration value,
       const auto count = rendezvous_per_peer_.find(value.peer);
       const auto registrations = count == rendezvous_per_peer_.end() ? 0U : count->second;
       if (!existing && max_registrations_per_peer && registrations >= *max_registrations_per_peer) {
-         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
-                               "peer store Rendezvous per-peer capacity reached");
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "peer store Rendezvous per-peer capacity reached");
       }
       if (rendezvous_sequence_ == std::numeric_limits<std::uint64_t>::max()) {
          FORGE_THROW_EXCEPTION(exceptions::sequence_exhausted, "peer store Rendezvous sequence is exhausted");

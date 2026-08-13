@@ -47,185 +47,83 @@ import forge.plugins.db.store.api;
 namespace forge::plugins::p2p::node {
 namespace {
 
-inline constexpr auto bootstrap_scan_interval = std::chrono::seconds{1};
-inline constexpr auto bootstrap_connect_timeout = std::chrono::seconds{2};
-inline constexpr auto bootstrap_retry_max = std::chrono::seconds{30};
-inline constexpr auto bootstrap_protection_tag = "bootstrap";
-
 [[nodiscard]] bool contains_protocol(
     const std::vector<std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>>& routes,
     const forge::net::p2p::protocol_id& protocol) {
    return std::any_of(routes.begin(), routes.end(), [&](const auto& route) { return route.first == protocol; });
 }
 
-[[nodiscard]] std::chrono::milliseconds bootstrap_retry_delay(std::size_t failures, std::chrono::milliseconds step,
-                                                              std::chrono::milliseconds maximum) {
-   if (failures == 0) {
-      return bootstrap_scan_interval;
-   }
-   auto delay = step;
-   for (auto attempt = std::size_t{1}; attempt < failures && delay < maximum; ++attempt) {
-      delay = delay > maximum - delay ? maximum : delay + delay;
-   }
-   return std::min(delay, maximum);
-}
-
-[[nodiscard]] bool has_active_session(const forge::net::p2p::node& node, const forge::net::p2p::peer_id& peer,
-                                      std::size_t max_sessions) {
-   const auto snapshot = node.diagnostics(forge::net::p2p::diagnostics::options{
-       .max_sessions = max_sessions,
-   });
-   return std::any_of(snapshot.sessions.begin(), snapshot.sessions.end(),
-                      [&](const auto& session) { return !session.closed && session.remote_peer == peer; });
-}
-
 } // namespace
 
-forge::net::p2p::node& plugin::impl::ensure_node() {
+std::optional<std::vector<plugin::impl::route>> plugin::impl::begin_startup() {
+   auto lock = std::scoped_lock{configuration_mutex};
+   if (stop_requested.load(std::memory_order_acquire)) {
+      phase.store(lifecycle_phase::stopping, std::memory_order_release);
+      return std::nullopt;
+   }
+   if (phase.load(std::memory_order_relaxed) != lifecycle_phase::idle) {
+      FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P node startup has already begun");
+   }
+   phase.store(lifecycle_phase::starting, std::memory_order_release);
+   return routes;
+}
+
+void plugin::impl::mark_started() noexcept {
+   auto expected = lifecycle_phase::starting;
+   static_cast<void>(phase.compare_exchange_strong(expected, lifecycle_phase::started, std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
+}
+
+void plugin::impl::mark_stopped() noexcept {
+   phase.store(lifecycle_phase::stopped, std::memory_order_release);
+}
+
+bool plugin::impl::is_started() const noexcept {
+   return phase.load(std::memory_order_acquire) == lifecycle_phase::started;
+}
+
+std::shared_ptr<forge::net::p2p::node> plugin::impl::ensure_node(const std::vector<route>& startup_routes) {
    if (!runtime) {
       FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin is not initialized");
    }
-   if (!node) {
+   auto current = std::atomic_load_explicit(&node, std::memory_order_acquire);
+   if (!current) {
       if (pubsub_requested) {
          options.capabilities.add(forge::net::p2p::capabilities::pubsub);
          options.limits.pubsub = pubsub_options;
       }
-      node = std::make_unique<forge::net::p2p::node>(*runtime, options);
+      auto candidate = std::make_shared<forge::net::p2p::node>(*runtime, options);
+      for (const auto& route : startup_routes) {
+         candidate->register_protocol_handler(route.first, route.second);
+      }
+      if (!std::atomic_compare_exchange_strong_explicit(&node, &current, candidate, std::memory_order_acq_rel,
+                                                        std::memory_order_acquire)) {
+         candidate->stop();
+      } else {
+         current = std::move(candidate);
+      }
    }
-   return *node;
+   if (stop_requested.load(std::memory_order_acquire)) {
+      current->stop();
+   }
+   return current;
 }
 
-forge::net::p2p::node& plugin::impl::require_node() {
-   if (!node) {
+std::shared_ptr<forge::net::p2p::node> plugin::impl::node_snapshot() const noexcept {
+   return std::atomic_load_explicit(&node, std::memory_order_acquire);
+}
+
+std::shared_ptr<forge::net::p2p::node> plugin::impl::require_node() const {
+   auto current = node_snapshot();
+   if (!current) {
       FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin is not initialized");
    }
-   return *node;
-}
-
-const forge::net::p2p::node& plugin::impl::require_node() const {
-   if (!node) {
-      FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin is not initialized");
-   }
-   return *node;
-}
-
-boost::asio::awaitable<void> plugin::impl::refresh_bootstrap() {
-   auto& active_node = require_node();
-   for (auto& configured : bootstrap) {
-      if (stopping.load(std::memory_order_acquire)) {
-         co_return;
-      }
-      const auto now = std::chrono::steady_clock::now();
-      if (configured.next_attempt > now) {
-         continue;
-      }
-      if (configured.peer && has_active_session(active_node, *configured.peer, options.limits.max_sessions)) {
-         configured.failures = 0;
-         configured.next_attempt = now + bootstrap_scan_interval;
-         active_node.protect_peer(*configured.peer, bootstrap_protection_tag);
-         continue;
-      }
-
-      try {
-         const auto session = co_await active_node.async_connect(
-             configured.endpoint, forge::net::p2p::node::connect_options{
-                                      .expected_peer = configured.peer,
-                                      .allow_relay = false,
-                                      .timeout = bootstrap_connect_timeout,
-                                      .direct_attempt_timeout = bootstrap_connect_timeout,
-                                      .allow_hole_punch = false,
-                                  });
-         configured.peer = session.remote_peer;
-         configured.failures = 0;
-         configured.next_attempt = std::chrono::steady_clock::now() + bootstrap_scan_interval;
-         active_node.protect_peer(session.remote_peer, bootstrap_protection_tag);
-      } catch (...) {
-         if (configured.failures < std::numeric_limits<std::size_t>::max()) {
-            ++configured.failures;
-         }
-         configured.next_attempt =
-             std::chrono::steady_clock::now() +
-             bootstrap_retry_delay(
-                 configured.failures, options.limits.dial_backoff_step,
-                 std::min(options.limits.dial_backoff_max,
-                          std::chrono::duration_cast<std::chrono::milliseconds>(bootstrap_retry_max)));
-         forge::exceptions::capture_and_log("P2P bootstrap connect failed");
-      }
-   }
-}
-
-void plugin::impl::start_maintenance() {
-   if (!scheduler) {
-      FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin scheduler is not initialized");
-   }
-   auto self = shared_from_this();
-   auto task = scheduler->submit(forge::asio::task::awaitable{
-       .name = "p2p-peer-maintenance",
-       .work = [self = std::move(self)](forge::asio::task::context& context) -> boost::asio::awaitable<void> {
-          auto executor = co_await boost::asio::this_coro::executor;
-          auto lane = boost::asio::make_strand(executor);
-          co_await boost::asio::co_spawn(
-              lane,
-              [self, &context]() -> boost::asio::awaitable<void> {
-                 auto executor = co_await boost::asio::this_coro::executor;
-                 while (!context.cancel_requested() && !self->stopping.load(std::memory_order_acquire)) {
-                    co_await self->refresh_bootstrap();
-                    try {
-                       static_cast<void>(co_await self->require_node().peers().async_prune_expired());
-                    } catch (...) {
-                       forge::exceptions::capture_and_log("P2P peer persistence maintenance failed");
-                    }
-                    if (context.cancel_requested() || self->stopping.load(std::memory_order_acquire)) {
-                       co_return;
-                    }
-
-                    auto timer = std::make_shared<boost::asio::steady_timer>(executor, bootstrap_scan_interval);
-                    auto stop = std::stop_callback{context.stop_token(), [executor, timer] {
-                                                      boost::asio::post(executor, [timer] { timer->cancel(); });
-                                                   }};
-                    auto error = boost::system::error_code{};
-                    co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-                    if (error && error != boost::asio::error::operation_aborted) {
-                       throw boost::system::system_error{error};
-                    }
-                 }
-              },
-              boost::asio::use_awaitable);
-       },
-   });
-
-   auto lock = std::scoped_lock{maintenance_mutex};
-   maintenance = std::move(task);
-   if (stopping.load(std::memory_order_acquire)) {
-      maintenance.cancel();
-   }
-}
-
-void plugin::impl::request_maintenance_stop() noexcept {
-   stopping.store(true, std::memory_order_release);
-   auto lock = std::scoped_lock{maintenance_mutex};
-   if (maintenance.valid()) {
-      maintenance.cancel();
-   }
-}
-
-boost::asio::awaitable<void> plugin::impl::stop_maintenance() {
-   auto task = forge::asio::task::handle{};
-   {
-      auto lock = std::scoped_lock{maintenance_mutex};
-      if (!maintenance.valid()) {
-         co_return;
-      }
-      task = std::move(maintenance);
-   }
-   try {
-      co_await task.wait();
-   } catch (const forge::asio::exceptions::canceled&) {
-   }
+   return current;
 }
 
 void plugin::impl::add_route(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler) {
-   if (started) {
+   auto lock = std::scoped_lock{configuration_mutex};
+   if (phase.load(std::memory_order_relaxed) != lifecycle_phase::idle) {
       FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P routes must be published before startup",
                             forge::exceptions::ctx("protocol", protocol.value));
    }
@@ -237,6 +135,15 @@ void plugin::impl::add_route(forge::net::p2p::protocol_id protocol, forge::net::
                             forge::exceptions::ctx("protocol", protocol.value));
    }
    routes.emplace_back(std::move(protocol), std::move(handler));
+}
+
+void plugin::impl::enable_pubsub(forge::net::p2p::pubsub::options options_value) {
+   auto lock = std::scoped_lock{configuration_mutex};
+   if (phase.load(std::memory_order_relaxed) != lifecycle_phase::idle) {
+      FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P PubSub capability must be requested before startup");
+   }
+   pubsub_options = std::move(options_value);
+   pubsub_requested = true;
 }
 
 forge::net::p2p::node::open_options plugin::impl::open_options_for(remote_options value) const {

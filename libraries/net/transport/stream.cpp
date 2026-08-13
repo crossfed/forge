@@ -70,8 +70,10 @@ std::int64_t stream::id() const noexcept {
 }
 
 boost::asio::awaitable<void> stream::async_write(std::span<const std::uint8_t> bytes) {
-   auto owned = chunk{bytes};
-   co_await async_write(std::move(owned));
+   if (!impl_ || !impl_->model) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "invalid transport stream");
+   }
+   co_await impl_->model->async_write(bytes);
 }
 
 boost::asio::awaitable<void> stream::async_write(chunk bytes) {
@@ -101,12 +103,17 @@ boost::asio::awaitable<chunk> stream::async_read_chunk() {
 }
 
 boost::asio::awaitable<void> stream::async_write_frame(std::span<const std::uint8_t> bytes) {
-   auto encoded = encode_frame(bytes);
-   co_await async_write(chunk{std::move(encoded)});
+   if (!impl_ || !impl_->model) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "invalid transport stream");
+   }
+   co_await impl_->model->async_write_frame(bytes);
 }
 
 boost::asio::awaitable<void> stream::async_write_frame(chunk bytes) {
-   co_await async_write_frame(bytes.bytes());
+   if (!impl_ || !impl_->model) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "invalid transport stream");
+   }
+   co_await impl_->model->async_write_frame_chunk(std::move(bytes));
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>> stream::async_read_frame() {
@@ -178,6 +185,17 @@ stream detail::stream_access::with_buffer(stream value, std::vector<std::uint8_t
 
 boost::asio::awaitable<void> detail::stream_concept::async_write_chunk(chunk bytes) {
    co_await async_write(bytes.bytes());
+}
+
+boost::asio::awaitable<void> detail::stream_concept::async_write_frame(std::span<const std::uint8_t> bytes) {
+   co_await async_write_frame_chunk(chunk{bytes});
+}
+
+boost::asio::awaitable<void> detail::stream_concept::async_write_frame_chunk(chunk bytes) {
+   auto [payload, lifetime] = detail::chunk_access::consume(std::move(bytes));
+   auto encoded = chunk{encode_frame(payload)};
+   detail::chunk_access::attach_lifetime(encoded, std::move(lifetime));
+   co_await async_write_chunk(std::move(encoded));
 }
 
 boost::asio::awaitable<chunk> detail::stream_concept::async_read_chunk() {

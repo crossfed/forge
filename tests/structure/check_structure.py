@@ -21,7 +21,7 @@ BROAD_EXPORT = re.compile(r"^\s*export\s*\{")
 CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
-PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
+PRIVATE_DECLARATION = re.compile(r"^\s*(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
 VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
 UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
 
@@ -84,6 +84,21 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
       remainder = include_line.sub("", import_line.sub("", module_line.sub("", source))).strip()
       if not remainder:
          errors.append(f"{path.relative_to(root)}: aggregate-only module is forbidden")
+
+
+def check_p2p_scoped_peer_mutations(root: Path, errors: list[str]) -> None:
+   path = root / "libraries/net/p2p/relay_discovery.cpp"
+   source = path.read_text(errors="ignore")
+   for forbidden in ("store.find(", "store.upsert("):
+      if forbidden in source:
+         errors.append(
+            f"{path.relative_to(root)}: relay maintenance must use scoped peer-store mutations, not {forbidden}"
+         )
+   for required in ("store.mark_discovery_failure(", "store.prune_expired_relay_reservations("):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: relay maintenance is missing scoped mutation {required}"
+         )
 
 
 def component_roots(root: Path) -> list[Path]:
@@ -1062,6 +1077,7 @@ def main() -> int:
 
    check_layout(root, errors)
    check_aggregates(root, errors)
+   check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)

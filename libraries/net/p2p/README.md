@@ -5,12 +5,20 @@ sessions, protocol stream negotiation, peer exchange, relay reservations,
 reachability probes, hole punching, path scoring, discovery protocol machinery
 and GossipSub/pubsub.
 
+API status: `forge.net.p2p.resource_manager` is Preview while P2P production
+hardening replaces manual counters with move-only reservations. The Stage 3
+migration intentionally removes `try_acquire_*`/`release_*`; callers retain the
+returned reservation for the complete operation lifetime instead. Other public
+P2P contracts remain Stable unless their owning section explicitly says
+otherwise.
+
 ## Current Support State
 
 This library contains substantial libp2p-compatible protocol substrate, but it
 is not yet a complete autonomous production host. Direct QUIC and TCP/Yamux,
-secure peer authentication, session admission and connection management are on
-the normal node path. GossipSub has bounded connected-peer mechanics and live
+secure peer authentication, node-owned bootstrap, automatic Identify,
+session/stream/dial admission and transport-backed queued-byte accounting are
+on the normal node path. GossipSub has bounded connected-peer mechanics and live
 interop fixtures, but its overall support state remains `partial` until scoring
 and autonomous topology are complete.
 
@@ -21,14 +29,12 @@ The following surfaces are not production claims yet:
 - Kademlia now has bounded node-owned k-buckets, DHT-exchange-verified server
   admission and failure eviction; Identify and hydrated records remain
   candidates until a valid DHT response, while autonomous refresh and the
-  standard value profile are still Stage 3/4 work;
+  standard value profile are still Stage 4 work;
 - standard Kademlia value operations do not have a value store or validation
   policy;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
   reachability feed;
-- GossipSub scoring and autonomous topology remain incomplete;
-- generic stream, dial and queued-byte resource scopes are not connected to all
-  production paths.
+- GossipSub scoring and autonomous topology remain incomplete.
 
 The machine-readable support inventory is
 [`p2p_feature_inventory.json`](../../../tests/libp2p_interop/p2p_feature_inventory.json).
@@ -59,12 +65,14 @@ donor run.
 
 ## Public Modules
 
-- `forge.net.p2p.identity`, `forge.net.p2p.endpoint`, `forge.net.p2p.node`.
+- `forge.net.p2p.identity`, `forge.net.p2p.endpoint`, `forge.net.p2p.node`,
+  `forge.net.p2p.lifecycle`.
 - `forge.net.p2p.protocol`, `forge.net.p2p.message`, `forge.net.p2p.negotiation`.
 - `forge.net.p2p.peer_store`, `forge.net.p2p.discovery`, `forge.net.p2p.dht`,
   `forge.net.p2p.rendezvous`.
 - `forge.net.p2p.pubsub`.
-- `forge.net.p2p.relay`, `forge.net.p2p.scoring`.
+- `forge.net.p2p.relay`, `forge.net.p2p.scoring`,
+  `forge.net.p2p.resource_manager`.
 - `forge.net.p2p.exceptions`.
 
 Target: `forge_net_p2p`.
@@ -114,6 +122,13 @@ Network-level behaviors that must not be pushed into plugins:
 - protocol capability negotiation;
 - network limits, backpressure, metrics and shutdown behavior.
 
+Circuit Relay v2 reservations belong to authenticated peer sessions. Renewal
+keeps the same reservation generation and active-circuit accounting; the final
+session disconnect releases the reservation. Configured relay duration must be
+positive and exactly representable in the whole seconds advertised on the wire.
+Per-direction byte limits close the direction as soon as its final permitted
+byte is forwarded.
+
 `forge_net_p2p` remains free of application plugins, storage and authorization
 policy. Application protocols own idempotency, acknowledgement and
 permission checks above P2P.
@@ -137,6 +152,7 @@ create unbounded work or a second cache.
 
 import forge.net.p2p.identity;
 import forge.net.p2p.endpoint;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.node;
 
 boost::asio::awaitable<void> start_node(forge::asio::runtime& runtime) {
@@ -144,18 +160,30 @@ boost::asio::awaitable<void> start_node(forge::asio::runtime& runtime) {
       .certificate_pem = certificate_pem,
       .private_key_pem = private_key_pem,
       .peer_state = {.persistence = persistence},
+      .lifecycle = {
+         .listen = {forge::net::p2p::parse_endpoint(
+            "/ip4/127.0.0.1/udp/9443/quic-v1")},
+         .bootstrap = {forge::net::p2p::bootstrap_peer{
+            .address = forge::net::p2p::parse_endpoint(bootstrap_endpoint)}},
+      },
    };
 
-   auto peer = forge::net::p2p::make_peer_id_from_certificate_pem(certificate_pem);
    auto node = forge::net::p2p::node{runtime, options};
-   co_await node.async_listen(forge::net::p2p::parse_endpoint("/ip4/127.0.0.1/udp/9443/quic-v1"));
-   advertise_peer(peer);
+   const auto status = co_await node.async_start();
+   if (status.degraded) {
+      report_degraded_bootstrap(status);
+   }
+   co_await node.async_stop();
 }
 ```
 
 Production certificates must carry the signed libp2p identity extension. Peer
 IDs are not derived from a bare certificate hash in production verification
 paths.
+
+Bootstrap endpoints should include `/p2p/<peer-id>` so the authenticated peer is
+pinned before the dial. Peer-less legacy endpoints remain accepted: the node
+learns and protects the peer only after transport authentication succeeds.
 
 ### Parse A libp2p QUIC Endpoint
 
@@ -200,6 +228,22 @@ peer and persistence-queue bounds. The endpoint and total variable-byte limits
 also apply to each provider and Rendezvous record, including records returned
 during hydration, before any operational state is changed.
 
+Identify address provenance is operational metadata used to replace each live
+unsigned or certified snapshot without appending stale addresses. The existing
+ObjectDB schema v1 is unchanged: hydrated endpoints conservatively re-enter as
+learned cache facts and age through the existing peer-health/expiry policy;
+the next verified Identify refresh establishes provenance for its live
+snapshot.
+
+Identify receive limits distinguish one length-delimited frame from the merged
+multipart message. Defaults accept the Go libp2p profile of at most ten 8 KiB
+parts while reserving the complete decode budget before reading. Partial
+Identify Push follows Rust libp2p merge semantics: omitted scalar fields and
+empty repeated fields preserve the previous verified facts. A valid signed
+PeerRecord with an equal sequence is accepted as a refresh because Rust
+sequences have second granularity; a lower sequence is rejected. Lifecycle
+diagnostics expose the last non-cancellation bootstrap failure directly.
+
 The official P2P plugin supplies the production ObjectDB adapter. Direct users
 may implement the persistence port over their own lifecycle owner. The memory
 implementation is deterministic but intended only for tests and explicit local
@@ -233,7 +277,13 @@ auto node = forge::net::p2p::node{runtime, {
    .certificate_pem = certificate_pem,
    .private_key_pem = private_key_pem,
    .peer_state = {.persistence = persistence},
+   .lifecycle = {
+      .listen = {listen_endpoint},
+      .bootstrap = {{.address = bootstrap_endpoint}},
+   },
 }};
+
+auto status = co_await node.async_start();
 
 auto test_store = forge::net::p2p::peer_store{
    {.persistence = forge::net::p2p::peer_store::make_memory_persistence()}};

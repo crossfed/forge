@@ -25,8 +25,52 @@ boost::asio::awaitable<boost::system::error_code> async_waiter::wait() {
       co_return error;
    }
 
+   if (notified_) {
+      co_return boost::asio::error::operation_aborted;
+   }
+
    co_await timer_.async_wait(boost::asio::bind_cancellation_slot(
       boost::asio::cancellation_slot{}, boost::asio::redirect_error(boost::asio::use_awaitable, error)));
+   co_return error;
+}
+
+boost::asio::awaitable<boost::system::error_code>
+async_waiter::wait_until(std::chrono::steady_clock::time_point deadline) {
+   auto error = boost::system::error_code{};
+   co_await boost::asio::dispatch(
+      strand_,
+      boost::asio::bind_cancellation_slot(
+         boost::asio::cancellation_slot{}, boost::asio::redirect_error(boost::asio::use_awaitable, error)));
+   if (error) {
+      co_return error;
+   }
+
+   if (notified_) {
+      co_return boost::asio::error::operation_aborted;
+   }
+
+   timer_.expires_at(deadline);
+   co_await timer_.async_wait(boost::asio::bind_cancellation_slot(
+      boost::asio::cancellation_slot{}, boost::asio::redirect_error(boost::asio::use_awaitable, error)));
+   co_return error;
+}
+
+boost::asio::awaitable<boost::system::error_code>
+async_waiter::wait_until_cancellable(std::chrono::steady_clock::time_point deadline) {
+   auto error = boost::system::error_code{};
+   co_await boost::asio::dispatch(
+      strand_, boost::asio::redirect_error(boost::asio::use_awaitable, error));
+   if (error) {
+      co_return error;
+   }
+
+   if (notified_) {
+      co_return boost::asio::error::operation_aborted;
+   }
+
+   timer_.expires_at(deadline);
+   co_await timer_.async_wait(
+      boost::asio::redirect_error(boost::asio::use_awaitable, error));
    co_return error;
 }
 
@@ -35,7 +79,7 @@ void async_waiter::wake() noexcept {
    boost::asio::dispatch(strand_, [weak] {
       if (auto self = weak.lock()) {
          try {
-            self->timer_.expires_at(boost::asio::steady_timer::time_point::min());
+            self->notified_ = true;
             self->timer_.cancel();
          } catch (...) {
             // Completion and shutdown paths must stay noexcept.

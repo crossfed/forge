@@ -25,6 +25,7 @@ struct dht::routing_table::impl {
 
    [[nodiscard]] std::size_t bucket_for(const peer_id& peer) const;
    void upsert(dht::peer value, dht::routing_admission admission);
+   void remove(const peer_id& peer);
    void mark_failure(const peer_id& peer);
    [[nodiscard]] std::vector<dht::peer> closest(std::span<const std::uint8_t> target, std::size_t limit) const;
    [[nodiscard]] std::vector<dht::peer> query_seeds(std::span<const std::uint8_t> target, std::size_t limit) const;

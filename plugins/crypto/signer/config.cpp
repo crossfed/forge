@@ -39,7 +39,7 @@ config decode_config(const forge::config::core::component_view& view) {
 
 void apply_config(plugin::impl& state, forge::config::core::component_view view) {
    auto config = decode_config(view);
-   auto loaded = std::map<std::string, plugin::impl::loaded_key>{};
+   auto loaded = std::map<std::string, loaded_key>{};
    for (auto& key : config.keys) {
       const auto& input_profile = state.profile_by_name(key.input_profile);
       auto private_key = forge::crypto::asymmetric::private_key{};
@@ -50,17 +50,17 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
                                forge::exceptions::ctx("key_id", key.id),
                                forge::exceptions::ctx("input_profile", key.input_profile));
       }
-      loaded.emplace(key.id, plugin::impl::loaded_key{
+      loaded.emplace(key.id, loaded_key{
                                  .key_id = key.id,
                                  .private_key = std::move(private_key),
                                  .purposes = std::move(key.purposes),
                              });
    }
-   auto loaded_bls = std::map<std::string, plugin::impl::loaded_bls_key>{};
+   auto loaded_bls = std::map<std::string, loaded_bls_key>{};
    for (auto& key : config.bls_keys) {
       try {
          auto private_key = forge::crypto::bls::encoding::parse_private_key(key.private_key);
-         loaded_bls.emplace(key.id, plugin::impl::loaded_bls_key{
+         loaded_bls.emplace(key.id, loaded_bls_key{
                                         .key_id = key.id,
                                         .private_key = std::move(private_key),
                                         .purposes = std::move(key.purposes),

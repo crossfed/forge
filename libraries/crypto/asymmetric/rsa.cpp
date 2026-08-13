@@ -11,6 +11,8 @@ module;
 
 module forge.crypto.asymmetric.rsa;
 
+import forge.crypto.core.secret_bytes;
+
 namespace forge::crypto::asymmetric::rsa {
 namespace {
 
@@ -107,6 +109,31 @@ bool public_key::verify(std::span<const std::uint8_t> message, const signature_d
 }
 
 private_key::private_key(private_key_secret value) : data_(std::move(value)) {}
+
+private_key::private_key(private_key&& other) noexcept : data_{std::move(other.data_)} {
+   forge::crypto::core::secure_erase(other.data_);
+}
+
+private_key& private_key::operator=(const private_key& other) {
+   if (this != &other) {
+      forge::crypto::core::secure_erase(data_);
+      data_ = other.data_;
+   }
+   return *this;
+}
+
+private_key& private_key::operator=(private_key&& other) noexcept {
+   if (this != &other) {
+      forge::crypto::core::secure_erase(data_);
+      data_ = std::move(other.data_);
+      forge::crypto::core::secure_erase(other.data_);
+   }
+   return *this;
+}
+
+private_key::~private_key() {
+   forge::crypto::core::secure_erase(data_);
+}
 
 private_key private_key::generate(std::uint32_t bits) {
    auto context = pkey_ctx_ptr{EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr)};

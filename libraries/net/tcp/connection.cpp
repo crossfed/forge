@@ -5,6 +5,7 @@ module;
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <utility>
@@ -12,9 +13,12 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/system/error_code.hpp>
@@ -26,6 +30,7 @@ import forge.net.transport.stream;
 namespace forge::net::tcp {
 namespace {
 
+namespace asio = boost::asio;
 using asio_tcp = boost::asio::ip::tcp;
 
 [[nodiscard]] std::int64_t next_stream_id() noexcept {
@@ -75,13 +80,23 @@ void cancel_socket(asio_tcp::socket& socket) noexcept {
    socket.close(ignored);
 }
 
-class socket_stream final : public transport::detail::stream_concept {
+enum class socket_state : std::uint8_t {
+   active,
+   cancel_requested,
+   close_requested,
+   handed_off,
+   closed,
+};
+
+class socket_stream final : public transport::detail::stream_concept,
+                            public std::enable_shared_from_this<socket_stream> {
  public:
-   socket_stream(std::shared_ptr<asio_tcp::socket> socket, options tcp_options, std::int64_t id)
-       : socket_(std::move(socket)), options_(tcp_options), id_(id) {}
+   socket_stream(std::shared_ptr<asio_tcp::socket> socket, asio::strand<asio::any_io_executor> strand,
+                 options tcp_options, std::int64_t id)
+       : socket_(std::move(socket)), strand_(std::move(strand)), options_(tcp_options), id_(id) {}
 
    [[nodiscard]] bool valid() const noexcept override {
-      return socket_ && socket_->is_open();
+      return state_.load(std::memory_order_acquire) == socket_state::active;
    }
 
    [[nodiscard]] std::int64_t id() const noexcept override {
@@ -89,162 +104,245 @@ class socket_stream final : public transport::detail::stream_concept {
    }
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes) override {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
-      }
-      auto error = boost::system::error_code{};
-      co_await boost::asio::async_write(*socket_, boost::asio::buffer(bytes),
-                                        boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
+      auto self = shared_from_this();
+      co_await asio::co_spawn(
+          strand_,
+          [self = std::move(self), bytes]() -> asio::awaitable<void> {
+             if (!self->valid()) {
+                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
+             }
+             auto error = boost::system::error_code{};
+             co_await asio::async_write(*self->socket_, asio::buffer(bytes),
+                                        asio::redirect_error(asio::use_awaitable, error));
+             if (error) {
+                throw_read_write_error(error);
+             }
+          },
+          asio::use_awaitable);
    }
 
    boost::asio::awaitable<std::vector<std::uint8_t>> async_read() override {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
-      }
+      auto self = shared_from_this();
       auto out = std::vector<std::uint8_t>(options_.read_chunk_size);
-      auto error = boost::system::error_code{};
-      const auto size = co_await socket_->async_read_some(boost::asio::buffer(out),
-                                                          boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
+      const auto size = co_await asio::co_spawn(
+          strand_,
+          [self = std::move(self), writable = std::span<std::uint8_t>{out}]() -> asio::awaitable<std::size_t> {
+             if (!self->valid()) {
+                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
+             }
+             auto error = boost::system::error_code{};
+             const auto size = co_await self->socket_->async_read_some(
+                 asio::buffer(writable), asio::redirect_error(asio::use_awaitable, error));
+             if (error) {
+                throw_read_write_error(error);
+             }
+             co_return size;
+          },
+          asio::use_awaitable);
       out.resize(size);
       co_return out;
    }
 
    boost::asio::awaitable<transport::chunk> async_read_chunk() override {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
-      }
       auto builder = pool_.acquire(options_.read_chunk_size);
       auto writable = builder.writable();
-      auto error = boost::system::error_code{};
-      const auto size = co_await socket_->async_read_some(boost::asio::buffer(writable),
-                                                          boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
+      auto self = shared_from_this();
+      const auto size = co_await asio::co_spawn(
+          strand_,
+          [self = std::move(self), writable]() -> asio::awaitable<std::size_t> {
+             if (!self->valid()) {
+                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp stream");
+             }
+             auto error = boost::system::error_code{};
+             const auto size = co_await self->socket_->async_read_some(
+                 asio::buffer(writable), asio::redirect_error(asio::use_awaitable, error));
+             if (error) {
+                throw_read_write_error(error);
+             }
+             co_return size;
+          },
+          asio::use_awaitable);
       co_return builder.commit(size);
    }
 
    boost::asio::awaitable<void> async_close() override {
-      if (!socket_) {
-         co_return;
-      }
-      cancel_socket(*socket_);
-      co_return;
+      static_cast<void>(request_terminal(socket_state::close_requested));
+      auto self = shared_from_this();
+      co_await asio::co_spawn(
+          strand_,
+          [self = std::move(self)]() -> asio::awaitable<void> {
+             self->close_on_owner();
+             co_return;
+          },
+          asio::use_awaitable);
    }
 
    void cancel() override {
-      if (socket_) {
-         cancel_socket(*socket_);
+      if (request_terminal(socket_state::cancel_requested)) {
+         auto self = shared_from_this();
+         asio::post(strand_, [self = std::move(self)] { self->close_on_owner(); });
       }
    }
 
  private:
+   [[nodiscard]] bool request_terminal(socket_state requested) noexcept {
+      auto expected = socket_state::active;
+      return state_.compare_exchange_strong(expected, requested, std::memory_order_acq_rel,
+                                            std::memory_order_acquire);
+   }
+
+   void close_on_owner() noexcept {
+      auto current = state_.load(std::memory_order_acquire);
+      while (current == socket_state::cancel_requested || current == socket_state::close_requested) {
+         if (state_.compare_exchange_weak(current, socket_state::closed, std::memory_order_acq_rel,
+                                          std::memory_order_acquire)) {
+            cancel_socket(*socket_);
+            return;
+         }
+      }
+   }
+
    std::shared_ptr<asio_tcp::socket> socket_;
+   asio::strand<asio::any_io_executor> strand_;
    options options_;
    transport::buffer_pool pool_;
    std::int64_t id_ = -1;
+   std::atomic<socket_state> state_{socket_state::active};
 };
 
-[[nodiscard]] transport::stream make_stream(std::shared_ptr<asio_tcp::socket> socket, options tcp_options,
+[[nodiscard]] transport::stream make_stream(std::shared_ptr<asio_tcp::socket> socket,
+                                            asio::strand<asio::any_io_executor> strand, options tcp_options,
                                             std::int64_t id) {
    return transport::detail::stream_access::make(
-       std::make_shared<socket_stream>(std::move(socket), tcp_options, id));
+       std::make_shared<socket_stream>(std::move(socket), std::move(strand), tcp_options, id));
 }
 
 } // namespace
 
-struct connection::impl final {
+struct connection::impl final : std::enable_shared_from_this<connection::impl> {
    impl(asio_tcp::socket socket_value, options tcp_options_value)
        : socket(std::make_shared<asio_tcp::socket>(std::move(socket_value))), tcp_options(tcp_options_value),
-         id(next_stream_id()) {
+         strand(asio::make_strand(socket->get_executor())), id(next_stream_id()) {
       validate_options(tcp_options);
+      auto error = boost::system::error_code{};
+      local = from_asio_endpoint(socket->local_endpoint(error));
+      if (error) {
+         throw_io_error("failed to read tcp local endpoint", error);
+      }
+      remote = from_asio_endpoint(socket->remote_endpoint(error));
+      if (error) {
+         throw_io_error("failed to read tcp remote endpoint", error);
+      }
    }
 
    [[nodiscard]] bool valid() const noexcept {
-      return socket && socket->is_open();
+      const auto lock = std::scoped_lock{state_mutex};
+      return state == socket_state::active;
    }
 
    [[nodiscard]] transport::endpoint local_endpoint() const {
       if (!valid()) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
       }
-      auto error = boost::system::error_code{};
-      const auto endpoint = socket->local_endpoint(error);
-      if (error) {
-         throw_io_error("failed to read tcp local endpoint", error);
-      }
-      return from_asio_endpoint(endpoint);
+      return local;
    }
 
    [[nodiscard]] transport::endpoint remote_endpoint() const {
       if (!valid()) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
       }
-      auto error = boost::system::error_code{};
-      const auto endpoint = socket->remote_endpoint(error);
-      if (error) {
-         throw_io_error("failed to read tcp remote endpoint", error);
-      }
-      return from_asio_endpoint(endpoint);
+      return remote;
    }
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes) {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
-      }
-      auto error = boost::system::error_code{};
-      co_await boost::asio::async_write(*socket, boost::asio::buffer(bytes),
-                                        boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
+      auto self = shared_from_this();
+      co_await asio::co_spawn(
+          strand,
+          [self = std::move(self), bytes]() -> asio::awaitable<void> {
+             self->claim_operation();
+             auto error = boost::system::error_code{};
+             try {
+                co_await asio::async_write(*self->socket, asio::buffer(bytes),
+                                           asio::redirect_error(asio::use_awaitable, error));
+             } catch (...) {
+                self->release_operation();
+                throw;
+             }
+             self->release_operation();
+             if (error) {
+                throw_read_write_error(error);
+             }
+          },
+          asio::use_awaitable);
    }
 
    boost::asio::awaitable<std::size_t> async_read_some(std::span<std::uint8_t> bytes) {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
-      }
-      auto error = boost::system::error_code{};
-      const auto size = co_await socket->async_read_some(boost::asio::buffer(bytes),
-                                                         boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
-      co_return size;
+      auto self = shared_from_this();
+      co_return co_await asio::co_spawn(
+          strand,
+          [self = std::move(self), bytes]() -> asio::awaitable<std::size_t> {
+             self->claim_operation();
+             auto error = boost::system::error_code{};
+             auto size = std::size_t{};
+             try {
+                size = co_await self->socket->async_read_some(
+                    asio::buffer(bytes), asio::redirect_error(asio::use_awaitable, error));
+             } catch (...) {
+                self->release_operation();
+                throw;
+             }
+             self->release_operation();
+             if (error) {
+                throw_read_write_error(error);
+             }
+             co_return size;
+          },
+          asio::use_awaitable);
    }
 
    boost::asio::awaitable<std::vector<std::uint8_t>> async_read() {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
-      }
       auto out = std::vector<std::uint8_t>(tcp_options.read_chunk_size);
-      auto error = boost::system::error_code{};
-      const auto size = co_await socket->async_read_some(boost::asio::buffer(out),
-                                                        boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         throw_read_write_error(error);
-      }
+      auto self = shared_from_this();
+      const auto size = co_await asio::co_spawn(
+          strand,
+          [self = std::move(self), writable = std::span<std::uint8_t>{out}]() -> asio::awaitable<std::size_t> {
+             self->claim_operation();
+             auto error = boost::system::error_code{};
+             auto size = std::size_t{};
+             try {
+                size = co_await self->socket->async_read_some(
+                    asio::buffer(writable), asio::redirect_error(asio::use_awaitable, error));
+             } catch (...) {
+                self->release_operation();
+                throw;
+             }
+             self->release_operation();
+             if (error) {
+                throw_read_write_error(error);
+             }
+             co_return size;
+          },
+          asio::use_awaitable);
       out.resize(size);
       co_return out;
    }
 
    boost::asio::awaitable<void> async_close() {
-      if (!socket) {
-         co_return;
-      }
-      cancel();
-      co_return;
+      static_cast<void>(request_terminal(socket_state::close_requested));
+      auto self = shared_from_this();
+      co_await asio::co_spawn(
+          strand,
+          [self = std::move(self)]() -> asio::awaitable<void> {
+             self->close_on_owner();
+             co_return;
+          },
+          asio::use_awaitable);
    }
 
-   void cancel() noexcept {
-      if (socket) {
-         cancel_socket(*socket);
+   void cancel() {
+      if (request_terminal(socket_state::cancel_requested)) {
+         auto self = shared_from_this();
+         asio::post(strand, [self = std::move(self)] { self->close_on_owner(); });
       }
    }
 
@@ -252,12 +350,10 @@ struct connection::impl final {
       if (!valid()) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
       }
-      auto local = local_endpoint();
-      auto remote = remote_endpoint();
-      auto stream = make_stream(socket, tcp_options, id);
-      socket.reset();
-      return transport::stream_connection{.local_endpoint = std::move(local),
-                                          .remote_endpoint = std::move(remote),
+      auto current = detach_socket();
+      auto stream = make_stream(std::move(current), strand, tcp_options, id);
+      return transport::stream_connection{.local_endpoint = local,
+                                          .remote_endpoint = remote,
                                           .stream = std::move(stream)};
    }
 
@@ -265,14 +361,67 @@ struct connection::impl final {
       if (!valid()) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
       }
-      auto out = std::move(*socket);
-      socket.reset();
+      auto current = detach_socket();
+      auto out = std::move(*current);
       return out;
+   }
+
+   [[nodiscard]] bool request_terminal(socket_state requested) noexcept {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state != socket_state::active) {
+         return false;
+      }
+      state = requested;
+      return true;
+   }
+
+   void close_on_owner() noexcept {
+      auto current = std::shared_ptr<asio_tcp::socket>{};
+      {
+         const auto lock = std::scoped_lock{state_mutex};
+         if (state != socket_state::cancel_requested && state != socket_state::close_requested) {
+            return;
+         }
+         state = socket_state::closed;
+         current = socket;
+      }
+      cancel_socket(*current);
+   }
+
+   [[nodiscard]] std::shared_ptr<asio_tcp::socket> detach_socket() {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state != socket_state::active) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "tcp connection cannot hand off a terminal socket");
+      }
+      if (active_operations != 0) {
+         FORGE_THROW_EXCEPTION(exceptions::io_error, "tcp connection cannot hand off while I/O is active");
+      }
+      state = socket_state::handed_off;
+      return std::move(socket);
+   }
+
+   void claim_operation() {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state != socket_state::active) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
+      }
+      ++active_operations;
+   }
+
+   void release_operation() noexcept {
+      const auto lock = std::scoped_lock{state_mutex};
+      --active_operations;
    }
 
    std::shared_ptr<asio_tcp::socket> socket;
    options tcp_options;
+   asio::strand<asio::any_io_executor> strand;
+   transport::endpoint local;
+   transport::endpoint remote;
    std::int64_t id = -1;
+   mutable std::mutex state_mutex;
+   socket_state state = socket_state::active;
+   std::size_t active_operations = 0;
 };
 
 connection::connection() = default;
@@ -301,31 +450,35 @@ transport::endpoint connection::remote_endpoint() const {
 }
 
 boost::asio::awaitable<void> connection::async_write(std::span<const std::uint8_t> bytes) {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
    }
-   co_await impl_->async_write(bytes);
+   auto state = impl_;
+   co_await state->async_write(bytes);
 }
 
 boost::asio::awaitable<std::size_t> connection::async_read_some(std::span<std::uint8_t> bytes) {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
    }
-   co_return co_await impl_->async_read_some(bytes);
+   auto state = impl_;
+   co_return co_await state->async_read_some(bytes);
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>> connection::async_read() {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
    }
-   co_return co_await impl_->async_read();
+   auto state = impl_;
+   co_return co_await state->async_read();
 }
 
 boost::asio::awaitable<void> connection::async_close() {
-   if (!valid()) {
+   if (!impl_) {
       co_return;
    }
-   co_await impl_->async_close();
+   auto state = impl_;
+   co_await state->async_close();
 }
 
 void connection::cancel() {
@@ -335,21 +488,17 @@ void connection::cancel() {
 }
 
 transport::stream_connection connection::into_transport_stream() && {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
    }
-   auto out = impl_->into_transport_stream();
-   impl_.reset();
-   return out;
+   return impl_->into_transport_stream();
 }
 
 boost::asio::ip::tcp::socket connection::release_socket() && {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connection");
    }
-   auto out = impl_->release_socket();
-   impl_.reset();
-   return out;
+   return impl_->release_socket();
 }
 
 } // namespace forge::net::tcp

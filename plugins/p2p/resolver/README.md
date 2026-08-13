@@ -31,6 +31,7 @@ contracts it exposes before opening a typed API connection.
 - Public modules:
   - `forge.plugins.p2p.resolver.plugin`
   - `forge.plugins.p2p.resolver.api`
+  - `forge.plugins.p2p.resolver.managed_api`
   - `forge.plugins.p2p.resolver.types`
   - `forge.plugins.p2p.resolver.exceptions`
 
@@ -40,6 +41,8 @@ contracts it exposes before opening a typed API connection.
 - Queries peer API descriptors with bounded response validation.
 - Resolves a requested `forge::api::core::api_ref` to a concrete peer descriptor.
 - Opens typed remote API handles with compatibility projection.
+- Opens stable managed handles over an ordered peer set with sticky selection,
+  single-flight reconnect and bounded backoff.
 
 It does not own the P2P node lifecycle; it composes through
 `forge.plugins.p2p.node`.
@@ -58,6 +61,10 @@ plugins:
          max-apis-per-peer: 1024
          max-methods-per-api: 256
          max-errors-per-method: 64
+         managed:
+            max-peers: 64
+            max-remotes: 1024
+            max-waiters: 1024
 ```
 
 ## Dependencies
@@ -99,6 +106,23 @@ auto catalog = co_await resolver->remote<catalog_api>(peer);
 auto value = co_await catalog->read(request);
 ```
 
+### Publish A Managed Process Service
+
+Applications obtain `managed_api` during `builder.connect(...)` and publish the
+resulting exact-type service through Forge App:
+
+```cpp
+auto resolver = context.api<forge::plugins::p2p::resolver::managed_api>();
+auto catalog = co_await resolver->remote<catalog_api>(ordered_authoritative_peers);
+context.publish(std::make_shared<catalog_service>(std::move(catalog)));
+```
+
+The initial connect tries peers in declared order. A live peer remains sticky.
+If a call fails at the transport/session boundary, that call is returned to the
+caller unchanged and is never replayed; only the next call reconnects, starting
+with the next peer. Products must recover an uncertain transaction submission by
+transaction ID and verified finality rather than by resubmitting it.
+
 ## Security And Boundaries
 
 - Descriptor data is bounded by config limits before it is accepted.
@@ -106,6 +130,8 @@ auto value = co_await catalog->read(request);
   authorization remain product policy.
 - Remote errors should be surfaced as typed API errors, not as raw transport
   messages.
+- Managed reconnect never changes authorization or trust policy; the caller
+  supplies the already approved ordered peer set.
 
 ## Common Mistakes
 
@@ -118,3 +144,4 @@ auto value = co_await catalog->read(request);
 
 - `test_forge_quic_p2p`
 - `test_forge_plugins`
+- `test_forge_p2p_managed_remote`

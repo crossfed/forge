@@ -38,11 +38,11 @@ import forge.plugins.p2p.node.types;
 
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
+#include "details/managed_remote_invoker.hxx"
 #include "details/resolver_protocol.hxx"
 
 FORGE_API(::forge::plugins::p2p::resolver::detail::resolver_protocol,
-          FORGE_API_CONTRACT("forge.plugins.p2p.resolver.protocol", 1, 0),
-          FORGE_API_METHOD(query))
+          FORGE_API_CONTRACT("forge.plugins.p2p.resolver.protocol", 1, 0), FORGE_API_METHOD(query))
 
 namespace forge::plugins::p2p::resolver {
 namespace {
@@ -55,10 +55,10 @@ inline constexpr auto resolver_api_id = "forge.plugins.p2p.resolver.protocol";
 
 [[nodiscard]] error project_error(const forge::api::core::error_descriptor& value) {
    return error{
-      .name = value.name,
-      .identity = value.identity,
-      .status_code = value.status_code,
-      .retryable = value.retryable,
+       .name = value.name,
+       .identity = value.identity,
+       .status_code = value.status_code,
+       .retryable = value.retryable,
    };
 }
 
@@ -94,9 +94,8 @@ std::chrono::milliseconds plugin::impl::request_deadline(resolve_options value) 
 
 void plugin::impl::evict_cache_locked() {
    while (cache.size() > settings.max_cached_peers) {
-      auto expired = std::ranges::find_if(cache, [](const auto& item) {
-         return item.second.expires_at <= std::chrono::steady_clock::now();
-      });
+      auto expired = std::ranges::find_if(
+          cache, [](const auto& item) { return item.second.expires_at <= std::chrono::steady_clock::now(); });
       if (expired != cache.end()) {
          cache.erase(expired);
          continue;
@@ -112,7 +111,7 @@ void plugin::impl::evict_cache_locked() {
 }
 
 std::optional<std::vector<entry>> plugin::impl::cached_peer(const forge::net::p2p::peer_id& peer,
-                                                           resolve_options options) const {
+                                                            resolve_options options) const {
    if (options.force_refresh) {
       return std::nullopt;
    }
@@ -130,9 +129,9 @@ void plugin::impl::store_peer(const forge::net::p2p::peer_id& peer, std::vector<
    const auto now = std::chrono::steady_clock::now();
    auto lock = std::scoped_lock{mutex};
    cache[peer.to_string()] = cache_record{
-      .apis = std::move(entries),
-      .expires_at = now + to_ms(settings.cache_ttl_ms),
-      .stored_at = now,
+       .apis = std::move(entries),
+       .expires_at = now + to_ms(settings.cache_ttl_ms),
+       .stored_at = now,
    };
    evict_cache_locked();
 }
@@ -142,12 +141,13 @@ std::vector<entry> plugin::impl::local_snapshot() const {
    return local;
 }
 
-void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options) {
+void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route,
+                             publish_options options) {
    auto& p2p_api = require_p2p();
    validate_transport_options(options.transport);
    if (route.value.empty() || route.value.front() != '/' || plan.exports.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "resolver API publication is invalid",
-                          forge::exceptions::ctx("protocol", route.value));
+                            forge::exceptions::ctx("protocol", route.value));
    }
 
    auto projected = std::vector<entry>{};
@@ -173,12 +173,12 @@ void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2
       for (const auto& value : projected) {
          if (!keys.insert(api_key(value.id, value.version.major)).second) {
             FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API publication",
-                                forge::exceptions::ctx("api", value.id.value));
+                                  forge::exceptions::ctx("api", value.id.value));
          }
       }
       if (!protocols.insert(route.value).second) {
          FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API protocol",
-                             forge::exceptions::ctx("protocol", route.value));
+                               forge::exceptions::ctx("protocol", route.value));
       }
    }
 
@@ -186,8 +186,8 @@ void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2
       p2p_api.publish_api(std::move(plan), route, options.transport);
    } catch (const forge::plugins::p2p::node::exceptions::route_conflict& error) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "P2P API route conflicts with resolver publication",
-                          forge::exceptions::ctx("protocol", route.value),
-                          forge::exceptions::ctx("error", error.message()));
+                            forge::exceptions::ctx("protocol", route.value),
+                            forge::exceptions::ctx("error", error.message()));
    }
 
    auto lock = std::scoped_lock{mutex};
@@ -213,60 +213,52 @@ std::string plugin::impl::api_key(const forge::api::core::api_id& id, std::uint1
    return id.value + "#" + std::to_string(major);
 }
 
-entry plugin::impl::project_descriptor(
-   const forge::api::core::descriptor& descriptor,
-   const forge::net::p2p::protocol_id& route,
-   const forge::api::transport::options& options) const {
+entry plugin::impl::project_descriptor(const forge::api::core::descriptor& descriptor,
+                                       const forge::net::p2p::protocol_id& route,
+                                       const forge::api::transport::options& options) const {
    auto methods = std::vector<method>{};
    methods.reserve(descriptor.methods.size());
    for (const auto& method : descriptor.methods) {
       methods.push_back(project_method(method));
    }
    return entry{
-      .id = descriptor.id,
-      .version = descriptor.version,
-      .protocol = route.value,
-      .codec = options.codec,
-      .max_inflight = static_cast<std::uint64_t>(options.max_inflight),
-      .max_frame_size = options.max_frame_size,
-      .methods = std::move(methods),
+       .id = descriptor.id,
+       .version = descriptor.version,
+       .protocol = route.value,
+       .codec = options.codec,
+       .max_inflight = static_cast<std::uint64_t>(options.max_inflight),
+       .max_frame_size = options.max_frame_size,
+       .methods = std::move(methods),
    };
 }
 
 void plugin::impl::validate_entry(const entry& value, std::string_view source) const {
    if (value.id.value.empty() || value.version.major == 0 || !valid_protocol(value.protocol)) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API entry is invalid",
-                            forge::exceptions::ctx("source", source),
-                            forge::exceptions::ctx("api", value.id.value),
+                            forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value),
                             forge::exceptions::ctx("protocol", value.protocol));
    }
    if (value.codec.value.empty() || value.max_inflight == 0 || value.max_frame_size == 0) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API entry limits are invalid",
-                            forge::exceptions::ctx("source", source),
-                            forge::exceptions::ctx("api", value.id.value));
+                            forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value));
    }
    if (value.max_frame_size > (std::numeric_limits<std::uint32_t>::max)()) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error,
-                            "resolver API max frame size exceeds transport limit",
-                            forge::exceptions::ctx("source", source),
-                            forge::exceptions::ctx("api", value.id.value));
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API max frame size exceeds transport limit",
+                            forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value));
    }
    if (value.methods.size() > settings.max_methods_per_api) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API method limit exceeded",
-                            forge::exceptions::ctx("source", source),
-                            forge::exceptions::ctx("api", value.id.value));
+                            forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value));
    }
    auto method_names = std::set<std::string>{};
    for (const auto& method : value.methods) {
       if (method.name.empty() || !method_names.insert(method.name).second) {
          FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API method is invalid",
-                               forge::exceptions::ctx("source", source),
-                               forge::exceptions::ctx("api", value.id.value));
+                               forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value));
       }
       if (method.errors.size() > settings.max_errors_per_method) {
          FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API error limit exceeded",
-                               forge::exceptions::ctx("source", source),
-                               forge::exceptions::ctx("api", value.id.value),
+                               forge::exceptions::ctx("source", source), forge::exceptions::ctx("api", value.id.value),
                                forge::exceptions::ctx("method", method.name));
       }
    }
@@ -279,34 +271,29 @@ void plugin::impl::validate_response(const std::vector<entry>& entries) const {
    auto keys = std::set<std::string>{};
    for (const auto& value : entries) {
       validate_entry(value, "remote");
-      const auto key = api_key(value.id, value.version.major) + "#" +
-                       std::to_string(value.version.revision);
+      const auto key = api_key(value.id, value.version.major) + "#" + std::to_string(value.version.revision);
       if (!keys.insert(key).second) {
-         FORGE_THROW_EXCEPTION(exceptions::protocol_error,
-                               "resolver API response contains duplicate entry",
+         FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver API response contains duplicate entry",
                                forge::exceptions::ctx("api", value.id.value));
       }
    }
 }
 
-void plugin::impl::validate_descriptor_compatible(
-   const forge::api::core::descriptor& descriptor,
-   const entry& remote) const {
-   if (!forge::api::core::compatible(
-          forge::api::core::descriptor{.id = remote.id, .version = remote.version},
-          forge::api::core::api_ref{
-             .id = descriptor.id,
-             .major = descriptor.version.major,
-             .min_revision = descriptor.version.revision,
-          })) {
+void plugin::impl::validate_descriptor_compatible(const forge::api::core::descriptor& descriptor,
+                                                  const entry& remote) const {
+   if (!forge::api::core::compatible(forge::api::core::descriptor{.id = remote.id, .version = remote.version},
+                                     forge::api::core::api_ref{
+                                         .id = descriptor.id,
+                                         .major = descriptor.version.major,
+                                         .min_revision = descriptor.version.revision,
+                                     })) {
       FORGE_THROW_EXCEPTION(exceptions::incompatible_api, "remote API version is incompatible",
                             forge::exceptions::ctx("api", descriptor.id.value));
    }
    for (const auto& local_method : descriptor.methods) {
       const auto found = std::ranges::find_if(remote.methods, [&](const auto& candidate) {
          return forge::api::core::compatible(
-            forge::api::core::method_descriptor{.name = candidate.name, .kind = candidate.kind},
-            local_method);
+             forge::api::core::method_descriptor{.name = candidate.name, .kind = candidate.kind}, local_method);
       });
       if (found == remote.methods.end()) {
          FORGE_THROW_EXCEPTION(exceptions::incompatible_api, "remote API method is incompatible",
@@ -316,14 +303,12 @@ void plugin::impl::validate_descriptor_compatible(
    }
 }
 
-std::optional<entry> plugin::impl::select_compatible(
-   const std::vector<entry>& entries,
-   const forge::api::core::api_ref& requested) const {
+std::optional<entry> plugin::impl::select_compatible(const std::vector<entry>& entries,
+                                                     const forge::api::core::api_ref& requested) const {
    auto selected = std::optional<entry>{};
    for (const auto& value : entries) {
-      if (!forge::api::core::compatible(
-             forge::api::core::descriptor{.id = value.id, .version = value.version},
-             requested)) {
+      if (!forge::api::core::compatible(forge::api::core::descriptor{.id = value.id, .version = value.version},
+                                        requested)) {
          continue;
       }
       if (!selected || value.version.revision > selected->version.revision) {
@@ -336,25 +321,120 @@ std::optional<entry> plugin::impl::select_compatible(
 void plugin::impl::install_protocol() {
    protocol_registry.clear();
    protocol_registry.install<detail::resolver_protocol>(
-      std::make_shared<detail::resolver_protocol>(shared_from_this()));
+       std::make_shared<detail::resolver_protocol>(shared_from_this()));
    auto plan = forge::api::core::binding()
-                  .serve(protocol_registry)
-                  .export_api<detail::resolver_protocol>(
-                     {.id = {resolver_api_id}, .major = 1, .min_revision = 0})
-                  .build();
+                   .serve(protocol_registry)
+                   .export_api<detail::resolver_protocol>({.id = {resolver_api_id}, .major = 1, .min_revision = 0})
+                   .build();
    p2p->publish_api(std::move(plan), protocol, resolver_transport);
 }
 
-boost::asio::awaitable<std::vector<entry>>
-plugin::impl::query_remote_apis(forge::net::p2p::peer_id peer, resolve_options options) {
-   auto remote = co_await p2p->remote<detail::resolver_protocol>(
-      peer, protocol,
-      forge::plugins::p2p::node::remote_options{
-         .open_deadline = open_deadline(options),
-         .deadline = query_deadline(options),
-      });
+boost::asio::awaitable<resolution>
+plugin::impl::resolve_remote(forge::net::p2p::peer_id peer, forge::api::core::api_ref api, resolve_options options) {
+   auto entries = cached_peer(peer, options);
+   if (!entries) {
+      entries = co_await query_remote_apis(peer, options);
+      validate_response(*entries);
+      store_peer(peer, *entries);
+   }
+   if (auto selected = select_compatible(*entries, api)) {
+      co_return resolution{.api = std::move(*selected)};
+   }
+   const auto has_same_api = std::ranges::any_of(
+       *entries, [&](const auto& candidate) { return candidate.id == api.id && candidate.version.major == api.major; });
+   if (has_same_api) {
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_api, "remote peer has incompatible API revision",
+                            forge::exceptions::ctx("api", api.id.value));
+   }
+   FORGE_THROW_EXCEPTION(exceptions::not_found, "remote peer does not advertise requested API",
+                         forge::exceptions::ctx("api", api.id.value));
+}
+
+boost::asio::awaitable<resolved_connection>
+plugin::impl::open_resolved_connection(forge::net::p2p::peer_id peer, forge::api::core::api_ref api,
+                                       forge::api::core::descriptor descriptor, resolve_options options) {
+   auto selected = co_await resolve_remote(peer, api, options);
+   validate_descriptor_compatible(descriptor, selected.api);
+   auto protocol = forge::net::p2p::protocol_id{.value = selected.api.protocol};
+   auto connection = co_await require_p2p().open_api_connection(
+       std::move(peer), std::move(protocol),
+       forge::plugins::p2p::node::remote_options{
+           .open_deadline = open_deadline(options),
+           .codec = selected.api.codec,
+           .max_inflight = static_cast<std::size_t>(selected.api.max_inflight),
+           .deadline = request_deadline(options),
+           .max_frame_size = static_cast<std::uint32_t>(selected.api.max_frame_size),
+       });
+   co_return resolved_connection{
+       .connection = std::move(connection),
+       .selected =
+           forge::api::core::api_ref{
+               .id = std::move(selected.api.id),
+               .major = selected.api.version.major,
+               .min_revision = selected.api.version.revision,
+           },
+   };
+}
+
+boost::asio::awaitable<std::vector<entry>> plugin::impl::query_remote_apis(forge::net::p2p::peer_id peer,
+                                                                           resolve_options options) {
+   auto remote = co_await p2p->remote<detail::resolver_protocol>(peer, protocol,
+                                                                 forge::plugins::p2p::node::remote_options{
+                                                                     .open_deadline = open_deadline(options),
+                                                                     .deadline = query_deadline(options),
+                                                                 });
    auto result = co_await remote->query(query{});
    co_return std::move(result.apis);
+}
+
+void plugin::impl::register_managed(const std::shared_ptr<detail::managed_remote_invoker>& value) {
+   auto lock = std::scoped_lock{mutex};
+   managed_remotes.erase(
+       std::remove_if(managed_remotes.begin(), managed_remotes.end(), [](const auto& item) { return item.expired(); }),
+       managed_remotes.end());
+   if (stopping || !initialized) {
+      FORGE_THROW_EXCEPTION(exceptions::remote_stopped, "managed remote owner is not running");
+   }
+   if (managed_remotes.size() >= settings.max_managed_remotes) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_remote, "managed remote capacity is exhausted");
+   }
+   managed_remotes.push_back(value);
+}
+
+void plugin::impl::request_stop_managed() noexcept {
+   auto values = std::vector<std::shared_ptr<detail::managed_remote_invoker>>{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      stopping = true;
+      for (auto& value : managed_remotes) {
+         if (auto owned = value.lock()) {
+            values.push_back(std::move(owned));
+         }
+      }
+   }
+   for (const auto& value : values) {
+      value->request_stop();
+   }
+}
+
+boost::asio::awaitable<void> plugin::impl::shutdown_managed() {
+   auto values = std::vector<std::shared_ptr<detail::managed_remote_invoker>>{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      stopping = true;
+      for (auto& value : managed_remotes) {
+         if (auto owned = value.lock()) {
+            values.push_back(std::move(owned));
+         }
+      }
+      managed_remotes.clear();
+   }
+   for (const auto& value : values) {
+      value->request_stop();
+   }
+   for (const auto& value : values) {
+      co_await value->async_stop();
+   }
 }
 
 } // namespace forge::plugins::p2p::resolver

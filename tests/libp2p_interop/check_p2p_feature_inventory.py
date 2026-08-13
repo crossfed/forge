@@ -583,17 +583,15 @@ def main() -> int:
         )
     }
 
-    plugin_impl_source = (root / "plugins/p2p/node/plugin_impl.cpp").read_text()
-    maintenance_match = re.search(
-        r"void plugin::impl::start_maintenance\(\)\s*\{(?P<body>.*?)"
-        r"\n\}\n\nvoid plugin::impl::request_maintenance_stop",
-        plugin_impl_source,
-        re.DOTALL,
+    plugin_sources = "\n".join(
+        source.read_text() for source in (root / "plugins/p2p/node").glob("*.cpp")
     )
-    if maintenance_match is None:
-        errors.append("plugin.p2p.node: maintenance ownership is not structurally discoverable")
-    elif "async_flush" in maintenance_match.group("body"):
-        errors.append("plugin.p2p.node: maintenance must not periodically flush all peer state")
+    if "start_maintenance" in plugin_sources or "async_refresh_discovery" in plugin_sources:
+        errors.append("plugin.p2p.node: network maintenance must be owned by forge_net_p2p")
+    node_lifecycle_source = (root / "libraries/net/p2p/node_impl_lifecycle.cpp").read_text()
+    bootstrap_source = (root / "libraries/net/p2p/bootstrap_service.cpp").read_text()
+    if "bootstrap_service" not in node_lifecycle_source or "start_maintenance" not in bootstrap_source:
+        errors.append("net.p2p.node: bootstrap maintenance ownership is not structurally discoverable")
 
     for kind, declared, coverage in (
         ("built-in protocol", declared_builtins, builtin_coverage),

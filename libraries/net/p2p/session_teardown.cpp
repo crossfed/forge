@@ -12,7 +12,9 @@ module;
 #include <boost/system/error_code.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -47,6 +49,10 @@ void wake(const std::shared_ptr<teardown_waiter>& waiter) noexcept {
 } // namespace
 
 struct session_teardown::state : std::enable_shared_from_this<state> {
+   struct tracked_operation {
+      std::function<void()> cancel;
+   };
+
    explicit state(boost::asio::any_io_executor executor_value) : executor{std::move(executor_value)} {}
 
    boost::asio::any_io_executor executor;
@@ -54,7 +60,8 @@ struct session_teardown::state : std::enable_shared_from_this<state> {
    bool started = false;
    bool completed = false;
    std::size_t pending = 0;
-   std::size_t tracked = 0;
+   std::uint64_t next_ticket_id = 1;
+   std::map<std::uint64_t, std::shared_ptr<tracked_operation>> tracked;
    std::exception_ptr failure;
    std::vector<operation> operations;
    std::vector<std::shared_ptr<teardown_waiter>> waiters;
@@ -97,14 +104,13 @@ struct session_teardown::state : std::enable_shared_from_this<state> {
       }
    }
 
-   void release_ticket() noexcept {
+   void release_ticket(std::uint64_t id) noexcept {
       auto complete_after_start = false;
       {
          const auto lock = std::scoped_lock{mutex};
-         if (tracked == 0) {
+         if (tracked.erase(id) == 0) {
             return;
          }
-         --tracked;
          complete_after_start = started;
       }
       if (complete_after_start) {
@@ -121,14 +127,16 @@ struct session_teardown::state : std::enable_shared_from_this<state> {
 session_teardown::session_teardown(boost::asio::any_io_executor executor)
     : state_{std::make_shared<state>(std::move(executor))} {}
 
-session_teardown::ticket::ticket(std::shared_ptr<state> state) : state_{std::move(state)} {}
+session_teardown::ticket::ticket(std::shared_ptr<state> state, std::uint64_t id) : state_{std::move(state)}, id_{id} {}
 
-session_teardown::ticket::ticket(ticket&& other) noexcept : state_{std::move(other.state_)} {}
+session_teardown::ticket::ticket(ticket&& other) noexcept
+    : state_{std::move(other.state_)}, id_{std::exchange(other.id_, 0)} {}
 
 session_teardown::ticket& session_teardown::ticket::operator=(ticket&& other) noexcept {
    if (this != &other) {
       release();
       state_ = std::move(other.state_);
+      id_ = std::exchange(other.id_, 0);
    }
    return *this;
 }
@@ -138,22 +146,28 @@ session_teardown::ticket::~ticket() {
 }
 
 bool session_teardown::ticket::active() const noexcept {
-   return static_cast<bool>(state_);
+   return state_ && id_ != 0;
 }
 
 void session_teardown::ticket::release() noexcept {
+   const auto id = std::exchange(id_, 0);
    if (auto state = std::move(state_)) {
-      state->release_ticket();
+      state->release_ticket(id);
    }
 }
 
-session_teardown::ticket session_teardown::track() noexcept {
-   const auto lock = std::scoped_lock{state_->mutex};
-   if (state_->started) {
+session_teardown::ticket session_teardown::track(std::function<void()> cancel) noexcept {
+   try {
+      const auto lock = std::scoped_lock{state_->mutex};
+      if (state_->started || state_->next_ticket_id == 0) {
+         return {};
+      }
+      const auto id = state_->next_ticket_id++;
+      state_->tracked.emplace(id, std::make_shared<state::tracked_operation>(std::move(cancel)));
+      return ticket{state_, id};
+   } catch (...) {
       return {};
    }
-   ++state_->tracked;
-   return ticket{state_};
 }
 
 void session_teardown::start(std::vector<operation> operations) noexcept {
@@ -166,7 +180,7 @@ void session_teardown::start(std::vector<operation> operations) noexcept {
       }
       state_->started = true;
       state_->operations = std::move(operations);
-      state_->pending = state_->operations.size() + state_->tracked;
+      state_->pending = state_->operations.size() + state_->tracked.size();
       operation_count = state_->operations.size();
       complete_immediately = state_->pending == 0;
    }
@@ -174,6 +188,27 @@ void session_teardown::start(std::vector<operation> operations) noexcept {
    if (complete_immediately) {
       state_->complete();
       return;
+   }
+
+   auto tracked_id = std::uint64_t{0};
+   for (;;) {
+      auto tracked = std::shared_ptr<state::tracked_operation>{};
+      {
+         const auto lock = std::scoped_lock{state_->mutex};
+         const auto found = state_->tracked.upper_bound(tracked_id);
+         if (found == state_->tracked.end()) {
+            break;
+         }
+         tracked_id = found->first;
+         tracked = found->second;
+      }
+      try {
+         if (tracked->cancel) {
+            tracked->cancel();
+         }
+      } catch (...) {
+         // A tracked owner remains responsible for releasing its ticket.
+      }
    }
 
    for (auto index = std::size_t{0}; index < operation_count; ++index) {

@@ -9,12 +9,11 @@ use std::{
 
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, autonat, dcutr, gossipsub, identify, identity,
-    kad,
+    autonat, dcutr, gossipsub, identify, identity, kad,
     multiaddr::Protocol,
-    noise, ping, relay, rendezvous, tls,
+    noise, ping, relay, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux,
+    tcp, tls, yamux, Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
 };
 use libp2p_stream as raw_stream;
 use rand::rngs::OsRng;
@@ -124,9 +123,9 @@ fn behaviour_for(key: &identity::Keypair, relay_client: relay::client::Behaviour
         )
         .expect("valid gossipsub behaviour"),
         ping: ping::Behaviour::new(ping::Config::new()),
-        identify: identify::Behaviour::new(identify::Config::new(
+        identify: identify::Behaviour::new(identify::Config::new_with_signed_peer_record(
             "/forge-interop/0.1.0".into(),
-            key.public(),
+            key,
         )),
         dcutr: dcutr::Behaviour::new(peer),
         stream: raw_stream::Behaviour::new(),
@@ -626,6 +625,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
     let mut connected = false;
     let mut ping_ok = false;
     let mut identify_count = 0usize;
+    let mut identify_signed_record = false;
     while started.elapsed() < Duration::from_secs(20) {
         match swarm.select_next_some().await {
             SwarmEvent::ConnectionEstablished { peer_id, .. } if peer_id == remote_peer => {
@@ -658,6 +658,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             })) if peer_id == remote_peer => {
                 eprintln!("rust-dial identify: protocols={}", info.protocols.len());
                 identify_count = info.protocols.len();
+                identify_signed_record = info.signed_peer_record.is_some();
                 if opts.scenario == "identify" {
                     break;
                 }
@@ -762,9 +763,12 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         "unknown_protocol" => {
-            let error =
-                expect_unknown_stream_rejection(&mut swarm, remote_peer, "/forge/interop/unknown/1")
-                    .await?;
+            let error = expect_unknown_stream_rejection(
+                &mut swarm,
+                remote_peer,
+                "/forge/interop/unknown/1",
+            )
+            .await?;
             write_json(
                 &opts.result_file,
                 json!({
@@ -787,7 +791,8 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             "scenario": opts.scenario,
             "status": "ok",
             "ping_ok": ping_ok,
-            "protocol_count": identify_count
+            "protocol_count": identify_count,
+            "signed_peer_record": identify_signed_record
         }),
     )
 }

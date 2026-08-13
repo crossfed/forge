@@ -26,6 +26,7 @@ import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.exceptions;
+import forge.plugins.p2p.resolver.managed_api;
 import forge.plugins.p2p.resolver.types;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.exceptions;
@@ -33,6 +34,7 @@ import forge.plugins.p2p.node.exceptions;
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
 #include "details/api_impl.hxx"
+#include "details/managed_api_impl.hxx"
 
 namespace forge::plugins::p2p::resolver {
 
@@ -48,7 +50,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.0.0";
+   return "1.1.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -65,18 +67,21 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<api_impl>(impl_));
+   provider.install<managed_api>(std::make_shared<managed_api_impl>(impl_));
    co_return;
 }
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
-   impl_->p2p = context.apis().get<forge::plugins::p2p::node::api>(
-      {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0}).operator->();
+   impl_->p2p =
+       context.apis()
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           .operator->();
    try {
       impl_->install_protocol();
    } catch (const forge::plugins::p2p::node::exceptions::route_conflict& error) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "P2P API resolver protocol conflicts with an existing route",
-                          forge::exceptions::ctx("protocol", impl_->protocol.value),
-                          forge::exceptions::ctx("error", error.message()));
+                            forge::exceptions::ctx("protocol", impl_->protocol.value),
+                            forge::exceptions::ctx("error", error.message()));
    }
    impl_->initialized = true;
    impl_->stopping = false;
@@ -88,11 +93,11 @@ boost::asio::awaitable<void> plugin::startup() {
 }
 
 void plugin::request_stop() noexcept {
-   impl_->stopping = true;
+   impl_->request_stop_managed();
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
-   impl_->stopping = true;
+   co_await impl_->shutdown_managed();
    impl_->initialized = false;
    impl_->p2p = nullptr;
    auto lock = std::scoped_lock{impl_->mutex};
@@ -102,11 +107,9 @@ boost::asio::awaitable<void> plugin::shutdown() {
 
 forge::app::plugin_descriptor descriptor() {
    return forge::app::plugin_descriptor{
-      .id = forge::app::plugin_id{.value = "forge.plugins.p2p.resolver"},
-      .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
-      .factory = [] {
-         return std::make_unique<plugin>();
-      },
+       .id = forge::app::plugin_id{.value = "forge.plugins.p2p.resolver"},
+       .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
+       .factory = [] { return std::make_unique<plugin>(); },
    };
 }
 

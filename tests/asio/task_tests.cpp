@@ -2,6 +2,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <future>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -47,6 +48,15 @@ bool wait_for_true(const std::atomic_bool& value, std::chrono::milliseconds time
    return value.load(std::memory_order_acquire);
 }
 
+bool wait_for_count(const std::atomic_size_t& value, std::size_t expected,
+                    std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
+   const auto deadline = std::chrono::steady_clock::now() + timeout;
+   while (value.load(std::memory_order_acquire) != expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   return value.load(std::memory_order_acquire) == expected;
+}
+
 void wait_until_true(const std::atomic_bool& value, const char* name = "condition") {
    static_cast<void>(wait_for_true(value));
    BOOST_REQUIRE_MESSAGE(value.load(std::memory_order_acquire), name);
@@ -63,6 +73,87 @@ boost::asio::awaitable<std::string> current_thread_name() {
 #endif
 
 } // namespace
+
+BOOST_AUTO_TEST_CASE(task_handle_completion_is_latched_for_late_waiters) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+   auto completed = scheduler.submit(task{.priority = priority{1}, .name = "complete-before-wait", .work = [] {}});
+
+   const auto completion_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (scheduler.snapshot().completed == 0U && std::chrono::steady_clock::now() < completion_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE_EQUAL(scheduler.snapshot().completed, 1U);
+
+   auto waiters = std::vector<std::future<void>>{};
+   waiters.reserve(64);
+   for (auto index = 0U; index < 64U; ++index) {
+      waiters.push_back(boost::asio::co_spawn(runtime.context(), completed.wait(), boost::asio::use_future));
+   }
+   const auto waiter_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   for (auto& waiter : waiters) {
+      BOOST_REQUIRE(waiter.wait_until(waiter_deadline) == std::future_status::ready);
+      BOOST_CHECK_NO_THROW(waiter.get());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(task_handle_failure_is_published_before_late_wait_registration) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+   auto failed = scheduler.submit(task{.priority = priority{1},
+                                       .name = "failure-before-wait",
+                                       .work = [] { throw std::runtime_error{"late task failure"}; }});
+
+   const auto failure_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (scheduler.snapshot().failed == 0U && std::chrono::steady_clock::now() < failure_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE_EQUAL(scheduler.snapshot().failed, 1U);
+
+   auto waiter = boost::asio::co_spawn(runtime.context(), failed.wait(), boost::asio::use_future);
+   BOOST_REQUIRE(waiter.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(waiter.get(), std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(task_handle_wakes_concurrent_waiters) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+   auto task_started = std::atomic_bool{false};
+   auto release_task = std::atomic_bool{false};
+   auto waiters_started = std::atomic_size_t{0};
+   auto active = scheduler.submit(task{
+       .priority = priority{1},
+       .name = "concurrent-waiters",
+       .work = [&] {
+          task_started.store(true, std::memory_order_release);
+          while (!release_task.load(std::memory_order_acquire)) {
+             std::this_thread::yield();
+          }
+       },
+   });
+   wait_until_true(task_started, "concurrent waiter task did not start");
+
+   auto waiters = std::vector<std::future<void>>{};
+   waiters.reserve(64);
+   for (auto index = 0U; index < 64U; ++index) {
+      waiters.push_back(boost::asio::co_spawn(
+          runtime.context(),
+          [&active, &waiters_started]() -> boost::asio::awaitable<void> {
+             waiters_started.fetch_add(1, std::memory_order_release);
+             co_await active.wait();
+          },
+          boost::asio::use_future));
+   }
+   const auto all_waiters_started = wait_for_count(waiters_started, 64U);
+   release_task.store(true, std::memory_order_release);
+   BOOST_REQUIRE(all_waiters_started);
+
+   const auto waiter_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   for (auto& waiter : waiters) {
+      BOOST_REQUIRE(waiter.wait_until(waiter_deadline) == std::future_status::ready);
+      BOOST_CHECK_NO_THROW(waiter.get());
+   }
+}
 
 BOOST_AUTO_TEST_CASE(runtime_applies_custom_worker_thread_name_when_observable) {
 #if defined(__APPLE__) || defined(__linux__)

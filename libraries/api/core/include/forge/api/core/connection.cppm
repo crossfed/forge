@@ -60,9 +60,9 @@ class remote_invoker {
 
    virtual boost::asio::awaitable<response> async_call(request value) = 0;
 
-   virtual boost::asio::awaitable<response>
-   async_stream_call(request value, method_kind kind, std::shared_ptr<detail::stream_endpoint> input,
-                     std::shared_ptr<detail::stream_endpoint> output) {
+   virtual boost::asio::awaitable<response> async_stream_call(request value, method_kind kind,
+                                                              std::shared_ptr<detail::stream_endpoint> input,
+                                                              std::shared_ptr<detail::stream_endpoint> output) {
       static_cast<void>(value);
       static_cast<void>(kind);
       static_cast<void>(input);
@@ -77,14 +77,14 @@ class remote_invoker {
 
    virtual boost::asio::awaitable<void> async_call_arguments(request value, std::type_index argument_tuple_type,
                                                              void* argument_tuple, std::type_index response_type,
-                                                            void* response_storage) {
+                                                             void* response_storage) {
       static_cast<void>(value);
       static_cast<void>(argument_tuple_type);
       static_cast<void>(argument_tuple);
       static_cast<void>(response_type);
       static_cast<void>(response_storage);
       FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
-                          "remote invoker does not support typed argument calls");
+                            "remote invoker does not support typed argument calls");
    }
 
    template <typename Request, typename Response>
@@ -118,7 +118,7 @@ class remote_invoker {
                                        &output);
          if (!output.has_value()) {
             FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
-                                "typed remote invoker returned no response value");
+                                  "typed remote invoker returned no response value");
          }
          co_return std::move(*output);
       }
@@ -178,9 +178,8 @@ boost::asio::awaitable<Response> proxy_call_arguments(std::shared_ptr<remote_inv
 }
 
 template <typename Interface, auto Method, typename... Args>
-boost::asio::awaitable<method_response_t<Method>> proxy_method(std::shared_ptr<remote_invoker> invoker,
-                                                               api_ref selected_api, std::string method,
-                                                               Args&&... args) {
+boost::asio::awaitable<method_response_t<Method>>
+proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std::string method, Args&&... args) {
    validate_method_signature<Method>();
    static_assert(sizeof...(Args) == method_argument_count_v<Method>,
                  "generated API proxy argument count does not match method signature");
@@ -207,8 +206,8 @@ boost::asio::awaitable<method_response_t<Method>> proxy_method(std::shared_ptr<r
           .api = std::move(selected_api),
           .method = std::move(method),
           .codec = {.value = "forge.raw"},
-          .body = pack_fixed_proxy_arguments<Method>(
-              arguments, std::make_index_sequence<fixed_argument_count_v<Method>>{}),
+          .body =
+              pack_fixed_proxy_arguments<Method>(arguments, std::make_index_sequence<fixed_argument_count_v<Method>>{}),
       };
       auto inbound = co_await invoker->async_stream_call(std::move(outbound), method_kind_v<Method>, std::move(input),
                                                          std::move(output));
@@ -250,11 +249,16 @@ class remote_mount {
  public:
    virtual ~remote_mount() = default;
 
+   boost::asio::awaitable<std::shared_ptr<remote_invoker>> get_remote_invoker(api_ref requested,
+                                                                              descriptor remote_descriptor) {
+      return open_remote_invoker(std::move(requested), std::move(remote_descriptor));
+   }
+
    template <typename Interface>
    boost::asio::awaitable<handle<Interface>> get_remote_api(api_ref requested = Interface::ref()) {
       static_assert(remote_interface<Interface>, "Interface must opt in to forge::api::core::surface::remote");
       auto remote_descriptor = Interface::describe();
-      auto invoker = co_await open_remote_invoker(requested, remote_descriptor);
+      auto invoker = co_await get_remote_invoker(requested, remote_descriptor);
       co_return handle<Interface>{std::make_shared<proxy<Interface>>(std::move(invoker), std::move(requested))};
    }
 

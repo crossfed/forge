@@ -2,12 +2,15 @@ add_library(
    forge_plugins_p2p_node STATIC
       plugin.cpp
       api_impl.cpp
-      diagnostics_source.cpp
-      pubsub_source.cpp
+      plugin_diagnostics_source_adapter.cpp
+      plugin_pubsub_source_adapter.cpp
       config.cpp
       plugin_impl.cpp
       object_peer_state_adapter.cpp
+      details/lifecycle_phase.hxx
       details/object_peer_state_adapter.hxx
+      details/plugin_diagnostics_source_adapter.hxx
+      details/plugin_pubsub_source_adapter.hxx
       details/peer_state_schema.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_node plugins/p2p/node)

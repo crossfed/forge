@@ -26,6 +26,7 @@ import forge.plugins.p2p.resolver.types;
 
 namespace forge::plugins::p2p::resolver::detail {
 
+class managed_remote_invoker;
 class resolver_protocol;
 
 } // namespace forge::plugins::p2p::resolver::detail
@@ -51,10 +52,12 @@ class plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override;
 
  private:
+   friend class detail::managed_remote_invoker;
    friend class detail::resolver_protocol;
 
    struct impl;
    class api_impl;
+   class managed_api_impl;
    std::shared_ptr<impl> impl_;
 };
 

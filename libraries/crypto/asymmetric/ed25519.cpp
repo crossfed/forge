@@ -10,6 +10,8 @@ module;
 
 module forge.crypto.asymmetric.ed25519;
 
+import forge.crypto.core.secret_bytes;
+
 namespace forge::crypto::asymmetric::ed25519 {
 namespace {
 
@@ -77,6 +79,31 @@ bool public_key::verify(std::span<const std::uint8_t> message, const signature_d
 }
 
 private_key::private_key(const private_key_secret& value) : data_(value) {}
+
+private_key::private_key(private_key&& other) noexcept : data_{other.data_} {
+   forge::crypto::core::secure_erase(std::span<std::uint8_t>{other.data_});
+}
+
+private_key& private_key::operator=(const private_key& other) {
+   if (this != &other) {
+      forge::crypto::core::secure_erase(std::span<std::uint8_t>{data_});
+      data_ = other.data_;
+   }
+   return *this;
+}
+
+private_key& private_key::operator=(private_key&& other) noexcept {
+   if (this != &other) {
+      forge::crypto::core::secure_erase(std::span<std::uint8_t>{data_});
+      data_ = other.data_;
+      forge::crypto::core::secure_erase(std::span<std::uint8_t>{other.data_});
+   }
+   return *this;
+}
+
+private_key::~private_key() {
+   forge::crypto::core::secure_erase(std::span<std::uint8_t>{data_});
+}
 
 private_key private_key::generate() {
    auto context = pkey_ctx_ptr{EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, nullptr)};

@@ -184,7 +184,7 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
    require_aes_update_limit(decoded.default_max_ciphertext_bytes, "default-max-ciphertext-bytes");
    require_aes_update_limit(decoded.default_max_aad_bytes, "default-max-aad-bytes");
 
-   auto loaded = std::map<std::string, plugin::impl::loaded_secret>{};
+   auto loaded = std::map<std::string, loaded_secret>{};
    const auto decrypt_limits = forge::crypto::keystore::decrypt_limits{
        .max_plaintext_bytes = decoded.default_max_plaintext_bytes,
        .max_scrypt_n = decoded.encrypted_file_max_scrypt_n,
@@ -200,7 +200,7 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
       require_aes_update_limit(max_ciphertext, "max-ciphertext-bytes");
       require_aes_update_limit(max_aad, "max-aad-bytes");
       auto material = load_secret_material(entry, max_plaintext, max_ciphertext, decrypt_limits);
-      loaded.emplace(entry.id, plugin::impl::loaded_secret{
+      loaded.emplace(entry.id, loaded_secret{
                                    .id = entry.id,
                                    .kind = entry.kind,
                                    .material = std::move(material),

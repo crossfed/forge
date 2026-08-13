@@ -151,7 +151,7 @@ identity_fixture make_identity_fixture(std::string_view common_name) {
    const auto identity_private_key = forge::crypto::pki::pem::read_private_key(private_key_pem);
    const auto identity_key = forge::net::p2p::public_key{
        .type = forge::net::p2p::public_key::type::rsa,
-       .data = forge::crypto::pki::der::write_public_key(identity_private_key.get_public_key()),
+       .data = std::get<forge::crypto::asymmetric::rsa_public_key>(identity_private_key.get_public_key()).serialize(),
    };
    const auto message = tls_identity_message(certificate_public_key_der(certificate.get()));
    const auto signature = bytes_from_range(

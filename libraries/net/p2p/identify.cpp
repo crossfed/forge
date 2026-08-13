@@ -59,10 +59,9 @@ void append_string(std::vector<std::uint8_t>& out, std::uint32_t field, std::str
 }
 
 [[nodiscard]] std::optional<endpoint> supported_endpoint(std::span<const std::uint8_t> value) {
+   const auto address = forge::multiformats::multiaddr::from_bytes(value);
    try {
-      return parse_endpoint(forge::multiformats::multiaddr::from_bytes(value).to_string());
-   } catch (const forge::multiformats::exceptions::invalid_format&) {
-      return std::nullopt;
+      return parse_endpoint(address.to_string());
    } catch (const forge::exceptions::base&) {
       return std::nullopt;
    }
@@ -95,10 +94,13 @@ class reader {
       }
    }
 
-   [[nodiscard]] std::vector<std::uint8_t> bytes() {
+   [[nodiscard]] std::vector<std::uint8_t> bytes(std::size_t limit) {
       const auto size = read_varint();
       if (size > bytes_.size() - offset_) {
          FORGE_THROW_EXCEPTION(exceptions::codec_error, "truncated Identify protobuf bytes field");
+      }
+      if (size > limit) {
+         FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify protobuf field exceeds max size");
       }
       auto out = std::vector<std::uint8_t>{bytes_.begin() + static_cast<std::ptrdiff_t>(offset_),
                                            bytes_.begin() + static_cast<std::ptrdiff_t>(offset_ + size)};
@@ -106,8 +108,8 @@ class reader {
       return out;
    }
 
-   [[nodiscard]] std::string string() {
-      const auto value = bytes();
+   [[nodiscard]] std::string string(std::size_t limit) {
+      const auto value = bytes(limit);
       return {value.begin(), value.end()};
    }
 
@@ -116,7 +118,7 @@ class reader {
          (void)read_varint();
          return;
       }
-      (void)bytes();
+      (void)bytes(bytes_.size());
    }
 
  private:
@@ -155,38 +157,74 @@ forge::multiformats::bytes encode(const document& value) {
 }
 
 document decode(std::span<const std::uint8_t> bytes) {
+   return decode(bytes, limits{});
+}
+
+document decode(std::span<const std::uint8_t> bytes, const limits& limits_value) {
+   if (bytes.size() > limits_value.max_total_message_size) {
+      FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify message parts exceed aggregate size");
+   }
    auto out = document{};
    auto in = reader{bytes};
+   auto listen_address_count = std::size_t{};
    while (!in.done()) {
       const auto [field, type] = in.key();
       if (type != wire_type::length_delimited) {
+         if (field >= 1 && field <= 8 && field != 7) {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify protobuf field has invalid wire type");
+         }
          in.skip(type);
          continue;
       }
       switch (field) {
       case 1:
-         out.public_key = in.bytes();
+         out.public_key = in.bytes(limits_value.max_public_key_size);
+         out.present.public_key = true;
          break;
       case 2: {
-         if (auto endpoint = supported_endpoint(in.bytes())) {
-            out.listen_endpoints.push_back(std::move(*endpoint));
+         if (listen_address_count++ >= limits_value.max_listen_endpoints) {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify has too many listen addresses");
+         }
+         try {
+            auto endpoint = supported_endpoint(in.bytes(limits_value.max_message_size));
+            if (endpoint) {
+               out.listen_endpoints.push_back(std::move(*endpoint));
+            }
+         } catch (const forge::multiformats::exceptions::invalid_format& error) {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, error.what());
          }
          break;
       }
-      case 3:
-         out.protocols.push_back(protocol_id{.value = in.string()});
+      case 3: {
+         if (out.protocols.size() >= limits_value.max_protocols) {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify has too many protocols");
+         }
+         auto protocol = in.string(limits_value.max_protocol_size);
+         if (protocol.empty() || protocol.front() != '/') {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify contains invalid protocol id");
+         }
+         out.protocols.push_back(protocol_id{.value = std::move(protocol)});
          break;
+      }
       case 4:
-         out.observed_endpoint = supported_endpoint(in.bytes());
+         try {
+            out.observed_endpoint = supported_endpoint(in.bytes(limits_value.max_message_size));
+            out.present.observed_endpoint = true;
+         } catch (const forge::multiformats::exceptions::invalid_format& error) {
+            FORGE_THROW_EXCEPTION(exceptions::codec_error, error.what());
+         }
          break;
       case 5:
-         out.protocol_version = in.string();
+         out.protocol_version = in.string(limits_value.max_version_size);
+         out.present.protocol_version = true;
          break;
       case 6:
-         out.agent_version = in.string();
+         out.agent_version = in.string(limits_value.max_version_size);
+         out.present.agent_version = true;
          break;
       case 8:
-         out.signed_peer_record = in.bytes();
+         out.signed_peer_record = in.bytes(limits_value.max_signed_peer_record_size);
+         out.present.signed_peer_record = true;
          break;
       default:
          in.skip(type);

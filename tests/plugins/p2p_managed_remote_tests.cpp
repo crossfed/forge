@@ -1,0 +1,484 @@
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+#include <boost/test/unit_test.hpp>
+#include <forge/api/core/macros.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <future>
+#include <memory>
+#include <optional>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "../quic_p2p/libp2p_identity_fixture.hxx"
+
+import forge.api.core.binding;
+import forge.api.core.exceptions;
+import forge.api.core.registry;
+import forge.api.core.types;
+import forge.app.application;
+import forge.app.application_shell;
+import forge.app.plugin;
+import forge.app.plugin_context;
+import forge.app.plugin_registry;
+import forge.asio.blocking;
+import forge.config.core.document;
+import forge.config.core.value;
+import forge.crypto.digest.sha256;
+import forge.exceptions;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
+import forge.plugins.crypto.secrets.api;
+import forge.plugins.crypto.secrets.types;
+import forge.plugins.p2p.node.api;
+import forge.plugins.p2p.node.plugin;
+import forge.plugins.p2p.resolver.api;
+import forge.plugins.p2p.resolver.exceptions;
+import forge.plugins.p2p.resolver.managed_api;
+import forge.plugins.p2p.resolver.plugin;
+import forge.plugins.p2p.resolver.types;
+
+namespace {
+
+namespace crypto_secrets = forge::plugins::crypto::secrets;
+
+class test_api : public forge::api::core::contract<test_api, forge::api::core::surface::local |
+                                                                 forge::api::core::surface::remote> {
+ public:
+   virtual ~test_api() = default;
+   virtual boost::asio::awaitable<int> ping(int request) = 0;
+};
+
+class test_api_impl final : public test_api {
+ public:
+   explicit test_api_impl(int increment, std::chrono::milliseconds first_call_delay = {})
+       : increment_{increment}, first_call_delay_{first_call_delay} {}
+
+   boost::asio::awaitable<int> ping(int request) override {
+      const auto call = calls_.fetch_add(1, std::memory_order_relaxed) + 1U;
+      if (call == 1U && first_call_delay_.count() != 0) {
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor, first_call_delay_};
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      co_return request + increment_;
+   }
+
+   [[nodiscard]] std::uint64_t calls() const noexcept {
+      return calls_.load(std::memory_order_relaxed);
+   }
+
+ private:
+   int increment_ = 0;
+   std::chrono::milliseconds first_call_delay_{};
+   std::atomic_uint64_t calls_{0};
+};
+
+class dependency_plugin : public forge::app::plugin {
+ public:
+   explicit dependency_plugin(std::string value) : id_{std::move(value)} {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return {.value = id_};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "test";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::string id_;
+};
+
+class secrets_api final : public crypto_secrets::api {
+ public:
+   boost::asio::awaitable<crypto_secrets::snapshot> status(crypto_secrets::query) override {
+      co_return crypto_secrets::snapshot{.configured_secrets = 2};
+   }
+
+   boost::asio::awaitable<crypto_secrets::get_result> get_bytes(crypto_secrets::get_request request) override {
+      const auto& identity = fixture();
+      const auto* material = request.secret_id == "p2p/test-certificate"   ? &identity.certificate_pem
+                             : request.secret_id == "p2p/test-private-key" ? &identity.private_key_pem
+                                                                           : nullptr;
+      if (material == nullptr) {
+         throw std::runtime_error{"unknown test secret"};
+      }
+      auto bytes = std::vector<std::uint8_t>{};
+      bytes.reserve(material->size());
+      for (const auto value : *material) {
+         bytes.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(value)));
+      }
+      co_return crypto_secrets::get_result{.secret_id = std::move(request.secret_id), .bytes = std::move(bytes)};
+   }
+
+   boost::asio::awaitable<crypto_secrets::derive_result> derive_hkdf_sha256(crypto_secrets::derive_request) override {
+      throw std::logic_error{"not used"};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_encrypt_result>
+   encrypt_aes_gcm(crypto_secrets::aead_encrypt_request) override {
+      throw std::logic_error{"not used"};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_decrypt_result>
+   decrypt_aes_gcm(crypto_secrets::aead_decrypt_request) override {
+      throw std::logic_error{"not used"};
+   }
+
+ private:
+   [[nodiscard]] static const forge::tests::p2p::identity_fixture& fixture() {
+      static const auto value = forge::tests::p2p::make_identity_fixture("managed-remote-suite");
+      return value;
+   }
+};
+
+class secrets_plugin final : public dependency_plugin {
+ public:
+   secrets_plugin() : dependency_plugin{"forge.plugins.crypto.secrets"} {}
+
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
+      provider.install<crypto_secrets::api>(std::make_shared<secrets_api>());
+      co_return;
+   }
+};
+
+void register_p2p(forge::app::plugin_registry& registry) {
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = {.value = "forge.plugins.db.store"},
+       .factory = [] { return std::make_unique<dependency_plugin>("forge.plugins.db.store"); },
+   });
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = {.value = "forge.plugins.crypto.secrets"},
+       .factory = [] { return std::make_unique<secrets_plugin>(); },
+   });
+   registry.register_plugin(forge::plugins::p2p::node::descriptor());
+   registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
+}
+
+class publisher_plugin final : public forge::app::plugin {
+ public:
+   explicit publisher_plugin(std::size_t max_inflight) : max_inflight_{max_inflight} {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return {.value = "managed-remote-publisher"};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "test";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
+      auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+      auto plan = forge::api::core::binding()
+                      .serve(context.apis())
+                      .export_api<test_api>({.id = {"managed.test"}, .major = 1, .min_revision = 0})
+                      .build();
+      auto options = forge::plugins::p2p::resolver::publish_options{};
+      options.transport.max_inflight = max_inflight_;
+      resolver->publish_api(std::move(plan), {.value = "/forge/api/managed-test/1"}, options);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::size_t max_inflight_ = 128;
+};
+
+class test_application final : public forge::app::application_shell {
+ public:
+   explicit test_application(std::shared_ptr<test_api> api = {}, std::size_t max_inflight = 128)
+       : api_{std::move(api)}, max_inflight_{max_inflight} {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      register_p2p(registry);
+      if (api_) {
+         registry.register_plugin(forge::app::plugin_descriptor{
+             .id = {.value = "managed-remote-publisher"},
+             .dependencies = {{.value = "forge.plugins.p2p.resolver"}},
+             .factory = [max_inflight = max_inflight_] { return std::make_unique<publisher_plugin>(max_inflight); },
+         });
+      }
+   }
+
+   boost::asio::awaitable<void> on_provide(forge::app::application_context& context) override {
+      if (api_) {
+         context.apis().install<test_api>(test_api::describe(), api_);
+      }
+      co_return;
+   }
+
+ private:
+   std::shared_ptr<test_api> api_;
+   std::size_t max_inflight_ = 128;
+};
+
+[[nodiscard]] forge::net::p2p::peer_id test_peer(std::uint8_t seed) {
+   return forge::net::p2p::make_peer_id(
+       {.type = forge::net::p2p::public_key::type::ed25519, .data = std::vector<std::uint8_t>(32, seed)});
+}
+
+[[nodiscard]] forge::config::core::document test_config(forge::net::p2p::peer_id peer) {
+   auto value = forge::config::core::document{};
+   value.set("plugins.p2p.node.allow-insecure-test-mode", true);
+   value.set("plugins.p2p.node.identity.certificate-secret", "p2p/test-certificate");
+   value.set("plugins.p2p.node.identity.private-key-secret", "p2p/test-private-key");
+   value.set("plugins.p2p.node.peer-id", peer.to_string());
+   return value;
+}
+
+[[nodiscard]] std::string listen_endpoint(test_application& app) {
+   const auto endpoint =
+       app.apis()
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           ->local_endpoint();
+   BOOST_REQUIRE(endpoint.has_value());
+   return endpoint->to_string();
+}
+
+} // namespace
+
+FORGE_API(::test_api, FORGE_API_CONTRACT("managed.test", 1, 0), FORGE_API_METHOD(ping))
+
+BOOST_AUTO_TEST_CASE(managed_remote_is_sticky_and_fails_over_without_replay) {
+   const auto first_peer = test_peer(201);
+   const auto second_peer = test_peer(202);
+   auto first_api = std::make_shared<test_api_impl>(1);
+   auto second_api = std::make_shared<test_api_impl>(2);
+
+   auto first = test_application{first_api};
+   auto first_config = test_config(first_peer);
+   first_config.set("plugins.p2p.node.listen",
+                    forge::config::core::value::array_type{forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   first.configure(first_config);
+   forge::asio::blocking::run(first.runtime(), first.startup());
+
+   auto second = test_application{second_api};
+   auto second_config = test_config(second_peer);
+   second_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   second.configure(second_config);
+   forge::asio::blocking::run(second.runtime(), second.startup());
+
+   auto client = test_application{};
+   auto client_config = test_config(test_peer(203));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{listen_endpoint(first)},
+                                                       forge::config::core::value{listen_endpoint(second)},
+                                                   });
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+
+   auto managed = client.apis().get<forge::plugins::p2p::resolver::managed_api>(
+       {.id = {"forge.plugins.p2p.resolver.managed"}, .major = 1, .min_revision = 0});
+   auto remote = forge::asio::blocking::run(
+       client.runtime(), managed->remote<test_api>({first_peer, second_peer}, {.max_connect_rounds = 1}));
+
+   BOOST_TEST(forge::asio::blocking::run(client.runtime(), remote->ping(40)) == 41);
+   BOOST_TEST(first_api->calls() == 1U);
+   BOOST_TEST(second_api->calls() == 0U);
+
+   forge::asio::blocking::run(first.runtime(), first.shutdown());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(40)), forge::exceptions::base);
+   BOOST_TEST(first_api->calls() == 1U);
+   BOOST_TEST(second_api->calls() == 0U);
+
+   auto first_follower = boost::asio::co_spawn(client.runtime().context(), remote->ping(40), boost::asio::use_future);
+   auto second_follower = boost::asio::co_spawn(client.runtime().context(), remote->ping(40), boost::asio::use_future);
+   BOOST_TEST(first_follower.get() == 42);
+   BOOST_TEST(second_follower.get() == 42);
+   BOOST_TEST(first_api->calls() == 1U);
+   BOOST_TEST(second_api->calls() == 2U);
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(40)),
+                     forge::plugins::p2p::resolver::exceptions::remote_stopped);
+   forge::asio::blocking::run(second.runtime(), second.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_rejects_invalid_peer_sets) {
+   auto app = test_application{};
+   auto config = test_config(test_peer(204));
+   config.set("plugins.p2p.resolver.managed.max-peers", std::uint64_t{1});
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto managed = app.apis().get<forge::plugins::p2p::resolver::managed_api>(
+       {.id = {"forge.plugins.p2p.resolver.managed"}, .major = 1, .min_revision = 0});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), managed->remote<test_api>({})),
+                     forge::plugins::p2p::resolver::exceptions::invalid_remote);
+   const auto peer = test_peer(205);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), managed->remote<test_api>({peer, peer})),
+                     forge::plugins::p2p::resolver::exceptions::invalid_remote);
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(app.runtime(), managed->remote<test_api>({test_peer(206), test_peer(207)})),
+       forge::plugins::p2p::resolver::exceptions::invalid_remote);
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_preserves_caller_cancellation) {
+   auto app = test_application{};
+   app.configure(test_config(test_peer(208)));
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto managed = app.apis().get<forge::plugins::p2p::resolver::managed_api>(
+       {.id = {"forge.plugins.p2p.resolver.managed"}, .major = 1, .min_revision = 0});
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto pending =
+       boost::asio::co_spawn(app.runtime().context(),
+                             managed->remote<test_api>({test_peer(209)},
+                                                       {
+                                                           .resolution = {.query_deadline = std::chrono::seconds{5},
+                                                                          .open_deadline = std::chrono::seconds{5}},
+                                                           .max_connect_rounds = 8,
+                                                           .initial_backoff = std::chrono::seconds{1},
+                                                           .max_backoff = std::chrono::seconds{1},
+                                                       }),
+                             boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   std::this_thread::sleep_for(std::chrono::milliseconds{50});
+   cancellation.emit(boost::asio::cancellation_type::all);
+
+   BOOST_CHECK_THROW((void)pending.get(), forge::api::core::exceptions::cancelled);
+   const auto shutdown_started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   const auto shutdown_was_prompt = std::chrono::steady_clock::now() - shutdown_started < std::chrono::seconds{2};
+   BOOST_TEST(shutdown_was_prompt);
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_keeps_healthy_session_after_call_deadline) {
+   const auto first_peer = test_peer(210);
+   const auto second_peer = test_peer(211);
+   auto first_api = std::make_shared<test_api_impl>(1, std::chrono::seconds{5});
+   auto second_api = std::make_shared<test_api_impl>(2);
+
+   auto first = test_application{first_api, 1};
+   auto first_config = test_config(first_peer);
+   first_config.set("plugins.p2p.node.listen",
+                    forge::config::core::value::array_type{forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   first.configure(first_config);
+   forge::asio::blocking::run(first.runtime(), first.startup());
+
+   auto second = test_application{second_api};
+   auto second_config = test_config(second_peer);
+   second_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   second.configure(second_config);
+   forge::asio::blocking::run(second.runtime(), second.startup());
+
+   auto client = test_application{};
+   auto client_config = test_config(test_peer(212));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{listen_endpoint(first)},
+                                                       forge::config::core::value{listen_endpoint(second)},
+                                                   });
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+
+   auto managed = client.apis().get<forge::plugins::p2p::resolver::managed_api>(
+       {.id = {"forge.plugins.p2p.resolver.managed"}, .major = 1, .min_revision = 0});
+   auto remote = forge::asio::blocking::run(
+       client.runtime(),
+       managed->remote<test_api>({first_peer, second_peer},
+                                 {
+                                     .resolution = {.request_deadline = std::chrono::milliseconds{100}},
+                                     .max_connect_rounds = 1,
+                                 }));
+
+   auto delayed = boost::asio::co_spawn(client.runtime().context(), remote->ping(40), boost::asio::use_future);
+   for (auto count = 0; count < 500 && first_api->calls() == 0U; ++count) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE_EQUAL(first_api->calls(), 1U);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(40)),
+                     forge::api::core::exceptions::resource_exhausted);
+   BOOST_CHECK_THROW((void)delayed.get(), forge::api::core::exceptions::deadline_exceeded);
+   BOOST_TEST(first_api->calls() == 1U);
+
+   BOOST_TEST(forge::asio::blocking::run(client.runtime(), remote->ping(40)) == 41);
+   BOOST_TEST(first_api->calls() == 2U);
+   BOOST_TEST(second_api->calls() == 0U);
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   forge::asio::blocking::run(first.runtime(), first.shutdown());
+   forge::asio::blocking::run(second.runtime(), second.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_bounds_reconnect_waiters) {
+   const auto server_peer = test_peer(213);
+   auto server_api = std::make_shared<test_api_impl>(1);
+   auto server = test_application{server_api};
+   auto server_config = test_config(server_peer);
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server.configure(server_config);
+   forge::asio::blocking::run(server.runtime(), server.startup());
+
+   auto client = test_application{};
+   auto client_config = test_config(test_peer(214));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{listen_endpoint(server)},
+                                                   });
+   client_config.set("plugins.p2p.resolver.managed.max-waiters", std::uint64_t{1});
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+
+   auto managed = client.apis().get<forge::plugins::p2p::resolver::managed_api>(
+       {.id = {"forge.plugins.p2p.resolver.managed"}, .major = 1, .min_revision = 0});
+   auto remote = forge::asio::blocking::run(
+       client.runtime(),
+       managed->remote<test_api>({server_peer}, {
+                                                    .resolution = {.query_deadline = std::chrono::milliseconds{250},
+                                                                   .open_deadline = std::chrono::milliseconds{250}},
+                                                    .max_connect_rounds = 8,
+                                                    .initial_backoff = std::chrono::seconds{1},
+                                                    .max_backoff = std::chrono::seconds{1},
+                                                }));
+   BOOST_TEST(forge::asio::blocking::run(client.runtime(), remote->ping(40)) == 41);
+
+   forge::asio::blocking::run(server.runtime(), server.shutdown());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(40)), forge::exceptions::base);
+
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto first =
+       boost::asio::co_spawn(client.runtime().context(), remote->ping(40),
+                             boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   std::this_thread::sleep_for(std::chrono::milliseconds{50});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(40)),
+                     forge::api::core::exceptions::resource_exhausted);
+   cancellation.emit(boost::asio::cancellation_type::all);
+   BOOST_CHECK_THROW((void)first.get(), forge::api::core::exceptions::cancelled);
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+}
