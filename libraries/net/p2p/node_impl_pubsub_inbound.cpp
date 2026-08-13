@@ -133,8 +133,9 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
             auto lock = std::scoped_lock{mutex};
             for (const auto& subscription : value.subscriptions) {
                if (subscription.subscribe) {
-                  auto& topics = pubsub_value.peer_topics[session->info.remote_peer];
-                  if (topics.contains(subscription.subject.value)) {
+                  const auto topics = pubsub_value.peer_topics.find(session->info.remote_peer);
+                  if (topics != pubsub_value.peer_topics.end() &&
+                      topics->second.contains(subscription.subject.value)) {
                      continue;
                   }
                   const auto subscribed = static_cast<std::size_t>(std::ranges::count_if(
@@ -145,12 +146,18 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
                      subscription_limit_reached = true;
                      continue;
                   }
-                  topics.insert(subscription.subject.value);
-               } else if (auto topics = pubsub_value.peer_topics.find(session->info.remote_peer);
-                          topics != pubsub_value.peer_topics.end()) {
-                  topics->second.erase(subscription.subject.value);
-                  if (topics->second.empty()) {
-                     pubsub_value.peer_topics.erase(topics);
+                  pubsub_value.peer_topics[session->info.remote_peer].insert(subscription.subject.value);
+               } else {
+                  if (auto topics = pubsub_value.peer_topics.find(session->info.remote_peer);
+                      topics != pubsub_value.peer_topics.end()) {
+                     topics->second.erase(subscription.subject.value);
+                     if (topics->second.empty()) {
+                        pubsub_value.peer_topics.erase(topics);
+                     }
+                  }
+                  if (auto mesh = pubsub_value.mesh.find(subscription.subject.value);
+                      mesh != pubsub_value.mesh.end()) {
+                     mesh->second.erase(session->info.remote_peer);
                   }
                }
             }

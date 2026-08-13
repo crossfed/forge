@@ -151,16 +151,6 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
                grafts[peer].push_back(pubsub::control::graft{.subject = pubsub::topic{.value = topic_value}});
             }
          }
-         for (const auto& [_, session] : sessions) {
-            if (mesh.size() >= mesh_target) {
-               break;
-            }
-            const auto& peer = session->info.remote_peer;
-            if (!mesh.contains(peer)) {
-               mesh.insert(peer);
-               grafts[peer].push_back(pubsub::control::graft{.subject = pubsub::topic{.value = topic_value}});
-            }
-         }
          while (mesh.size() > mesh_high) {
             auto it = std::prev(mesh.end());
             const auto peer = *it;

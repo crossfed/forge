@@ -7422,6 +7422,51 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_subscription_is_idempotent_and_does_not_creat
    wait_on_runtime(runtime, std::chrono::milliseconds{25}, "duplicate GossipSub GRAFT processing");
    BOOST_TEST(server.pubsub_snapshot().mesh_edges == 1U);
 
+   const auto unsubscribe = pubsub::codec::encode(pubsub::rpc{
+       .subscriptions = std::vector<pubsub::subscription>{
+           pubsub::subscription{.subscribe = false, .subject = subject},
+       },
+   });
+   forge::asio::blocking::run(runtime, stream.async_write(unsubscribe));
+   for (auto poll = 0; poll < 100 && server.pubsub_snapshot().mesh_edges != 0U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{5}, "GossipSub unsubscribe processing");
+   }
+   BOOST_TEST(server.pubsub_snapshot().mesh_edges == 0U);
+   forge::asio::blocking::run(runtime, stream.async_write(unsubscribe));
+   wait_on_runtime(runtime, std::chrono::milliseconds{25}, "duplicate GossipSub unsubscribe processing");
+   BOOST_TEST(server.pubsub_snapshot().mesh_edges == 0U);
+
+   forge::asio::blocking::run(runtime, stream.async_close());
+   forge::asio::blocking::run(runtime, client.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_heartbeat_does_not_graft_unsubscribed_sessions) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto server_options = pubsub_options_for();
+   server_options.limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+   server_options.limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+   auto client_options = pubsub_options_for();
+   client_options.explicit_peer_id = peer(220);
+
+   auto server = node{runtime, std::move(server_options)};
+   auto client = node{runtime, std::move(client_options)};
+   const auto server_endpoint = listen(server, runtime);
+   client.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   auto stream = forge::asio::blocking::run(
+       runtime, client.async_open_protocol_stream(server.local_peer(), builtins::meshsub_v11));
+   const auto subject = pubsub::topic{.value = "forge.subscription.absent"};
+   forge::asio::blocking::run(
+       runtime, server.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   wait_on_runtime(runtime, std::chrono::milliseconds{150}, "GossipSub unsubscribed heartbeat stability");
+   BOOST_TEST(server.pubsub_snapshot().peers == 0U);
+   BOOST_TEST(server.pubsub_snapshot().mesh_edges == 0U);
+
    forge::asio::blocking::run(runtime, stream.async_close());
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
