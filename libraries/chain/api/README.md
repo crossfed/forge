@@ -54,7 +54,9 @@ network policy remain in downstream products.
 
 Each `method_capability` advertises its own HTTP and P2P publication state;
 the service never implies that every enabled method is available on every
-transport. `service_limits` separately advertises page, state-batch,
+transport. Typed change methods use the existing `state_changes` audit class;
+other typed state projections may use `state_range`. `service_limits`
+separately advertises page, state-batch,
 transaction-batch, decoded-container allocation, transaction-status scan,
 await deadline, request, response, proof and authenticated-state retention
 bounds. Transports reject oversized frames, declared containers and HTTP bodies
@@ -71,13 +73,14 @@ them for feature negotiation only. `verified_client` and `submission_client`
 apply independently configured local limits before dispatch and after receipt,
 so a peer cannot weaken client resource policy by advertising larger values.
 
-`verified_client` verifies transport envelopes, chain identity, finality and
-generic authenticated point/range/change proofs itself. Verification returns
-the authenticated source bytes, so typed composite reads can use a product
-`projection_verifier` to recompute the public response from those exact bytes.
-This keeps DB schema knowledge out of Forge without exposing proof internals or
-trusting a server-side DTO conversion. Missing projection support fails closed with
-`audit_not_supported`; it never falls back to an envelope-only check.
+`verified_client` verifies transport envelopes, chain identity and finality.
+Authenticated point/range/change primitives exist only on the local
+`audit_verifier` / `projection_verifier` boundary. They are not Chain Protocol
+DTOs, API methods or transport routes. A projection verifier recomputes typed
+responses from those exact authenticated bytes and owns the concrete state-key
+schema. This keeps DB schema knowledge out of the product protocol without
+trusting a server-side DTO conversion. Missing projection support fails closed
+with `audit_not_supported`; it never falls back to an envelope-only check.
 Public client, verifier and authenticated-store boundaries preserve existing
 Forge exceptions and translate implementation `std`/Boost failures into their
 own typed Forge error contracts. Asio operation cancellation remains a typed
@@ -85,22 +88,44 @@ own typed Forge error contracts. Asio operation cancellation remains a typed
 
 ## Verified state synchronization
 
-`state_changes_request::from_block` is exclusive and `to_block` is inclusive.
-Its cursor identifies the next block, requested range and key within that
-range. A verified page must start exactly at that position, cover blocks and
-ranges in canonical order, and either return that exact continuation or end at
-the finalized `to_block` anchor. Every returned range has its own authenticated
-change-tree proof.
+`forge.chain.api.state` is contract version `2.0`. It exposes typed
+`get_table_changes` and `get_account_changes` methods; the old remote
+`get_point`, `get_range` and `get_changes` surface does not exist. Both change
+methods use `POST` because selectors and proof pagination are structured
+payloads.
 
-Change proofs establish the complete mutation set for each requested range;
-the finality verifier also proves that every returned intermediate anchor is a
-canonical ancestor of the finalized target. They do not by themselves prove a
-state transition. A partial-state consumer
-keeps the authenticated frontier obtained from its snapshot, applies verified
-changes in order and accepts the update only when the resulting root equals the
-finalized target `state_root`. This is the intended `mountd`-class client path
-and prevents a server from omitting an intermediate mutation or inventing an
-unbound intermediate root.
+`from_block` is exclusive and `to_block` is inclusive. `to_block` resolves to
+the finalized response anchor. Table selectors and account names must be
+sorted, unique and non-empty. The request `cursor` and response `next` are
+opaque `bytes`; callers store and return them unchanged. The projection owner
+must bind a cursor to the chain, method, exact target anchor, normalized
+selector/account set and internal proof position, and reject reuse in another
+context.
+
+`table_change_selector` carries `code`, `scope` and `table`.
+`table_mutation` carries that selector, a primary ID and an optional
+`table_row`; an absent row is a deletion. Each `table_change_batch` binds its
+mutations to one `state_anchor`, and `table_changes_response.blocks` preserves
+the ordered multi-block `(from_block, to_block]` history. Page limits apply to
+the aggregate mutation count across all returned blocks.
+
+`account_state` contains only `creation_date` and `permissions`.
+`account_response` carries the requested account beside that state, while
+`account_mutation` carries an account and optional `account_state`; an absent
+state is a deletion. `account_change_batch` and
+`account_changes_response.blocks` use the same per-block history shape. Within
+each block, mutations are last-write-wins by logical identity: a batch cannot
+contain two mutations for the same table primary key or account.
+
+The local projection verifier associates each batch anchor with its
+authenticated change proofs and proves typed values, deletion, ordering,
+ancestry, completeness and cursor continuation. Intermediate block anchors
+must form a canonical sequence ending at the finalized target anchor on the
+last page.
+Unavailable retained history is reported as the typed
+`history_unavailable` error so a consumer can bootstrap from current finalized
+state or select an archival peer. The public Chain API does not expose the
+runtime-specific `history_lost` concept.
 
 ## Local ABI conversion
 

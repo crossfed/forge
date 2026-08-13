@@ -14,12 +14,31 @@ import forge.chain.protocol.transaction;
 
 bool producer_authority_json_roundtrip();
 
+template <typename T>
+concept has_account_member = requires(T value) { value.account; };
+
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::table_scope_request{}.cursor),
                               std::optional<forge::chain::protocol::bytes>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::table_scope_response{}.next),
                               std::optional<forge::chain::protocol::bytes>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::table_changes_request{}.cursor),
+                              std::optional<forge::chain::protocol::bytes>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::account_changes_request{}.cursor),
+                              std::optional<forge::chain::protocol::bytes>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::table_mutation{}.table),
+                              forge::chain::protocol::table_change_selector>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::table_changes_response{}.blocks),
+                              std::vector<forge::chain::protocol::table_change_batch>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::account_changes_response{}.blocks),
+                              std::vector<forge::chain::protocol::account_change_batch>>);
+   static_assert(
+       std::same_as<decltype(forge::chain::protocol::account_response{}.state), forge::chain::protocol::account_state>);
+   static_assert(!has_account_member<forge::chain::protocol::account_state>);
+   static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_point) == 2U);
+   static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_range) == 3U);
+   static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_changes) == 4U);
    const auto digest = forge::chain::protocol::digest::hash(std::string{"package-chain-protocol"});
    auto transaction = forge::chain::protocol::transaction{};
    auto action = forge::chain::protocol::action{};
