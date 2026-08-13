@@ -71,6 +71,9 @@ boost::asio::awaitable<void> serve_mux(forge::net::transport::stream base) {
   transport so shutdown cannot wait forever for a peer that never sends FIN.
 - Reset streams are not valid for further read/write operations.
 - Lower transport failures are translated to typed Yamux boundary errors.
+- Yamux's wire-level initial stream credit is fixed at 256 KiB. A larger
+  `options::initial_window` is advertised as a SYN/ACK delta; values below the
+  baseline are rejected as invalid options.
 
 ## Tests
 

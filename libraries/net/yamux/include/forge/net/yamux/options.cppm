@@ -14,7 +14,7 @@ enum class side : std::uint8_t {
 };
 
 struct options {
-   std::uint32_t initial_window = 256 * 1024;
+   std::uint32_t initial_window = 256U * 1024U;
    std::uint32_t max_stream_window = 16 * 1024 * 1024;
    std::uint32_t max_frame_size = 256 * 1024;
    std::size_t max_streams = 4096;

@@ -1,6 +1,12 @@
 add_library(
    forge_net_yamux STATIC
+   frame.cpp
    session.cpp
+   session_impl.cpp
+   session_impl_protocol.cpp
+   session_impl_stream.cpp
+   session_impl_stream_model.cpp
+   session_model.cpp
 )
 forge_target_modules_at(forge_net_yamux net/yamux)
 
