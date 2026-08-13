@@ -300,6 +300,40 @@ exchange_rendezvous(const auto& self, const peer_id& peer, rendezvous::message r
    }
 }
 
+boost::asio::awaitable<void> async_stop_owned(auto self) {
+   auto failure = std::exception_ptr{};
+   try {
+      co_await self->provider_registry->async_drain();
+   } catch (...) {
+      failure = std::current_exception();
+   }
+   co_await self->lifecycle.wait();
+   co_await self->teardown.wait();
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
+   for (auto& [_, profile] : self->dht_profiles) {
+      try {
+         co_await profile->records.async_close();
+      } catch (...) {
+         if (!failure) {
+            failure = std::current_exception();
+         }
+      }
+   }
+   try {
+      co_await self->store.async_close();
+   } catch (...) {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   }
+   self->lifecycle.finish_stop();
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
+}
+
 } // namespace
 
 node::node(forge::asio::runtime& runtime, node::options options) {
@@ -379,6 +413,7 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
       }
       const auto routing = state->routing.status();
       const auto records_state = state->records.persistence_state();
+      const auto maintenance = impl_->routing_refresh ? impl_->routing_refresh->status(protocol) : std::nullopt;
       dht_profiles.push_back(forge::net::p2p::diagnostics::dht_profile_state{
           .protocol = protocol,
           .kind = state->profile.kind == dht::profile_kind::amino_v1 ? "amino-v1" : "custom",
@@ -390,6 +425,11 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
           .routing_replacements = routing.replacements,
           .routing_candidates = routing.candidates,
           .routing_nonempty_buckets = routing.nonempty_buckets,
+          .maintenance_enabled = maintenance.has_value(),
+          .maintenance_startup_pending = maintenance && maintenance->startup_lookup_pending,
+          .maintenance_in_flight = maintenance && maintenance->in_flight,
+          .maintenance_failures = maintenance ? maintenance->failures : 0,
+          .maintenance_next_attempt = maintenance ? maintenance->next_attempt_in : std::chrono::milliseconds{0},
           .persistence_failures = records_state.failure_count,
           .persistence_degraded = records_state.degraded,
           .durability_uncertain = records_state.durability_uncertain,
@@ -810,39 +850,9 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
 }
 
 boost::asio::awaitable<void> node::async_stop() {
-   stop();
    auto self = impl_;
-   auto failure = std::exception_ptr{};
-   try {
-      co_await self->provider_registry->async_drain();
-   } catch (...) {
-      failure = std::current_exception();
-   }
-   co_await self->lifecycle.wait();
-   co_await self->teardown.wait();
-   if (failure) {
-      std::rethrow_exception(failure);
-   }
-   for (auto& [_, profile] : self->dht_profiles) {
-      try {
-         co_await profile->records.async_close();
-      } catch (...) {
-         if (!failure) {
-            failure = std::current_exception();
-         }
-      }
-   }
-   try {
-      co_await self->store.async_close();
-   } catch (...) {
-      if (!failure) {
-         failure = std::current_exception();
-      }
-   }
-   self->lifecycle.finish_stop();
-   if (failure) {
-      std::rethrow_exception(failure);
-   }
+   stop();
+   return async_stop_owned(std::move(self));
 }
 
 void node::stop() {

@@ -259,6 +259,9 @@ maintenance lifecycle. The Amino profile fixes `/ipfs/kad/1.0.0`, `k=20`,
 `alpha=10`, `/pk` and `/ipns`; product validators/selectors require a distinct
 product protocol ID. Queries initialize the shortlist from the local `k`
 closest peers and use `alpha` only as the concurrent RPC bound.
+Per-profile diagnostics expose whether autonomous maintenance is enabled, the
+startup lookup and in-flight state, consecutive failures and the bounded delay
+until the next attempt.
 
 Amino keeps the donor-compatible 16 KiB outbound message limit and accepts the
 larger bounded inbound messages used by Go/Rust implementations. Inbound peer

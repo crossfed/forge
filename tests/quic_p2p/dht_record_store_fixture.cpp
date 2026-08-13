@@ -6,6 +6,7 @@ module;
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -43,11 +44,18 @@ dht_record_store_persistence::async_apply(forge::net::p2p::dht::record_store::mu
 boost::asio::awaitable<forge::net::p2p::dht::record_store::prune_result>
 dht_record_store_persistence::async_prune_expired(std::chrono::system_clock::time_point now, std::size_t limit) {
    auto uncertain = false;
+   auto injected = std::optional<forge::net::p2p::dht::record_store::prune_result>{};
    {
       auto lock = std::scoped_lock{mutex_};
       uncertain = std::exchange(uncertain_next_prune_, false);
+      injected = std::exchange(next_prune_result_, std::nullopt);
    }
-   auto result = co_await inner_->async_prune_expired(now, limit);
+   auto result = forge::net::p2p::dht::record_store::prune_result{};
+   if (injected) {
+      result = std::move(*injected);
+   } else {
+      result = co_await inner_->async_prune_expired(now, limit);
+   }
    if (uncertain) {
       result.durability.durability_confirmed = false;
       result.durability.durability_failure = "injected post-commit DHT prune durability failure";
@@ -98,6 +106,11 @@ void dht_record_store_persistence::make_next_apply_durability_uncertain() {
 void dht_record_store_persistence::make_next_prune_durability_uncertain() {
    auto lock = std::scoped_lock{mutex_};
    uncertain_next_prune_ = true;
+}
+
+void dht_record_store_persistence::return_next_prune_result(forge::net::p2p::dht::record_store::prune_result result) {
+   auto lock = std::scoped_lock{mutex_};
+   next_prune_result_ = std::move(result);
 }
 
 } // namespace forge::test::net::p2p

@@ -61,8 +61,8 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 | DHT bounded donor materialization | Ported | `dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k`, exact 16 KiB and peer/address bound fixtures |
 | DHT trusted provider ownership and full fanout | Ported | `p2p_dht_get_providers_does_not_persist_third_party_claim`, `p2p_dht_fanout_full_target_attempts_every_closest_peer`, `p2p_dht_provide_replicates_to_all_closest_peers_after_quorum` |
 | DHT remaining value TTL | Ported | `p2p_dht_get_value_reports_remaining_record_ttl` |
-| DHT bounded async persistence | Ported | `p2p_peer_store_memory_persistence_hydrates_bounded_pages`, `p2p_peer_store_bounds_pending_queue_and_recovers_after_flush`, `p2p_peer_store_bounds_variable_peer_record_state` |
-| DHT ObjectDB reopen through official plugin | Ported | `p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state`, conditional MDBX/RocksDB reopen cases |
+| DHT bounded async persistence | Ported | `dht_record_store_hydrates_bounded_pages_across_reopen`, `dht_record_store_enforces_value_provider_and_per_key_capacity`, `dht_record_store_enforces_record_and_total_byte_capacity` |
+| DHT ObjectDB adapter reopen | Ported | `p2p_dht_record_state_mdbx_reopens_prunes_and_isolates_profiles`, `p2p_dht_record_state_rocksdb_reopens_prunes_and_isolates_profiles`; plugin lifecycle config/ownership is covered separately and is not claimed as a DHT reopen test |
 | DHT live peer lookup fixture | Limited | `test_forge_libp2p_interop dht_find_peer`; direct-peer setup is not credited as outbound iterative lookup proof |
 | DHT live provider lookup | Ported | `test_forge_libp2p_interop dht_provide_find_provider` against go-libp2p/rust-libp2p |
 | DHT validated value store and bounded prune | Ported | `dht_record_store_tests`, MDBX/RocksDB reopen and expiry parity |

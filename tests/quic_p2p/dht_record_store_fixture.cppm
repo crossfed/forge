@@ -6,6 +6,7 @@ module;
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 export module forge.test.net.p2p.dht_record_store_fixture;
 
@@ -31,6 +32,7 @@ class dht_record_store_persistence final : public forge::net::p2p::dht::record_s
    void fail_next_close();
    void make_next_apply_durability_uncertain();
    void make_next_prune_durability_uncertain();
+   void return_next_prune_result(forge::net::p2p::dht::record_store::prune_result result);
 
  private:
    std::shared_ptr<forge::net::p2p::dht::record_store::persistence> inner_;
@@ -40,6 +42,7 @@ class dht_record_store_persistence final : public forge::net::p2p::dht::record_s
    bool fail_next_close_ = false;
    bool uncertain_next_apply_ = false;
    bool uncertain_next_prune_ = false;
+   std::optional<forge::net::p2p::dht::record_store::prune_result> next_prune_result_;
 };
 
 } // namespace forge::test::net::p2p

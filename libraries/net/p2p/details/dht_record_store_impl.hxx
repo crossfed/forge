@@ -85,6 +85,8 @@ struct dht::record_store::impl {
    void publish_provider_locked(dht::record_store::provider_record value);
    void erase_value_locked(const dht::key& key);
    void erase_provider_locked(const dht::record_store::provider_key& key);
+   void validate_prune_result_locked(const dht::record_store::prune_result& result,
+                                     std::chrono::system_clock::time_point now) const;
    void apply_prune_locked(const dht::record_store::prune_result& result);
    void mark_persistence_failure_locked(std::string message);
    void mark_durability_uncertain_locked(std::string message);

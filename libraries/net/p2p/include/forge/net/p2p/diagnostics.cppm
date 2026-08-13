@@ -184,6 +184,11 @@ struct diagnostics {
       std::size_t routing_replacements = 0;
       std::size_t routing_candidates = 0;
       std::size_t routing_nonempty_buckets = 0;
+      bool maintenance_enabled = false;
+      bool maintenance_startup_pending = false;
+      bool maintenance_in_flight = false;
+      std::uint32_t maintenance_failures = 0;
+      std::chrono::milliseconds maintenance_next_attempt{0};
       std::uint64_t persistence_failures = 0;
       bool persistence_degraded = false;
       bool durability_uncertain = false;
@@ -244,8 +249,10 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::persistence_state, (),
                       (pending_peer_mutations, failure_count, degraded, closing, closed, last_failure))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::dht_profile_state, (),
                       (protocol, kind, mode, peers, providers, values, routing_active, routing_replacements,
-                       routing_candidates, routing_nonempty_buckets, persistence_failures, persistence_degraded,
-                       durability_uncertain, persistence_closing, persistence_closed, last_persistence_failure))
+                       routing_candidates, routing_nonempty_buckets, maintenance_enabled, maintenance_startup_pending,
+                       maintenance_in_flight, maintenance_failures, maintenance_next_attempt, persistence_failures,
+                       persistence_degraded, durability_uncertain, persistence_closing, persistence_closed,
+                       last_persistence_failure))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
                       (network, metrics, resources, pubsub, connections, peers, sessions, persistence, dht_profiles,
                        lifecycle, effective_limits))

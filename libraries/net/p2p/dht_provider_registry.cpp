@@ -116,6 +116,7 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
       auto existing = std::shared_ptr<entry>{};
       auto merged = query;
       auto wait_for_removal = false;
+      auto retry_removal = false;
       {
          const auto lock = std::scoped_lock{mutex_};
          if (sealed_) {
@@ -136,7 +137,14 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
          }
          existing = found->second;
          if (existing->stop_requested) {
-            wait_for_removal = true;
+            if (existing->removal_failed && !existing->removal_in_flight) {
+               existing->removal_failed = false;
+               existing->removal_failure = {};
+               existing->removal_in_flight = true;
+               retry_removal = true;
+            } else {
+               wait_for_removal = true;
+            }
          } else {
             merged.requested_count = std::max(existing->query.requested_count, query.requested_count);
             merged.quorum = std::max(existing->query.quorum, query.quorum);
@@ -146,6 +154,23 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
                co_return lease{add_owner_locked(existing)};
             }
          }
+      }
+
+      if (retry_removal) {
+         reset_owners_for_retry(existing);
+         co_await async_remove(existing);
+         auto retry_failure = std::exception_ptr{};
+         {
+            const auto lock = std::scoped_lock{mutex_};
+            const auto found = entries_.find(registration);
+            if (found != entries_.end() && found->second == existing && existing->removal_failed) {
+               retry_failure = existing->removal_failure;
+            }
+         }
+         if (retry_failure) {
+            std::rethrow_exception(retry_failure);
+         }
+         continue;
       }
 
       if (wait_for_removal) {
@@ -176,7 +201,10 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
 
    auto admission_pending = true;
    auto persist_attempted = false;
-   auto value = std::shared_ptr<entry>{};
+   auto value = std::make_shared<entry>();
+   value->registration = registration;
+   value->query = query;
+   value->renewal = renewal;
    auto owner = std::shared_ptr<owner_state>{};
    auto failure = std::exception_ptr{};
    try {
@@ -188,10 +216,6 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
          FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "DHT provide did not reach the requested quorum");
       }
 
-      value = std::make_shared<entry>();
-      value->registration = registration;
-      value->query = query;
-      value->renewal = renewal;
       {
          const auto lock = std::scoped_lock{mutex_};
          if (sealed_) {
@@ -238,9 +262,12 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
       } catch (...) {
          failure = std::current_exception();
          const auto lock = std::scoped_lock{mutex_};
-         if (!drain_failure_) {
-            drain_failure_ = failure;
-         }
+         value->owners.clear();
+         value->stop_requested = true;
+         value->removal_in_flight = false;
+         value->removal_failed = true;
+         value->removal_failure = failure;
+         entries_.try_emplace(value->registration, value);
       }
    }
    {
@@ -337,6 +364,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_release_owner(const st
             retry = found->second;
             retry->removal_in_flight = true;
             retry->removal_failed = false;
+            retry->removal_failure = {};
          }
       }
    }
@@ -485,6 +513,7 @@ void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, st
          value->removal_in_flight = false;
          retain_for_retry = static_cast<bool>(failure);
          value->removal_failed = retain_for_retry;
+         value->removal_failure = failure;
          if (retain_for_retry && sealed_) {
             if (!drain_failure_) {
                drain_failure_ = failure;
@@ -550,6 +579,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<en
             if (remove) {
                value->removal_in_flight = true;
                value->removal_failed = false;
+               value->removal_failure = {};
             }
             attempt_generation = endpoint_generation_;
             republish = !remove && (value->observed_endpoint_generation != endpoint_generation_ ||
@@ -665,6 +695,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_drain() {
                retry = found->second;
                retry->removal_in_flight = true;
                retry->removal_failed = false;
+               retry->removal_failure = {};
             } else if (entries_.empty()) {
                co_return;
             }

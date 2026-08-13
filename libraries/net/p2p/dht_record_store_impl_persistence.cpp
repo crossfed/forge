@@ -206,6 +206,50 @@ void dht::record_store::impl::apply_prune_locked(const dht::record_store::prune_
    }
 }
 
+void dht::record_store::impl::validate_prune_result_locked(const dht::record_store::prune_result& result,
+                                                           std::chrono::system_clock::time_point now) const {
+   auto value_removals = std::set<value_key>{};
+   for (const auto& key : result.values) {
+      if (key.bytes.empty() || !value_removals.insert(key.bytes).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid value prune key");
+      }
+      const auto current = values_.find(key.bytes);
+      if (current == values_.end() || !expired(current->second.expires_at, now)) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence attempted to prune a live value record");
+      }
+   }
+
+   auto provider_removals = std::set<provider_map_key>{};
+   for (const auto& key : result.providers) {
+      const auto map_key = provider_map_key{key.key.bytes, key.provider};
+      if (key.key.bytes.empty() || !valid_peer_id(key.provider) || !provider_removals.insert(map_key).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid provider prune key");
+      }
+      const auto current = providers_.find(map_key);
+      if (current == providers_.end() || !expired(current->second.provider_expires_at, now)) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence attempted to prune a live provider record");
+      }
+   }
+
+   auto address_updates = std::set<provider_map_key>{};
+   for (const auto& value : result.provider_address_updates) {
+      const auto key = provider_map_key{value.key.bytes, value.provider};
+      if (!address_updates.insert(key).second || provider_removals.contains(key)) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned conflicting provider prune results");
+      }
+      const auto current = providers_.find(key);
+      if (current == providers_.end() || expired(current->second.provider_expires_at, now) ||
+          !expired(current->second.addresses_expires_at, now) || value.key != current->second.key ||
+          value.provider != current->second.provider ||
+          value.provider_expires_at != current->second.provider_expires_at ||
+          value.local_owned != current->second.local_owned || !value.endpoints.empty() ||
+          value.addresses_expires_at != std::chrono::system_clock::time_point{}) {
+         FORGE_THROW_EXCEPTION(exceptions::internal,
+                               "DHT persistence returned an invalid provider address prune update");
+      }
+   }
+}
+
 boost::asio::awaitable<dht::record_store::prune_result>
 dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_point now) {
    auto admission = admit_operation();
@@ -218,12 +262,20 @@ dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_poi
       mark_persistence_failure_locked(current_failure_message());
       throw;
    }
-   if (result.values.size() + result.providers.size() + result.provider_address_updates.size() >
-       options_.prune_page_limit) {
+   if (result.values.size() > options_.prune_page_limit ||
+       result.providers.size() > options_.prune_page_limit - result.values.size() ||
+       result.provider_address_updates.size() >
+           options_.prune_page_limit - result.values.size() - result.providers.size()) {
       FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence exceeded the prune result bound");
    }
    {
       auto lock = std::scoped_lock{mutex_};
+      try {
+         validate_prune_result_locked(result, now);
+      } catch (...) {
+         mark_durability_uncertain_locked("DHT persistence returned an invalid committed prune result");
+         throw;
+      }
       apply_prune_locked(result);
       apply_durability_result_locked(result.durability);
    }

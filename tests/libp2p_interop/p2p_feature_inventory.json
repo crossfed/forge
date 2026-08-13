@@ -152,7 +152,7 @@
         "forge.net.p2p.stream": [ "resource.streams", "resource.queued_bytes" ]
       },
       "header_features": {},
-      "sha256": "36e929578e21663bbe13c3afaf8430fa654c939d4ce03d2995fa192092c20dbc",
+      "sha256": "de52438be1238b3fc8730a0e08c9135c9ca985e23fbc5eb82cb9cfde52088d7b",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -647,7 +647,7 @@
       "persistence": "none",
       "maintenance":
           "Identify and hydration add candidates; validated DHT exchanges admit servers; node lifecycle refreshes stale non-empty buckets with jitter and backoff",
-      "diagnostics": "bounded active, replacement, candidate and non-empty bucket counts",
+      "diagnostics": "bounded routing counts plus startup-pending, in-flight, failure and next-attempt maintenance state",
       "intended_disposition": "integrate_stage5_topology_maintenance",
       "builtin_protocols": [],
       "capabilities": [],

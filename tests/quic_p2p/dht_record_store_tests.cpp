@@ -266,6 +266,35 @@ BOOST_AUTO_TEST_CASE(dht_record_store_publishes_post_commit_uncertain_prune) {
    BOOST_TEST(status.last_failure.find("post-commit DHT prune durability failure") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(dht_record_store_rejects_invalid_committed_prune_results_before_runtime_mutation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto store = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   const auto now = std::chrono::system_clock::now();
+   const auto key = test_key('i');
+   const auto provider = test_peer(19);
+   const auto live_value = test_value(key, 4, now + std::chrono::hours{1});
+   const auto live_provider = test_provider(key, provider, now + std::chrono::hours{2}, now + std::chrono::hours{1});
+   forge::asio::blocking::run(runtime, store.async_put(live_value, now));
+   forge::asio::blocking::run(runtime, store.async_upsert_provider(live_provider, now));
+
+   auto invalid = dht::record_store::prune_result{};
+   invalid.values.push_back(key);
+   auto replacement = live_provider;
+   replacement.endpoints.clear();
+   replacement.addresses_expires_at = {};
+   invalid.provider_address_updates.push_back(std::move(replacement));
+   persistence->return_next_prune_result(std::move(invalid));
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_prune_expired(now))), exceptions::internal);
+   BOOST_REQUIRE(store.find_value(key, now));
+   const auto providers = store.find_providers(key, 1, now);
+   BOOST_REQUIRE_EQUAL(providers.size(), 1U);
+   BOOST_REQUIRE_EQUAL(providers.front().endpoints.size(), 1U);
+   BOOST_TEST(store.persistence_state().degraded);
+   BOOST_TEST(store.persistence_state().durability_uncertain);
+}
+
 BOOST_AUTO_TEST_CASE(dht_record_store_keeps_provider_identity_after_address_expiry) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto store = dht::record_store{test_profile()};

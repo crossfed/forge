@@ -91,6 +91,7 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
       std::chrono::steady_clock::time_point next_republish{};
       std::uint64_t observed_endpoint_generation = 0;
       std::uint32_t publish_failures = 0;
+      std::exception_ptr removal_failure;
       bool stop_requested = false;
       bool removal_in_flight = false;
       bool removal_failed = false;

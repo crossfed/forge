@@ -10502,6 +10502,18 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_timeout_penalizes_peer_without_advancin
 
    const auto server_endpoint = listen(server, server_runtime);
    verify_dht_server(client_runtime, client, server, server_endpoint, content_swarm_test_dht);
+   const auto refresh_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (true) {
+      const auto state = client.diagnostics();
+      const auto profile = std::ranges::find_if(
+          state.dht_profiles, [](const auto& value) { return value.protocol == content_swarm_test_dht; });
+      BOOST_REQUIRE(profile != state.dht_profiles.end());
+      if (profile->maintenance_enabled && !profile->maintenance_startup_pending && !profile->maintenance_in_flight) {
+         break;
+      }
+      BOOST_REQUIRE(std::chrono::steady_clock::now() < refresh_deadline);
+      wait_on_runtime(client_runtime, std::chrono::milliseconds{10}, "DHT startup routing refresh");
+   }
    const auto routing_before = client.routing_status(content_swarm_test_dht);
    const auto before = client.peers().find(server.local_peer());
    BOOST_REQUIRE(before.has_value());
@@ -11734,6 +11746,79 @@ BOOST_AUTO_TEST_CASE(p2p_dht_awaitables_own_node_impl_before_first_resume) {
    BOOST_TEST(get_result.selected->value == std::vector<std::uint8_t>{'v'});
 
    forge::asio::blocking::run(runtime, owner.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_async_stop_owns_node_impl_before_first_resume) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto pending = std::optional<boost::asio::awaitable<void>>{};
+   {
+      auto source = node{runtime, options_for(peer(218))};
+      pending.emplace(source.async_stop());
+   }
+
+   forge::asio::blocking::run(runtime, std::move(*pending));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dht_failed_initial_publication_retains_cleanup_for_stop_retry) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto identity = make_test_certificate_identity("dht-initial-cleanup-retry");
+   auto persistence = std::make_shared<tracking_dht_record_store_persistence>();
+   auto options = dht_options_for(identity, custom_test_dht_profile());
+   options.dht_record_persistence.emplace(content_swarm_test_dht, persistence);
+   auto advertised = make_dns_tcp_endpoint(4'194, "dht-initial-cleanup-retry.example.com");
+   advertised.peer = identity.peer;
+   options.advertised_endpoints.push_back(std::move(advertised));
+   auto provider = node{runtime, std::move(options)};
+   forge::asio::blocking::run(runtime, provider.async_hydrate_peer_state());
+   persistence->reject_next_provider_removal.store(true, std::memory_order_relaxed);
+
+   const auto key = make_dht_key(std::vector<std::uint8_t>{'i', 'n', 'i', 't', 'i', 'a', 'l'});
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, provider.async_provide(content_swarm_test_dht, key))),
+                     std::runtime_error);
+   BOOST_TEST(persistence->provider_upsert_attempts.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 1U);
+
+   forge::asio::blocking::run(runtime, provider.async_stop());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
+   BOOST_TEST(persistence->close_attempts.load(std::memory_order_relaxed) == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dht_new_admission_retries_failed_destructor_cleanup) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto server_identity = make_test_certificate_identity("dht-readmission-server");
+   const auto provider_identity = make_test_certificate_identity("dht-readmission-provider");
+   auto server = node{runtime, dht_options_for(server_identity, custom_test_dht_profile(dht::mode::server))};
+   auto persistence = std::make_shared<tracking_dht_record_store_persistence>();
+   auto provider_options = dht_options_for(provider_identity, custom_test_dht_profile());
+   provider_options.dht_record_persistence.emplace(content_swarm_test_dht, persistence);
+   auto advertised = make_dns_tcp_endpoint(4'196, "dht-readmission.example.com");
+   advertised.peer = provider_identity.peer;
+   provider_options.advertised_endpoints.push_back(advertised);
+   auto provider = node{runtime, std::move(provider_options)};
+   const auto server_endpoint = listen(server, runtime);
+   static_cast<void>(listen(provider, runtime));
+   verify_dht_server(runtime, provider, server, server_endpoint, content_swarm_test_dht);
+   forge::asio::blocking::run(runtime, provider.async_hydrate_peer_state());
+
+   const auto key = make_dht_key(std::vector<std::uint8_t>{'r', 'e', 'a', 'd', 'm', 'i', 't'});
+   {
+      auto registration = forge::asio::blocking::run(runtime, provider.async_provide(content_swarm_test_dht, key));
+      BOOST_REQUIRE(registration.active());
+      persistence->reject_next_provider_removal.store(true, std::memory_order_relaxed);
+   }
+   for (auto attempt = 0U; attempt < 40U && persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 0U;
+        ++attempt) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{25}, "DHT failed destructor cleanup");
+   }
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 1U);
+
+   auto replacement = forge::asio::blocking::run(runtime, provider.async_provide(content_swarm_test_dht, key));
+   BOOST_REQUIRE(replacement.active());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
+   forge::asio::blocking::run(runtime, replacement.async_withdraw());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 3U);
+   forge::asio::blocking::run(runtime, provider.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_dht_provider_removal_failure_allows_stop_retry) {

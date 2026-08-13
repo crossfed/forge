@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace forge::net::p2p::detail {
@@ -17,6 +18,13 @@ class lifecycle_wakeup;
 class dht_routing_refresh final {
  public:
    using time_point = std::chrono::steady_clock::time_point;
+
+   struct profile_status {
+      bool startup_lookup_pending = true;
+      bool in_flight = false;
+      std::uint32_t failures = 0;
+      std::chrono::milliseconds next_attempt_in{0};
+   };
 
    struct profile {
       protocol_id protocol;
@@ -40,6 +48,7 @@ class dht_routing_refresh final {
 
    void notify_verified_server() noexcept;
    void request_stop() noexcept;
+   [[nodiscard]] std::optional<profile_status> status(const protocol_id& protocol) const;
    boost::asio::awaitable<void> async_run();
 
  private:
@@ -49,11 +58,13 @@ class dht_routing_refresh final {
       std::uint64_t generation = 0;
       std::uint32_t failures = 0;
       bool startup_lookup_pending = true;
+      bool in_flight = false;
    };
 
    [[nodiscard]] dht::key refresh_target(const profile_state& state, std::size_t common_prefix_length) const;
    [[nodiscard]] std::chrono::milliseconds regular_delay(const profile_state& state) const noexcept;
    [[nodiscard]] std::chrono::milliseconds retry_delay(const profile_state& state) const noexcept;
+   void publish_status(profile_state& state, bool in_flight);
    boost::asio::awaitable<void> async_refresh_profile(profile_state& state);
    [[nodiscard]] bool stopped() const noexcept;
 

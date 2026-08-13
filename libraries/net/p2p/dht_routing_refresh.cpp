@@ -115,6 +115,24 @@ void dht_routing_refresh::request_stop() noexcept {
    changed_->notify();
 }
 
+std::optional<dht_routing_refresh::profile_status> dht_routing_refresh::status(const protocol_id& protocol) const {
+   const auto now = time_.now();
+   auto lock = std::scoped_lock{mutex_};
+   const auto current =
+       std::ranges::find_if(profiles_, [&](const auto& value) { return value.config.protocol == protocol; });
+   if (current == profiles_.end()) {
+      return std::nullopt;
+   }
+   return profile_status{
+       .startup_lookup_pending = current->startup_lookup_pending,
+       .in_flight = current->in_flight,
+       .failures = current->failures,
+       .next_attempt_in = current->next_attempt > now
+                              ? std::chrono::duration_cast<std::chrono::milliseconds>(current->next_attempt - now)
+                              : std::chrono::milliseconds{0},
+   };
+}
+
 dht::key dht_routing_refresh::refresh_target(const profile_state& state, std::size_t common_prefix_length_value) const {
    if (common_prefix_length_value > max_refresh_common_prefix_length) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT routing refresh CPL exceeds preimage limit");
@@ -158,45 +176,66 @@ std::chrono::milliseconds dht_routing_refresh::retry_delay(const profile_state& 
    return std::chrono::duration_cast<std::chrono::milliseconds>(bounded + std::chrono::seconds{jitter});
 }
 
-boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_state& state) {
-   auto failed = false;
-   if (state.startup_lookup_pending) {
-      try {
-         state.startup_lookup_pending = !co_await query_(state.config.protocol, make_dht_key(local_));
-         failed = state.startup_lookup_pending;
-      } catch (...) {
-         failed = true;
-      }
-   }
+void dht_routing_refresh::publish_status(profile_state& state, bool in_flight) {
+   auto lock = std::scoped_lock{mutex_};
+   state.in_flight = in_flight;
+}
 
-   const auto planned_at = time_.now();
-   const auto plan = state.config.routing->plan_refresh(planned_at, state.config.interval);
-   for (const auto& bucket : plan) {
-      if (stopped()) {
-         co_return;
-      }
-      if (bucket.common_prefix_length > max_refresh_common_prefix_length) {
-         continue;
-      }
-      try {
-         const auto target = refresh_target(state, bucket.common_prefix_length);
-         if (co_await query_(state.config.protocol, target)) {
-            static_cast<void>(state.config.routing->mark_refreshed(bucket, time_.now()));
-         } else {
+boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_state& state) {
+   publish_status(state, true);
+   try {
+      auto failed = false;
+      if (state.startup_lookup_pending) {
+         auto startup_lookup_pending = true;
+         try {
+            startup_lookup_pending = !co_await query_(state.config.protocol, make_dht_key(local_));
+            failed = startup_lookup_pending;
+         } catch (...) {
             failed = true;
          }
-      } catch (...) {
-         failed = true;
+         {
+            auto lock = std::scoped_lock{mutex_};
+            state.startup_lookup_pending = startup_lookup_pending;
+         }
       }
-   }
 
-   ++state.generation;
-   if (failed) {
-      state.failures = std::min<std::uint32_t>(state.failures + 1U, 7U);
-      state.next_attempt = time_.now() + retry_delay(state);
-   } else {
-      state.failures = 0;
-      state.next_attempt = time_.now() + regular_delay(state);
+      const auto planned_at = time_.now();
+      const auto plan = state.config.routing->plan_refresh(planned_at, state.config.interval);
+      for (const auto& bucket : plan) {
+         if (stopped()) {
+            publish_status(state, false);
+            co_return;
+         }
+         if (bucket.common_prefix_length > max_refresh_common_prefix_length) {
+            continue;
+         }
+         try {
+            const auto target = refresh_target(state, bucket.common_prefix_length);
+            if (co_await query_(state.config.protocol, target)) {
+               static_cast<void>(state.config.routing->mark_refreshed(bucket, time_.now()));
+            } else {
+               failed = true;
+            }
+         } catch (...) {
+            failed = true;
+         }
+      }
+
+      {
+         auto lock = std::scoped_lock{mutex_};
+         ++state.generation;
+         if (failed) {
+            state.failures = std::min<std::uint32_t>(state.failures + 1U, 7U);
+            state.next_attempt = time_.now() + retry_delay(state);
+         } else {
+            state.failures = 0;
+            state.next_attempt = time_.now() + regular_delay(state);
+         }
+         state.in_flight = false;
+      }
+   } catch (...) {
+      publish_status(state, false);
+      throw;
    }
 }
 
