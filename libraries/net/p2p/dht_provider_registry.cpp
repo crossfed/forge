@@ -323,6 +323,31 @@ void dht_provider_registry::request_release_owner(const std::shared_ptr<owner_st
 
 boost::asio::awaitable<void> dht_provider_registry::async_release_owner(const std::shared_ptr<owner_state>& owner) {
    request_release_owner(owner);
+   auto retry = std::shared_ptr<entry>{};
+   {
+      auto failed = false;
+      {
+         const auto lock = std::scoped_lock{owner->mutex};
+         failed = owner->terminal && static_cast<bool>(owner->terminal_failure);
+      }
+      if (failed) {
+         const auto lock = std::scoped_lock{mutex_};
+         const auto found = entries_.find(owner->registration);
+         if (found != entries_.end() && found->second->removal_failed && !found->second->removal_in_flight) {
+            retry = found->second;
+            retry->removal_in_flight = true;
+            retry->removal_failed = false;
+         }
+      }
+   }
+   if (retry) {
+      {
+         const auto lock = std::scoped_lock{owner->mutex};
+         owner->terminal = false;
+         owner->terminal_failure = {};
+      }
+      co_await async_remove(retry);
+   }
    co_await async_wait_owner(owner);
 }
 
@@ -429,7 +454,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shar
 void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, std::exception_ptr failure) noexcept {
    try {
       auto owners = std::vector<std::shared_ptr<owner_state>>{};
-      auto retain_for_drain = false;
+      auto retain_for_retry = false;
       {
          const auto lock = std::scoped_lock{mutex_};
          const auto found = entries_.find(value->registration);
@@ -444,9 +469,9 @@ void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, st
          }
          value->stop_requested = true;
          value->removal_in_flight = false;
-         retain_for_drain = static_cast<bool>(failure) && sealed_;
-         value->removal_failed = retain_for_drain;
-         if (retain_for_drain) {
+         retain_for_retry = static_cast<bool>(failure);
+         value->removal_failed = retain_for_retry;
+         if (retain_for_retry && sealed_) {
             if (!drain_failure_) {
                drain_failure_ = failure;
             }
@@ -455,7 +480,7 @@ void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, st
       for (const auto& owner : owners) {
          finish_owner(owner, failure);
       }
-      if (!retain_for_drain) {
+      if (!retain_for_retry) {
          const auto lock = std::scoped_lock{mutex_};
          const auto found = entries_.find(value->registration);
          if (found != entries_.end() && found->second == value) {

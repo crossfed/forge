@@ -11759,6 +11759,39 @@ BOOST_AUTO_TEST_CASE(p2p_dht_provider_removal_failure_allows_stop_retry) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_dht_provider_removal_failure_allows_withdraw_retry) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto server_identity = make_test_certificate_identity("dht-withdraw-retry-server");
+   const auto provider_identity = make_test_certificate_identity("dht-withdraw-retry-provider");
+   auto server = node{runtime, dht_options_for(server_identity, custom_test_dht_profile(dht::mode::server))};
+   auto persistence = std::make_shared<tracking_dht_record_store_persistence>();
+   auto provider_options = dht_options_for(provider_identity, custom_test_dht_profile());
+   provider_options.dht_record_persistence.emplace(content_swarm_test_dht, persistence);
+   auto provider_endpoint = make_dns_tcp_endpoint(4'195, "dht-withdraw-retry.example.com");
+   provider_endpoint.peer = provider_identity.peer;
+   provider_options.advertised_endpoints.push_back(provider_endpoint);
+   auto provider = node{runtime, std::move(provider_options)};
+   const auto server_endpoint = listen(server, runtime);
+   static_cast<void>(listen(provider, runtime));
+   verify_dht_server(runtime, provider, server, server_endpoint, content_swarm_test_dht);
+   forge::asio::blocking::run(runtime, provider.async_hydrate_peer_state());
+
+   const auto key = make_dht_key(std::vector<std::uint8_t>{'w', 'i', 't', 'h', 'd', 'r', 'a', 'w'});
+   auto registration = forge::asio::blocking::run(runtime, provider.async_provide(content_swarm_test_dht, key));
+   BOOST_REQUIRE(registration.active());
+   persistence->reject_next_provider_removal.store(true, std::memory_order_relaxed);
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, registration.async_withdraw())), std::runtime_error);
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(!registration.active());
+
+   forge::asio::blocking::run(runtime, registration.async_withdraw());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
+   forge::asio::blocking::run(runtime, provider.async_stop());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_production_options_reject_missing_mtls_identity) {
    try {
       validate(node::options{});
