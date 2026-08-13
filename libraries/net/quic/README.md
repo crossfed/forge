@@ -201,6 +201,31 @@ Transport limits cover stream count, queued bytes and inbound packet queue size.
 Timeouts are scoped to handshake/connect/read/write phases so callers can return
 typed failures instead of vague network errors.
 
+Graceful connection close serializes and sends a standard QUIC application
+`CONNECTION_CLOSE` before local transport teardown. Peers therefore observe a
+terminal close promptly rather than retaining higher-level session ownership
+until the QUIC idle timeout. Local failure paths may still terminate transport
+immediately when a close frame cannot be emitted safely. Late packets for a
+released connection are isolated according to ngtcp2's silent-drop contract;
+they neither consume a listener slot indefinitely nor fail a concurrent
+`async_accept()` for another connection.
+
+The listener validates the remote address with an encrypted QUIC Retry token
+before allocating server connection or TLS state. Tokens are bound to the
+remote endpoint, Retry connection ID and original destination connection ID,
+and expire after the ngtcp2 donor-compatible ten-second validation window.
+Invalid, expired and late Retry traffic is dropped without poisoning another
+pending `async_accept()`.
+
+`server_options::inbound_admission` is an optional early-admission hook for
+higher-level resource managers. QUIC invokes it only after Retry validation but
+before allocating the server connection and TLS state. Returning an empty
+token, or throwing, rejects that connection attempt; a non-empty token is held
+until the connection closes or a higher-level transport adapter takes
+ownership through the private connection-access bridge. Leaving the callback
+empty keeps the standalone QUIC listener unrestricted by an external admission
+layer.
+
 ## Security Notes
 
 OpenSSL 3.0+ is the supported TLS backend. Fingerprint and mTLS failures are

@@ -4,6 +4,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -42,6 +43,7 @@ struct server_options {
    security_options security{.verify_peer = false};
    std::string certificate_pem;
    std::string private_key_pem;
+   std::function<std::shared_ptr<void>()> inbound_admission;
 };
 
 void validate(const client_options& options);

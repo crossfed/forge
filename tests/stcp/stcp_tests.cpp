@@ -1,6 +1,8 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <barrier>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -8,8 +10,10 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -394,6 +398,80 @@ boost::asio::awaitable<void> stcp_stalled_peer_returns_typed_handshake_timeout(t
       BOOST_CHECK(*forge::net::stcp::exceptions::code_of(error) == forge::net::stcp::exceptions::code::timeout);
    }
    co_await server_tcp.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_stalled_handshake_cancel_from_foreign_thread(tls_material material) {
+   constexpr auto iteration_count = std::size_t{8};
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto connector = forge::net::tcp::connector{executor};
+
+   for (auto iteration = std::size_t{}; iteration < iteration_count; ++iteration) {
+      auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+      auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+      auto server_tcp = co_await take_result(accept);
+      auto stop = std::stop_source{};
+      auto upgrade = spawn_result<forge::net::stcp::connection>(
+          executor, forge::net::stcp::async_upgrade_client(std::move(client_tcp), client_options(material),
+                                                            std::chrono::seconds{2}, stop.get_token()));
+
+      auto client_hello = bytes(1);
+      BOOST_REQUIRE(co_await server_tcp.async_read_some(client_hello) == client_hello.size());
+
+      auto request_won = false;
+      auto stop_thread = std::thread{[&] { request_won = stop.request_stop(); }};
+      stop_thread.join();
+      BOOST_TEST(request_won);
+
+      try {
+         static_cast<void>(co_await take_result(upgrade));
+         BOOST_FAIL("stalled STCP handshake should be canceled from foreign thread");
+      } catch (const forge::net::stcp::exceptions::canceled&) {
+      }
+      co_await server_tcp.async_close();
+   }
+
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_completed_handshake_survives_late_foreign_thread_stop(tls_material material) {
+   constexpr auto iteration_count = std::size_t{8};
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto connector = forge::net::tcp::connector{executor};
+
+   for (auto iteration = std::size_t{}; iteration < iteration_count; ++iteration) {
+      auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+      auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+      auto server_tcp = co_await take_result(accept);
+      auto stop = std::stop_source{};
+      auto request_won = false;
+      auto client = client_options(material);
+      client.security.verifier = [&](const forge::net::stcp::certificate_chain&) {
+         auto stop_thread = std::thread{[&] { request_won = stop.request_stop(); }};
+         stop_thread.join();
+         return true;
+      };
+
+      auto server_upgrade = spawn_result<forge::net::stcp::connection>(
+          executor, forge::net::stcp::async_upgrade_server(std::move(server_tcp), server_options(material),
+                                                            std::chrono::seconds{2}));
+      auto client_connection = co_await forge::net::stcp::async_upgrade_client(
+          std::move(client_tcp), std::move(client), std::chrono::seconds{2}, stop.get_token());
+      auto server_connection = co_await take_result(server_upgrade);
+
+      BOOST_TEST(request_won);
+      BOOST_TEST(client_connection.valid());
+      const auto payload = bytes{static_cast<std::uint8_t>(iteration)};
+      co_await client_connection.async_write(payload);
+      auto received = co_await server_connection.async_read();
+      BOOST_TEST(received == payload, boost::test_tools::per_element());
+
+      co_await client_connection.async_close();
+      co_await server_connection.async_close();
+   }
+
    co_await listener.async_close();
 }
 
@@ -790,6 +868,96 @@ boost::asio::awaitable<void> stcp_connection_cancel_unblocks_pending_read() {
    co_await listener.async_close();
 }
 
+boost::asio::awaitable<void> stcp_active_read_rejects_transport_handoff_scenario() {
+   const auto material = make_tls_material();
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::stcp::listener{executor, loopback(0), server_options(material)};
+   auto accept = spawn_result<forge::net::stcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::stcp::connector{executor, client_options(material)};
+   auto client = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server = co_await take_result(accept);
+   auto pending_read = std::make_shared<spawned_result<bytes>>(executor);
+   boost::asio::co_spawn(
+       executor,
+       [pending_read, &server]() -> boost::asio::awaitable<void> {
+          try {
+             pending_read->value.emplace(co_await server.async_read());
+             pending_read->done = true;
+          } catch (...) {
+             pending_read->error = std::current_exception();
+             pending_read->done = true;
+          }
+          pending_read->timer.cancel();
+       },
+       boost::asio::detached);
+
+   // With one worker, this FIFO barrier runs after async_read claims its reservation and suspends on native I/O.
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   BOOST_CHECK_THROW((void)std::move(server).into_transport_stream(), forge::net::stcp::exceptions::io_error);
+   BOOST_TEST(server.valid());
+
+   server.cancel();
+   try {
+      static_cast<void>(co_await take_result(pending_read));
+      BOOST_FAIL("pending STCP read should be canceled");
+   } catch (const forge::net::stcp::exceptions::canceled&) {
+   }
+   BOOST_CHECK_THROW((void)std::move(server).into_transport_stream(), forge::net::stcp::exceptions::closed);
+
+   co_await server.async_close();
+   co_await client.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_cancel_racing_handoff_has_one_terminal_owner(tls_material material) {
+   constexpr auto race_iterations = std::size_t{64};
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::stcp::listener{executor, loopback(0), server_options(material)};
+   auto connector = forge::net::stcp::connector{executor, client_options(material)};
+   auto successful_handoffs = std::size_t{};
+
+   for (auto iteration = std::size_t{}; iteration < race_iterations; ++iteration) {
+      auto accept = spawn_result<forge::net::stcp::connection>(executor, listener.async_accept_connection());
+      auto client = co_await connector.async_connect_connection(listener.local_endpoint());
+      auto server = co_await take_result(accept);
+      auto start = std::barrier{2};
+      auto handoff_finished = std::atomic_bool{false};
+      auto cancel_thread = std::thread{[&, iteration] {
+         start.arrive_and_wait();
+         if (iteration == 0) {
+            while (!handoff_finished.load(std::memory_order_acquire)) {
+               std::this_thread::yield();
+            }
+         }
+         client.cancel();
+      }};
+      start.arrive_and_wait();
+
+      auto handed_off = std::optional<forge::net::transport::stream_connection>{};
+      try {
+         handed_off.emplace(std::move(client).into_transport_stream());
+      } catch (const forge::net::stcp::exceptions::closed&) {
+      }
+      handoff_finished.store(true, std::memory_order_release);
+      cancel_thread.join();
+
+      if (handed_off) {
+         ++successful_handoffs;
+         const auto payload = bytes{static_cast<std::uint8_t>(iteration)};
+         co_await handed_off->stream.async_write(payload);
+         auto received = co_await server.async_read();
+         BOOST_TEST(received == payload, boost::test_tools::per_element());
+         co_await handed_off->stream.async_close();
+      } else {
+         BOOST_CHECK_THROW((void)std::move(client).into_transport_stream(), forge::net::stcp::exceptions::closed);
+      }
+      co_await server.async_close();
+   }
+
+   BOOST_TEST(successful_handoffs > 0U);
+   co_await listener.async_close();
+}
+
 boost::asio::awaitable<void> stcp_rejects_tls12_peer() {
    namespace asio = boost::asio;
    const auto material = make_tls_material();
@@ -848,6 +1016,19 @@ BOOST_AUTO_TEST_CASE(stcp_stalled_peer_reports_typed_handshake_timeout) {
        runtime, stcp_stalled_peer_returns_typed_handshake_timeout(make_tls_material()), std::chrono::seconds{2}));
 }
 
+BOOST_AUTO_TEST_CASE(stcp_stalled_handshake_cancel_from_foreign_thread_is_typed) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_stalled_handshake_cancel_from_foreign_thread(make_tls_material()), std::chrono::seconds{5}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_late_foreign_thread_stop_does_not_close_handed_off_connection) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_completed_handshake_survives_late_foreign_thread_stop(make_tls_material()),
+       std::chrono::seconds{5}));
+}
+
 BOOST_AUTO_TEST_CASE(stcp_serializes_full_duplex_ssl_operations_on_multi_worker_runtime) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 8}};
    BOOST_CHECK(forge::asio::blocking::run_for(runtime, stcp_full_duplex_uses_one_connection_strand(make_tls_material()),
@@ -901,6 +1082,18 @@ BOOST_AUTO_TEST_CASE(stcp_cancel_unblocks_pending_read) {
    auto runtime = forge::asio::runtime{};
    BOOST_CHECK(forge::asio::blocking::run_for(runtime, stcp_connection_cancel_unblocks_pending_read(),
                                               std::chrono::seconds{2}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_active_read_rejects_transport_handoff_without_moving_stream) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_active_read_rejects_transport_handoff_scenario(), std::chrono::seconds{3}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_cancel_racing_handoff_has_one_terminal_owner_and_preserves_handoff_winner) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_cancel_racing_handoff_has_one_terminal_owner(make_tls_material()), std::chrono::seconds{20}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_requires_tls13_by_default) {

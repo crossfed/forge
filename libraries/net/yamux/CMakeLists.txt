@@ -1,6 +1,14 @@
 add_library(
    forge_net_yamux STATIC
+   frame.cpp
    session.cpp
+   session_impl.cpp
+   session_impl_protocol.cpp
+   session_impl_stream.cpp
+   session_impl_stream_state.cpp
+   session_impl_stream_model.cpp
+   session_model.cpp
+   transport_write_tracker.cpp
 )
 forge_target_modules_at(forge_net_yamux net/yamux)
 
@@ -11,4 +19,6 @@ target_link_libraries(
       forge_exceptions
       forge_net_transport
       Boost::asio
+   PRIVATE
+      forge_asio
 )

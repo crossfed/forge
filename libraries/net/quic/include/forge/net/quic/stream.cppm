@@ -9,6 +9,8 @@ module;
 
 export module forge.net.quic.stream;
 
+import forge.net.transport.buffer;
+
 export namespace forge::net::quic {
 
 namespace detail {
@@ -48,6 +50,8 @@ namespace detail {
 
 struct stream_access {
    static stream make(stream_handle handle);
+   static boost::asio::awaitable<void> async_write_chunk(stream& value, forge::net::transport::chunk bytes);
+   static void cancel_write(stream& value);
 };
 
 } // namespace detail

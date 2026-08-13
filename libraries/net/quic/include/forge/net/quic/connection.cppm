@@ -54,6 +54,7 @@ namespace detail {
 
 struct connection_access {
    static connection make(connection_handle handle);
+   static std::shared_ptr<void> take_inbound_admission(connection& value) noexcept;
 };
 
 } // namespace detail

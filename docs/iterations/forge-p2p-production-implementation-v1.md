@@ -187,6 +187,13 @@ Current focused evidence includes
 
 ## 6. Stage 3: Node Lifecycle, Identify And Resource Ownership
 
+> **Implementation status:** implemented by `forge-p2p-node-lifecycle-v1`.
+> The node now owns bounded bootstrap and maintenance, automatic per-session
+> Identify and coalesced full-snapshot Identify Push, move-only network
+> reservations, transport-backed queued-byte accounting and tracked shutdown.
+> This status does not promote Kademlia, topology or the complete host to
+> production readiness; their Stage 4/5 gates remain unchanged.
+
 - move bootstrap startup and maintenance from the plugin into the node;
 - apply one bounded startup budget, bounded parallelism, jittered retry and
   deterministic cancellation;
@@ -208,6 +215,13 @@ Current focused evidence includes
 - bootstrap and Identify continue to work for programmatic node users without
   the official plugin;
 - adversarial limits and reverse shutdown are proven.
+
+Focused evidence includes
+`p2p_node_strict_bootstrap_retries_until_shared_startup_budget`,
+`p2p_node_connect_waits_for_identify_and_push_replaces_protocol_snapshot`,
+`p2p_node_identify_failure_keeps_authenticated_session_usable`,
+`p2p_node_queued_byte_budget_is_held_until_quic_ack` and
+`yamux_retains_chunk_lifetime_while_flow_control_is_blocked`.
 
 ## 7. Stage 4: Complete Kademlia And Durable Record Lifetimes
 

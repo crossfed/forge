@@ -11,6 +11,7 @@ struct engine_server_options {
    engine_security_options security{};
    std::string certificate_pem;
    forge::crypto::core::secret_string private_key_pem;
+   std::function<std::shared_ptr<void>()> inbound_admission;
 };
 
 } // namespace forge::net::quic::detail

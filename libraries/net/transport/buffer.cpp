@@ -25,6 +25,10 @@ namespace {
    return requested == 0 ? options.default_capacity : requested;
 }
 
+struct lifetime_bundle {
+   std::vector<std::shared_ptr<void>> values;
+};
+
 } // namespace
 
 namespace detail {
@@ -156,6 +160,35 @@ std::vector<std::uint8_t> chunk::into_vector() && {
       return out;
    }
    return to_vector();
+}
+
+void detail::chunk_access::attach_lifetime(chunk& value, std::shared_ptr<void> lifetime) {
+   if (!lifetime) {
+      return;
+   }
+   if (!value.lifetime_) {
+      value.lifetime_ = std::move(lifetime);
+      return;
+   }
+   auto bundle = std::make_shared<lifetime_bundle>();
+   bundle->values.reserve(2);
+   bundle->values.push_back(std::move(value.lifetime_));
+   bundle->values.push_back(std::move(lifetime));
+   value.lifetime_ = std::move(bundle);
+}
+
+std::pair<std::vector<std::uint8_t>, std::shared_ptr<void>> detail::chunk_access::consume(chunk value) {
+   if (value.storage_ && value.storage_.use_count() == 1 && value.offset_ == 0 &&
+       value.size_ == value.storage_->data.size()) {
+      auto lifetime = std::move(value.lifetime_);
+      auto bytes = std::move(value.storage_->data);
+      value.storage_.reset();
+      value.offset_ = 0;
+      value.size_ = 0;
+      return {std::move(bytes), std::move(lifetime)};
+   }
+   auto bytes = value.to_vector();
+   return {std::move(bytes), std::move(value.lifetime_)};
 }
 
 chunk_builder::chunk_builder() = default;

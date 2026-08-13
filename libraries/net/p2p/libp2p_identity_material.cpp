@@ -31,9 +31,10 @@ libp2p_identity_material make_libp2p_identity_material(const node::options& opti
 
    try {
       auto private_key = forge::crypto::pki::pem::read_private_key(options.private_key_pem);
-      auto public_key = options.public_key;
-      if (public_key.empty()) {
-         public_key = encode_public_key(public_key_from_crypto(private_key.get_public_key()));
+      auto public_key = encode_public_key(public_key_from_crypto(private_key.get_public_key()));
+      if (!options.public_key.empty() && options.public_key != public_key) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_identity,
+                               "configured libp2p public key does not match the private key");
       }
       return {
           .private_key = std::move(private_key),

@@ -47,7 +47,7 @@ register/discover against rust-libp2p.
 | DHT protocol id | Ported | `p2p_libp2p_reachability_relay_protocol_ids_are_exact` |
 | DHT codec and malformed rejection | Ported | `p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed` |
 | DHT k-bucket bounds, replacement and XOR ordering | Ported | `p2p_dht_k_bucket_bounds_active_and_replacement_capacity`, `p2p_dht_k_bucket_closest_is_sha256_xor_ordered_and_deterministic` |
-| DHT candidate admission and failure eviction | Ported | `p2p_identify_dht_advertisement_remains_candidate_without_valid_exchange`, `p2p_dht_query_seeds_prioritize_active_and_evict_failed_replacements` |
+| DHT candidate admission and failure eviction | Ported | `p2p_verified_identify_dht_advertisement_admits_server_before_exchange`, `p2p_dht_query_seeds_prioritize_active_and_evict_failed_replacements` |
 | DHT exact and failed-target lookup semantics | Ported | `p2p_dht_find_node_returns_exact_peer_store_and_self_before_active_closest`, `p2p_dht_query_failed_target_seed_is_not_complete_or_closest` |
 | DHT node handler over negotiated stream | Ported | `p2p_dht_node_finds_peer_and_provider_over_negotiated_stream` |
 | DHT iterative many-peer lookup | Ported | `p2p_dht_iterative_lookup_walks_many_peer_topology` |

@@ -28,6 +28,12 @@ class peer_store {
  public:
    class persistence;
 
+   struct endpoint_sources {
+      bool learned = true;
+      bool identify_unsigned = false;
+      bool identify_signed = false;
+   };
+
    struct endpoint_record {
       forge::net::p2p::endpoint endpoint;
       path::kind kind = path::kind::direct;
@@ -37,6 +43,7 @@ class peer_store {
       std::chrono::milliseconds last_latency{0};
       std::chrono::system_clock::time_point backoff_until{};
       double score = 0.0;
+      endpoint_sources sources;
    };
 
    struct relay_record {
@@ -72,6 +79,25 @@ class peer_store {
       std::uint64_t failures = 0;
       std::chrono::milliseconds last_latency{0};
       double score = 0.0;
+   };
+
+   struct identify_update {
+      std::optional<std::string> protocol_version;
+      std::optional<std::string> agent_version;
+      std::optional<std::vector<std::uint8_t>> public_key;
+      std::optional<std::vector<protocol_id>> protocols;
+      std::optional<capability_set> capabilities;
+      std::optional<std::vector<std::uint8_t>> signed_peer_record;
+      std::optional<std::vector<forge::net::p2p::endpoint>> signed_endpoints;
+      std::optional<std::vector<forge::net::p2p::endpoint>> unsigned_endpoints;
+      bool replace_observed_endpoint = false;
+      std::optional<forge::net::p2p::endpoint> observed_endpoint;
+   };
+
+   struct discovery_update {
+      discovery::source source = discovery::source::explicit_config;
+      std::chrono::system_clock::time_point observed_at{};
+      std::chrono::system_clock::time_point expires_at{};
    };
 
    struct provider_record {
@@ -168,6 +194,14 @@ class peer_store {
    [[nodiscard]] static std::shared_ptr<persistence> make_memory_persistence();
 
    void upsert(record value);
+   [[nodiscard]] record apply_identify(const peer_id& peer, identify_update update);
+   [[nodiscard]] std::optional<record> apply_discovery(const peer_id& peer, discovery_update update);
+   void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
+   void upsert_relay_reservation(relay_record value);
+   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer,
+                                             std::chrono::system_clock::time_point backoff_until);
+   [[nodiscard]] std::size_t prune_expired_relay_reservations(
+      const peer_id& peer, std::chrono::system_clock::time_point now);
    void learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities = {});
    void mark_reachability(peer_id peer, reachability::state state,
                           std::optional<forge::net::p2p::endpoint> observed = std::nullopt);
@@ -182,8 +216,8 @@ class peer_store {
 
    boost::asio::awaitable<void> async_upsert_provider(provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
-   boost::asio::awaitable<void>
-   async_register_rendezvous(rendezvous::registration value, std::size_t max_registrations_per_peer);
+   boost::asio::awaitable<void> async_register_rendezvous(rendezvous::registration value,
+                                                          std::size_t max_registrations_per_peer);
    boost::asio::awaitable<void> async_remove_rendezvous(peer_id peer, std::string namespace_name);
    boost::asio::awaitable<void> async_hydrate();
    boost::asio::awaitable<prune_result>

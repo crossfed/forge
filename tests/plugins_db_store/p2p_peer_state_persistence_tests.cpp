@@ -34,6 +34,7 @@ import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.transaction;
 import forge.net.p2p.dht;
+import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.peer_store;
@@ -241,6 +242,14 @@ template <typename DocumentFactory> void check_object_peer_state_persistence(Doc
       state.upsert(p2p::peer_store::record{
           .peer = high,
           .protocol_version = "/forge/persisted/high/1",
+          .endpoints = std::vector<p2p::peer_store::endpoint_record>{p2p::peer_store::endpoint_record{
+              .endpoint = p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4701/p2p/" + high.to_string()),
+              .sources =
+                  p2p::peer_store::endpoint_sources{
+                      .learned = false,
+                      .identify_signed = true,
+                  },
+          }},
           .discovery_expires_at = expires_at,
           .successes = 10,
       });
@@ -277,7 +286,14 @@ template <typename DocumentFactory> void check_object_peer_state_persistence(Doc
       forge::asio::blocking::run(app->runtime(), state.async_hydrate());
       BOOST_REQUIRE_EQUAL(state.snapshot(10).size(), 1U);
       BOOST_TEST(!state.find(low).has_value());
-      BOOST_REQUIRE(state.find(high).has_value());
+      const auto hydrated_high = state.find(high);
+      BOOST_REQUIRE(hydrated_high.has_value());
+      BOOST_REQUIRE_EQUAL(hydrated_high->endpoints.size(), 1U);
+      // Persisted schema v1 predates Identify provenance; hydration keeps the
+      // address as a conservative learned cache fact without changing layout.
+      BOOST_TEST(hydrated_high->endpoints.front().sources.learned);
+      BOOST_TEST(!hydrated_high->endpoints.front().sources.identify_unsigned);
+      BOOST_TEST(!hydrated_high->endpoints.front().sources.identify_signed);
       const auto providers = state.find_providers(key, 10);
       BOOST_REQUIRE_EQUAL(providers.size(), 1U);
       BOOST_TEST(providers.front().provider.id.value == provider.value);

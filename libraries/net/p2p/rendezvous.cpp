@@ -380,7 +380,9 @@ void validate_namespace(std::string_view value, const rendezvous::options& opts)
 }
 
 [[nodiscard]] std::vector<std::uint8_t> encode_peer_record_address(const endpoint& value) {
-   const auto address = forge::multiformats::multiaddr::parse(value.to_string());
+   auto address_value = value;
+   address_value.peer.reset();
+   const auto address = forge::multiformats::multiaddr::parse(address_value.to_string());
    return address.to_bytes();
 }
 
@@ -605,7 +607,7 @@ rendezvous::peer_record rendezvous::codec::open_peer_record(const signed_envelop
       FORGE_THROW_EXCEPTION(exceptions::codec_error, "rendezvous peer record has unsupported payload type");
    }
    auto out = decode_peer_record(envelope.payload);
-   if (expected_signer && out.peer != *expected_signer) {
+   if (out.peer != envelope.signer()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "rendezvous peer record peer id mismatch");
    }
    return out;

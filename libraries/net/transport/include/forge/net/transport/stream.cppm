@@ -64,6 +64,8 @@ class stream_concept {
 
    virtual boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes) = 0;
    virtual boost::asio::awaitable<void> async_write_chunk(chunk bytes);
+   virtual boost::asio::awaitable<void> async_write_frame(std::span<const std::uint8_t> bytes);
+   virtual boost::asio::awaitable<void> async_write_frame_chunk(chunk bytes);
    virtual boost::asio::awaitable<std::vector<std::uint8_t>> async_read() = 0;
    virtual boost::asio::awaitable<chunk> async_read_chunk();
    virtual boost::asio::awaitable<void> async_close() = 0;

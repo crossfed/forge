@@ -118,8 +118,11 @@ class engine_stream : public std::enable_shared_from_this<engine_stream> {
    [[nodiscard]] std::int64_t id() const noexcept;
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes);
+   boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes, std::shared_ptr<void> lifetime);
+   boost::asio::awaitable<void> async_write(std::vector<std::uint8_t> bytes, std::shared_ptr<void> lifetime);
    boost::asio::awaitable<std::vector<std::uint8_t>> async_read();
    boost::asio::awaitable<void> async_close();
+   void cancel_write();
    void cancel();
 
  private:
@@ -142,6 +145,7 @@ class engine_connection : public std::enable_shared_from_this<engine_connection>
    [[nodiscard]] engine_endpoint local_endpoint() const;
    [[nodiscard]] engine_endpoint remote_endpoint() const;
    [[nodiscard]] std::optional<engine_peer_certificate> peer_certificate() const;
+   [[nodiscard]] std::shared_ptr<void> take_inbound_admission() noexcept;
    boost::asio::awaitable<std::shared_ptr<engine_stream>> async_open_stream();
    boost::asio::awaitable<std::shared_ptr<engine_stream>> async_accept_stream();
    boost::asio::awaitable<void> async_close();

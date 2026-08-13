@@ -7,8 +7,10 @@ module;
 #include <cctype>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +23,7 @@ module;
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -48,6 +51,14 @@ namespace {
 namespace asio = boost::asio;
 using asio_tcp = boost::asio::ip::tcp;
 using native_stream = boost::asio::ssl::stream<boost::asio::ip::tcp::socket>;
+
+enum class connection_state : std::uint8_t {
+   active,
+   cancel_requested,
+   close_requested,
+   handed_off,
+   closed,
+};
 
 struct x509_deleter {
    void operator()(X509* value) const noexcept {
@@ -417,6 +428,12 @@ void cancel_stream(native_stream& stream) noexcept {
    stream.lowest_layer().close(ignored);
 }
 
+enum class handshake_cancellation_state : std::uint8_t {
+   active,
+   canceled,
+   terminal,
+};
+
 enum class io_stop_reason : std::uint8_t {
    none,
    closed,
@@ -477,11 +494,31 @@ struct io_gates {
 
 boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stream,
                                              asio::ssl::stream_base::handshake_type type,
-                                             std::optional<std::chrono::milliseconds> timeout) {
+                                             std::optional<std::chrono::milliseconds> timeout,
+                                             std::stop_token stop) {
    auto strand = asio::make_strand(stream->lowest_layer().get_executor());
    co_await asio::co_spawn(
        strand,
-       [stream = std::move(stream), type, timeout]() -> asio::awaitable<void> {
+       [stream = std::move(stream), strand, type, timeout, stop]() -> asio::awaitable<void> {
+          if (stop.stop_requested()) {
+             FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp handshake canceled");
+          }
+
+          auto cancellation = std::make_shared<handshake_cancellation_state>(handshake_cancellation_state::active);
+          auto post_cancel = [stream, strand, cancellation]() noexcept {
+             try {
+                asio::post(strand, [stream, cancellation] {
+                   if (*cancellation != handshake_cancellation_state::active) {
+                      return;
+                   }
+                   *cancellation = handshake_cancellation_state::canceled;
+                   cancel_stream(*stream);
+                });
+             } catch (...) {
+                // Never fall back to cross-strand socket access.
+             }
+          };
+          auto cancel_on_stop = std::stop_callback{stop, std::move(post_cancel)};
           auto timer = std::shared_ptr<asio::steady_timer>{};
           auto terminal = std::shared_ptr<detail::handshake_deadline_state>{};
           if (timeout) {
@@ -502,6 +539,8 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
 
           auto error = boost::system::error_code{};
           co_await stream->async_handshake(type, asio::redirect_error(asio::use_awaitable, error));
+          const auto canceled = *cancellation == handshake_cancellation_state::canceled || stop.stop_requested();
+          *cancellation = handshake_cancellation_state::terminal;
           if (timer) {
              const auto completed = terminal->try_complete();
              timer->cancel();
@@ -509,6 +548,9 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
                 throw_handshake_timeout(type == asio::ssl::stream_base::client ? "stcp client handshake timed out"
                                                                                : "stcp server handshake timed out");
              }
+          }
+          if (canceled) {
+             FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp handshake canceled");
           }
           if (error) {
              throw_handshake_failed(type == asio::ssl::stream_base::client ? "stcp client handshake failed"
@@ -646,10 +688,10 @@ class stream_model final : public transport::detail::stream_concept {
 
 } // namespace
 
-struct connection::impl final {
-   impl(native_stream stream_value, std::shared_ptr<asio::ssl::context> context_value,
+struct connection::impl final : std::enable_shared_from_this<connection::impl> {
+   impl(std::shared_ptr<native_stream> stream_value, std::shared_ptr<asio::ssl::context> context_value,
         std::size_t read_chunk_size_value)
-       : stream(std::make_shared<native_stream>(std::move(stream_value))), context(std::move(context_value)),
+       : stream(std::move(stream_value)), context(std::move(context_value)),
          strand(asio::make_strand(stream->lowest_layer().get_executor())), gates(std::make_shared<io_gates>()),
          read_chunk_size(read_chunk_size_value), id(next_stream_id()) {
       auto error = boost::system::error_code{};
@@ -669,7 +711,8 @@ struct connection::impl final {
    }
 
    [[nodiscard]] bool valid() const noexcept {
-      return stream && !gates->stopped();
+      const auto lock = std::scoped_lock{state_mutex};
+      return state == connection_state::active;
    }
 
    [[nodiscard]] transport::endpoint local_endpoint() const {
@@ -687,115 +730,193 @@ struct connection::impl final {
    }
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes) {
-      auto write_ticket = co_await gates->acquire(gates->write);
-      auto current = stream;
-      auto current_gates = gates;
-      co_await asio::co_spawn(
-          strand,
-          [current = std::move(current), current_gates = std::move(current_gates), bytes]() -> asio::awaitable<void> {
-             if (current_gates->stopped()) {
-                current_gates->throw_stopped();
-             }
-             if (!current || !current->lowest_layer().is_open()) {
-                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
-             }
-             auto error = boost::system::error_code{};
-             co_await asio::async_write(*current, asio::buffer(bytes),
-                                        asio::redirect_error(asio::use_awaitable, error));
-             if (error) {
-                terminalize_io_error(*current, *current_gates, error);
-             }
-          },
-          asio::use_awaitable);
+      claim_operation();
+      try {
+         auto write_ticket = co_await gates->acquire(gates->write);
+         auto self = shared_from_this();
+         co_await asio::co_spawn(
+             strand,
+             [self = std::move(self), bytes]() -> asio::awaitable<void> {
+                if (self->gates->stopped()) {
+                   self->gates->throw_stopped();
+                }
+                if (!self->stream || !self->stream->lowest_layer().is_open()) {
+                   self->mark_closed_from_io();
+                   terminalize_closed(self->stream.get(), *self->gates, "invalid stcp connection");
+                }
+                auto error = boost::system::error_code{};
+                co_await asio::async_write(*self->stream, asio::buffer(bytes),
+                                           asio::redirect_error(asio::use_awaitable, error));
+                if (error) {
+                   self->mark_closed_from_io();
+                   terminalize_io_error(*self->stream, *self->gates, error);
+                }
+             },
+             asio::use_awaitable);
+      } catch (...) {
+         release_operation();
+         throw;
+      }
+      release_operation();
    }
 
    boost::asio::awaitable<std::size_t> async_read_some(std::span<std::uint8_t> bytes) {
-      auto read_ticket = co_await gates->acquire(gates->read);
-      auto current = stream;
-      auto current_gates = gates;
-      co_return co_await asio::co_spawn(
-          strand,
-          [current = std::move(current), current_gates = std::move(current_gates),
-           bytes]() -> asio::awaitable<std::size_t> {
-             if (current_gates->stopped()) {
-                current_gates->throw_stopped();
-             }
-             if (!current || !current->lowest_layer().is_open()) {
-                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
-             }
-             auto error = boost::system::error_code{};
-             const auto size = co_await current->async_read_some(asio::buffer(bytes),
-                                                                 asio::redirect_error(asio::use_awaitable, error));
-             if (error) {
-                terminalize_io_error(*current, *current_gates, error);
-             }
-             co_return size;
-          },
-          asio::use_awaitable);
+      claim_operation();
+      try {
+         auto read_ticket = co_await gates->acquire(gates->read);
+         auto self = shared_from_this();
+         const auto size = co_await asio::co_spawn(
+             strand,
+             [self = std::move(self), bytes]() -> asio::awaitable<std::size_t> {
+                if (self->gates->stopped()) {
+                   self->gates->throw_stopped();
+                }
+                if (!self->stream || !self->stream->lowest_layer().is_open()) {
+                   self->mark_closed_from_io();
+                   terminalize_closed(self->stream.get(), *self->gates, "invalid stcp connection");
+                }
+                auto error = boost::system::error_code{};
+                const auto size = co_await self->stream->async_read_some(
+                    asio::buffer(bytes), asio::redirect_error(asio::use_awaitable, error));
+                if (error) {
+                   self->mark_closed_from_io();
+                   terminalize_io_error(*self->stream, *self->gates, error);
+                }
+                co_return size;
+             },
+             asio::use_awaitable);
+         release_operation();
+         co_return size;
+      } catch (...) {
+         release_operation();
+         throw;
+      }
    }
 
    boost::asio::awaitable<std::vector<std::uint8_t>> async_read() {
-      auto read_ticket = co_await gates->acquire(gates->read);
-      auto out = std::vector<std::uint8_t>(read_chunk_size);
-      auto current = stream;
-      auto current_gates = gates;
-      const auto size = co_await asio::co_spawn(
-          strand,
-          [current = std::move(current), current_gates = std::move(current_gates),
-           writable = std::span<std::uint8_t>{out}]() -> asio::awaitable<std::size_t> {
-             if (current_gates->stopped()) {
-                current_gates->throw_stopped();
-             }
-             if (!current || !current->lowest_layer().is_open()) {
-                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
-             }
-             auto error = boost::system::error_code{};
-             const auto size = co_await current->async_read_some(asio::buffer(writable),
-                                                                 asio::redirect_error(asio::use_awaitable, error));
-             if (error) {
-                terminalize_io_error(*current, *current_gates, error);
-             }
-             co_return size;
-          },
-          asio::use_awaitable);
-      out.resize(size);
-      co_return out;
+      claim_operation();
+      try {
+         auto read_ticket = co_await gates->acquire(gates->read);
+         auto out = std::vector<std::uint8_t>(read_chunk_size);
+         auto self = shared_from_this();
+         const auto size = co_await asio::co_spawn(
+             strand,
+             [self = std::move(self), writable = std::span<std::uint8_t>{out}]() -> asio::awaitable<std::size_t> {
+                if (self->gates->stopped()) {
+                   self->gates->throw_stopped();
+                }
+                if (!self->stream || !self->stream->lowest_layer().is_open()) {
+                   self->mark_closed_from_io();
+                   terminalize_closed(self->stream.get(), *self->gates, "invalid stcp connection");
+                }
+                auto error = boost::system::error_code{};
+                const auto size = co_await self->stream->async_read_some(
+                    asio::buffer(writable), asio::redirect_error(asio::use_awaitable, error));
+                if (error) {
+                   self->mark_closed_from_io();
+                   terminalize_io_error(*self->stream, *self->gates, error);
+                }
+                co_return size;
+             },
+             asio::use_awaitable);
+         out.resize(size);
+         release_operation();
+         co_return out;
+      } catch (...) {
+         release_operation();
+         throw;
+      }
    }
 
    boost::asio::awaitable<void> async_close() {
-      if (!stream) {
-         co_return;
+      if (request_terminal(connection_state::close_requested)) {
+         gates->stop(io_stop_reason::closed);
       }
-      gates->stop(io_stop_reason::closed);
-      auto current = stream;
+      auto self = shared_from_this();
       co_await asio::co_spawn(
           strand,
-          [current = std::move(current)]() -> asio::awaitable<void> {
-             cancel_stream(*current);
+          [self = std::move(self)]() -> asio::awaitable<void> {
+             self->close_on_owner();
              co_return;
           },
           asio::use_awaitable);
    }
 
-   void cancel() noexcept {
-      if (stream) {
+   void cancel() {
+      if (request_terminal(connection_state::cancel_requested)) {
          gates->stop(io_stop_reason::canceled);
-         asio::dispatch(strand, [current = stream] { cancel_stream(*current); });
+         auto self = shared_from_this();
+         asio::post(strand, [self = std::move(self)] { self->close_on_owner(); });
       }
    }
 
    [[nodiscard]] transport::stream_connection into_transport_stream() {
-      if (!valid()) {
+      auto current = detach_stream();
+      auto transport_stream = transport::detail::stream_access::make(
+          std::make_shared<stream_model>(std::move(current), context, strand, gates, read_chunk_size, id));
+      return transport::stream_connection{.local_endpoint = local_value,
+                                          .remote_endpoint = remote_value,
+                                          .stream = std::move(transport_stream)};
+   }
+
+   [[nodiscard]] bool request_terminal(connection_state requested) noexcept {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state != connection_state::active) {
+         return false;
+      }
+      state = requested;
+      return true;
+   }
+
+   void close_on_owner() noexcept {
+      auto current = std::shared_ptr<native_stream>{};
+      {
+         const auto lock = std::scoped_lock{state_mutex};
+         if (state != connection_state::cancel_requested && state != connection_state::close_requested) {
+            return;
+         }
+         state = connection_state::closed;
+         current = stream;
+      }
+      if (current) {
+         cancel_stream(*current);
+      }
+   }
+
+   void mark_closed_from_io() noexcept {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state == connection_state::active || state == connection_state::cancel_requested ||
+          state == connection_state::close_requested) {
+         state = connection_state::closed;
+      }
+   }
+
+   [[nodiscard]] std::shared_ptr<native_stream> detach_stream() {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state != connection_state::active) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "stcp connection cannot hand off a terminal stream");
+      }
+      if (active_operations != 0) {
+         FORGE_THROW_EXCEPTION(exceptions::io_error, "stcp connection cannot hand off while I/O is active");
+      }
+      state = connection_state::handed_off;
+      return std::move(stream);
+   }
+
+   void claim_operation() {
+      const auto lock = std::scoped_lock{state_mutex};
+      if (state == connection_state::cancel_requested) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp connection canceled");
+      }
+      if (state != connection_state::active) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
       }
-      auto local = local_endpoint();
-      auto remote = remote_endpoint();
-      auto transport_stream = transport::detail::stream_access::make(
-          std::make_shared<stream_model>(stream, context, strand, gates, read_chunk_size, id));
-      stream.reset();
-      return transport::stream_connection{.local_endpoint = std::move(local),
-                                          .remote_endpoint = std::move(remote),
-                                          .stream = std::move(transport_stream)};
+      ++active_operations;
+   }
+
+   void release_operation() noexcept {
+      const auto lock = std::scoped_lock{state_mutex};
+      --active_operations;
    }
 
    std::shared_ptr<native_stream> stream;
@@ -809,11 +930,14 @@ struct connection::impl final {
    std::optional<forge::net::stcp::peer_certificate> certificate_value;
    certificate_chain chain_value;
    std::string alpn_value;
+   mutable std::mutex state_mutex;
+   connection_state state = connection_state::active;
+   std::size_t active_operations = 0;
 };
 
 connection::connection() = default;
-connection::connection(native_token, native_stream stream, std::shared_ptr<boost::asio::ssl::context> context,
-                       std::size_t read_chunk_size)
+connection::connection(native_token, std::shared_ptr<native_stream> stream,
+                       std::shared_ptr<boost::asio::ssl::context> context, std::size_t read_chunk_size)
     : impl_(std::make_shared<impl>(std::move(stream), std::move(context), read_chunk_size)) {}
 connection::~connection() = default;
 connection::connection(connection&&) noexcept = default;
@@ -862,28 +986,32 @@ boost::asio::awaitable<void> connection::async_write(std::span<const std::uint8_
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
    }
-   co_await impl_->async_write(bytes);
+   auto state = impl_;
+   co_await state->async_write(bytes);
 }
 
 boost::asio::awaitable<std::size_t> connection::async_read_some(std::span<std::uint8_t> bytes) {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
    }
-   co_return co_await impl_->async_read_some(bytes);
+   auto state = impl_;
+   co_return co_await state->async_read_some(bytes);
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>> connection::async_read() {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
    }
-   co_return co_await impl_->async_read();
+   auto state = impl_;
+   co_return co_await state->async_read();
 }
 
 boost::asio::awaitable<void> connection::async_close() {
    if (!impl_) {
       co_return;
    }
-   co_await impl_->async_close();
+   auto state = impl_;
+   co_await state->async_close();
 }
 
 void connection::cancel() {
@@ -893,30 +1021,41 @@ void connection::cancel() {
 }
 
 transport::stream_connection connection::into_transport_stream() && {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
    }
-   auto out = impl_->into_transport_stream();
-   impl_.reset();
-   return out;
+   return impl_->into_transport_stream();
 }
 
 boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
-                                                        std::optional<std::chrono::milliseconds> timeout);
+                                                        std::optional<std::chrono::milliseconds> timeout,
+                                                        std::stop_token stop);
 boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
-                                                        std::optional<std::chrono::milliseconds> timeout);
+                                                        std::optional<std::chrono::milliseconds> timeout,
+                                                        std::stop_token stop);
 
 boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options) {
-   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::nullopt);
+   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::nullopt, {});
 }
 
 boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
                                                         std::chrono::milliseconds timeout) {
-   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::optional{timeout});
+   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::optional{timeout}, {});
 }
 
 boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
-                                                        std::optional<std::chrono::milliseconds> timeout) {
+                                                        std::stop_token stop) {
+   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::nullopt, stop);
+}
+
+boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
+                                                        std::chrono::milliseconds timeout, std::stop_token stop) {
+   co_return co_await async_upgrade_client(std::move(source), std::move(options), std::optional{timeout}, stop);
+}
+
+boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
+                                                        std::optional<std::chrono::milliseconds> timeout,
+                                                        std::stop_token stop) {
    if (!source.valid()) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid source tcp connection");
    }
@@ -926,7 +1065,7 @@ boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, 
    configure_client_stream(*stream, options, remote.host);
 
    try {
-      co_await async_handshake(stream, asio::ssl::stream_base::client, timeout);
+      co_await async_handshake(stream, asio::ssl::stream_base::client, timeout, stop);
    } catch (const exceptions::handshake_failed&) {
       const auto verify_result = SSL_get_verify_result(stream->native_handle());
       if (options.security.verify_peer && verify_result != X509_V_OK) {
@@ -937,29 +1076,40 @@ boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, 
    }
    const auto expected_host = options.server_name.empty() ? remote.host : options.server_name;
    verify_peer(*stream, options.security, expected_host);
-   co_return connection{connection::native_token{}, std::move(*stream), std::move(context), options.read_chunk_size};
+   co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 
 boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options) {
-   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::nullopt);
+   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::nullopt, {});
 }
 
 boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
                                                         std::chrono::milliseconds timeout) {
-   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::optional{timeout});
+   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::optional{timeout}, {});
 }
 
 boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
-                                                        std::optional<std::chrono::milliseconds> timeout) {
+                                                        std::stop_token stop) {
+   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::nullopt, stop);
+}
+
+boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
+                                                        std::chrono::milliseconds timeout, std::stop_token stop) {
+   co_return co_await async_upgrade_server(std::move(source), std::move(options), std::optional{timeout}, stop);
+}
+
+boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
+                                                        std::optional<std::chrono::milliseconds> timeout,
+                                                        std::stop_token stop) {
    if (!source.valid()) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid source tcp connection");
    }
    auto context = make_server_context(options);
    configure_server_context(*context, options);
    auto stream = std::make_shared<native_stream>(std::move(source).release_socket(), *context);
-   co_await async_handshake(stream, asio::ssl::stream_base::server, timeout);
+   co_await async_handshake(stream, asio::ssl::stream_base::server, timeout, stop);
    verify_peer(*stream, options.security, {});
-   co_return connection{connection::native_token{}, std::move(*stream), std::move(context), options.read_chunk_size};
+   co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 
 } // namespace forge::net::stcp

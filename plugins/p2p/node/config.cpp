@@ -25,6 +25,7 @@ import forge.config.core.decode;
 import forge.exceptions;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.node;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
@@ -122,15 +123,17 @@ void apply_config(plugin::impl& state, const config& config) {
        .deadline = to_ms(config.api_deadline_ms),
        .max_frame_size = static_cast<std::uint32_t>(config.api_max_frame_size),
    };
-   state.listen = parse_endpoint_list(config.listen);
-   state.bootstrap.clear();
+   state.options.lifecycle.listen = parse_endpoint_list(config.listen);
+   state.options.lifecycle.bootstrap.clear();
    for (auto& endpoint : parse_endpoint_list(config.bootstrap)) {
-      auto peer = endpoint.peer;
-      state.bootstrap.push_back(bootstrap_peer{
-          .endpoint = std::move(endpoint),
-          .peer = std::move(peer),
-      });
+      state.options.lifecycle.bootstrap.push_back(forge::net::p2p::bootstrap_peer{.address = std::move(endpoint)});
    }
+   state.options.lifecycle.requirement = config.bootstrap_requirement == bootstrap_requirement::require_connection
+                                             ? forge::net::p2p::bootstrap_requirement::require_connection
+                                             : forge::net::p2p::bootstrap_requirement::allow_disconnected;
+   state.options.lifecycle.startup_budget = to_ms(config.bootstrap_startup_budget_ms);
+   state.options.lifecycle.connect_timeout = to_ms(config.bootstrap_connect_timeout_ms);
+   state.options.lifecycle.max_parallel_bootstrap = static_cast<std::size_t>(config.bootstrap_max_parallel);
    state.options.advertised_endpoints = parse_endpoint_list(config.advertised_endpoints);
    state.peer_store_name = config.peer_store;
    state.certificate_secret = config.certificate_secret;

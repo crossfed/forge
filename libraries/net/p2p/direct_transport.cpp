@@ -16,6 +16,7 @@ module forge.net.p2p.node;
 import forge.asio.runtime;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.net.p2p.resource_manager;
 import forge.net.transport.session;
 
 #include "details/direct_transport.hxx"
@@ -39,10 +40,10 @@ struct registry::state {
 };
 
 registry::registry(forge::asio::runtime& runtime, const node::options& options,
-                   const libp2p_identity_material& identity)
+                   const libp2p_identity_material& identity, resource_manager resources)
     : state_(std::make_unique<state>()) {
-   register_quic_profile(*this, runtime, options);
-   register_tcp_profile(*this, runtime, options, identity);
+   register_quic_profile(*this, runtime, options, resources);
+   register_tcp_profile(*this, runtime, options, identity, std::move(resources));
 }
 
 registry::~registry() = default;
@@ -128,9 +129,10 @@ detail::session_teardown::operation registry::teardown_operation() const {
 }
 
 boost::asio::awaitable<connection> registry::async_connect(forge::net::p2p::endpoint endpoint,
-                                                           const node::connect_options& options) {
+                                                           const node::connect_options& options,
+                                                           std::shared_ptr<cancellation_latch> cancellation) {
    auto& selected = profile_for(state_->profiles, endpoint);
-   co_return co_await selected.async_connect(std::move(endpoint), options);
+   co_return co_await selected.async_connect(std::move(endpoint), options, std::move(cancellation));
 }
 
 boost::asio::awaitable<connection> registry::async_accept(forge::net::p2p::endpoint endpoint) {

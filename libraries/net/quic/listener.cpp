@@ -102,6 +102,7 @@ namespace {
        .security = map_security(options.security),
        .certificate_pem = options.certificate_pem,
        .private_key_pem = options.private_key_pem,
+       .inbound_admission = options.inbound_admission,
    };
 }
 

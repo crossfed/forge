@@ -5,6 +5,8 @@ add_library(
       bls_api_impl.cpp
       config.cpp
       plugin_impl.cpp
+      details/loaded_bls_key.hxx
+      details/loaded_key.hxx
 )
 forge_target_modules_at(forge_plugins_crypto_signer plugins/crypto/signer)
 

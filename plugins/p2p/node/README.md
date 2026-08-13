@@ -5,12 +5,12 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 
 ## Current Support State
 
-The plugin now provides the Stage 2 production foundation: identity material is
+The plugin now provides the Stage 3 production foundation: identity material is
 loaded through Crypto Secrets, peer/provider/Rendezvous state is persisted in a
 dedicated DB Store Object layer, hydration completes before listeners open and
-the low-level node owns bounded Kademlia routing state. It remains a
-bootstrap/static-topology adapter until Stage 3 moves bootstrap and topology
-maintenance into the node and completes Identify lifecycle ownership.
+the low-level node owns bootstrap, automatic Identify/Identify Push, scoped
+network resources and bounded Kademlia routing state. It remains a configuration
+adapter; complete Kademlia records and autonomous topology remain Stage 4/5.
 
 Insecure memory mode remains an explicit local-test path only. Current support
 classifications live
@@ -58,15 +58,16 @@ isolated codec and interop fixtures do not promote this plugin to production.
 - Loads certificate/private-key secrets, opens ObjectDB persistence and performs
   bounded hydration before opening any listener.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
-- Maintains configured bootstrap sessions with bounded reconnect backoff and
-  protects them from connection-manager pruning.
+- Passes bootstrap policy to the node, which owns bounded startup, reconnect
+  backoff and connection-manager protection.
 - Lets application plugins publish typed APIs over a P2P protocol id.
 - Opens typed remote API handles to peers through `remote<Interface>()`.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
-`request_stop()` synchronously closes admission and listeners and initiates
-session disconnect. `shutdown()` then awaits transport teardown, peer-state
-flush/close and bootstrap maintenance before releasing DB and Secrets handles.
+`request_stop()` synchronously asks the node lifecycle to stop admission,
+listeners, bootstrap, Identify Push and sessions. `shutdown()` then awaits all
+tracked network work and peer-state flush/close before releasing DB and Secrets
+handles.
 If peer-state close fails, the stopped node and its persistence ownership are
 retained so a subsequent `shutdown()` can retry deterministic close; the plugin
 never drops a persistence backend that still reports pending close work.
@@ -84,7 +85,11 @@ plugins:
    p2p:
       node:
          listen: ["/ip4/0.0.0.0/udp/9443/quic-v1"]
-         bootstrap: ["/dns4/bootstrap.example/udp/9443/quic-v1"]
+         bootstrap: ["/dns4/bootstrap.example/udp/9443/quic-v1/p2p/<peer-id>"]
+         bootstrap-requirement: allow-disconnected
+         bootstrap-startup-budget-ms: 10000
+         bootstrap-connect-timeout-ms: 2000
+         bootstrap-max-parallel: 4
          advertised-endpoints: ["/dns4/node.example/udp/9443/quic-v1"]
          peer-id: ""
          peer-store:
@@ -110,6 +115,11 @@ plugins:
             reservation-ttl-ms: 60000
             max-candidates: 4
 ```
+
+Including `/p2p/<peer-id>` in each bootstrap endpoint pins the expected
+authenticated peer and is recommended for production. Existing peer-less
+bootstrap endpoints remain supported; their peer is learned only after the
+authenticated connection succeeds.
 
 The named DB Store must provide an Object layer dedicated to P2P peer state.
 One authoritative schema marker versions the complete private row family, so

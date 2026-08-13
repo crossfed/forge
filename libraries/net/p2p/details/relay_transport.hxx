@@ -4,8 +4,6 @@ namespace forge::net::p2p {
 
 struct libp2p_identity_material;
 
-void trace_relay(std::string_view message);
-
 class relay_secure_io;
 
 boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>

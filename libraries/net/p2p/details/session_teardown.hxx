@@ -3,6 +3,7 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -32,15 +33,16 @@ class session_teardown {
       void release() noexcept;
 
     private:
-      explicit ticket(std::shared_ptr<state> state);
+      explicit ticket(std::shared_ptr<state> state, std::uint64_t id);
 
       std::shared_ptr<state> state_;
+      std::uint64_t id_ = 0;
       friend class session_teardown;
    };
 
    explicit session_teardown(boost::asio::any_io_executor executor);
 
-   [[nodiscard]] ticket track() noexcept;
+   [[nodiscard]] ticket track(std::function<void()> cancel = {}) noexcept;
    void start(std::vector<operation> operations) noexcept;
    boost::asio::awaitable<void> wait() const;
 

@@ -4,15 +4,19 @@ module;
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
 
@@ -21,6 +25,7 @@ module forge.net.tcp.listener;
 namespace forge::net::tcp {
 namespace {
 
+namespace asio = boost::asio;
 using asio_tcp = boost::asio::ip::tcp;
 
 [[noreturn]] void throw_invalid_endpoint(const transport::endpoint& endpoint, std::string message) {
@@ -102,12 +107,19 @@ void configure_socket(asio_tcp::socket& socket, const options& tcp_options) {
    }
 }
 
+enum class listener_state : std::uint8_t {
+   open,
+   close_requested,
+   closed,
+};
+
 } // namespace
 
-struct listener::impl final : transport::detail::stream_listener_concept {
+struct listener::impl final : transport::detail::stream_listener_concept,
+                              std::enable_shared_from_this<listener::impl> {
    impl(boost::asio::any_io_executor executor, transport::endpoint requested, transport::listen_options listen_options,
         options tcp_options_value)
-       : acceptor(std::move(executor)), tcp_options(tcp_options_value) {
+       : strand(asio::make_strand(std::move(executor))), acceptor(strand), tcp_options(tcp_options_value) {
       validate_options(tcp_options);
       if (listen_options.limits.max_connections == 0) {
          throw_invalid_options("tcp listener max_connections must be greater than zero");
@@ -141,7 +153,7 @@ struct listener::impl final : transport::detail::stream_listener_concept {
    }
 
    [[nodiscard]] bool valid() const noexcept override {
-      return acceptor.is_open();
+      return state.load(std::memory_order_acquire) == listener_state::open;
    }
 
    [[nodiscard]] transport::endpoint local_endpoint() const override {
@@ -152,25 +164,32 @@ struct listener::impl final : transport::detail::stream_listener_concept {
    }
 
    boost::asio::awaitable<connection> async_accept_connection() {
-      if (!valid()) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp listener");
-      }
-      auto socket = asio_tcp::socket{acceptor.get_executor()};
-      auto error = boost::system::error_code{};
-      co_await acceptor.async_accept(socket, boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error) {
-         if (error == boost::asio::error::operation_aborted) {
-            if (close_requested.load(std::memory_order_acquire)) {
-               FORGE_THROW_EXCEPTION(exceptions::closed, "tcp listener closed during accept");
-            }
-            FORGE_THROW_EXCEPTION(exceptions::canceled, "tcp listener accept canceled");
-         }
-         FORGE_THROW_EXCEPTION(exceptions::accept_failed, "tcp accept failed",
-                             forge::exceptions::ctx("reason", error.message()));
-      }
+      auto self = shared_from_this();
+      co_return co_await asio::co_spawn(
+          strand,
+          [self = std::move(self)]() -> asio::awaitable<connection> {
+             if (!self->valid()) {
+                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp listener");
+             }
+             auto socket = asio_tcp::socket{self->acceptor.get_executor()};
+             auto error = boost::system::error_code{};
+             co_await self->acceptor.async_accept(socket,
+                                                  asio::redirect_error(asio::use_awaitable, error));
+             if (error) {
+                if (error == asio::error::operation_aborted) {
+                   if (self->state.load(std::memory_order_acquire) != listener_state::open) {
+                      FORGE_THROW_EXCEPTION(exceptions::closed, "tcp listener closed during accept");
+                   }
+                   FORGE_THROW_EXCEPTION(exceptions::canceled, "tcp listener accept canceled");
+                }
+                FORGE_THROW_EXCEPTION(exceptions::accept_failed, "tcp accept failed",
+                                      forge::exceptions::ctx("reason", error.message()));
+             }
 
-      configure_socket(socket, tcp_options);
-      co_return connection{std::move(socket), tcp_options};
+             configure_socket(socket, self->tcp_options);
+             co_return connection{std::move(socket), self->tcp_options};
+          },
+          asio::use_awaitable);
    }
 
    boost::asio::awaitable<transport::stream_connection> async_accept() override {
@@ -179,25 +198,56 @@ struct listener::impl final : transport::detail::stream_listener_concept {
    }
 
    boost::asio::awaitable<void> async_close() override {
-      close();
-      co_return;
+      static_cast<void>(request_close());
+      auto self = shared_from_this();
+      co_await asio::co_spawn(
+          strand,
+          [self = std::move(self)]() -> asio::awaitable<void> {
+             self->close_on_owner();
+             co_return;
+          },
+          asio::use_awaitable);
    }
 
    void close() {
-      close_requested.store(true, std::memory_order_release);
+      if (request_close()) {
+         auto self = shared_from_this();
+         asio::post(strand, [self = std::move(self)] { self->close_on_owner(); });
+      }
+   }
+
+   void cancel() override {
+      auto self = shared_from_this();
+      asio::post(strand, [self = std::move(self)] {
+         if (self->state.load(std::memory_order_acquire) != listener_state::open) {
+            return;
+         }
+         auto ignored = boost::system::error_code{};
+         self->acceptor.cancel(ignored);
+      });
+   }
+
+   [[nodiscard]] bool request_close() noexcept {
+      auto expected = listener_state::open;
+      return state.compare_exchange_strong(expected, listener_state::close_requested, std::memory_order_acq_rel,
+                                           std::memory_order_acquire);
+   }
+
+   void close_on_owner() noexcept {
+      auto expected = listener_state::close_requested;
+      if (!state.compare_exchange_strong(expected, listener_state::closed, std::memory_order_acq_rel,
+                                         std::memory_order_acquire)) {
+         return;
+      }
       auto ignored = boost::system::error_code{};
       acceptor.close(ignored);
    }
 
-   void cancel() override {
-      auto ignored = boost::system::error_code{};
-      acceptor.cancel(ignored);
-   }
-
+   asio::strand<asio::any_io_executor> strand;
    asio_tcp::acceptor acceptor;
    transport::endpoint local;
    options tcp_options;
-   std::atomic_bool close_requested = false;
+   std::atomic<listener_state> state{listener_state::open};
 };
 
 listener::listener() = default;
@@ -220,24 +270,27 @@ transport::endpoint listener::local_endpoint() const {
 }
 
 boost::asio::awaitable<connection> listener::async_accept_connection() {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp listener");
    }
-   co_return co_await impl_->async_accept_connection();
+   auto state = impl_;
+   co_return co_await state->async_accept_connection();
 }
 
 boost::asio::awaitable<transport::stream_connection> listener::async_accept() {
-   if (!valid()) {
+   if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp listener");
    }
-   co_return co_await impl_->async_accept();
+   auto state = impl_;
+   co_return co_await state->async_accept();
 }
 
 boost::asio::awaitable<void> listener::async_close() {
-   if (!valid()) {
+   if (!impl_) {
       co_return;
    }
-   co_await impl_->async_close();
+   auto state = impl_;
+   co_await state->async_close();
 }
 
 void listener::close() {
@@ -247,7 +300,7 @@ void listener::close() {
 }
 
 void listener::cancel() {
-   if (valid()) {
+   if (impl_) {
       impl_->cancel();
    }
 }

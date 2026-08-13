@@ -20,6 +20,8 @@ import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.hole_punch;
 import forge.net.p2p.identity;
+import forge.net.p2p.identify;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
@@ -75,6 +77,8 @@ class node {
       std::string agent_version = "forge/1.0.0";
       peer_store::options peer_state;
       bool allow_insecure_test_mode = false;
+      identify::limits identify;
+      lifecycle_options lifecycle;
    };
 
    struct connect_options {
@@ -105,6 +109,7 @@ class node {
       capability_set capabilities{};
       path::kind path = path::kind::direct;
       std::optional<peer_id> relay_peer;
+      identify::state identify_state = identify::state::unknown;
    };
 
    struct incoming_protocol_stream {
@@ -135,12 +140,17 @@ class node {
    [[nodiscard]] peer_store& peers() noexcept;
    [[nodiscard]] const peer_store& peers() const noexcept;
    [[nodiscard]] dht::routing_status routing_status() const;
+   [[nodiscard]] lifecycle_status lifecycle_state() const;
 
    void protect_peer(peer_id peer, std::string tag = "manual");
    [[nodiscard]] bool unprotect_peer(peer_id peer, std::string tag = "manual");
    [[nodiscard]] bool is_peer_protected(const peer_id& peer) const;
 
    void register_protocol_handler(protocol_id protocol, protocol_handler handler);
+   [[nodiscard]] bool unregister_protocol_handler(const protocol_id& protocol);
+   void set_advertised_endpoints(std::vector<forge::net::p2p::endpoint> endpoints);
+   boost::asio::awaitable<lifecycle_status> async_start();
+   boost::asio::awaitable<void> async_set_bootstrap(std::vector<bootstrap_peer> peers);
    boost::asio::awaitable<void> async_listen(forge::net::p2p::endpoint endpoint);
    boost::asio::awaitable<void> async_hydrate_peer_state();
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint);

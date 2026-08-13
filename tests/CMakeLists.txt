@@ -710,6 +710,7 @@ add_executable(
    asio/affine_tests.cpp
    asio/compute_tests.cpp
    asio/gate_tests.cpp
+   asio/notification_tests.cpp
    asio/task_tests.cpp
 )
 target_link_libraries(test_forge_asio forge_asio Boost::included_unit_test_framework)
@@ -874,12 +875,14 @@ add_executable(
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/quic_tests.cpp
+   quic_p2p/p2p_lifecycle_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
 )
 target_link_libraries(test_forge_quic_p2p forge Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 add_test(NAME test_forge_quic_p2p COMMAND test_forge_quic_p2p WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+set_tests_properties(test_forge_quic_p2p PROPERTIES TIMEOUT 300)
 
 add_executable(
    forge_interop_fixture

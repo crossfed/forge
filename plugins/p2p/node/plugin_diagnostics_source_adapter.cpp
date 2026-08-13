@@ -31,7 +31,7 @@ import forge.plugins.crypto.secrets.api;
 import forge.plugins.db.store.api;
 
 #include "details/plugin_impl.hxx"
-#include "details/diagnostics_source.hxx"
+#include "details/plugin_diagnostics_source_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 
@@ -40,7 +40,7 @@ plugin::diagnostics_source_adapter::diagnostics_source_adapter(std::shared_ptr<p
 
 forge::net::p2p::diagnostics::snapshot
 plugin::diagnostics_source_adapter::snapshot(forge::net::p2p::diagnostics::options options) const {
-   return impl_->require_node().diagnostics(options);
+   return impl_->require_node()->diagnostics(options);
 }
 
 } // namespace forge::plugins::p2p::node

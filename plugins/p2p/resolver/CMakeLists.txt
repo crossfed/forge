@@ -4,6 +4,7 @@ add_library(
       config.cpp
       plugin_impl.cpp
       api_impl.cpp
+      details/cache_record.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
 

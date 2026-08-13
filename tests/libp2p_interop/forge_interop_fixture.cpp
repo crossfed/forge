@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <coroutine>
 #include <exception>
@@ -29,6 +30,7 @@ import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.crypto.pki.pem;
 import forge.net.p2p.dht;
+import forge.net.p2p.diagnostics;
 import forge.multiformats.exceptions;
 import forge.multiformats.multihash;
 import forge.multiformats.types;
@@ -702,14 +704,23 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
       return "\"rtt_ms\":" + std::to_string(rtt.count());
    }
    if (scenario == "identify") {
-      auto document = forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<forge::net::p2p::identify::document> {
-         auto stream = co_await value.async_open_protocol_stream(peer, forge::net::p2p::builtins::identify,
-                                                                 forge::net::p2p::node::open_options{.allow_relay = false});
-         auto payload = co_await read_length_delimited(stream, 4 * 1024 * 1024);
-         co_return forge::net::p2p::identify::decode(payload);
-      }());
-      return "\"protocol_count\":" + std::to_string(document.protocols.size()) + ",\"agent_version\":\"" +
-             json_escape(document.agent_version) + "\"";
+      const auto record = value.peers().find(peer);
+      if (!record || record->protocols.empty() || record->signed_peer_record.empty()) {
+         auto detail = std::string{"FORGE Identify did not retain a verified signed peer record"};
+         if (record) {
+            detail += " (protocols=" + std::to_string(record->protocols.size()) +
+                      ", signed-bytes=" + std::to_string(record->signed_peer_record.size()) + ")";
+         }
+         const auto snapshot = value.diagnostics();
+         const auto session =
+             std::ranges::find(snapshot.sessions, peer, &forge::net::p2p::diagnostics::session::remote_peer);
+         if (session != snapshot.sessions.end() && !session->identify_error.empty()) {
+            detail += ": " + session->identify_error;
+         }
+         throw std::runtime_error{std::move(detail)};
+      }
+      return "\"protocol_count\":" + std::to_string(record->protocols.size()) + ",\"agent_version\":\"" +
+             json_escape(record->agent_version) + "\",\"signed_peer_record\":true";
    }
    if (scenario == "autonatv2") {
       const auto state = forge::asio::blocking::run(runtime, value.async_probe_reachability(peer));
@@ -836,12 +847,15 @@ int dial_mode(const std::map<std::string, std::string>& args) {
                                                                   forge::net::p2p::capabilities::pubsub});
 
    const auto scenario = required(args, "scenario");
-   if (scenario == "gossipsub_publish" || scenario == "gossipsub_mixed_mesh_stress") {
-      (void)forge::asio::blocking::run(
-          runtime, value.async_connect(remote,
-                                       forge::net::p2p::node::connect_options{.expected_peer = peer,
-                                                                       .allow_relay = false,
-                                                                       .allow_hole_punch = false}));
+   if (scenario == "identify" || scenario == "gossipsub_publish" || scenario == "gossipsub_mixed_mesh_stress") {
+      const auto session = forge::asio::blocking::run(
+          runtime,
+          value.async_connect(remote, forge::net::p2p::node::connect_options{
+                                          .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false}));
+      if (scenario == "identify" && session.identify_state != forge::net::p2p::identify::state::identified) {
+         throw std::runtime_error{"FORGE automatic Identify did not complete, state=" +
+                                  std::to_string(static_cast<int>(session.identify_state))};
+      }
    }
 
    const auto details = run_scenario(runtime, value, scenario, optional_value(args, "payload", pubsub_payload), peer);

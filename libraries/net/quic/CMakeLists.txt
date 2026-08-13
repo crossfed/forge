@@ -6,6 +6,8 @@ add_library(
    libp2p.cpp
    framed_stream.cpp
    runtime.cpp
+   acknowledged_ranges.cpp
+   details/acknowledged_ranges.hxx
    quic_engine.cpp
    details/quic_engine.hxx
    details/engine_client_options.hxx
