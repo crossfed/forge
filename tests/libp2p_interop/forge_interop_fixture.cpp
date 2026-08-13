@@ -830,11 +830,19 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
           .key_value = fixture.key,
           .value = fixture.value,
       };
-      const auto put = forge::asio::blocking::run(
-          runtime, value.async_put_value(forge::net::p2p::builtins::kad_dht, record,
-                                         {.requested_count = 20, .quorum = 1, .timeout = 20s}));
-      if (!put.quorum_reached || put.accepted == 0) {
-         throw std::runtime_error{"FORGE DHT value publication did not reach remote quorum"};
+      auto accepted = std::size_t{};
+      if (payload != "get_only") {
+         const auto put = forge::asio::blocking::run(
+             runtime, value.async_put_value(forge::net::p2p::builtins::kad_dht, record,
+                                            {.requested_count = 20, .quorum = 1, .timeout = 20s}));
+         if (!put.quorum_reached || put.accepted == 0) {
+            throw std::runtime_error{"FORGE DHT value publication did not reach remote quorum"};
+         }
+         accepted = put.accepted;
+      }
+      if (payload == "put_only") {
+         return "\"operation\":\"put_only\",\"accepted\":" + std::to_string(accepted) +
+                ",\"value_bytes\":" + std::to_string(fixture.value.size());
       }
       const auto get = forge::asio::blocking::run(
           runtime, value.async_get_value(forge::net::p2p::builtins::kad_dht, fixture.key,
@@ -842,9 +850,10 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
       if (!get.quorum_reached || !get.selected || get.selected->value != fixture.value) {
          throw std::runtime_error{"FORGE DHT value query did not return the published record"};
       }
-      return "\"accepted\":" + std::to_string(put.accepted) +
-             ",\"valid_records\":" + std::to_string(get.valid_records) +
-             ",\"value_bytes\":" + std::to_string(fixture.value.size());
+      return "\"operation\":\"" + std::string{payload == "get_only" ? "get_only" : "put_get"} +
+             "\",\"accepted\":" + std::to_string(accepted) + ",\"valid_records\":" + std::to_string(get.valid_records) +
+             ",\"value_bytes\":" + std::to_string(fixture.value.size()) +
+             ",\"remote_get\":" + std::string{payload == "get_only" ? "true" : "false"};
    }
    if (scenario == "rendezvous_register_discover") {
       const auto local = value.local_endpoint();

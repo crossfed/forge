@@ -38,7 +38,7 @@ void dht::record_store::impl::mark_durability_uncertain_locked(std::string messa
 }
 
 void dht::record_store::impl::mark_persistence_healthy_locked(bool durability_confirmed) {
-   if (durability_confirmed) {
+   if (durability_confirmed && !reconciliation_required_) {
       durability_uncertain_ = false;
    }
    if (durability_uncertain_) {
@@ -180,10 +180,13 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
       providers_by_key_.swap(providers_by_key);
       local_providers_ = 0;
       total_bytes_ = total_bytes;
+      reconciliation_required_ = false;
       if (cleanup_result) {
          apply_durability_result_locked(*cleanup_result);
       } else {
-         mark_persistence_healthy_locked();
+         // A complete successful hydration is the reconciliation boundary:
+         // runtime state now exactly reflects the durable store.
+         mark_persistence_healthy_locked(true);
       }
    }
    if (cleanup_result && !cleanup_result->durability_confirmed) {
@@ -273,6 +276,7 @@ dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_poi
       try {
          validate_prune_result_locked(result, now);
       } catch (...) {
+         reconciliation_required_ = true;
          mark_durability_uncertain_locked("DHT persistence returned an invalid committed prune result");
          throw;
       }

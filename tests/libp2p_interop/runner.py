@@ -119,9 +119,15 @@ def command_attempt(command: list[str], log_file: Path, scenario: str, attempt_i
     }
 
 
-def run_command_with_attempts(command: list[str], log_file: Path, scenario: str, kind: str, timeout: float) -> list[dict]:
+def run_command_with_attempts(command: list[str], log_file: Path, scenario: str, kind: str, timeout: float,
+                              reset_paths: tuple[Path, ...] = ()) -> list[dict]:
     attempts: list[dict] = []
     for attempt_id in (1, 2):
+        for path in reset_paths:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
         attempt = command_attempt(command, log_file, scenario, attempt_id, kind, timeout)
         attempts.append(attempt)
         with log_file.open("w") as log:
@@ -234,7 +240,7 @@ def start_destination(binary: Path, implementation: str, relay_addr: str, relay_
 
 
 def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, addr: str, work: Path,
-             payload: Optional[str] = None, transport: str = "quic") -> dict:
+             payload: Optional[str] = None, transport: str = "quic", fresh_store_each_attempt: bool = False) -> dict:
     payload_suffix = "" if payload is None else f"-{payload}"
     result_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.json"
     log_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.log"
@@ -258,7 +264,10 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
     if payload is not None:
         command.extend(["--payload", payload])
     try:
-        attempts = run_command_with_attempts(command, log_file, scenario, "dial", DIAL_TIMEOUT_SECONDS)
+        reset_paths = (store_dir, result_file) if fresh_store_each_attempt else ()
+        attempts = run_command_with_attempts(
+            command, log_file, scenario, "dial", DIAL_TIMEOUT_SECONDS, reset_paths=reset_paths
+        )
     except RuntimeError as error:
         detail = str(error)
         if result_file.exists():
@@ -439,6 +448,54 @@ def run_pair(dialer_binary: Path, dialer: str, listener_binary: Path, listener: 
     return run_pair_with_transport(dialer_binary, dialer, listener_binary, listener, scenario, root, "quic")
 
 
+def run_dht_value_remote_get(binaries: dict[str, Path], writer: str, listener: str, scenario: str,
+                             root: Path) -> dict:
+    readers = [implementation for implementation in binaries if implementation not in (writer, listener)]
+    if len(readers) != 1:
+        raise RuntimeError(f"DHT value proof requires one distinct third reader, got {readers}")
+    reader = readers[0]
+    work = root / f"quic-{writer}-via-{listener}-to-{reader}-{scenario}"
+    work.mkdir(parents=True, exist_ok=True)
+    listener_result = work / f"{listener}-listen-{scenario}.json"
+    server = start_listener(binaries[listener], listener, work, scenario, listener_result)
+    try:
+        addr = server.ready["listen_addrs"][0]
+        peer_id = server.ready["peer_id"]
+        publication = run_dial(binaries[writer], writer, scenario, peer_id, addr, work, payload="put_only")
+        if publication.get("operation") != "put_only":
+            raise RuntimeError(f"{writer} did not report an isolated DHT PUT: {publication}")
+        delivered = wait_json(listener_result, 20)
+        if delivered.get("status") != "ok" or delivered.get("record_persisted") is not True:
+            raise RuntimeError(f"{listener} listener did not persist the DHT value: {delivered}")
+
+        retrieval = run_dial(
+            binaries[reader], reader, scenario, peer_id, addr, work, payload="get_only",
+            fresh_store_each_attempt=True
+        )
+        if retrieval.get("operation") != "get_only" or retrieval.get("remote_get") is not True:
+            raise RuntimeError(f"{reader} did not report an isolated remote DHT GET: {retrieval}")
+        return {
+            "writer": writer,
+            "listener": listener,
+            "reader": reader,
+            "scenario": scenario,
+            "transport": "quic",
+            "addr": addr,
+            "peer_id": peer_id,
+            "reader_store_reset_each_attempt": True,
+            "listener_process": {
+                "pid": server.process.pid,
+                "command": server.command,
+                "log_file": str(server.log_file),
+            },
+            "publication": publication,
+            "listener_result": delivered,
+            "retrieval": retrieval,
+        }
+    finally:
+        server.close()
+
+
 def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str,
                             root: Path, transport: str) -> dict:
     work = root / f"{transport}-{dialer}-to-{listener}-{scenario}"
@@ -611,7 +668,12 @@ def main() -> int:
                     failures.append(f"{dialer}->{listener} {scenario}: {error}")
             for scenario in DHT_SCENARIOS:
                 try:
-                    artifacts.append(run_pair(binaries[dialer], dialer, binaries[listener], listener, scenario, root))
+                    if scenario in DHT_VALUE_SCENARIOS:
+                        artifacts.append(run_dht_value_remote_get(binaries, dialer, listener, scenario, root))
+                    else:
+                        artifacts.append(
+                            run_pair(binaries[dialer], dialer, binaries[listener], listener, scenario, root)
+                        )
                 except Exception as error:
                     failures.append(f"{dialer}->{listener} {scenario}: {error}")
             for scenario in PUBSUB_SCENARIOS:

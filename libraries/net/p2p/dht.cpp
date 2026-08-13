@@ -69,6 +69,11 @@ void validate_outbound_provider_key(const dht::message& value) {
    if (value.type != dht::message_type::add_provider && value.type != dht::message_type::get_providers) {
       return;
    }
+   // Rust libp2p omits the request key from non-PUT responses. Request
+   // semantics validate the key after decoding, where direction is known.
+   if (value.key_value.bytes.empty()) {
+      return;
+   }
    if (!valid_amino_provider_key(value.key_value.bytes)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                             "Amino DHT provider key must be a multihash of at most 80 bytes");
@@ -77,6 +82,9 @@ void validate_outbound_provider_key(const dht::message& value) {
 
 void validate_inbound_provider_key(const dht::message& value) {
    if (value.type != dht::message_type::add_provider && value.type != dht::message_type::get_providers) {
+      return;
+   }
+   if (value.key_value.bytes.empty()) {
       return;
    }
    if (!valid_amino_provider_key(value.key_value.bytes)) {

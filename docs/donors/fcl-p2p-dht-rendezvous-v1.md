@@ -10,9 +10,10 @@ lifetimes belong to `dht::record_store`.
 
 Supported claims stay tied to evidence. The current slice has component proof
 for wire codecs, FCL-to-FCL negotiated streams, routing/provider state and
-rendezvous register/discover state, plus live donor interop artifacts for
-DHT peer/provider lookup plus `/pk` and `/ipns` value exchange against
-go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
+rendezvous register/discover state. Live donor interop proves DHT
+peer/provider lookup, Rendezvous register/discover and a three-process `/pk`
+and `/ipns` value flow: one implementation writes, the listener persists, and
+a distinct fresh implementation reads remotely.
 
 ## Donor Sources
 
@@ -36,7 +37,10 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
   adapters for both; `forge_net_p2p` has no RocksDB or DB Store dependency.
 - DHT/rendezvous messages are full length-delimited libp2p protocol payloads;
   payload-only helpers are not public API.
-- Amino keeps the donor 16 KiB outbound bound while bounded inbound decoding
+- Every inbound DHT handler response is capped at the donor 16 KiB bound;
+  non-PUT response keys are omitted and records, peers and endpoints are added
+  only while the complete encoded response fits. A `PUT_VALUE` whose required
+  echo cannot fit is rejected before durable mutation. Bounded inbound decoding
   retains useful candidates and skips excess peers/endpoints. The Kademlia
   shortlist begins with `k` local peers; `alpha` controls only concurrency.
 - Durable provider ownership is accepted only from an authenticated
@@ -58,7 +62,7 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 | DHT node handler over negotiated stream | Ported | `p2p_dht_node_finds_peer_and_provider_over_negotiated_stream` |
 | DHT iterative many-peer lookup | Ported | `p2p_dht_iterative_lookup_walks_many_peer_topology` |
 | DHT iterative provider lookup and provide | Ported | `p2p_dht_iterative_provider_lookup_and_provide_reach_closest_peers` |
-| DHT bounded donor materialization | Ported | `dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k`, exact 16 KiB and peer/address bound fixtures |
+| DHT bounded donor materialization | Ported | `dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k`, `p2p_dht_large_non_put_key_uses_bounded_response_and_preserves_stream`, `p2p_dht_large_stored_value_is_omitted_without_resetting_stream`, `p2p_dht_oversized_put_echo_is_rejected_before_durable_mutation`, `p2p_dht_provider_response_incrementally_truncates_to_wire_budget` |
 | DHT trusted provider ownership and full fanout | Ported | `p2p_dht_get_providers_does_not_persist_third_party_claim`, `p2p_dht_fanout_full_target_attempts_every_closest_peer`, `p2p_dht_provide_replicates_to_all_closest_peers_after_quorum` |
 | DHT remaining value TTL | Ported | `p2p_dht_get_value_reports_remaining_record_ttl` |
 | DHT bounded async persistence | Ported | `dht_record_store_hydrates_bounded_pages_across_reopen`, `dht_record_store_enforces_value_provider_and_per_key_capacity`, `dht_record_store_enforces_record_and_total_byte_capacity` |
@@ -69,7 +73,7 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 | DHT autonomous routing refresh | Ported | `dht_routing_refresh_tests` with fake clock, coalescing, backoff and cancellation |
 | DHT owned provider lifetime | Ported | initial quorum, coalesced owners, republish snapshot, withdrawal and restart confirmation tests |
 | IPNS codec, validation and selection | Ported | hardcoded Boxo v1/v2 golden, tamper, expiry, key binding and deterministic selector tests |
-| DHT live `/pk` and `/ipns` values | Ported | bilateral Forge/Go/Rust `dht_pk_put_get` and `dht_ipns_put_get` scenarios |
+| DHT live `/pk` and `/ipns` values | Ported | Forge/Go/Rust `dht_pk_put_get` and `dht_ipns_put_get`: writer-only PUT, listener persistence confirmation and reader-only GET from a distinct fresh process with a reset local store |
 | Rendezvous protocol id | Ported | `p2p_libp2p_reachability_relay_protocol_ids_are_exact` |
 | Rendezvous codec, TTL, cookie and status | Ported | `p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status` |
 | Rendezvous node handler over negotiated stream | Ported | `p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream` |
@@ -83,6 +87,9 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 - Live donor fixtures for repeated many-peer DHT/rendezvous refresh topologies
   are still limited. Forge component simulations cover the lifecycle; live matrix
   artifacts remain peer/provider lookup and Rust rendezvous register/discover.
+- The `/pk` and `/ipns` matrix does not credit same-process local reads. Each
+  artifact records distinct writer, listener and reader implementations and
+  resets the reader store before every attempt.
 - Go Rendezvous behaviour proof is not claimed because no official go-libp2p
   rendezvous behaviour donor is present in the workspace.
 - Full topology management remains Stage 5 work; completing Kademlia does not

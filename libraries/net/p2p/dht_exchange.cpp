@@ -57,6 +57,9 @@ boost::asio::awaitable<std::vector<std::uint8_t>> async_read_dht_message(forge::
 } // namespace
 
 void validate_dht_request(const dht::message& request, const peer_id& remote, const dht::profile& profile) {
+   if (request.type != dht::message_type::ping && request.key_value.bytes.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT request key must not be empty");
+   }
    if ((request.type == dht::message_type::put_value || request.type == dht::message_type::get_value) &&
        !profile.capabilities.values) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable value operations");
@@ -119,6 +122,9 @@ void validate_dht_response(const dht::message& request, const dht::message& resp
 boost::asio::awaitable<dht::message> async_exchange_dht(forge::net::p2p::stream stream, dht::message request,
                                                         const dht::profile& profile, boost::asio::io_context& context,
                                                         std::chrono::milliseconds timeout) {
+   if (request.type != dht::message_type::ping && request.key_value.bytes.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT request key must not be empty");
+   }
    auto deadline = operation_deadline{context, timeout};
    deadline.arm([&stream] { stream.cancel(); });
    try {
@@ -144,6 +150,9 @@ boost::asio::awaitable<dht::message> async_exchange_dht(forge::net::p2p::stream 
 boost::asio::awaitable<void> async_send_dht(forge::net::p2p::stream stream, dht::message request,
                                             const dht::profile& profile, boost::asio::io_context& context,
                                             std::chrono::milliseconds timeout) {
+   if (request.type != dht::message_type::ping && request.key_value.bytes.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT request key must not be empty");
+   }
    auto deadline = operation_deadline{context, timeout};
    deadline.arm([&stream] { stream.cancel(); });
    try {

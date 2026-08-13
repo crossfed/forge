@@ -341,8 +341,10 @@ node::node(forge::asio::runtime& runtime, node::options options) {
    impl_ = std::make_shared<impl>(runtime, std::move(options));
    impl_->validate_local_identify_document();
    impl_->initialize_dht_provider_registry();
-   impl_->initialize_dht_routing_refresh();
    impl_->initialize_lifecycle();
+   // Launch the self-owning maintenance task only after every throwing
+   // constructor step has completed.
+   impl_->initialize_dht_routing_refresh();
 }
 
 node::~node() {

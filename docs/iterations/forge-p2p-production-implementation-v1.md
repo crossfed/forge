@@ -229,7 +229,7 @@ Focused evidence includes
 
 > **Implementation status:** present on `forge-p2p-kademlia-v1`; the exit gate
 > remains unverified until the focused persistence, adversarial, package and
-> bilateral Go/Rust interoperability suites pass on the exact reviewed head.
+> three-process Go/Rust interoperability suites pass on the exact reviewed head.
 > This status does not yet promote Kademlia or the P2P host to production.
 
 ### Standard profile
@@ -280,6 +280,10 @@ interoperability with the standard Kademlia profile.
 The current `dht_find_peer` fixture connects directly to the searched peer and
 can be satisfied from the local peer store. It is not live outbound DHT evidence
 until a third-peer route or explicit Kademlia negotiation is proven.
+The `/pk` and `/ipns` fixture uses writer-only PUT, listener persistence
+confirmation and reader-only GET from a distinct fresh process whose local
+store is reset before each attempt. The focused exact-head matrix emits all
+three roles in each evidence artifact.
 
 ## 8. Stage 5+: Production Host Completion
 

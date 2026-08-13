@@ -153,6 +153,51 @@ BOOST_AUTO_TEST_CASE(dht_routing_refresh_fake_time_proves_retry_backoff_and_canc
    running.get();
 }
 
+BOOST_AUTO_TEST_CASE(dht_routing_refresh_status_is_synchronized_with_wakeup_rescheduling) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   const auto local = refresh_peer(21);
+   auto routing = dht::routing_table{local};
+   routing.upsert(dht::peer{.id = refresh_peer(22)}, dht::routing_admission::verified_server);
+
+   auto clock = fake_refresh_clock{};
+   auto queries = std::atomic_size_t{};
+   auto refresh = detail::dht_routing_refresh{
+       local,
+       {detail::dht_routing_refresh::profile{
+           .protocol = builtins::kad_dht,
+           .routing = &routing,
+           .interval = std::chrono::milliseconds{1},
+       }},
+       [&queries](protocol_id, dht::key) -> boost::asio::awaitable<bool> {
+          queries.fetch_add(1, std::memory_order_acq_rel);
+          co_return true;
+       },
+       clock.source(),
+   };
+   auto running = boost::asio::co_spawn(runtime.context(), refresh.async_run(), boost::asio::use_future);
+   BOOST_REQUIRE(refresh_eventually([&] { return queries.load(std::memory_order_acquire) > 1; }));
+
+   auto missing_status = std::atomic_bool{};
+   auto reader = std::jthread{[&] {
+      for (auto attempt = 0U; attempt < 10'000U; ++attempt) {
+         if (!refresh.status(builtins::kad_dht)) {
+            missing_status.store(true, std::memory_order_release);
+         }
+      }
+   }};
+   for (auto attempt = 0U; attempt < 1'000U; ++attempt) {
+      clock.advance(std::chrono::milliseconds{2});
+      refresh.notify_verified_server();
+      static_cast<void>(refresh.status(builtins::kad_dht));
+   }
+   reader.join();
+
+   BOOST_TEST(!missing_status.load(std::memory_order_acquire));
+   refresh.request_stop();
+   BOOST_REQUIRE(running.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   running.get();
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 } // namespace forge::net::p2p

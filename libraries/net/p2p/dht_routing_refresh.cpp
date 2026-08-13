@@ -185,7 +185,12 @@ boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_
    publish_status(state, true);
    try {
       auto failed = false;
-      if (state.startup_lookup_pending) {
+      auto should_run_startup_lookup = false;
+      {
+         auto lock = std::scoped_lock{mutex_};
+         should_run_startup_lookup = state.startup_lookup_pending;
+      }
+      if (should_run_startup_lookup) {
          auto startup_lookup_pending = true;
          try {
             startup_lookup_pending = !co_await query_(state.config.protocol, make_dht_key(local_));
@@ -252,7 +257,12 @@ boost::asio::awaitable<void> dht_routing_refresh::async_run() {
          if (state.config.routing->status().active == 0) {
             continue;
          }
-         if (state.next_attempt == std::chrono::steady_clock::time_point{} || state.next_attempt <= now) {
+         auto due = false;
+         {
+            auto lock = std::scoped_lock{mutex_};
+            due = state.next_attempt == std::chrono::steady_clock::time_point{} || state.next_attempt <= now;
+         }
+         if (due) {
             co_await async_refresh_profile(state);
             ran = true;
          }
@@ -264,9 +274,11 @@ boost::asio::awaitable<void> dht_routing_refresh::async_run() {
 
       auto deadline = std::chrono::steady_clock::time_point::max();
       for (const auto& state : profiles_) {
-         if (state.config.routing->status().active != 0 &&
-             state.next_attempt != std::chrono::steady_clock::time_point{}) {
-            deadline = std::min(deadline, state.next_attempt);
+         if (state.config.routing->status().active != 0) {
+            auto lock = std::scoped_lock{mutex_};
+            if (state.next_attempt != std::chrono::steady_clock::time_point{}) {
+               deadline = std::min(deadline, state.next_attempt);
+            }
          }
       }
       if (deadline == std::chrono::steady_clock::time_point::max()) {
@@ -277,8 +289,9 @@ boost::asio::awaitable<void> dht_routing_refresh::async_run() {
 
       const auto wake_now = time_.now();
       for (auto& state : profiles_) {
-         if (state.startup_lookup_pending && state.config.routing->status().active != 0 &&
-             state.next_attempt == std::chrono::steady_clock::time_point{}) {
+         const auto active = state.config.routing->status().active != 0;
+         auto lock = std::scoped_lock{mutex_};
+         if (state.startup_lookup_pending && active && state.next_attempt == std::chrono::steady_clock::time_point{}) {
             state.next_attempt = wake_now;
          }
       }

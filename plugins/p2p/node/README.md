@@ -55,10 +55,11 @@ isolated codec and interop fixtures do not promote this plugin to production.
 ## What It Provides Today
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
-- Registers and validates the private P2P-state ObjectDB schema during
-  `after_initialize()`.
-- Loads certificate/private-key secrets, opens ObjectDB persistence and performs
-  bounded hydration before opening any listener.
+- Acquires the configured physical store and registers private P2P-state
+  ObjectDB models during `after_initialize()`.
+- Loads certificate/private-key secrets, validates or explicitly resets the
+  private cache schema, opens ObjectDB persistence and performs bounded
+  hydration during `startup()` before opening any listener.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
 - Passes bootstrap policy to the node, which owns bounded startup, reconnect
   backoff and connection-manager protection.

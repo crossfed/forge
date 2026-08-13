@@ -27,6 +27,7 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <map>
@@ -162,7 +163,25 @@ void node::impl::initialize_lifecycle() {
               if (!self) {
                  co_return;
               }
-              static_cast<void>(co_await self->store.async_prune_expired());
+              auto failure = std::exception_ptr{};
+              try {
+                 static_cast<void>(co_await self->store.async_prune_expired());
+              } catch (...) {
+                 failure = std::current_exception();
+              }
+              for (auto& [_, state] : self->dht_profiles) {
+                 try {
+                    // One bounded page per profile keeps maintenance fair.
+                    static_cast<void>(co_await state->records.async_prune_expired());
+                 } catch (...) {
+                    if (!failure) {
+                       failure = std::current_exception();
+                    }
+                 }
+              }
+              if (failure) {
+                 std::rethrow_exception(failure);
+              }
            },
        });
 }

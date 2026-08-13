@@ -109,6 +109,7 @@ struct dht::record_store::impl {
    std::uint64_t persistence_failures_ = 0;
    bool degraded_ = false;
    bool durability_uncertain_ = false;
+   bool reconciliation_required_ = false;
    bool closing_ = false;
    bool closed_ = false;
    std::string last_failure_;

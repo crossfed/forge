@@ -138,9 +138,7 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
          existing = found->second;
          if (existing->stop_requested) {
             if (existing->removal_failed && !existing->removal_in_flight) {
-               existing->removal_failed = false;
-               existing->removal_failure = {};
-               existing->removal_in_flight = true;
+               claim_removal_retry_locked(existing);
                retry_removal = true;
             } else {
                wait_for_removal = true;
@@ -157,7 +155,6 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
       }
 
       if (retry_removal) {
-         reset_owners_for_retry(existing);
          co_await async_remove(existing);
          auto retry_failure = std::exception_ptr{};
          {
@@ -267,6 +264,7 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
          value->removal_in_flight = false;
          value->removal_failed = true;
          value->removal_failure = failure;
+         value->removal_failure_reported = true;
          entries_.try_emplace(value->registration, value);
       }
    }
@@ -362,14 +360,11 @@ boost::asio::awaitable<void> dht_provider_registry::async_release_owner(const st
          const auto found = entries_.find(owner->registration);
          if (found != entries_.end() && found->second->removal_failed && !found->second->removal_in_flight) {
             retry = found->second;
-            retry->removal_in_flight = true;
-            retry->removal_failed = false;
-            retry->removal_failure = {};
+            claim_removal_retry_locked(retry);
          }
       }
    }
    if (retry) {
-      reset_owners_for_retry(retry);
       co_await async_remove(retry);
    }
    co_await async_wait_owner(owner);
@@ -475,13 +470,16 @@ boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shar
    finish_entry(value, failure);
 }
 
-void dht_provider_registry::reset_owners_for_retry(const std::shared_ptr<entry>& value) noexcept {
+void dht_provider_registry::claim_removal_retry_locked(const std::shared_ptr<entry>& value) noexcept {
    try {
-      const auto registry_lock = std::scoped_lock{mutex_};
       const auto found = entries_.find(value->registration);
-      if (found == entries_.end() || found->second != value || !value->removal_in_flight) {
+      if (found == entries_.end() || found->second != value || value->removal_in_flight || !value->removal_failed) {
          return;
       }
+      value->removal_in_flight = true;
+      value->removal_failed = false;
+      value->removal_failure = {};
+      value->removal_failure_reported = false;
       for (const auto& [_, weak] : value->owners) {
          if (const auto owner = weak.lock()) {
             const auto owner_lock = std::scoped_lock{owner->mutex};
@@ -514,11 +512,7 @@ void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, st
          retain_for_retry = static_cast<bool>(failure);
          value->removal_failed = retain_for_retry;
          value->removal_failure = failure;
-         if (retain_for_retry && sealed_) {
-            if (!drain_failure_) {
-               drain_failure_ = failure;
-            }
-         }
+         value->removal_failure_reported = retain_for_retry && !sealed_;
       }
       for (const auto& owner : owners) {
          finish_owner(owner, failure);
@@ -685,19 +679,23 @@ boost::asio::awaitable<void> dht_provider_registry::async_drain() {
       auto retry = std::shared_ptr<entry>{};
       {
          const auto lock = std::scoped_lock{mutex_};
-         if (drain_failure_) {
-            failure = std::exchange(drain_failure_, {});
-         } else if (sealed_ && admissions_in_flight_ == 0) {
-            const auto found = std::ranges::find_if(entries_, [](const auto& item) {
-               return item.second->removal_failed && !item.second->removal_in_flight;
+         if (sealed_ && admissions_in_flight_ == 0) {
+            const auto unreported = std::ranges::find_if(entries_, [](const auto& item) {
+               return item.second->removal_failed && !item.second->removal_failure_reported;
             });
-            if (found != entries_.end()) {
-               retry = found->second;
-               retry->removal_in_flight = true;
-               retry->removal_failed = false;
-               retry->removal_failure = {};
-            } else if (entries_.empty()) {
-               co_return;
+            if (unreported != entries_.end()) {
+               failure = unreported->second->removal_failure;
+               unreported->second->removal_failure_reported = true;
+            } else {
+               const auto found = std::ranges::find_if(entries_, [](const auto& item) {
+                  return item.second->removal_failed && !item.second->removal_in_flight;
+               });
+               if (found != entries_.end()) {
+                  retry = found->second;
+                  claim_removal_retry_locked(retry);
+               } else if (entries_.empty()) {
+                  co_return;
+               }
             }
          }
       }
@@ -705,7 +703,6 @@ boost::asio::awaitable<void> dht_provider_registry::async_drain() {
          std::rethrow_exception(failure);
       }
       if (retry) {
-         reset_owners_for_retry(retry);
          co_await async_remove(retry);
          continue;
       }

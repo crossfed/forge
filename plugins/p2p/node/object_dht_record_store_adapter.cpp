@@ -580,11 +580,19 @@ object_dht_record_store_adapter::async_prune_expired(std::chrono::system_clock::
                                  detail::p2p_state_schema::by_dht_provider_profile_key_peer>()
                           .find(profile_.value, row.key, row.peer);
       if (existing && existing->addresses_expires_at_ns == row.addresses_expires_at_ns) {
-         existing->endpoints.clear();
-         existing->addresses_expires_at_ns = 0;
-         auto update = from_provider_row(*existing, profile_.value, max_record_bytes_);
-         co_await objects.replace(std::move(*existing));
-         result.provider_address_updates.push_back(std::move(update));
+         if (existing->provider_expires_at_ns <= now_ns) {
+            result.providers.push_back(forge::net::p2p::dht::record_store::provider_key{
+                .key = forge::net::p2p::dht::key{.bytes = binary_bytes(row.key)},
+                .provider = parse_peer(row.peer),
+            });
+            co_await objects.erase(existing->id);
+         } else {
+            existing->endpoints.clear();
+            existing->addresses_expires_at_ns = 0;
+            auto update = from_provider_row(*existing, profile_.value, max_record_bytes_);
+            co_await objects.replace(std::move(*existing));
+            result.provider_address_updates.push_back(std::move(update));
+         }
          changed = true;
       }
    }

@@ -572,6 +572,8 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
        forge::tests::p2p::make_identity_fixture("p2p-dht-address-provider").certificate_pem);
    const auto expired_provider = p2p::make_peer_id_from_certificate_pem(
        forge::tests::p2p::make_identity_fixture("p2p-dht-expired-provider").certificate_pem);
+   const auto fully_expired_provider = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-dht-fully-expired-provider").certificate_pem);
    const auto local_provider = p2p::make_peer_id_from_certificate_pem(
        forge::tests::p2p::make_identity_fixture("p2p-dht-local-provider").certificate_pem);
    const auto active_key = p2p::make_dht_key(std::vector<std::uint8_t>{'a', 'c', 't', 'i', 'v', 'e'});
@@ -582,7 +584,10 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
    const auto now = std::chrono::system_clock::now();
    const auto future = now + std::chrono::hours{1};
    const auto past = now - std::chrono::seconds{1};
+   const auto older_past = now - std::chrono::seconds{2};
    const auto address = p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4781/p2p/" + address_provider.to_string());
+   const auto fully_expired_address =
+       p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4782/p2p/" + fully_expired_provider.to_string());
 
    {
       auto app = make_app(document_for(driver, path));
@@ -628,6 +633,13 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
               .key = provider_key,
               .provider = expired_provider,
               .provider_expires_at = past,
+          },
+          p2p::dht::record_store::provider_record{
+              .key = provider_key,
+              .provider = fully_expired_provider,
+              .endpoints = {fully_expired_address},
+              .provider_expires_at = past,
+              .addresses_expires_at = older_past,
           },
           p2p::dht::record_store::provider_record{
               .key = provider_key,
@@ -693,7 +705,7 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
                               .kind = p2p::dht::record_store::hydration_kind::providers,
                               .limit = 10,
                           }));
-      BOOST_REQUIRE_EQUAL(providers.providers.size(), 3U);
+      BOOST_REQUIRE_EQUAL(providers.providers.size(), 4U);
       BOOST_TEST(std::ranges::any_of(providers.providers, [&](const auto& value) {
          return value.provider == local_provider && value.local_owned;
       }));
@@ -703,11 +715,15 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
 
       const auto pruned = forge::asio::blocking::run(app->runtime(), persistence_a->async_prune_expired(now, 10));
       BOOST_REQUIRE_EQUAL(pruned.values.size(), 1U);
-      BOOST_REQUIRE_EQUAL(pruned.providers.size(), 1U);
+      BOOST_REQUIRE_EQUAL(pruned.providers.size(), 2U);
       BOOST_REQUIRE_EQUAL(pruned.provider_address_updates.size(), 1U);
       BOOST_TEST(!pruned.may_have_more);
       BOOST_TEST(pruned.durability.durability_confirmed);
       BOOST_TEST(pruned.provider_address_updates.front().provider.value == address_provider.value);
+      BOOST_TEST(std::ranges::any_of(pruned.providers,
+                                     [&](const auto& value) { return value.provider == fully_expired_provider; }));
+      BOOST_TEST(std::ranges::none_of(pruned.provider_address_updates,
+                                      [&](const auto& value) { return value.provider == fully_expired_provider; }));
       BOOST_TEST(pruned.provider_address_updates.front().endpoints.empty());
       BOOST_TEST(pruned.provider_address_updates.front().addresses_expires_at.time_since_epoch().count() == 0);
 

@@ -91,6 +91,8 @@ void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer);
 [[nodiscard]] host_addresses::learning_context third_party_discovery_context();
 [[nodiscard]] dht::peer sanitize_discovered_peer(dht::peer value, host_addresses::learning_context context);
 [[nodiscard]] bool has_usable_endpoint(const dht::peer& value) noexcept;
+[[nodiscard]] std::chrono::system_clock::time_point
+dht_value_expiry(const dht::record& value, std::chrono::system_clock::time_point now, const dht::profile& profile);
 
 namespace {
 
@@ -420,8 +422,8 @@ boost::asio::awaitable<dht::value_put_result> async_put_value_owned(auto self, p
    }
    validate_query_options(options);
    const auto now = std::chrono::system_clock::now();
-   auto stored = co_await state.records.async_put(
-       {.record = std::move(value), .expires_at = now + state.profile.limits.provider_record_ttl}, now);
+   const auto expires_at = dht_value_expiry(value, now, state.profile);
+   auto stored = co_await state.records.async_put({.record = std::move(value), .expires_at = expires_at}, now);
    if (stored.outcome != dht::record_store::put_outcome::incoming_stored) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT PUT_VALUE incoming record was not selected locally");
    }
@@ -490,24 +492,26 @@ boost::asio::awaitable<dht::value_get_result> async_get_value_owned(auto self, p
    }
    auto lookup_options = options;
    lookup_options.timeout = remaining_timeout(started, options.timeout, "P2P DHT GET_VALUE");
-   auto lookup = co_await run_lookup(
-       self, protocol, key, std::nullopt, dht::message_type::get_value, lookup_options,
-       [&state, &result, quorum = options.quorum](const dht::peer&,
-                                                  dht::message& response) -> boost::asio::awaitable<bool> {
-          if (!response.record_value) {
-             co_return false;
-          }
-          try {
-             const auto stored = co_await state.records.async_put(
-                 {.record = *response.record_value,
-                  .expires_at = std::chrono::system_clock::now() + state.profile.limits.provider_record_ttl});
-             result.selected = stored.selected.record;
-             ++result.valid_records;
-          } catch (const forge::exceptions::base&) {
-             // Invalid remote values do not poison the local winner or abort the remaining quorum.
-          }
-          co_return result.valid_records >= quorum;
-       });
+   auto lookup =
+       co_await run_lookup(self, protocol, key, std::nullopt, dht::message_type::get_value, lookup_options,
+                           [&state, &result, quorum = options.quorum](
+                               const dht::peer&, dht::message& response) -> boost::asio::awaitable<bool> {
+                              if (!response.record_value) {
+                                 co_return false;
+                              }
+                              try {
+                                 const auto now = std::chrono::system_clock::now();
+                                 const auto stored = co_await state.records.async_put(
+                                     {.record = *response.record_value,
+                                      .expires_at = dht_value_expiry(*response.record_value, now, state.profile)},
+                                     now);
+                                 result.selected = stored.selected.record;
+                                 ++result.valid_records;
+                              } catch (const forge::exceptions::base&) {
+                                 // Invalid remote values do not poison the local winner or abort the remaining quorum.
+                              }
+                              co_return result.valid_records >= quorum;
+                           });
    result.responses = lookup.value_responses.size();
    result.quorum_reached = result.valid_records >= options.quorum;
    if (!result.selected) {

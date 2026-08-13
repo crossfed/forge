@@ -293,6 +293,18 @@ BOOST_AUTO_TEST_CASE(dht_record_store_rejects_invalid_committed_prune_results_be
    BOOST_REQUIRE_EQUAL(providers.front().endpoints.size(), 1U);
    BOOST_TEST(store.persistence_state().degraded);
    BOOST_TEST(store.persistence_state().durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_flush());
+   auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+   BOOST_TEST(status.last_failure.find("invalid committed prune result") != std::string::npos);
+
+   forge::asio::blocking::run(runtime, store.async_hydrate(now));
+   status = store.persistence_state();
+   BOOST_TEST(!status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+   BOOST_TEST(status.last_failure.empty());
 }
 
 BOOST_AUTO_TEST_CASE(dht_record_store_keeps_provider_identity_after_address_expiry) {

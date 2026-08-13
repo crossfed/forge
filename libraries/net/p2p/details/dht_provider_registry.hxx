@@ -95,6 +95,7 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
       bool stop_requested = false;
       bool removal_in_flight = false;
       bool removal_failed = false;
+      bool removal_failure_reported = false;
    };
 
    [[nodiscard]] std::shared_ptr<owner_state> add_owner_locked(const std::shared_ptr<entry>& value);
@@ -103,7 +104,7 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    boost::asio::awaitable<void> async_release_owner(const std::shared_ptr<owner_state>& owner);
    boost::asio::awaitable<void> async_run(std::shared_ptr<entry> value);
    boost::asio::awaitable<void> async_remove(const std::shared_ptr<entry>& value);
-   void reset_owners_for_retry(const std::shared_ptr<entry>& value) noexcept;
+   void claim_removal_retry_locked(const std::shared_ptr<entry>& value) noexcept;
    boost::asio::awaitable<void> async_rollback(const registration_key& registration);
    boost::asio::awaitable<std::size_t> async_publish(protocol_id protocol, dht::key key, dht::peer provider,
                                                      dht::query_options query);
@@ -122,7 +123,6 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    mutable std::mutex mutex_;
    std::map<registration_key, std::shared_ptr<entry>> entries_;
    std::map<protocol_id, std::size_t> active_publications_;
-   std::exception_ptr drain_failure_;
    std::uint64_t next_owner_id_ = 1;
    std::uint64_t endpoint_generation_ = 1;
    std::size_t admissions_in_flight_ = 0;

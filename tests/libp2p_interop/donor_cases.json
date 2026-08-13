@@ -497,6 +497,10 @@
       "forge_tests": [
         "test_forge_quic_p2p p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed",
         "test_forge_quic_p2p p2p_dht_node_finds_peer_and_provider_over_negotiated_stream",
+        "test_forge_quic_p2p p2p_dht_large_non_put_key_uses_bounded_response_and_preserves_stream",
+        "test_forge_quic_p2p p2p_dht_large_stored_value_is_omitted_without_resetting_stream",
+        "test_forge_quic_p2p p2p_dht_oversized_put_echo_is_rejected_before_durable_mutation",
+        "test_forge_quic_p2p p2p_dht_provider_response_incrementally_truncates_to_wire_budget",
         "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_and_sequence_state"
       ],
       "known_gap":
@@ -532,7 +536,9 @@
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p dht_record_store_validates_and_selects_before_durable_publication",
-        "test_forge_quic_p2p p2p_ipns_create_matches_pinned_boxo_v1_v2_golden"
+        "test_forge_quic_p2p p2p_ipns_create_matches_pinned_boxo_v1_v2_golden",
+        "test_forge_quic_p2p p2p_dht_get_value_reports_remaining_record_ttl",
+        "test_forge_quic_p2p p2p_dht_positive_wire_ttl_caps_pk_ipns_and_custom_value_expiry"
       ],
       "known_gap": "Product-specific value namespaces require a distinct custom profile and product-owned validator/selector."
     },
@@ -613,7 +619,8 @@
         { "profile": "quic_dht", "scenario": "dht_pk_put_get" },
         { "profile": "quic_dht", "scenario": "dht_ipns_put_get" }
       ],
-      "known_gap": "The live matrix proves Amino value interoperability, not product-owned custom protocol semantics."
+      "known_gap":
+          "The matrix proves writer-only PUT, listener persistence confirmation and reader-only GET from a distinct fresh process with a reset local store. Product-owned custom protocol semantics remain out of scope."
     },
     {
       "id": "interop.live_rendezvous_register_discover",

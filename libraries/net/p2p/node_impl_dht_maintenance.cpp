@@ -105,8 +105,12 @@ void node::impl::initialize_dht_routing_refresh() {
           }
           co_return co_await self->async_refresh_dht_routing(std::move(protocol), std::move(target));
        });
+   const auto self = shared_from_this();
    const auto service = routing_refresh;
-   if (!launch_tracked([service]() -> boost::asio::awaitable<void> { co_await service->async_run(); })) {
+   if (!launch_tracked([self, service]() -> boost::asio::awaitable<void> {
+          static_cast<void>(self);
+          co_await service->async_run();
+       })) {
       routing_refresh.reset();
       FORGE_THROW_EXCEPTION(exceptions::closed, "P2P lifecycle rejected DHT routing refresh service");
    }

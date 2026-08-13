@@ -10,11 +10,12 @@ use std::{
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
 use libp2p::kad::store::RecordStore;
 use libp2p::{
-    autonat, dcutr, gossipsub, identify, identity, kad,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, autonat, dcutr, gossipsub, identify, identity,
+    kad,
     multiaddr::Protocol,
     noise, ping, relay, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, tls, yamux, Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
+    tcp, tls, yamux,
 };
 use libp2p_stream as raw_stream;
 use rand::rngs::OsRng;
@@ -488,15 +489,21 @@ async fn wait_dht_provide_find_provider(
 async fn wait_dht_put_get(
     swarm: &mut libp2p::Swarm<Behaviour>,
     scenario: &str,
+    operation: &str,
 ) -> Result<usize, Box<dyn Error>> {
     let (key, expected) = dht_value_fixture(scenario)?;
-    let put_id = swarm.behaviour_mut().kad.put_record(
-        kad::Record::new(key.clone(), expected.clone()),
-        kad::Quorum::One,
-    )?;
+    let mut put_id = None;
+    let mut get_id = None;
+    if operation == "get_only" {
+        get_id = Some(swarm.behaviour_mut().kad.get_record(key.clone()));
+    } else {
+        put_id = Some(swarm.behaviour_mut().kad.put_record(
+            kad::Record::new(key.clone(), expected.clone()),
+            kad::Quorum::One,
+        )?);
+    }
     let deadline = tokio::time::sleep(Duration::from_secs(30));
     tokio::pin!(deadline);
-    let mut get_id = None;
     loop {
         tokio::select! {
             _ = &mut deadline => return Err("timed out waiting for Kademlia value proof".into()),
@@ -506,8 +513,11 @@ async fn wait_dht_put_get(
                         id,
                         result: kad::QueryResult::PutRecord(result),
                         ..
-                    })) if id == put_id => {
+                    })) if Some(id) == put_id => {
                         result?;
+                        if operation == "put_only" {
+                            return Ok(expected.len());
+                        }
                         get_id = Some(swarm.behaviour_mut().kad.get_record(key.clone()));
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
@@ -856,7 +866,12 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         "dht_pk_put_get" | "dht_ipns_put_get" => {
-            let bytes = wait_dht_put_get(&mut swarm, &opts.scenario).await?;
+            let bytes = wait_dht_put_get(&mut swarm, &opts.scenario, &opts.payload).await?;
+            let operation = match opts.payload.as_str() {
+                "put_only" => "put_only",
+                "get_only" => "get_only",
+                _ => "put_get",
+            };
             write_json(
                 &opts.result_file,
                 json!({
@@ -864,6 +879,8 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     "role": "dialer",
                     "scenario": opts.scenario,
                     "status": "ok",
+                    "operation": operation,
+                    "remote_get": operation == "get_only",
                     "value_bytes": bytes
                 }),
             )?;

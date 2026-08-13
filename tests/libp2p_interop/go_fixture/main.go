@@ -815,8 +815,15 @@ func dial(opts options) error {
 		if err != nil {
 			return err
 		}
-		if err := h.kad.PutValue(ctx, string(key), expected); err != nil {
-			return fmt.Errorf("DHT PutValue failed: %w", err)
+		if opts.payload != "get_only" {
+			if err := h.kad.PutValue(ctx, string(key), expected); err != nil {
+				return fmt.Errorf("DHT PutValue failed: %w", err)
+			}
+		}
+		if opts.payload == "put_only" {
+			result["operation"] = "put_only"
+			result["value_bytes"] = len(expected)
+			break
 		}
 		selected, err := h.kad.GetValue(ctx, string(key))
 		if err != nil {
@@ -824,6 +831,13 @@ func dial(opts options) error {
 		}
 		if !bytes.Equal(selected, expected) {
 			return fmt.Errorf("DHT GetValue returned a different value")
+		}
+		if opts.payload == "get_only" {
+			result["operation"] = "get_only"
+			result["remote_get"] = true
+		} else {
+			result["operation"] = "put_get"
+			result["remote_get"] = false
 		}
 		result["value_bytes"] = len(selected)
 	case "gossipsub_publish", "gossipsub_mixed_mesh_stress":

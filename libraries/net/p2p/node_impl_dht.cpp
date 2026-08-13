@@ -85,7 +85,15 @@ namespace forge::net::p2p {
 discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::optional<endpoint> session_remote_endpoint,
                                    std::optional<endpoint> session_direct_endpoint, const peer_id& peer);
 
+[[nodiscard]] std::chrono::system_clock::time_point
+dht_value_expiry(const dht::record& value, std::chrono::system_clock::time_point now, const dht::profile& profile) {
+   const auto requested = value.ttl.count() > 0 ? value.ttl : profile.limits.provider_record_ttl;
+   return now + std::min(requested, profile.limits.provider_record_ttl);
+}
+
 namespace {
+
+constexpr auto inbound_dht_response_limit = std::size_t{16 * 1024};
 
 [[nodiscard]] bool protocol_open_failure_requires_peer_penalty(const forge::exceptions::base& error) {
    const auto kind = p2p_code(error);
@@ -121,17 +129,35 @@ void record_dht_exchange_failure(std::mutex& mutex, const bool& stopped, peer_st
                                                           : dht::connection_type::can_connect};
 }
 
-[[nodiscard]] std::chrono::system_clock::time_point
-value_expiry(const dht::record& value, std::chrono::system_clock::time_point now, const dht::profile& profile) {
-   const auto requested = value.ttl.count() > 0 ? value.ttl : profile.limits.provider_record_ttl;
-   return now + std::min(requested, profile.limits.provider_record_ttl);
+[[nodiscard]] bool response_fits(const dht::message& response, const dht::profile& profile) {
+   try {
+      static_cast<void>(dht::codec::encode(response, profile));
+      return true;
+   } catch (const exceptions::invalid_options&) {
+      return false;
+   }
 }
 
-void append_unique(std::vector<dht::peer>& peers, dht::peer value, std::size_t limit) {
+void append_unique_bounded(dht::message& response, std::vector<dht::peer>& peers, dht::peer value, std::size_t limit,
+                           const dht::profile& profile) {
    const auto current = std::ranges::find_if(peers, [&](const auto& candidate) { return candidate.id == value.id; });
    if (current == peers.end()) {
-      if (peers.size() < limit) {
-         peers.push_back(std::move(value));
+      if (peers.size() >= limit) {
+         return;
+      }
+      auto endpoints = std::move(value.endpoints);
+      value.endpoints.clear();
+      peers.push_back(std::move(value));
+      if (!response_fits(response, profile)) {
+         peers.pop_back();
+         return;
+      }
+      auto& inserted = peers.back();
+      for (auto& endpoint : endpoints) {
+         inserted.endpoints.push_back(std::move(endpoint));
+         if (!response_fits(response, profile)) {
+            inserted.endpoints.pop_back();
+         }
       }
       return;
    }
@@ -140,7 +166,17 @@ void append_unique(std::vector<dht::peer>& peers, dht::peer value, std::size_t l
           current->endpoints, [&](const auto& candidate) { return candidate.to_string() == endpoint.to_string(); });
       if (!known) {
          current->endpoints.push_back(std::move(endpoint));
+         if (!response_fits(response, profile)) {
+            current->endpoints.pop_back();
+         }
       }
+   }
+}
+
+void assign_record_bounded(dht::message& response, dht::record value, const dht::profile& profile) {
+   response.record_value = std::move(value);
+   if (!response_fits(response, profile)) {
+      response.record_value.reset();
    }
 }
 
@@ -205,6 +241,9 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
                                                     protocol_id protocol, forge::net::p2p::stream stream) {
    auto& state = dht_profile(protocol);
    const auto& profile = state.profile;
+   auto response_profile = profile;
+   response_profile.limits.max_outbound_message_size =
+       std::min(response_profile.limits.max_outbound_message_size, inbound_dht_response_limit);
    if (profile.operating_mode != dht::mode::server) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile server mode is disabled");
    }
@@ -236,11 +275,18 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT request key must not be empty");
          }
 
-         auto response = dht::message{.type = request.type, .key_value = request.key_value};
+         auto response = dht::message{.type = request.type};
+         if (request.type == dht::message_type::put_value) {
+            response.key_value = request.key_value;
+            if (!response_fits(response, response_profile)) {
+               response.key_value = {};
+            }
+         }
          const auto append_closest = [&] {
             for (auto& peer : state.routing.closest(request.key_value.bytes, profile.limits.replication)) {
                if (peer.id != session->info.remote_peer) {
-                  append_unique(response.closer_peers, std::move(peer), profile.limits.replication);
+                  append_unique_bounded(response, response.closer_peers, std::move(peer), profile.limits.replication,
+                                        response_profile);
                }
             }
          };
@@ -250,11 +296,11 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             try {
                const auto requested = peer_id::from_bytes(request.key_value.bytes);
                if (requested == local) {
-                  append_unique(response.closer_peers,
-                                dht::peer{.id = local,
-                                          .endpoints = local_endpoints_for_control(),
-                                          .connection = dht::connection_type::connected},
-                                profile.limits.replication);
+                  append_unique_bounded(response, response.closer_peers,
+                                        dht::peer{.id = local,
+                                                  .endpoints = local_endpoints_for_control(),
+                                                  .connection = dht::connection_type::connected},
+                                        profile.limits.replication, response_profile);
                } else if (const auto record = store.find(requested)) {
                   auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
                   for (const auto& item : record->endpoints) {
@@ -262,7 +308,8 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
                      endpoint.peer = requested;
                      exact.endpoints.push_back(std::move(endpoint));
                   }
-                  append_unique(response.closer_peers, std::move(exact), profile.limits.replication);
+                  append_unique_bounded(response, response.closer_peers, std::move(exact), profile.limits.replication,
+                                        response_profile);
                }
             } catch (const forge::exceptions::base&) {
                // Arbitrary keys use ordinary XOR-distance routing.
@@ -274,7 +321,8 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             for (const auto& provider :
                  state.records.find_providers(request.key_value, profile.limits.max_provider_peers)) {
                if (provider.provider != session->info.remote_peer) {
-                  response.provider_peers.push_back(provider_peer(provider));
+                  append_unique_bounded(response, response.provider_peers, provider_peer(provider),
+                                        profile.limits.max_provider_peers, response_profile);
                }
             }
             append_closest();
@@ -316,27 +364,32 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             continue;
          }
          case dht::message_type::put_value: {
+            assign_record_bounded(response, *request.record_value, response_profile);
+            if (!response.record_value) {
+               FORGE_THROW_EXCEPTION(exceptions::protocol_error,
+                                     "DHT PUT_VALUE echo exceeds the outbound message limit");
+            }
             const auto now = std::chrono::system_clock::now();
             const auto stored = co_await state.records.async_put(
                 dht::record_store::value_record{
                     .record = *request.record_value,
-                    .expires_at = value_expiry(*request.record_value, now, profile),
+                    .expires_at = dht_value_expiry(*request.record_value, now, profile),
                 },
                 now);
             if (stored.outcome != dht::record_store::put_outcome::incoming_stored) {
                FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT PUT_VALUE incoming record was not selected");
             }
-            response.record_value = *request.record_value;
             break;
          }
          case dht::message_type::get_value:
             if (const auto value = state.records.find_value(request.key_value)) {
-               response.record_value = value->record;
-               if (response.record_value->ttl > std::chrono::seconds::zero()) {
+               auto record = value->record;
+               if (record.ttl > std::chrono::seconds::zero()) {
                   const auto remaining = value->expires_at - std::chrono::system_clock::now();
-                  response.record_value->ttl =
+                  record.ttl =
                       std::max(std::chrono::seconds{1}, std::chrono::duration_cast<std::chrono::seconds>(remaining));
                }
+               assign_record_bounded(response, std::move(record), response_profile);
             }
             append_closest();
             break;
@@ -345,7 +398,7 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
          }
 
          increment_dht_response();
-         co_await stream.async_write(dht::codec::encode(response, profile));
+         co_await stream.async_write(dht::codec::encode(response, response_profile));
          if (!deadline.finish()) {
             throw_operation_timeout("P2P inbound DHT exchange");
          }
