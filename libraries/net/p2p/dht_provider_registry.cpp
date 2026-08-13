@@ -341,11 +341,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_release_owner(const st
       }
    }
    if (retry) {
-      {
-         const auto lock = std::scoped_lock{owner->mutex};
-         owner->terminal = false;
-         owner->terminal_failure = {};
-      }
+      reset_owners_for_retry(retry);
       co_await async_remove(retry);
    }
    co_await async_wait_owner(owner);
@@ -449,6 +445,24 @@ boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shar
       failure = std::current_exception();
    }
    finish_entry(value, failure);
+}
+
+void dht_provider_registry::reset_owners_for_retry(const std::shared_ptr<entry>& value) noexcept {
+   try {
+      const auto registry_lock = std::scoped_lock{mutex_};
+      const auto found = entries_.find(value->registration);
+      if (found == entries_.end() || found->second != value || !value->removal_in_flight) {
+         return;
+      }
+      for (const auto& [_, weak] : value->owners) {
+         if (const auto owner = weak.lock()) {
+            const auto owner_lock = std::scoped_lock{owner->mutex};
+            owner->terminal = false;
+            owner->terminal_failure = {};
+         }
+      }
+   } catch (...) {
+   }
 }
 
 void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, std::exception_ptr failure) noexcept {
@@ -660,6 +674,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_drain() {
          std::rethrow_exception(failure);
       }
       if (retry) {
+         reset_owners_for_retry(retry);
          co_await async_remove(retry);
          continue;
       }

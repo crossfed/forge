@@ -11756,6 +11756,8 @@ BOOST_AUTO_TEST_CASE(p2p_dht_provider_removal_failure_allows_stop_retry) {
    forge::asio::blocking::run(runtime, provider.async_stop());
    BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
    BOOST_TEST(persistence->close_attempts.load(std::memory_order_relaxed) == 1U);
+   forge::asio::blocking::run(runtime, registration.async_withdraw());
+   BOOST_TEST(persistence->provider_remove_attempts.load(std::memory_order_relaxed) == 2U);
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 

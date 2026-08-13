@@ -102,6 +102,7 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    boost::asio::awaitable<void> async_release_owner(const std::shared_ptr<owner_state>& owner);
    boost::asio::awaitable<void> async_run(std::shared_ptr<entry> value);
    boost::asio::awaitable<void> async_remove(const std::shared_ptr<entry>& value);
+   void reset_owners_for_retry(const std::shared_ptr<entry>& value) noexcept;
    boost::asio::awaitable<void> async_rollback(const registration_key& registration);
    boost::asio::awaitable<std::size_t> async_publish(protocol_id protocol, dht::key key, dht::peer provider,
                                                      dht::query_options query);
