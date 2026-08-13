@@ -2280,21 +2280,25 @@ BOOST_AUTO_TEST_CASE(p2p_dht_discovery_rejects_third_party_non_routable_endpoint
 
 BOOST_AUTO_TEST_CASE(p2p_dht_add_provider_preserves_identity_and_continues_rpc_stream) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   const auto server_profile = amino_v1(dht::mode::server);
+   auto profile_limits = dht::options{};
+   profile_limits.provider_record_ttl = std::chrono::hours{3};
+   profile_limits.provider_address_ttl = std::chrono::hours{2};
+   profile_limits.provider_republish_interval = std::chrono::hours{1};
+   const auto server_profile = custom_test_dht_profile(dht::mode::server, profile_limits);
    auto server_options = dht_options_for(peer(226), server_profile);
    auto server_store = std::make_shared<tracking_dht_record_store_persistence>();
    server_options.dht_record_persistence.emplace(server_profile.protocol, server_store);
-   auto client_options = dht_options_for(peer(227), amino_v1());
+   auto client_options = dht_options_for(peer(227), custom_test_dht_profile(dht::mode::client, profile_limits));
    auto server = node{runtime, std::move(server_options)};
    auto client = node{runtime, std::move(client_options)};
    const auto server_endpoint = listen(server, runtime);
    client.peers().learn_endpoint(server.local_peer(), server_endpoint,
                                  capability_set{.bits = capabilities::direct_quic});
 
-   const auto key = amino_provider_key(
+   const auto key = make_dht_key(
        std::vector<std::uint8_t>{'f', 'c', 'l', '-', 'a', 'd', 'd', '-', 'p', 'r', 'o', 'v', 'i', 'd', 'e', 'r'});
-   auto stream =
-       forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), builtins::kad_dht));
+   auto stream = forge::asio::blocking::run(
+       runtime, client.async_open_protocol_stream(server.local_peer(), server_profile.protocol));
    auto authenticated_peer = std::optional<peer_id>{};
    for (auto attempt = 0U; attempt < 20U && !authenticated_peer; ++attempt) {
       const auto sessions = server.diagnostics().sessions;
@@ -2322,6 +2326,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_add_provider_preserves_identity_and_continues_rpc_s
    payload.insert(payload.end(), ping.begin(), ping.end());
    const auto responses_before = server.metrics().dht_responses;
    const auto rejections_before = server.metrics().protocol_rejections;
+   const auto stored_after = std::chrono::system_clock::now();
    forge::asio::blocking::run(runtime, stream.async_write(payload));
    const auto response = dht::codec::decode(
        wrap_length_delimited(forge::asio::blocking::run(runtime, read_length_delimited(stream))), server_profile);
@@ -2347,6 +2352,11 @@ BOOST_AUTO_TEST_CASE(p2p_dht_add_provider_preserves_identity_and_continues_rpc_s
    BOOST_TEST(page.providers.front().provider.to_string() == authenticated_peer->to_string());
    BOOST_REQUIRE_EQUAL(page.providers.front().endpoints.size(), 1U);
    BOOST_TEST(page.providers.front().endpoints.front().to_string() == provider_endpoint.to_string());
+   const auto observed_at = std::chrono::system_clock::now();
+   BOOST_TEST(page.providers.front().provider_expires_at >= stored_after + profile_limits.provider_record_ttl);
+   BOOST_TEST(page.providers.front().provider_expires_at <= observed_at + profile_limits.provider_record_ttl);
+   BOOST_TEST(page.providers.front().addresses_expires_at >= stored_after + profile_limits.provider_address_ttl);
+   BOOST_TEST(page.providers.front().addresses_expires_at <= observed_at + profile_limits.provider_address_ttl);
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());

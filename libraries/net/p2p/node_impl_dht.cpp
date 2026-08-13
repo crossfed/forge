@@ -87,8 +87,6 @@ discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::opt
 
 namespace {
 
-constexpr auto provider_address_ttl = std::chrono::hours{24};
-
 [[nodiscard]] bool protocol_open_failure_requires_peer_penalty(const forge::exceptions::base& error) {
    const auto kind = p2p_code(error);
    return kind == exceptions::code::unsupported_protocol || kind == exceptions::code::protocol_error ||
@@ -302,8 +300,8 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
                }
             }
             if (accepted) {
-               const auto addresses_expire =
-                   accepted->endpoints.empty() ? std::chrono::system_clock::time_point{} : now + provider_address_ttl;
+               const auto addresses_expire = accepted->endpoints.empty() ? std::chrono::system_clock::time_point{}
+                                                                         : now + profile.limits.provider_address_ttl;
                co_await state.records.async_upsert_provider(dht::record_store::provider_record{
                    .key = request.key_value,
                    .provider = accepted->id,
