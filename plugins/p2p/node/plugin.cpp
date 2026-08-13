@@ -76,7 +76,7 @@ import forge.plugins.db.store.api;
 #include "details/api_impl.hxx"
 #include "details/object_peer_state_adapter.hxx"
 #include "details/plugin_impl.hxx"
-#include "details/pubsub_source.hxx"
+#include "details/plugin_pubsub_source_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 namespace {
@@ -220,7 +220,7 @@ boost::asio::awaitable<void> plugin::startup() {
 
 void plugin::request_stop() noexcept {
    impl_->stop_requested.store(true, std::memory_order_release);
-   impl_->phase.store(plugin::impl::lifecycle_phase::stopping, std::memory_order_release);
+   impl_->phase.store(lifecycle_phase::stopping, std::memory_order_release);
    if (auto node = impl_->node_snapshot()) {
       try {
          node->stop();

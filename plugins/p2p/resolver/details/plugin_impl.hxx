@@ -1,14 +1,10 @@
 #pragma once
 
+#include "cache_record.hxx"
+
 namespace forge::plugins::p2p::resolver {
 
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
-   struct cache_record {
-      std::vector<entry> apis;
-      std::chrono::steady_clock::time_point expires_at;
-      std::chrono::steady_clock::time_point stored_at;
-   };
-
    mutable std::mutex mutex;
    config settings;
    forge::api::transport::options resolver_transport{};

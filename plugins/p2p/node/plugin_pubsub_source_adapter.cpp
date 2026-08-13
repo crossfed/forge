@@ -33,7 +33,7 @@ import forge.plugins.crypto.secrets.api;
 import forge.plugins.db.store.api;
 
 #include "details/plugin_impl.hxx"
-#include "details/pubsub_source.hxx"
+#include "details/plugin_pubsub_source_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 

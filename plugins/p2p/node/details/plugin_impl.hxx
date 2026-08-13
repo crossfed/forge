@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -10,18 +9,11 @@
 #include <vector>
 
 #include "config.hxx"
+#include "lifecycle_phase.hxx"
 
 namespace forge::plugins::p2p::node {
 
 struct plugin::impl {
-   enum class lifecycle_phase : std::uint8_t {
-      idle,
-      starting,
-      started,
-      stopping,
-      stopped,
-   };
-
    using route = std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>;
 
    forge::net::p2p::node::options options{

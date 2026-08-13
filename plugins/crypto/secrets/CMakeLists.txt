@@ -4,6 +4,7 @@ add_library(
       api_impl.cpp
       config.cpp
       plugin_impl.cpp
+      details/loaded_secret.hxx
 )
 forge_target_modules_at(forge_plugins_crypto_secrets plugins/crypto/secrets)
 
