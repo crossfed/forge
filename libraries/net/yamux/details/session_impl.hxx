@@ -44,8 +44,8 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    boost::asio::awaitable<void> wait_for_close();
    void finish_close(std::exception_ptr error = {}) noexcept;
    boost::asio::awaitable<void> wait_for_transport_write();
-   void begin_transport_write();
-   void finish_transport_write() noexcept;
+   void reserve_transport_write();
+   void release_transport_write() noexcept;
    void fail_session(exceptions::code value, std::string message);
    void wake_all_locked();
 
@@ -100,7 +100,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    bool read_loop_done_ = false;
    bool close_started_ = false;
    bool close_done_ = false;
-   bool transport_write_active_ = false;
+   std::size_t transport_write_reservations_ = 0;
    std::exception_ptr close_error_;
    bool closed_ = false;
    bool canceled_ = false;

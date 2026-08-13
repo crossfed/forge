@@ -186,11 +186,8 @@ boost::asio::awaitable<void> session::impl::async_close() {
          try {
             auto outbound = transport::chunk{
                 detail::encode_frame(detail::frame_type::go_away, 0, 0, detail::go_away_normal)};
-            begin_transport_write();
             co_await stream_.async_write(std::move(outbound));
-            finish_transport_write();
          } catch (...) {
-            finish_transport_write();
             // Closing is best-effort once the underlying byte stream has already failed.
          }
       }
@@ -311,7 +308,7 @@ boost::asio::awaitable<void> session::impl::wait_for_transport_write() {
       const auto observed = transport_write_notification_.epoch();
       {
          auto lock = std::scoped_lock{mutex_};
-         if (!transport_write_active_) {
+         if (transport_write_reservations_ == 0) {
             co_return;
          }
       }
@@ -319,15 +316,17 @@ boost::asio::awaitable<void> session::impl::wait_for_transport_write() {
    }
 }
 
-void session::impl::begin_transport_write() {
+void session::impl::reserve_transport_write() {
    auto lock = std::scoped_lock{mutex_};
-   transport_write_active_ = true;
+   ++transport_write_reservations_;
 }
 
-void session::impl::finish_transport_write() noexcept {
+void session::impl::release_transport_write() noexcept {
    {
       auto lock = std::scoped_lock{mutex_};
-      transport_write_active_ = false;
+      if (transport_write_reservations_ > 0) {
+         --transport_write_reservations_;
+      }
    }
    transport_write_notification_.notify();
 }
@@ -373,42 +372,47 @@ session::impl::write_prepared(std::function<std::optional<detail::bytes>()> prep
       rethrow_terminal_locked();
    }
 
-   auto ticket = forge::asio::gate::ticket{};
+   reserve_transport_write();
+   auto wrote = false;
    try {
-      ticket = co_await write_gate_.acquire();
-   } catch (const forge::asio::exceptions::canceled&) {
-      FORGE_THROW_EXCEPTION(exceptions::canceled, "yamux write was canceled while waiting");
-   } catch (const forge::asio::exceptions::rejected&) {
-      auto lock = std::scoped_lock{mutex_};
-      rethrow_terminal_locked();
-      FORGE_THROW_EXCEPTION(exceptions::closed, "yamux write gate is closed");
-   }
+      auto ticket = forge::asio::gate::ticket{};
+      try {
+         ticket = co_await write_gate_.acquire();
+      } catch (const forge::asio::exceptions::canceled&) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled, "yamux write was canceled while waiting");
+      } catch (const forge::asio::exceptions::rejected&) {
+         auto lock = std::scoped_lock{mutex_};
+         rethrow_terminal_locked();
+         FORGE_THROW_EXCEPTION(exceptions::closed, "yamux write gate is closed");
+      }
 
-   // A prepared state transition and its serialized frame complete together once this owns the writer.
-   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+      // A prepared state transition and its serialized frame complete together once this owns the writer.
+      co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
 
-   if (!allow_after_close) {
-      auto lock = std::scoped_lock{mutex_};
-      rethrow_terminal_locked();
-   }
+      if (!allow_after_close) {
+         auto lock = std::scoped_lock{mutex_};
+         rethrow_terminal_locked();
+      }
 
-   auto encoded = prepare();
-   if (!encoded) {
-      co_return false;
-   }
-
-   try {
-      auto outbound = transport::chunk{std::move(*encoded)};
-      transport::detail::chunk_access::attach_lifetime(outbound, std::move(lifetime));
-      begin_transport_write();
-      co_await stream_.async_write(std::move(outbound));
-      finish_transport_write();
+      auto encoded = prepare();
+      if (encoded) {
+         try {
+            auto outbound = transport::chunk{std::move(*encoded)};
+            transport::detail::chunk_access::attach_lifetime(outbound, std::move(lifetime));
+            co_await stream_.async_write(std::move(outbound));
+            wrote = true;
+         } catch (...) {
+            fail_session(exceptions::code::closed, "yamux underlying stream write failed");
+            FORGE_THROW_EXCEPTION(exceptions::closed, "yamux underlying stream write failed");
+         }
+      }
    } catch (...) {
-      finish_transport_write();
-      fail_session(exceptions::code::closed, "yamux underlying stream write failed");
-      FORGE_THROW_EXCEPTION(exceptions::closed, "yamux underlying stream write failed");
+      release_transport_write();
+      throw;
    }
-   co_return true;
+
+   release_transport_write();
+   co_return wrote;
 }
 
 boost::asio::awaitable<void> session::impl::write_frame(detail::frame_type type, std::uint16_t flags,

@@ -2132,6 +2132,8 @@ boost::asio::awaitable<void> yamux_close_waits_for_admitted_write_after_remote_g
    hold_writes(pair.left_state, true);
    auto write = spawn_result<void>(executor, inbound.async_write(bytes{0x41}));
    co_await wait_for_pending_writes(pair.left_state, 1);
+   auto queued_write = spawn_result<void>(executor, inbound.async_write(bytes{0x42}));
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
    co_await pair.left.async_write(frame(frame_type::go_away, 0, 0, 0));
    for (auto attempt = 0; attempt < 100 && right.valid(); ++attempt) {
       co_await boost::asio::post(executor, boost::asio::use_awaitable);
@@ -2147,6 +2149,8 @@ boost::asio::awaitable<void> yamux_close_waits_for_admitted_write_after_remote_g
 
    release_next_write(pair.left_state);
    co_await take_result_for(write, std::chrono::seconds{1});
+   BOOST_CHECK_THROW((void)co_await take_result_for(queued_write, std::chrono::seconds{1}),
+                     forge::net::yamux::exceptions::closed);
    co_await take_result_for(close, std::chrono::seconds{1});
    {
       auto lock = std::scoped_lock{pair.right_state->mutex};
