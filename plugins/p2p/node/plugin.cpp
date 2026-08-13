@@ -72,9 +72,9 @@ import forge.plugins.crypto.secrets.api;
 import forge.plugins.db.store.api;
 
 #include "details/config.hxx"
-#include "details/diagnostics_source.hxx"
 #include "details/api_impl.hxx"
 #include "details/object_peer_state_adapter.hxx"
+#include "details/plugin_diagnostics_source_adapter.hxx"
 #include "details/plugin_impl.hxx"
 #include "details/plugin_pubsub_source_adapter.hxx"
 
@@ -159,9 +159,7 @@ boost::asio::awaitable<void> plugin::startup() {
    if (!routes) {
       co_return;
    }
-   auto private_key_cleanup = boost::scope::scope_exit{[this] {
-      clear_text(impl_->options.private_key_pem);
-   }};
+   auto private_key_cleanup = boost::scope::scope_exit{[this] { clear_text(impl_->options.private_key_pem); }};
    if (!impl_->certificate_secret.empty()) {
       auto certificate = co_await impl_->secrets->get_bytes(
           {.secret_id = impl_->certificate_secret, .purpose = "p2p.identity.certificate"});

@@ -12,6 +12,7 @@
 
 namespace forge::net::p2p {
 
+class cancellation_latch;
 struct libp2p_identity_material;
 
 } // namespace forge::net::p2p
@@ -33,7 +34,8 @@ struct profile {
    std::function<forge::net::p2p::endpoint(forge::net::p2p::endpoint)> listen;
    std::function<void()> stop;
    std::function<boost::asio::awaitable<void>()> async_stop;
-   std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint, const node::connect_options&)>
+   std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint, const node::connect_options&,
+                                                    std::shared_ptr<forge::net::p2p::cancellation_latch>)>
        async_connect;
    std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint)> async_accept;
 };
@@ -56,8 +58,9 @@ class registry {
    void stop() noexcept;
    [[nodiscard]] detail::session_teardown::operation teardown_operation() const;
 
-   boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
-                                                    const node::connect_options& options);
+   boost::asio::awaitable<connection>
+   async_connect(forge::net::p2p::endpoint endpoint, const node::connect_options& options,
+                 std::shared_ptr<forge::net::p2p::cancellation_latch> cancellation = {});
    boost::asio::awaitable<connection> async_accept(forge::net::p2p::endpoint endpoint);
 
  private:

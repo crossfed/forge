@@ -31,7 +31,7 @@ import forge.plugins.crypto.secrets.api;
 import forge.plugins.db.store.api;
 
 #include "details/plugin_impl.hxx"
-#include "details/diagnostics_source.hxx"
+#include "details/plugin_diagnostics_source_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 

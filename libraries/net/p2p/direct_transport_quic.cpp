@@ -4,8 +4,11 @@ module;
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -40,6 +43,7 @@ import forge.net.transport.limits;
 import forge.net.transport.session;
 
 #include "details/direct_transport.hxx"
+#include "details/cancellation_latch.hxx"
 
 namespace forge::net::p2p::direct {
 namespace {
@@ -121,7 +125,7 @@ namespace {
       return make_peer_id_from_certificate_der(der);
    } catch (const forge::exceptions::base&) {
       FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
-                          "P2P peer certificate is missing a valid signed libp2p identity extension");
+                            "P2P peer certificate is missing a valid signed libp2p identity extension");
    }
 }
 
@@ -163,32 +167,32 @@ namespace {
 
 class quic_profile final {
    struct listener_entry {
-      std::unique_ptr<forge::net::quic::listener> value;
+      std::shared_ptr<forge::net::quic::listener> value;
+      forge::net::p2p::endpoint local;
       bool active = true;
    };
 
  public:
    quic_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
                 resource_manager resources_value)
-       : runtime_(runtime_value), options_(options_value), resources_(std::move(resources_value)),
-         connector_(runtime_value) {}
+       : runtime_(runtime_value), options_(options_value), resources_(std::move(resources_value)) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_quic();
    }
 
    [[nodiscard]] bool listening() const noexcept {
-      return std::ranges::any_of(listeners_, [](const auto& item) {
-         return item.second.active;
-      });
+      auto lock = std::scoped_lock{listeners_mutex_};
+      return std::ranges::any_of(listeners_, [](const auto& item) { return item.second.active; });
    }
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints() const {
       auto out = std::vector<forge::net::p2p::endpoint>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
       out.reserve(listeners_.size());
       for (const auto& [_, listener] : listeners_) {
          if (listener.active) {
-            out.push_back(p2p_endpoint_for(listener.value->local_endpoint()));
+            out.push_back(listener.local);
          }
       }
       return out;
@@ -199,21 +203,47 @@ class quic_profile final {
          FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "P2P endpoint is not a direct QUIC endpoint");
       }
       const auto requested_key = listener_key(endpoint);
-      if (endpoint.transport.port != 0) {
-         auto found = listeners_.find(requested_key);
-         if (found != listeners_.end() && found->second.active) {
-            FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P QUIC direct listener endpoint is already active");
+      {
+         auto lock = std::scoped_lock{listeners_mutex_};
+         if (listeners_stopped_) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P QUIC direct listener is stopped");
+         }
+         if (endpoint.transport.port != 0) {
+            auto found = listeners_.find(requested_key);
+            if (found != listeners_.end() && found->second.active) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                                     "P2P QUIC direct listener endpoint is already active");
+            }
          }
       }
       try {
-         auto listener = std::make_unique<forge::net::quic::listener>(runtime_, quic_endpoint_for(endpoint), server_options());
+         auto listener =
+             std::make_shared<forge::net::quic::listener>(runtime_, quic_endpoint_for(endpoint), server_options());
          auto local = p2p_endpoint_for(listener->local_endpoint());
          const auto key = listener_key(local);
-         auto found = listeners_.find(key);
-         if (found != listeners_.end() && found->second.active) {
+         auto stopped = false;
+         auto duplicate = false;
+         {
+            auto lock = std::scoped_lock{listeners_mutex_};
+            stopped = listeners_stopped_;
+            const auto found = listeners_.find(key);
+            duplicate = found != listeners_.end() && found->second.active;
+            if (!stopped && !duplicate) {
+               listeners_.emplace(key, listener_entry{.value = listener, .local = local, .active = true});
+            }
+         }
+         if (stopped || duplicate) {
+            try {
+               listener->stop();
+            } catch (...) {
+            }
+         }
+         if (stopped) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P QUIC direct listener is stopped");
+         }
+         if (duplicate) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P QUIC direct listener endpoint is already active");
          }
-         listeners_[key] = listener_entry{.value = std::move(listener), .active = true};
          return local;
       } catch (const forge::exceptions::base& error) {
          rethrow_quic_as_p2p(error);
@@ -221,29 +251,57 @@ class quic_profile final {
    }
 
    void stop() {
-      connector_.cancel();
-      for (auto& [_, listener] : listeners_) {
-         listener.active = false;
-         listener.value->stop();
+      auto listeners = stop_listeners();
+      for (const auto& listener : listeners) {
+         try {
+            listener->stop();
+         } catch (...) {
+         }
+      }
+      auto active = std::vector<std::shared_ptr<cancellation_latch>>{};
+      {
+         auto lock = std::scoped_lock{active_mutex_};
+         stopped_ = true;
+         for (auto iterator = active_.begin(); iterator != active_.end();) {
+            if (auto operation = iterator->lock()) {
+               active.push_back(std::move(operation));
+               ++iterator;
+            } else {
+               iterator = active_.erase(iterator);
+            }
+         }
+      }
+      for (const auto& operation : active) {
+         operation->request_stop();
       }
    }
 
    boost::asio::awaitable<void> async_stop() {
       stop();
-      for (auto& [_, listener] : listeners_) {
-         co_await listener.value->async_stop();
+      auto listeners = listener_snapshot();
+      for (const auto& listener : listeners) {
+         co_await listener->async_stop();
       }
    }
 
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
-                                                    const node::connect_options& options) {
+                                                    const node::connect_options& options,
+                                                    std::shared_ptr<cancellation_latch> cancellation) {
+      auto cancel_current = cancellation ? std::move(cancellation) : std::make_shared<cancellation_latch>();
+      track(cancel_current);
+      auto connector = std::make_shared<forge::net::quic::connector>(runtime_);
+      cancel_current->arm([connector] { connector->cancel(); });
       try {
          const auto expected_peer = expected_peer_for(endpoint, options);
-         auto quic = co_await connector_.async_connect(quic_endpoint_for(endpoint),
+         auto quic = co_await connector->async_connect(quic_endpoint_for(endpoint),
                                                        client_options(expected_peer, options.timeout));
          const auto remote = verified_peer_id_for(quic, expected_peer, options_.allow_insecure_test_mode);
          auto local_endpoint = p2p_endpoint_for(quic.local_endpoint());
          auto remote_endpoint = p2p_endpoint_for(quic.remote_endpoint());
+         if (!cancel_current->finish()) {
+            quic.cancel();
+            FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P QUIC direct connect canceled");
+         }
          co_return connection{
              .peer = remote,
              .session = forge::net::quic::as_transport_session(std::move(quic)),
@@ -251,17 +309,36 @@ class quic_profile final {
              .remote_endpoint = std::move(remote_endpoint),
          };
       } catch (const forge::exceptions::base& error) {
+         static_cast<void>(cancel_current->finish());
          rethrow_quic_as_p2p(error);
+      } catch (...) {
+         static_cast<void>(cancel_current->finish());
+         throw;
       }
    }
 
    boost::asio::awaitable<connection> async_accept(forge::net::p2p::endpoint endpoint) {
       try {
-         auto found = listeners_.find(listener_key(std::move(endpoint)));
-         if (found == listeners_.end() || !found->second.active) {
+         const auto key = listener_key(std::move(endpoint));
+         auto listener = std::shared_ptr<forge::net::quic::listener>{};
+         {
+            auto lock = std::scoped_lock{listeners_mutex_};
+            const auto found = listeners_.find(key);
+            if (found != listeners_.end() && found->second.active) {
+               listener = found->second.value;
+            }
+         }
+         if (!listener) {
             FORGE_THROW_EXCEPTION(exceptions::closed, "P2P QUIC direct listener is not active");
          }
-         auto quic = co_await found->second.value->async_accept();
+         auto quic = co_await listener->async_accept();
+         if (!listener_is_current(key, listener)) {
+            try {
+               quic.cancel();
+            } catch (...) {
+            }
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P QUIC direct listener stopped during accept");
+         }
          auto admission_token = forge::net::quic::detail::connection_access::take_inbound_admission(quic);
          auto admission = std::static_pointer_cast<resource_manager::session_reservation>(std::move(admission_token));
          if (!admission || !admission->active()) {
@@ -284,7 +361,55 @@ class quic_profile final {
    }
 
  private:
-   [[nodiscard]] forge::net::quic::security_options peer_verifier(std::optional<peer_id> expected = std::nullopt) const {
+   [[nodiscard]] bool listener_is_current(const std::string& key,
+                                          const std::shared_ptr<forge::net::quic::listener>& listener) const {
+      auto lock = std::scoped_lock{listeners_mutex_};
+      const auto found = listeners_.find(key);
+      return !listeners_stopped_ && found != listeners_.end() && found->second.active &&
+             found->second.value == listener;
+   }
+
+   [[nodiscard]] std::vector<std::shared_ptr<forge::net::quic::listener>> stop_listeners() {
+      auto listeners = std::vector<std::shared_ptr<forge::net::quic::listener>>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
+      listeners_stopped_ = true;
+      listeners.reserve(listeners_.size());
+      for (auto& [_, listener] : listeners_) {
+         listener.active = false;
+         listeners.push_back(listener.value);
+      }
+      return listeners;
+   }
+
+   [[nodiscard]] std::vector<std::shared_ptr<forge::net::quic::listener>> listener_snapshot() const {
+      auto listeners = std::vector<std::shared_ptr<forge::net::quic::listener>>{};
+      auto lock = std::scoped_lock{listeners_mutex_};
+      listeners.reserve(listeners_.size());
+      for (const auto& [_, listener] : listeners_) {
+         listeners.push_back(listener.value);
+      }
+      return listeners;
+   }
+
+   void track(const std::shared_ptr<cancellation_latch>& operation) {
+      auto cancel_now = false;
+      {
+         auto lock = std::scoped_lock{active_mutex_};
+         cancel_now = stopped_;
+         if (!cancel_now) {
+            active_.erase(std::remove_if(active_.begin(), active_.end(),
+                                         [](const auto& operation) { return operation.expired(); }),
+                          active_.end());
+            active_.push_back(operation);
+         }
+      }
+      if (cancel_now) {
+         operation->request_stop();
+      }
+   }
+
+   [[nodiscard]] forge::net::quic::security_options
+   peer_verifier(std::optional<peer_id> expected = std::nullopt) const {
       if (options_.allow_insecure_test_mode) {
          auto security = forge::net::quic::security_options{.verify_peer = true};
          security.verifier = [](const forge::net::quic::peer_certificate&) { return true; };
@@ -306,7 +431,7 @@ class quic_profile final {
    }
 
    [[nodiscard]] forge::net::quic::client_options client_options(std::optional<peer_id> expected,
-                                                          std::chrono::milliseconds timeout) const {
+                                                                 std::chrono::milliseconds timeout) const {
       return forge::net::quic::client_options{
           .alpn = "libp2p",
           .connect_timeout = timeout,
@@ -338,8 +463,12 @@ class quic_profile final {
    forge::asio::runtime& runtime_;
    const node::options& options_;
    resource_manager resources_;
-   forge::net::quic::connector connector_;
+   mutable std::mutex listeners_mutex_;
    std::map<std::string, listener_entry> listeners_;
+   bool listeners_stopped_ = false;
+   std::mutex active_mutex_;
+   std::vector<std::weak_ptr<cancellation_latch>> active_;
+   bool stopped_ = false;
 };
 
 } // namespace
@@ -355,8 +484,9 @@ void register_quic_profile(registry& value, forge::asio::runtime& runtime, const
        .stop = [owned] { owned->stop(); },
        .async_stop = [owned] { return owned->async_stop(); },
        .async_connect =
-           [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options) {
-              return owned->async_connect(std::move(endpoint), options);
+           [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options,
+                   std::shared_ptr<cancellation_latch> cancellation) {
+              return owned->async_connect(std::move(endpoint), options, std::move(cancellation));
            },
        .async_accept = [owned](forge::net::p2p::endpoint endpoint) { return owned->async_accept(std::move(endpoint)); },
    });

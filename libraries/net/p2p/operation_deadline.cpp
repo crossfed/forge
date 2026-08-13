@@ -58,17 +58,28 @@ namespace forge::net::p2p {
 
 namespace asio = boost::asio;
 
+namespace {
+
+thread_local const void* executing_cancel_state = nullptr;
+
+} // namespace
+
 operation_deadline::stop_token::stop_token(std::shared_ptr<shared_state> state) : state_{std::move(state)} {}
 
 [[nodiscard]] bool operation_deadline::stop_token::request_stop() const noexcept {
    if (!state_) {
       return false;
    }
-   auto expected = state_value::pending;
-   if (!state_->value.compare_exchange_strong(expected, state_value::stopped, std::memory_order_acq_rel)) {
-      return false;
+   auto claim = callback_claim{};
+   {
+      auto lock = std::scoped_lock{state_->mutex};
+      if (state_->finished || state_->value != state_value::pending) {
+         return false;
+      }
+      state_->value = state_value::stopped;
+      claim = operation_deadline::claim_cancel_locked(state_);
    }
-   operation_deadline::invoke_cancel(state_);
+   operation_deadline::invoke_cancel(std::move(claim));
    return true;
 }
 
@@ -76,71 +87,96 @@ operation_deadline::operation_deadline(boost::asio::io_context& context, std::ch
     : timer_(std::make_shared<asio::steady_timer>(context)), state_(std::make_shared<shared_state>()) {
    validate_operation_timeout(timeout, "P2P operation timeout");
    timer_->expires_after(timeout);
-}
-
-operation_deadline::~operation_deadline() {
-   cancel();
-}
-
-void operation_deadline::arm(std::function<void()> cancel) {
    auto timer = timer_;
    auto state = state_;
-   {
-      auto lock = std::scoped_lock{state->mutex};
-      state->cancel = std::move(cancel);
-   }
-   if (state->value.load(std::memory_order_acquire) == state_value::stopped) {
-      invoke_cancel(state);
-   }
-   timer_->async_wait([timer, state](boost::system::error_code ec) {
+   timer_->async_wait([timer = std::move(timer), state = std::move(state)](boost::system::error_code ec) {
       if (ec) {
          return;
       }
-      auto expected = state_value::pending;
-      if (!state->value.compare_exchange_strong(expected, state_value::timed_out, std::memory_order_acq_rel)) {
-         return;
+      auto claim = callback_claim{};
+      {
+         auto lock = std::scoped_lock{state->mutex};
+         if (state->finished || state->value != state_value::pending) {
+            return;
+         }
+         state->value = state_value::timed_out;
+         claim = operation_deadline::claim_cancel_locked(state);
       }
-      operation_deadline::invoke_cancel(state);
+      operation_deadline::invoke_cancel(std::move(claim));
    });
 }
 
-void operation_deadline::invoke_cancel(const std::shared_ptr<shared_state>& state) noexcept {
-   auto cancel = std::function<void()>{};
+operation_deadline::~operation_deadline() {
+   static_cast<void>(finish());
+}
+
+void operation_deadline::arm(std::function<void()> cancel) {
+   auto claim = callback_claim{};
    {
-      auto lock = std::scoped_lock{state->mutex};
-      if (state->cancel_invoked || !state->cancel) {
+      auto lock = std::scoped_lock{state_->mutex};
+      if (state_->finished) {
          return;
       }
-      state->cancel_invoked = true;
-      cancel = std::move(state->cancel);
+      state_->cancel = std::move(cancel);
+      claim = claim_cancel_locked(state_);
    }
+   invoke_cancel(std::move(claim));
+}
+
+operation_deadline::callback_claim
+operation_deadline::claim_cancel_locked(const std::shared_ptr<shared_state>& state) {
+   if (state->finished || state->cancel_invoked || !state->cancel ||
+       (state->value != state_value::stopped && state->value != state_value::timed_out)) {
+      return {};
+   }
+   state->cancel_invoked = true;
+   state->active_callbacks.fetch_add(1, std::memory_order_relaxed);
+   return callback_claim{.state = state, .callback = std::move(state->cancel)};
+}
+
+void operation_deadline::invoke_cancel(callback_claim claim) noexcept {
+   if (!claim.callback) {
+      return;
+   }
+   const auto* previous = executing_cancel_state;
+   executing_cancel_state = claim.state.get();
    try {
-      cancel();
+      claim.callback();
    } catch (...) {
    }
+   executing_cancel_state = previous;
+   claim.state->active_callbacks.fetch_sub(1, std::memory_order_release);
+   claim.state->active_callbacks.notify_all();
 }
 
 [[nodiscard]] bool operation_deadline::finish() noexcept {
-   auto expected = state_value::pending;
-   if (state_->value.compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel)) {
-      cancel();
-      return true;
-   }
-   cancel();
-   return state_->value.load(std::memory_order_acquire) != state_value::timed_out;
-}
-
-void operation_deadline::cancel() noexcept {
-   auto expected = state_value::pending;
-   (void)state_->value.compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel);
-   if (!timer_) {
-      return;
+   auto result = true;
+   {
+      auto lock = std::scoped_lock{state_->mutex};
+      state_->finished = true;
+      if (state_->value == state_value::pending) {
+         state_->value = state_value::completed;
+      }
+      state_->cancel = {};
+      result = state_->value != state_value::timed_out;
    }
    try {
       timer_->cancel();
    } catch (...) {
       // Timer cancellation must not escape destructor/cleanup paths.
    }
+   if (executing_cancel_state != state_.get()) {
+      auto active = state_->active_callbacks.load(std::memory_order_acquire);
+      while (active != 0) {
+         state_->active_callbacks.wait(active, std::memory_order_acquire);
+         active = state_->active_callbacks.load(std::memory_order_acquire);
+      }
+   }
+   return result;
+}
+
+void operation_deadline::cancel() noexcept {
+   static_cast<void>(finish());
 }
 
 [[nodiscard]] operation_deadline::stop_token operation_deadline::stopping() const noexcept {
@@ -148,11 +184,13 @@ void operation_deadline::cancel() noexcept {
 }
 
 [[nodiscard]] bool operation_deadline::timed_out() const noexcept {
-   return state_->value.load(std::memory_order_acquire) == state_value::timed_out;
+   auto lock = std::scoped_lock{state_->mutex};
+   return state_->value == state_value::timed_out;
 }
 
 [[nodiscard]] bool operation_deadline::stopped() const noexcept {
-   return state_->value.load(std::memory_order_acquire) == state_value::stopped;
+   auto lock = std::scoped_lock{state_->mutex};
+   return state_->value == state_value::stopped;
 }
 
 } // namespace forge::net::p2p

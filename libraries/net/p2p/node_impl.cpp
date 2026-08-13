@@ -25,7 +25,6 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
@@ -41,6 +40,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.symmetric.chacha20_poly1305;
 import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
@@ -76,6 +76,7 @@ import forge.net.transport.stream;
 import forge.net.yamux.exceptions;
 import forge.net.yamux.session;
 
+#include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
 #include "details/peer_exchange_learning.hxx"
 #include "details/protocol_capabilities.hxx"
@@ -345,8 +346,8 @@ void validate(const node::options& options) {
        options.limits.relay.reservation_ttl.count() <= 0 || options.limits.resources.max_streams == 0 ||
        options.limits.resources.max_streams_per_peer == 0 || options.limits.resources.max_streams_per_protocol == 0 ||
        options.limits.resources.max_relay_reservations == 0 || options.limits.resources.max_relay_streams == 0 ||
-       options.limits.resources.max_queued_bytes == 0 ||
-       options.limits.resources.max_dial_attempts == 0 || options.limits.resources.max_dial_attempts_per_peer == 0 ||
+       options.limits.resources.max_queued_bytes == 0 || options.limits.resources.max_dial_attempts == 0 ||
+       options.limits.resources.max_dial_attempts_per_peer == 0 ||
        options.limits.resources.max_malformed_messages_per_peer == 0 ||
        options.limits.discovery.query_timeout.count() <= 0 || options.limits.discovery.refresh_interval.count() <= 0 ||
        options.limits.discovery.max_parallel_queries == 0 || options.limits.discovery.max_results == 0 ||
@@ -436,9 +437,10 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id(decode_public_key(identity.public_key))),
       resources(resource_limits_for(options.limits)), direct_registry(runtime_value, options, identity, resources),
-      teardown(runtime_value.context().get_executor()),
-      lifecycle(runtime_value.context().get_executor()), identify_service(runtime_value.context().get_executor()),
-      store(options.peer_state), routing(local, options.limits.dht) {
+      teardown(runtime_value.context().get_executor()), lifecycle(runtime_value.context().get_executor()),
+      lifecycle_wakeup(std::make_shared<detail::lifecycle_wakeup>()),
+      identify_service(runtime_value.context().get_executor()), store(options.peer_state),
+      routing(local, options.limits.dht) {
    if (!options.allow_insecure_test_mode) {
       const auto identity_peer = make_peer_id(decode_public_key(identity.public_key));
       if (local != identity_peer) {
@@ -458,7 +460,6 @@ bool node::impl::launch_tracked(std::function<boost::asio::awaitable<void>()> ta
       return false;
    }
    const auto executor = operation.executor();
-   const auto cancellation_slot = operation.cancellation_slot();
    const auto stop_latch = operation.stop_latch();
    try {
       asio::co_spawn(
@@ -469,11 +470,10 @@ bool node::impl::launch_tracked(std::function<boost::asio::awaitable<void>()> ta
              }
              co_await task();
           },
-          asio::bind_cancellation_slot(cancellation_slot,
-                                       [operation = std::move(operation)](std::exception_ptr error) mutable {
-                                          static_cast<void>(error);
-                                          operation.release();
-                                       }));
+          [operation = std::move(operation)](std::exception_ptr error) mutable {
+             static_cast<void>(error);
+             operation.release();
+          });
       return true;
    } catch (...) {
       return false;
@@ -906,8 +906,8 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
                response.status_text = "rendezvous registration endpoints are not routable from source";
             } else {
                try {
-                  co_await store.async_register_rendezvous(
-                      std::move(*sanitized), options.limits.rendezvous.max_registrations_per_peer);
+                  co_await store.async_register_rendezvous(std::move(*sanitized),
+                                                           options.limits.rendezvous.max_registrations_per_peer);
                   response.ttl = ttl;
                   increment_rendezvous_registration();
                } catch (const forge::exceptions::base& error) {

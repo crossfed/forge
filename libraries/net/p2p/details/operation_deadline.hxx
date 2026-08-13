@@ -10,10 +10,17 @@ class operation_deadline {
    enum class state_value : std::uint8_t { pending, completed, timed_out, stopped };
 
    struct shared_state {
-      std::atomic<state_value> value{state_value::pending};
       std::mutex mutex;
       std::function<void()> cancel;
+      state_value value = state_value::pending;
+      bool finished = false;
       bool cancel_invoked = false;
+      std::atomic_size_t active_callbacks{0};
+   };
+
+   struct callback_claim {
+      std::shared_ptr<shared_state> state;
+      std::function<void()> callback;
    };
 
  public:
@@ -43,7 +50,8 @@ class operation_deadline {
    [[nodiscard]] bool stopped() const noexcept;
 
  private:
-   static void invoke_cancel(const std::shared_ptr<shared_state>& state) noexcept;
+   [[nodiscard]] static callback_claim claim_cancel_locked(const std::shared_ptr<shared_state>& state);
+   static void invoke_cancel(callback_claim claim) noexcept;
 
    std::shared_ptr<boost::asio::steady_timer> timer_;
    std::shared_ptr<shared_state> state_;

@@ -792,7 +792,6 @@ boost::asio::awaitable<void> node::async_stop() {
 }
 
 void node::stop() {
-   impl_->request_lifecycle_stop();
    auto operations = std::vector<detail::session_teardown::operation>{};
    auto deadlines = std::vector<operation_deadline::stop_token>{};
    {
@@ -815,7 +814,6 @@ void node::stop() {
       }
       impl_->stop_requested_at = std::chrono::steady_clock::now();
       impl_->stopped = true;
-      impl_->direct_registry.stop();
       for (auto& [_, session] : impl_->sessions) {
          session->closed = true;
       }
@@ -830,6 +828,8 @@ void node::stop() {
       impl_->metrics_value.active_relay_reservations = 0;
       impl_->metrics_value.stopped = true;
    }
+   impl_->request_lifecycle_stop();
+   impl_->direct_registry.stop();
    for (const auto& deadline : deadlines) {
       static_cast<void>(deadline.request_stop());
    }

@@ -2,10 +2,8 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -23,6 +21,7 @@ module;
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -39,27 +38,18 @@ module;
 
 module forge.net.p2p.node;
 
+import forge.asio.notification;
 import forge.crypto.core.random;
 import forge.exceptions;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.lifecycle;
 
 #include "details/bootstrap_service.hxx"
+#include "details/cancellation_latch.hxx"
+#include "details/lifecycle_wakeup.hxx"
 
 namespace forge::net::p2p::detail {
 namespace {
-
-void emit_cancellation(const boost::asio::strand<boost::asio::any_io_executor>& executor,
-                       const std::shared_ptr<boost::asio::cancellation_signal>& cancellation) noexcept {
-   if (!cancellation) {
-      return;
-   }
-   try {
-      boost::asio::post(executor, [cancellation] { cancellation->emit(boost::asio::cancellation_type::all); });
-   } catch (...) {
-      // Transport shutdown remains the final cancellation fallback.
-   }
-}
 
 [[nodiscard]] bool is_expected_cancellation(const std::exception_ptr& failure) noexcept {
    if (!failure) {
@@ -99,7 +89,7 @@ bootstrap_service::batch_state::batch_state(boost::asio::strand<boost::asio::any
 bootstrap_service::bootstrap_service(boost::asio::any_io_executor executor, lifecycle_options options,
                                      callbacks callbacks_value)
     : executor_{std::move(executor)}, strand_{boost::asio::make_strand(executor_)}, options_{std::move(options)},
-      callbacks_{std::move(callbacks_value)} {
+      callbacks_{std::move(callbacks_value)}, retry_wakeup_{std::make_shared<lifecycle_wakeup>()} {
    replace_bootstrap(options_.bootstrap);
 }
 
@@ -205,7 +195,7 @@ boost::asio::awaitable<bool> bootstrap_service::async_attempt(const std::string&
       co_return true;
    }
 
-   auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
+   auto cancellation = std::make_shared<cancellation_latch>();
    {
       const auto lock = std::scoped_lock{mutex_};
       const auto found = entries_.find(key);
@@ -221,12 +211,11 @@ boost::asio::awaitable<bool> bootstrap_service::async_attempt(const std::string&
    auto connected = std::optional<peer_id>{};
    auto failure = std::exception_ptr{};
    try {
-      connected = co_await boost::asio::co_spawn(
-          strand_, callbacks_.connect(configured, timeout),
-          boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::use_awaitable));
+      connected = co_await callbacks_.connect(configured, timeout, cancellation);
    } catch (...) {
       failure = std::current_exception();
    }
+   static_cast<void>(cancellation->finish());
    const auto expected_cancellation = is_expected_cancellation(failure);
    const auto failure_text = failure && !expected_cancellation ? failure_message(failure) : std::string{};
 
@@ -391,6 +380,7 @@ bootstrap_service::async_run_batch(std::vector<std::string> keys,
 }
 
 boost::asio::awaitable<void> bootstrap_service::async_wait_for_retry(std::chrono::steady_clock::time_point deadline) {
+   auto observed = retry_wakeup_->epoch();
    const auto now = std::chrono::steady_clock::now();
    if (now >= deadline || stopping()) {
       co_return;
@@ -398,24 +388,13 @@ boost::asio::awaitable<void> bootstrap_service::async_wait_for_retry(std::chrono
 
    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
    const auto delay = std::min(next_maintenance_delay(now), std::max(remaining, std::chrono::milliseconds{1}));
-   auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
-   timer->expires_after(delay);
    {
       const auto lock = std::scoped_lock{mutex_};
       if (stopping_) {
          co_return;
       }
-      retry_timer_ = timer;
    }
-
-   auto error = boost::system::error_code{};
-   co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-   {
-      const auto lock = std::scoped_lock{mutex_};
-      if (retry_timer_.lock() == timer) {
-         retry_timer_.reset();
-      }
-   }
+   static_cast<void>(co_await retry_wakeup_->async_wait_until(observed, now + delay));
 }
 
 boost::asio::awaitable<std::size_t> bootstrap_service::async_initial_bootstrap() {
@@ -463,17 +442,15 @@ void bootstrap_service::start_maintenance(lifecycle_tracker& tracker) {
       maintenance_started_ = true;
    }
    const auto executor = operation.executor();
-   const auto cancellation_slot = operation.cancellation_slot();
    auto self = shared_from_this();
    try {
-      boost::asio::co_spawn(executor, async_maintenance(),
-                            boost::asio::bind_cancellation_slot(
-                                cancellation_slot, [self = std::move(self), operation = std::move(operation)](
-                                                       std::exception_ptr error) mutable {
-                                   static_cast<void>(error);
-                                   static_cast<void>(self);
-                                   operation.release();
-                                }));
+      boost::asio::co_spawn(
+          executor, async_maintenance(),
+          [self = std::move(self), operation = std::move(operation)](std::exception_ptr error) mutable {
+             static_cast<void>(error);
+             static_cast<void>(self);
+             operation.release();
+          });
    } catch (...) {
       const auto lock = std::scoped_lock{mutex_};
       maintenance_started_ = false;
@@ -497,20 +474,16 @@ boost::asio::awaitable<void> bootstrap_service::async_maintenance() {
             }
          }
 
-         auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
-         timer->expires_after(next_maintenance_delay(std::chrono::steady_clock::now()));
+         const auto observed = retry_wakeup_->epoch();
+         const auto wait_started = std::chrono::steady_clock::now();
+         const auto deadline = wait_started + next_maintenance_delay(wait_started);
          {
             const auto lock = std::scoped_lock{mutex_};
-            retry_timer_ = timer;
-         }
-         auto error = boost::system::error_code{};
-         co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-         {
-            const auto lock = std::scoped_lock{mutex_};
-            if (retry_timer_.lock() == timer) {
-               retry_timer_.reset();
+            if (stopping_) {
+               break;
             }
          }
+         static_cast<void>(co_await retry_wakeup_->async_wait_until(observed, deadline));
       }
    } catch (...) {
       if (!stopping()) {
@@ -528,7 +501,7 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
       replacements.emplace(key, entry{.configured = std::move(peer), .generation = next_generation_++});
    }
 
-   auto cancellations = std::vector<std::shared_ptr<boost::asio::cancellation_signal>>{};
+   auto cancellations = std::vector<std::shared_ptr<cancellation_latch>>{};
    auto unprotect = std::set<peer_id>{};
    {
       const auto lock = std::scoped_lock{mutex_};
@@ -543,6 +516,7 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
             value.next_attempt = existing->second.next_attempt;
             value.failures = existing->second.failures;
             value.generation = existing->second.generation;
+            value.active_cancellation = existing->second.active_cancellation;
          }
       }
       auto retained_peers = std::set<peer_id>{};
@@ -579,7 +553,7 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
       }
    }
    for (const auto& cancellation : cancellations) {
-      emit_cancellation(strand_, cancellation);
+      cancellation->request_stop();
    }
    for (const auto& peer : unprotect) {
       callbacks_.unprotect(peer);
@@ -588,16 +562,22 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
 
 void bootstrap_service::cancel_attempts(const std::vector<std::string>& keys,
                                         std::optional<std::string> except) noexcept {
+   auto cancellations = std::vector<std::shared_ptr<cancellation_latch>>{};
    try {
-      const auto lock = std::scoped_lock{mutex_};
-      for (const auto& key : keys) {
-         if (except && key == *except) {
-            continue;
+      {
+         const auto lock = std::scoped_lock{mutex_};
+         for (const auto& key : keys) {
+            if (except && key == *except) {
+               continue;
+            }
+            const auto found = entries_.find(key);
+            if (found != entries_.end() && found->second.active_cancellation) {
+               cancellations.push_back(found->second.active_cancellation);
+            }
          }
-         const auto found = entries_.find(key);
-         if (found != entries_.end() && found->second.active_cancellation) {
-            emit_cancellation(strand_, found->second.active_cancellation);
-         }
+      }
+      for (const auto& cancellation : cancellations) {
+         cancellation->request_stop();
       }
    } catch (...) {
       // Node-level teardown remains the final cancellation fallback.
@@ -605,31 +585,26 @@ void bootstrap_service::cancel_attempts(const std::vector<std::string>& keys,
 }
 
 void bootstrap_service::wake_retry_wait() noexcept {
-   auto timer = std::shared_ptr<boost::asio::steady_timer>{};
-   {
-      const auto lock = std::scoped_lock{mutex_};
-      timer = retry_timer_.lock();
-   }
-   if (!timer) {
-      return;
-   }
-   try {
-      boost::asio::post(strand_, [timer] { timer->cancel(); });
-   } catch (...) {
-   }
+   retry_wakeup_->notify();
 }
 
 void bootstrap_service::request_stop() noexcept {
+   auto cancellations = std::vector<std::shared_ptr<cancellation_latch>>{};
    try {
-      const auto lock = std::scoped_lock{mutex_};
-      if (stopping_) {
-         return;
-      }
-      stopping_ = true;
-      for (const auto& [_, value] : entries_) {
-         if (value.active_cancellation) {
-            emit_cancellation(strand_, value.active_cancellation);
+      {
+         const auto lock = std::scoped_lock{mutex_};
+         if (stopping_) {
+            return;
          }
+         stopping_ = true;
+         for (const auto& [_, value] : entries_) {
+            if (value.active_cancellation) {
+               cancellations.push_back(value.active_cancellation);
+            }
+         }
+      }
+      for (const auto& cancellation : cancellations) {
+         cancellation->request_stop();
       }
    } catch (...) {
       // Node-level teardown remains the final cancellation fallback.
@@ -649,9 +624,8 @@ std::size_t bootstrap_service::connected_count() const {
          }
       }
    }
-   return static_cast<std::size_t>(std::ranges::count_if(entries, [&](const auto& value) {
-      return callbacks_.connected(value.first, value.second);
-   }));
+   return static_cast<std::size_t>(std::ranges::count_if(
+       entries, [&](const auto& value) { return callbacks_.connected(value.first, value.second); }));
 }
 
 std::size_t bootstrap_service::configured_count() const noexcept {

@@ -105,6 +105,26 @@ BOOST_AUTO_TEST_CASE(p2p_lifecycle_stop_is_latched_before_task_cancellation_hand
    forge::asio::blocking::run(runtime, tracker.wait());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_lifecycle_stop_latch_is_sticky_and_waits_for_operation_release) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto tracker = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(tracker.begin_start());
+
+   auto operation = tracker.track();
+   BOOST_REQUIRE(operation.active());
+   const auto stop_latch = operation.stop_latch();
+
+   tracker.request_stop();
+   BOOST_REQUIRE(stop_latch);
+   BOOST_TEST(stop_latch->load(std::memory_order_acquire));
+
+   auto waiting = boost::asio::co_spawn(runtime.context(), tracker.wait(), boost::asio::use_future);
+   BOOST_CHECK(waiting.wait_for(std::chrono::milliseconds{25}) == std::future_status::timeout);
+   operation.release();
+   BOOST_CHECK(waiting.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   waiting.get();
+}
+
 BOOST_AUTO_TEST_CASE(p2p_node_optional_bootstrap_reports_degraded_and_keeps_running) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto options = make_lifecycle_node_options("lifecycle-optional");
@@ -289,9 +309,9 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_replaces_authenticated_peer_pro
    const auto second_peer = second.local_peer();
    BOOST_TEST(static_cast<bool>(first_peer != second_peer));
 
-   BOOST_REQUIRE(eventually(
-       [&] { return client.is_peer_protected(second_peer) && !client.is_peer_protected(first_peer); },
-       std::chrono::seconds{3}));
+   BOOST_REQUIRE(
+       eventually([&] { return client.is_peer_protected(second_peer) && !client.is_peer_protected(first_peer); },
+                  std::chrono::seconds{3}));
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, second.async_stop());
@@ -333,8 +353,8 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_alias_removal_preserves_shared_
    auto client = node{runtime, std::move(client_options)};
    static_cast<void>(forge::asio::blocking::run(runtime, client.async_start()));
 
-   BOOST_REQUIRE(eventually([&] { return client.lifecycle_state().connected_bootstrap == 2U; },
-                            std::chrono::seconds{3}));
+   BOOST_REQUIRE(
+       eventually([&] { return client.lifecycle_state().connected_bootstrap == 2U; }, std::chrono::seconds{3}));
    BOOST_TEST(client.is_peer_protected(first_peer));
 
    forge::asio::blocking::run(runtime, first.async_stop());
@@ -349,9 +369,9 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_alias_removal_preserves_shared_
    BOOST_TEST(client.is_peer_protected(first_peer));
 
    forge::asio::blocking::run(runtime, client.async_set_bootstrap({bootstrap_peer{.address = tcp_address}}));
-   BOOST_REQUIRE(eventually(
-       [&] { return !client.is_peer_protected(first_peer) && client.is_peer_protected(second_peer); },
-       std::chrono::seconds{3}));
+   BOOST_REQUIRE(
+       eventually([&] { return !client.is_peer_protected(first_peer) && client.is_peer_protected(second_peer); },
+                  std::chrono::seconds{3}));
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, second.async_stop());
@@ -471,12 +491,12 @@ BOOST_AUTO_TEST_CASE(p2p_protocol_registration_rejects_unrepresentable_identify_
    server_options.lifecycle.listen = {parse_endpoint("/ip4/127.0.0.1/tcp/0")};
    auto server = node{runtime, std::move(server_options)};
 
-   BOOST_CHECK_THROW(server.register_protocol_handler(
-                         protocol_id{.value = "missing-leading-slash"},
-                         [](node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {
-                            co_await incoming.stream.async_close();
-                         }),
-                     exceptions::invalid_options);
+   BOOST_CHECK_THROW(
+       server.register_protocol_handler(protocol_id{.value = "missing-leading-slash"},
+                                        [](node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {
+                                           co_await incoming.stream.async_close();
+                                        }),
+       exceptions::invalid_options);
    BOOST_CHECK_THROW(server.register_protocol_handler(
                          protocol_id{.value = "/" + std::string(identify::limits{}.max_protocol_size, 'x')},
                          [](node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {

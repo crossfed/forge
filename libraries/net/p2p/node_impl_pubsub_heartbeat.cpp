@@ -28,10 +28,6 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
@@ -48,6 +44,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
@@ -59,6 +56,7 @@ import forge.net.p2p.stream;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
 
+#include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
 #include "details/peer_failure.hxx"
 
@@ -86,10 +84,10 @@ void node::impl::launch_pubsub_heartbeat() {
    }
    auto self = shared_from_this();
    if (!launch_tracked([self]() -> asio::awaitable<void> {
-          auto timer = asio::steady_timer{co_await asio::this_coro::executor};
-          timer.expires_after(self->options.limits.pubsub.limits.heartbeat_initial_delay);
-          boost::system::error_code ec;
-          co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+          const auto wakeup = self->lifecycle_wakeup;
+          auto observed = wakeup->epoch();
+          observed = co_await wakeup->async_wait_until(
+              observed, std::chrono::steady_clock::now() + self->options.limits.pubsub.limits.heartbeat_initial_delay);
           while (true) {
              {
                 auto lock = std::scoped_lock{self->mutex};
@@ -98,9 +96,8 @@ void node::impl::launch_pubsub_heartbeat() {
                 }
              }
              co_await self->pubsub_heartbeat_once();
-             timer.expires_after(self->options.limits.pubsub.limits.heartbeat_interval);
-             ec = {};
-             co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+             observed = co_await wakeup->async_wait_until(
+                 observed, std::chrono::steady_clock::now() + self->options.limits.pubsub.limits.heartbeat_interval);
           }
        })) {
       auto lock = std::scoped_lock{mutex};
@@ -119,6 +116,17 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
          co_return;
       }
       const auto now = std::chrono::steady_clock::now();
+      const auto backoff_limit = detail::pubsub_backoff::limit_for(options.limits.pubsub.limits.max_topics,
+                                                                   options.limits.max_sessions);
+      pubsub_value.backoffs.expire(now);
+      const auto add_prune = [&](const peer_id& peer, const std::string& topic) {
+         pubsub_value.backoffs.record_local(topic, peer, options.limits.pubsub.limits.prune_backoff, now,
+                                             backoff_limit);
+         prunes[peer].push_back(pubsub::control::prune{
+             .subject = pubsub::topic{.value = topic},
+             .backoff = options.limits.pubsub.limits.prune_backoff,
+         });
+      };
       const auto mesh_high =
           std::min(options.limits.pubsub.limits.mesh_n_high, options.limits.pubsub.limits.max_peers_per_topic);
       const auto mesh_target = std::min(options.limits.pubsub.limits.mesh_n, mesh_high);
@@ -132,10 +140,7 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
             const auto subscribed = topics != pubsub_value.peer_topics.end() && topics->second.contains(topic_value);
             if (!has_session || !subscribed) {
                if (has_session && !subscribed) {
-                  prunes[*it].push_back(pubsub::control::prune{
-                      .subject = pubsub::topic{.value = topic_value},
-                      .backoff = options.limits.pubsub.limits.prune_backoff,
-                  });
+                  add_prune(*it, topic_value);
                }
                it = mesh.erase(it);
             } else {
@@ -146,7 +151,11 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
             if (mesh.size() >= mesh_target) {
                break;
             }
-            if (topics.contains(topic_value) && !mesh.contains(peer)) {
+            const auto has_session = std::ranges::any_of(sessions, [&](const auto& item) {
+               return item.second->info.remote_peer == peer && !item.second->closed;
+            });
+            if (has_session && topics.contains(topic_value) && !mesh.contains(peer) &&
+                !pubsub_value.backoffs.blocked(topic_value, peer, now)) {
                mesh.insert(peer);
                grafts[peer].push_back(pubsub::control::graft{.subject = pubsub::topic{.value = topic_value}});
             }
@@ -155,10 +164,7 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
             auto it = std::prev(mesh.end());
             const auto peer = *it;
             mesh.erase(it);
-            prunes[peer].push_back(pubsub::control::prune{
-                .subject = pubsub::topic{.value = topic_value},
-                .backoff = options.limits.pubsub.limits.prune_backoff,
-            });
+            add_prune(peer, topic_value);
          }
          auto ids = std::vector<std::vector<std::uint8_t>>{};
          auto seen = std::size_t{};

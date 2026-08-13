@@ -761,7 +761,6 @@ void node::impl::launch_identify(const std::shared_ptr<session_state>& session) 
    }
    auto self = shared_from_this();
    const auto executor = operation.executor();
-   const auto cancellation_slot = operation.cancellation_slot();
    boost::asio::co_spawn(
        executor,
        [self, session]() mutable -> boost::asio::awaitable<void> {
@@ -771,11 +770,10 @@ void node::impl::launch_identify(const std::shared_ptr<session_state>& session) 
              // The Identify state records attributable failure without terminating the authenticated session.
           }
        },
-       boost::asio::bind_cancellation_slot(cancellation_slot,
-                                           [operation = std::move(operation)](std::exception_ptr error) mutable {
-                                              static_cast<void>(error);
-                                              operation.release();
-                                           }));
+       [operation = std::move(operation)](std::exception_ptr error) mutable {
+          static_cast<void>(error);
+          operation.release();
+       });
 }
 
 boost::asio::awaitable<std::optional<identify::document>>
@@ -790,12 +788,12 @@ node::impl::identify_peer_for_discovery(const peer_id& peer, discovery::source s
       }
    }
    const auto discovered_at = std::chrono::system_clock::now();
-   const auto record = store.apply_discovery(
-       peer, peer_store::discovery_update{
-                 .source = source,
-                 .observed_at = discovered_at,
-                 .expires_at = discovered_at + options.limits.discovery.refresh_interval,
-             });
+   const auto record =
+       store.apply_discovery(peer, peer_store::discovery_update{
+                                       .source = source,
+                                       .observed_at = discovered_at,
+                                       .expires_at = discovered_at + options.limits.discovery.refresh_interval,
+                                   });
    if (!record) {
       co_return std::nullopt;
    }

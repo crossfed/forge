@@ -3,6 +3,14 @@
 namespace forge::net::yamux::detail {
 
 class transport_write_tracker {
+ private:
+   struct state {
+      std::mutex mutex;
+      std::size_t active = 0;
+      bool sealed = false;
+      forge::asio::notification changed;
+   };
+
  public:
    class reservation {
     public:
@@ -17,22 +25,20 @@ class transport_write_tracker {
       void release() noexcept;
 
     private:
-      explicit reservation(transport_write_tracker& owner) noexcept;
+      explicit reservation(std::shared_ptr<state> owner) noexcept;
 
-      transport_write_tracker* owner_ = nullptr;
+      std::shared_ptr<state> owner_;
 
       friend class transport_write_tracker;
    };
 
-   [[nodiscard]] reservation reserve();
+   [[nodiscard]] std::optional<reservation> try_reserve();
+   void seal() noexcept;
    boost::asio::awaitable<void> async_wait();
+   boost::asio::awaitable<bool> async_wait_until(std::chrono::steady_clock::time_point deadline);
 
  private:
-   void release() noexcept;
-
-   std::mutex mutex_;
-   std::size_t active_ = 0;
-   forge::asio::notification changed_;
+   std::shared_ptr<state> state_ = std::make_shared<state>();
 };
 
 } // namespace forge::net::yamux::detail

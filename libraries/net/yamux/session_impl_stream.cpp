@@ -51,14 +51,11 @@ boost::asio::awaitable<transport::stream> session::impl::async_open_stream() {
          FORGE_THROW_EXCEPTION(exceptions::resource_limit, "yamux stream ids are exhausted");
       }
       const auto id = *next_stream_id_;
-      auto encoded = detail::encode_frame(detail::frame_type::window_update, detail::syn, id,
-                                          local_window_delta());
+      auto encoded = detail::encode_frame(detail::frame_type::window_update, detail::syn, id, local_window_delta());
       auto prepared = make_stream_locked(id, detail::initial_stream_window);
       prepared->accepted = true;
       streams_.emplace(id, prepared);
-      next_stream_id_ = detail::can_advance_stream_id(id)
-                            ? std::optional<std::uint32_t>{id + 2U}
-                            : std::nullopt;
+      next_stream_id_ = detail::can_advance_stream_id(id) ? std::optional<std::uint32_t>{id + 2U} : std::nullopt;
       state = std::move(prepared);
       return encoded;
    });
@@ -92,10 +89,17 @@ boost::asio::awaitable<transport::stream> session::impl::async_accept_stream() {
 }
 
 boost::asio::awaitable<void> session::impl::write_stream(const std::shared_ptr<stream_state>& state,
-                                                        detail::bytes payload,
-                                                        std::shared_ptr<void> lifetime) {
+                                                         detail::bytes payload, std::shared_ptr<void> lifetime) {
    co_await ensure_started();
 
+   auto transport_write = transport_writes_.try_reserve();
+   if (!transport_write) {
+      auto lock = std::scoped_lock{mutex_};
+      require_stream_owned_locked(state);
+      rethrow_terminal_locked();
+      FORGE_THROW_EXCEPTION(exceptions::closed, "yamux transport write admission is closed");
+   }
+   auto operation_lifetime = std::move(lifetime);
    auto offset = std::size_t{0};
    while (offset < payload.size()) {
       {
@@ -120,7 +124,7 @@ boost::asio::awaitable<void> session::impl::write_stream(const std::shared_ptr<s
       }
 
       auto written = std::size_t{0};
-      const auto sent = co_await write_prepared(
+      const auto sent = co_await write_admitted(
           [this, state, &payload, &offset, &written]() -> std::optional<detail::bytes> {
              auto lock = std::scoped_lock{mutex_};
              require_stream_owned_locked(state);
@@ -131,23 +135,21 @@ boost::asio::awaitable<void> session::impl::write_stream(const std::shared_ptr<s
              if (state->send_window == 0) {
                 return std::nullopt;
              }
-             written = std::min<std::size_t>(
-                 {payload.size() - offset, options_.max_frame_size, state->send_window});
+             written = std::min<std::size_t>({payload.size() - offset, options_.max_frame_size, state->send_window});
              const auto chunk = std::span<const std::uint8_t>{payload.data() + offset, written};
              auto encoded = detail::encode_frame(detail::frame_type::data, 0, state->id,
                                                  static_cast<std::uint32_t>(written), chunk);
              state->send_window -= static_cast<std::uint32_t>(written);
              return encoded;
           },
-          false, lifetime);
+          false, operation_lifetime);
       if (sent) {
          offset += written;
       }
    }
 }
 
-boost::asio::awaitable<detail::bytes>
-session::impl::read_stream(const std::shared_ptr<stream_state>& state) {
+boost::asio::awaitable<detail::bytes> session::impl::read_stream(const std::shared_ptr<stream_state>& state) {
    co_await ensure_started();
 
    while (true) {
@@ -182,10 +184,8 @@ session::impl::read_stream(const std::shared_ptr<stream_state>& state) {
                    consumed = static_cast<std::uint32_t>(state->inbound.front().size());
                    if (state->receive_window > options_.initial_window ||
                        state->pending_receive_credit > options_.initial_window - state->receive_window ||
-                       consumed > options_.initial_window - state->receive_window -
-                                      state->pending_receive_credit) {
-                      FORGE_THROW_EXCEPTION(exceptions::protocol_error,
-                                            "yamux receive window accounting overflow");
+                       consumed > options_.initial_window - state->receive_window - state->pending_receive_credit) {
+                      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "yamux receive window accounting overflow");
                    }
                    auto encoded = detail::encode_frame(detail::frame_type::window_update, 0, state->id, consumed);
                    out = std::move(state->inbound.front());
@@ -269,9 +269,8 @@ void session::impl::cancel_stream(const std::shared_ptr<stream_state>& state) {
    }
 
    auto self = shared_from_this();
-   boost::asio::co_spawn(
-       *executor, self->write_frame(detail::frame_type::data, detail::rst, state->id, 0, {}, true),
-       [self](std::exception_ptr) { (void)self; });
+   boost::asio::co_spawn(*executor, self->write_frame(detail::frame_type::data, detail::rst, state->id, 0, {}, true),
+                         [self](std::exception_ptr) { (void)self; });
 }
 
 void session::impl::reset_stream_locked(const std::shared_ptr<stream_state>& state) {

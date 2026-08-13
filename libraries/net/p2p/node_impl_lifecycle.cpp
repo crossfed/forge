@@ -44,6 +44,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -61,6 +62,7 @@ import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/bootstrap_service.hxx"
+#include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
 
 namespace forge::net::p2p {
@@ -106,21 +108,22 @@ void node::impl::initialize_lifecycle() {
    bootstrap = std::make_shared<detail::bootstrap_service>(
        runtime.context().get_executor(), options.lifecycle,
        detail::bootstrap_service::callbacks{
-           .connect = [weak](bootstrap_peer peer,
-                             std::chrono::milliseconds timeout) -> boost::asio::awaitable<peer_id> {
+           .connect = [weak](bootstrap_peer peer, std::chrono::milliseconds timeout,
+                             std::shared_ptr<cancellation_latch> cancellation) -> boost::asio::awaitable<peer_id> {
               const auto self = weak.lock();
               if (!self) {
                  FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node no longer owns bootstrap state");
               }
               const auto expected_peer = peer.address.peer;
-              const auto session =
-                  co_await self->connect_direct(std::move(peer.address), node::connect_options{
-                                                                             .expected_peer = expected_peer,
-                                                                             .allow_relay = false,
-                                                                             .timeout = timeout,
-                                                                             .direct_attempt_timeout = timeout,
-                                                                             .allow_hole_punch = false,
-                                                                         });
+              const auto session = co_await self->connect_direct(std::move(peer.address),
+                                                                 node::connect_options{
+                                                                     .expected_peer = expected_peer,
+                                                                     .allow_relay = false,
+                                                                     .timeout = timeout,
+                                                                     .direct_attempt_timeout = timeout,
+                                                                     .allow_hole_punch = false,
+                                                                 },
+                                                                 nullptr, std::move(cancellation));
               co_return session->info.remote_peer;
            },
            .connected =
@@ -165,10 +168,11 @@ void node::impl::initialize_lifecycle() {
 }
 
 void node::impl::request_lifecycle_stop() noexcept {
+   lifecycle.request_stop();
    bootstrap->request_stop();
    identify_service.close();
    session_admission_gate.close();
-   lifecycle.request_stop();
+   lifecycle_wakeup->notify();
 }
 
 boost::asio::awaitable<void> node::impl::async_hydrate_peer_state() {

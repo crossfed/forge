@@ -28,10 +28,6 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
@@ -48,6 +44,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -75,6 +72,7 @@ import forge.net.yamux.exceptions;
 import forge.net.yamux.session;
 
 #include "details/libp2p_identity_material.hxx"
+#include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
 #include "details/resource_stream.hxx"
 #include "details/operation_deadline.hxx"
@@ -282,8 +280,8 @@ std::optional<node::impl::relay_admission> node::impl::begin_relay(const peer_id
 void node::impl::finish_relay(const peer_id& owner, std::optional<std::uint64_t> reservation_id) {
    auto lock = std::scoped_lock{mutex};
    auto reservation = inbound_relay_reservations.find(owner);
-   if (reservation_id && reservation != inbound_relay_reservations.end() &&
-       reservation->second.id == *reservation_id && reservation->second.active_streams > 0) {
+   if (reservation_id && reservation != inbound_relay_reservations.end() && reservation->second.id == *reservation_id &&
+       reservation->second.active_streams > 0) {
       --reservation->second.active_streams;
    }
    if (metrics_value.active_relays > 0) {
@@ -299,7 +297,8 @@ void node::impl::erase_inbound_relay_reservation_locked(const peer_id& owner) no
 void node::impl::record_relay_bytes(std::uint64_t bytes) noexcept {
    auto lock = std::scoped_lock{mutex};
    const auto maximum = (std::numeric_limits<std::uint64_t>::max)();
-   metrics_value.relay_bytes = bytes > maximum - metrics_value.relay_bytes ? maximum : metrics_value.relay_bytes + bytes;
+   metrics_value.relay_bytes =
+       bytes > maximum - metrics_value.relay_bytes ? maximum : metrics_value.relay_bytes + bytes;
 }
 
 void node::impl::record_path_open(path::kind kind) {
@@ -562,11 +561,11 @@ void node::impl::launch_relay_discovery_maintenance() {
    }
    auto self = shared_from_this();
    if (!launch_tracked([self]() -> asio::awaitable<void> {
-          auto timer = asio::steady_timer{co_await asio::this_coro::executor};
+          const auto wakeup = self->lifecycle_wakeup;
+          auto observed = wakeup->epoch();
           while (true) {
-             timer.expires_after(self->options.limits.discovery.refresh_interval);
-             auto ec = boost::system::error_code{};
-             co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+             observed = co_await wakeup->async_wait_until(
+                 observed, std::chrono::steady_clock::now() + self->options.limits.discovery.refresh_interval);
              {
                 auto lock = std::scoped_lock{self->mutex};
                 if (self->stopped) {
@@ -1007,11 +1006,10 @@ void node::impl::launch_relay_pumps(peer_id owner, forge::net::p2p::stream left,
    auto self = shared_from_this();
    const auto byte_limit = relay_byte_limit(owner);
    const auto reservation_id = admission.reservation_id;
-   auto pair = std::make_shared<detail::relay_pair>(std::move(owner), std::move(left), std::move(right),
-                                                    std::move(admission.resource), runtime.context().get_executor(),
-                                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                                       options.limits.relay.max_duration),
-                                                    byte_limit);
+   auto pair = std::make_shared<detail::relay_pair>(
+       std::move(owner), std::move(left), std::move(right), std::move(admission.resource),
+       runtime.context().get_executor(),
+       std::chrono::duration_cast<std::chrono::seconds>(options.limits.relay.max_duration), byte_limit);
    auto finish = [self, pair, reservation_id] {
       if (pair->mark_finished()) {
          self->finish_relay(pair->owner, reservation_id);

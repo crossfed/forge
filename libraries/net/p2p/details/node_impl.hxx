@@ -10,6 +10,7 @@
 #include "operation_deadline.hxx"
 #include "path_selector.hxx"
 #include "peer_exchange_codec.hxx"
+#include "pubsub_backoff.hxx"
 #include "pubsub_outbound_budget.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
@@ -20,6 +21,7 @@ namespace forge::net::p2p {
 namespace detail {
 
 class bootstrap_service;
+class lifecycle_wakeup;
 class resource_stream;
 
 } // namespace detail
@@ -106,6 +108,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
          std::uint64_t session_id = 0;
          std::shared_ptr<forge::asio::gate> write_gate;
          std::shared_ptr<forge::net::p2p::stream> stream;
+         bool snapshot_pending = true;
       };
 
       struct validation {
@@ -142,6 +145,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
       std::map<std::string, pubsub::handler> handlers;
       std::map<peer_id, std::set<std::string>> peer_topics;
+      std::map<peer_id, std::map<std::uint64_t, std::uint64_t>> inbound;
       std::map<std::string, std::set<peer_id>> mesh;
       std::map<std::string, pubsub::message> cache;
       std::deque<std::string> history;
@@ -151,9 +155,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::map<peer_id, outbound_generation> outbound;
       detail::connection_singleflight_registry connection_gates;
       detail::pubsub_outbound_budget outbound_budget;
+      detail::pubsub_backoff backoffs;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
+      std::uint64_t next_inbound_generation = 1;
       std::uint64_t next_seqno = 1;
       bool heartbeat_started = false;
    };
@@ -175,6 +181,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    direct::registry direct_registry;
    detail::session_teardown teardown;
    detail::lifecycle_tracker lifecycle;
+   std::shared_ptr<detail::lifecycle_wakeup> lifecycle_wakeup;
    detail::identify_service identify_service;
    std::shared_ptr<detail::bootstrap_service> bootstrap;
    forge::asio::gate session_admission_gate;
@@ -208,7 +215,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void listen(forge::net::p2p::endpoint endpoint);
 
    void invalidate_pubsub_outbound_locked(const peer_id& peer,
-                                          std::optional<std::uint64_t> owner_session_id = std::nullopt);
+                                          std::optional<std::uint64_t> owner_session_id = std::nullopt,
+                                          const std::shared_ptr<forge::asio::gate>& owner_write_gate = {},
+                                          const std::shared_ptr<forge::net::p2p::stream>& owner_stream = {});
+   void forget_pubsub_peer_locked(const peer_id& peer);
+   void finish_pubsub_inbound(const peer_id& peer, std::uint64_t generation);
    void clear_pubsub_outbound_locked();
 
    void reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes);
@@ -355,6 +366,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void increment_pubsub_invalid(const peer_id& peer);
 
+   void penalize_pubsub_backoff_violation(const peer_id& peer);
+
    void increment_pubsub_control();
 
    [[nodiscard]] std::vector<std::uint8_t> next_pubsub_seqno();
@@ -386,6 +399,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    [[nodiscard]] bool should_request_pubsub_message_locked(const std::string& key, const peer_id& source,
                                                            std::chrono::steady_clock::time_point now);
 
+   [[nodiscard]] bool record_pubsub_subscription_locked(const peer_id& peer, const std::string& topic);
+
    [[nodiscard]] bool can_serve_pubsub_message_locked(const std::string& key) const;
 
    void remember_local_pubsub_message_locked(const std::string& key, pubsub::message value);
@@ -400,7 +415,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<std::shared_ptr<session_state>>
    connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
-                  resource_manager::dial_reservation* dial = nullptr);
+                  resource_manager::dial_reservation* dial = nullptr,
+                  std::shared_ptr<cancellation_latch> cancellation = {});
 
    boost::asio::awaitable<std::shared_ptr<session_state>> ensure_direct_session(
        const peer_id& peer, std::chrono::milliseconds timeout = node::connect_options{}.timeout,
@@ -418,8 +434,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<dht::message> exchange_dht(const peer_id& peer, dht::message request,
                                                      std::chrono::milliseconds timeout);
-   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request,
-                                         std::chrono::milliseconds timeout);
+   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<relay::reservation::info>
    request_relay_reservation(const peer_id& relay_peer, relay::reservation::options reservation_options,
@@ -457,9 +472,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    open_yamux_stream(const peer_id& peer, const std::shared_ptr<forge::net::yamux::session>& yamux,
                      const protocol_id& protocol, bool relay = true);
 
-   boost::asio::awaitable<admitted_stream>
-   accept_resource_stream(const peer_id& peer, forge::net::transport::stream stream,
-                          resource_manager::stream_reservation reservation);
+   boost::asio::awaitable<admitted_stream> accept_resource_stream(const peer_id& peer,
+                                                                  forge::net::transport::stream stream,
+                                                                  resource_manager::stream_reservation reservation);
 
    void launch_session_accept_loop(std::shared_ptr<session_state> session);
 
@@ -500,6 +515,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                   forge::net::p2p::stream stream);
 
    boost::asio::awaitable<void> handle_pubsub(std::shared_ptr<session_state> session, forge::net::p2p::stream stream);
+   boost::asio::awaitable<void> handle_pubsub_stream(std::shared_ptr<session_state> session,
+                                                     forge::net::p2p::stream stream);
 
    boost::asio::awaitable<bool> wait_for_direct_session(const peer_id& peer, std::chrono::milliseconds timeout);
 

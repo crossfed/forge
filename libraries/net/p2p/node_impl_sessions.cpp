@@ -132,9 +132,11 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
    try {
       admission_ticket = co_await session_admission_gate.acquire();
    } catch (const forge::asio::exceptions::canceled&) {
+      detail::mark_rejected_session(session);
       detail::cancel_rejected_session(session);
       FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P session admission was canceled");
    } catch (const forge::asio::exceptions::rejected&) {
+      detail::mark_rejected_session(session);
       detail::cancel_rejected_session(session);
       FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
    }
@@ -149,45 +151,45 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
       {
          auto lock = std::scoped_lock{mutex};
          if (stopped) {
-            session->closed = true;
-            detail::cancel_rejected_session(session);
-            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
-         }
-         session->direction = direction;
-         if (session->id == 0) {
-            session->id = next_session_id++;
-         }
-         const auto now = std::chrono::steady_clock::now();
-         auto admission = connections.remember(
-             connection_manager::session_record{
-                 .id = session->id,
-                 .peer = session->info.remote_peer,
-                 .direction = direction,
-                 .opened_at = now,
-                 .last_used_at = now,
-             },
-             now);
-         for (const auto id : admission.pruned) {
-            auto found = sessions.find(id);
-            if (found == sessions.end()) {
-               continue;
+            detail::mark_rejected_session(session);
+            rejected = rejection::stopped;
+         } else {
+            session->direction = direction;
+            if (session->id == 0) {
+               session->id = next_session_id++;
             }
-            const auto pruned = found->second;
-            pruned->closed = true;
-            const auto peer = pruned->info.remote_peer;
-            const auto session_id = pruned->id;
-            sessions.erase(found);
-            pruned_ids.push_back(session_id);
-            pruned_sessions.push_back(pruned);
-            invalidate_pubsub_outbound_locked(peer, session_id);
-         }
+            const auto now = std::chrono::steady_clock::now();
+            auto admission = connections.remember(
+                connection_manager::session_record{
+                    .id = session->id,
+                    .peer = session->info.remote_peer,
+                    .direction = direction,
+                    .opened_at = now,
+                    .last_used_at = now,
+                },
+                now);
+            for (const auto id : admission.pruned) {
+               auto found = sessions.find(id);
+               if (found == sessions.end()) {
+                  continue;
+               }
+               const auto pruned = found->second;
+               pruned->closed = true;
+               const auto peer = pruned->info.remote_peer;
+               const auto session_id = pruned->id;
+               sessions.erase(found);
+               pruned_ids.push_back(session_id);
+               pruned_sessions.push_back(pruned);
+               invalidate_pubsub_outbound_locked(peer, session_id);
+            }
 
-         if (!admission.accepted) {
-            detail::cancel_rejected_session(session);
-            ++metrics_value.backpressure_rejections;
-            ++metrics_value.connection_rejections;
-            rejected = rejection::admission;
-            rejection_reason = std::move(admission.reason);
+            if (!admission.accepted) {
+               detail::mark_rejected_session(session);
+               ++metrics_value.backpressure_rejections;
+               ++metrics_value.connection_rejections;
+               rejected = rejection::admission;
+               rejection_reason = std::move(admission.reason);
+            }
          }
 
          metrics_value.active_sessions = sessions.size();
@@ -199,6 +201,10 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
          identify_service.forget(id);
       }
       throw;
+   }
+
+   if (rejected == rejection::stopped || rejected == rejection::admission) {
+      detail::cancel_marked_session(session);
    }
 
    // identify_service owns a separate mutex; never take it while holding the
@@ -228,6 +234,9 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
       }
    }
 
+   if (rejected == rejection::stopped) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
+   }
    if (rejected == rejection::admission) {
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
                             rejection_reason.empty() ? "P2P session admission rejected" : rejection_reason);
@@ -237,7 +246,7 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
       auto lock = std::scoped_lock{mutex};
       if (stopped) {
          connections.forget(session->id);
-         detail::cancel_rejected_session(session);
+         detail::mark_rejected_session(session);
          rejected = rejection::stopped;
       } else {
          const auto resource_direction = direction == connection_manager::direction::inbound
@@ -248,7 +257,7 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
                  .direction = resource_direction,
              })) {
             connections.forget(session->id);
-            detail::cancel_rejected_session(session);
+            detail::mark_rejected_session(session);
             ++metrics_value.backpressure_rejections;
             ++metrics_value.connection_rejections;
             rejected = rejection::established_limit;
@@ -262,16 +271,18 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
    }
 
    if (rejected == rejection::stopped) {
+      detail::cancel_marked_session(session);
       FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
    }
    if (rejected == rejection::established_limit) {
+      detail::cancel_marked_session(session);
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P established session limit reached");
    }
    co_return;
 }
 
 void node::impl::forget_session(const peer_id& peer) {
-   auto removed_ids = std::vector<std::uint64_t>{};
+   auto removed_sessions = std::vector<std::shared_ptr<session_state>>{};
    {
       auto lock = std::scoped_lock{mutex};
       auto removed = std::size_t{0};
@@ -281,8 +292,7 @@ void node::impl::forget_session(const peer_id& peer) {
             continue;
          }
          it->second->closed = true;
-         launch_pruned_session_teardown(it->second);
-         removed_ids.push_back(it->second->id);
+         removed_sessions.push_back(it->second);
          connections.forget(it->second->id);
          it = sessions.erase(it);
          ++removed;
@@ -293,33 +303,39 @@ void node::impl::forget_session(const peer_id& peer) {
       }
       erase_inbound_relay_reservation_locked(peer);
       invalidate_pubsub_outbound_locked(peer);
+      forget_pubsub_peer_locked(peer);
    }
-   for (const auto id : removed_ids) {
-      identify_service.forget(id);
+   for (const auto& session : removed_sessions) {
+      launch_pruned_session_teardown(session);
+      identify_service.forget(session->id);
    }
 }
 
 void node::impl::forget_session(const std::shared_ptr<node::impl::session_state>& session) {
+   auto removed = false;
    {
       auto lock = std::scoped_lock{mutex};
       if (!detail::erase_current_session(sessions, session)) {
          return;
       }
       session->closed = true;
-      launch_pruned_session_teardown(session);
+      removed = true;
       connections.forget(session->id);
       metrics_value.active_sessions = sessions.size();
       ++metrics_value.sessions_closed;
       const auto peer = session->info.remote_peer;
-      const auto peer_still_connected = std::ranges::any_of(sessions, [&](const auto& item) {
-         return item.second->info.remote_peer == peer && !item.second->closed;
-      });
+      const auto peer_still_connected = std::ranges::any_of(
+          sessions, [&](const auto& item) { return item.second->info.remote_peer == peer && !item.second->closed; });
       if (!peer_still_connected) {
          erase_inbound_relay_reservation_locked(peer);
+         forget_pubsub_peer_locked(peer);
       }
       invalidate_pubsub_outbound_locked(session->info.remote_peer, session->id);
    }
-   identify_service.forget(session->id);
+   if (removed) {
+      launch_pruned_session_teardown(session);
+      identify_service.forget(session->id);
+   }
 }
 
 [[nodiscard]] std::shared_ptr<node::impl::session_state> node::impl::session_for(const peer_id& peer) const {
@@ -372,7 +388,8 @@ node::session_info node::impl::session_info_for(const std::shared_ptr<session_st
 
 boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
 node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
-                           resource_manager::dial_reservation* logical_dial) {
+                           resource_manager::dial_reservation* logical_dial,
+                           std::shared_ptr<cancellation_latch> cancellation) {
    validate_operation_timeout(connect_options_value.timeout, "P2P connect timeout");
    const auto deadline_at = std::chrono::steady_clock::now() + connect_options_value.timeout;
    auto endpoint_copy = endpoint;
@@ -403,7 +420,8 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
    }
    try {
       auto started = std::chrono::steady_clock::now();
-      auto result = co_await direct_registry.async_connect(std::move(endpoint), connect_options_value);
+      auto result =
+          co_await direct_registry.async_connect(std::move(endpoint), connect_options_value, std::move(cancellation));
       if (!logical_dial->bound() && !logical_dial->bind(result.peer)) {
          result.session.cancel();
          FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P authenticated peer dial limit reached");
@@ -517,12 +535,17 @@ void node::impl::launch_accept_loop(forge::net::p2p::endpoint local_endpoint) {
                }
                continue;
             }
+            auto stopped = false;
             {
                auto lock = std::scoped_lock{self->mutex};
-               if (self->stopped) {
+               stopped = self->stopped;
+            }
+            if (stopped) {
+               try {
                   connection.session.cancel();
-                  co_return;
+               } catch (...) {
                }
+               co_return;
             }
             auto accepted = std::make_shared<direct::connection>(std::move(connection));
             auto admission = std::make_shared<resource_manager::session_reservation>(std::move(*accepted->admission));
@@ -557,12 +580,17 @@ void node::impl::launch_accept_loop(forge::net::p2p::endpoint local_endpoint) {
 boost::asio::awaitable<void> node::impl::handle_inbound_connection(direct::connection connection,
                                                                    resource_manager::session_reservation reservation) {
    try {
+      auto node_stopped = false;
       {
          auto lock = std::scoped_lock{mutex};
-         if (stopped) {
+         node_stopped = stopped;
+      }
+      if (node_stopped) {
+         try {
             connection.session.cancel();
-            co_return;
+         } catch (...) {
          }
+         co_return;
       }
       auto remote = connection.peer;
       auto session = std::make_shared<session_state>();
@@ -578,6 +606,12 @@ boost::asio::awaitable<void> node::impl::handle_inbound_connection(direct::conne
       launch_session_accept_loop(session);
       launch_identify(session);
       co_await announce_pubsub_subscriptions(remote);
+   } catch (const forge::exceptions::base& error) {
+      const auto kind = p2p_code(error);
+      auto lock = std::scoped_lock{mutex};
+      if (!detail::suppress_inbound_handshake_failure(kind, stopped)) {
+         ++metrics_value.handshakes_failed;
+      }
    } catch (const std::exception&) {
       // The listener owns detached accepts; failed handshakes are reflected in metrics.
       auto lock = std::scoped_lock{mutex};

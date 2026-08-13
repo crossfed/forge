@@ -86,7 +86,9 @@ boost::asio::awaitable<pubsub::subscription> node::async_subscribe(pubsub::topic
    auto subscription = pubsub::subscription{.subscribe = true, .subject = std::move(subject)};
    {
       auto lock = std::scoped_lock{self->mutex};
-      if (self->pubsub_value.handlers.size() >= self->options.limits.pubsub.limits.max_topics &&
+      const auto local_subscription_limit =
+          std::min(self->options.limits.pubsub.limits.max_topics, self->options.limits.pubsub.limits.max_subscriptions);
+      if (self->pubsub_value.handlers.size() >= local_subscription_limit &&
           !self->pubsub_value.handlers.contains(subscription.subject.value)) {
          FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "GossipSub topic limit reached");
       }
@@ -110,16 +112,41 @@ boost::asio::awaitable<void> node::async_unsubscribe(pubsub::topic subject) {
    }
    auto self = impl_;
    auto subscription = pubsub::subscription{.subscribe = false, .subject = std::move(subject)};
+   auto former_mesh_peers = std::vector<peer_id>{};
    {
       auto lock = std::scoped_lock{self->mutex};
+      const auto now = std::chrono::steady_clock::now();
+      const auto backoff_limit = detail::pubsub_backoff::limit_for(self->options.limits.pubsub.limits.max_topics,
+                                                                   self->options.limits.max_sessions);
+      self->pubsub_value.backoffs.expire(now);
       self->pubsub_value.handlers.erase(subscription.subject.value);
-      self->pubsub_value.mesh.erase(subscription.subject.value);
+      if (const auto mesh = self->pubsub_value.mesh.find(subscription.subject.value);
+          mesh != self->pubsub_value.mesh.end()) {
+         former_mesh_peers.assign(mesh->second.begin(), mesh->second.end());
+         for (const auto& peer : former_mesh_peers) {
+            self->pubsub_value.backoffs.record_local(subscription.subject.value, peer,
+                                                      self->options.limits.pubsub.limits.unsubscribe_backoff, now,
+                                                      backoff_limit);
+         }
+         self->pubsub_value.mesh.erase(mesh);
+      }
    }
    auto peers = self->pubsub_candidate_peers(subscription.subject.value);
+   auto outbound = std::map<peer_id, pubsub::rpc>{};
    for (const auto& peer : peers) {
+      outbound[peer].subscriptions.push_back(subscription);
+   }
+   const auto leave = pubsub::control::prune{
+       .subject = subscription.subject,
+       .backoff = self->options.limits.pubsub.limits.unsubscribe_backoff,
+   };
+   for (const auto& peer : former_mesh_peers) {
+      auto& control = outbound[peer].control_value.emplace();
+      control.prunes.push_back(leave);
+   }
+   for (const auto& [peer, rpc] : outbound) {
       try {
-         co_await self->send_pubsub_rpc(peer,
-                                        pubsub::rpc{.subscriptions = std::vector<pubsub::subscription>{subscription}});
+         co_await self->send_pubsub_rpc(peer, rpc);
       } catch (const forge::exceptions::base& error) {
          self->record_pubsub_send_failure(peer, error);
       }

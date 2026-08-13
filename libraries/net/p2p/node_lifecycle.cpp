@@ -2,7 +2,6 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/cancellation_signal.hpp>
@@ -94,13 +93,10 @@ boost::asio::awaitable<lifecycle_status> node::async_start() {
       FORGE_THROW_EXCEPTION(exceptions::closed, "cannot start P2P node after shutdown");
    }
    const auto executor = operation.executor();
-   const auto cancellation_slot = operation.cancellation_slot();
    auto failure = std::exception_ptr{};
    auto result = lifecycle_status{};
    try {
-      result = co_await boost::asio::co_spawn(
-          executor, self->async_start_lifecycle(),
-          boost::asio::bind_cancellation_slot(cancellation_slot, boost::asio::use_awaitable));
+      result = co_await boost::asio::co_spawn(executor, self->async_start_lifecycle(), boost::asio::use_awaitable);
    } catch (...) {
       failure = std::current_exception();
    }

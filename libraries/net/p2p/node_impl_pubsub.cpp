@@ -73,13 +73,39 @@ boost::asio::awaitable<std::vector<std::uint8_t>> async_read_length_delimited(fo
                                                                               std::vector<std::uint8_t>& buffer,
                                                                               std::size_t max_payload_size);
 
-void node::impl::invalidate_pubsub_outbound_locked(const peer_id& peer, std::optional<std::uint64_t> owner_session_id) {
+void node::impl::invalidate_pubsub_outbound_locked(const peer_id& peer, std::optional<std::uint64_t> owner_session_id,
+                                                   const std::shared_ptr<forge::asio::gate>& owner_write_gate,
+                                                   const std::shared_ptr<forge::net::p2p::stream>& owner_stream) {
    const auto found = pubsub_value.outbound.find(peer);
-   if (found == pubsub_value.outbound.end() || (owner_session_id && found->second.session_id != *owner_session_id)) {
+   if (found == pubsub_value.outbound.end() || (owner_session_id && found->second.session_id != *owner_session_id) ||
+       (owner_write_gate && found->second.write_gate != owner_write_gate) ||
+       (owner_stream && found->second.stream != owner_stream)) {
       return;
    }
    found->second.write_gate->close();
    pubsub_value.outbound.erase(found);
+   for (auto& [_, mesh] : pubsub_value.mesh) {
+      mesh.erase(peer);
+   }
+}
+
+void node::impl::forget_pubsub_peer_locked(const peer_id& peer) {
+   pubsub_value.inbound.erase(peer);
+   pubsub_value.peer_topics.erase(peer);
+   for (auto& [_, mesh] : pubsub_value.mesh) {
+      mesh.erase(peer);
+   }
+}
+
+void node::impl::finish_pubsub_inbound(const peer_id& peer, std::uint64_t generation) {
+   auto lock = std::scoped_lock{mutex};
+   const auto found = pubsub_value.inbound.find(peer);
+   if (found == pubsub_value.inbound.end() || found->second.erase(generation) == 0) {
+      return;
+   }
+   if (found->second.empty()) {
+      pubsub_value.inbound.erase(found);
+   }
 }
 
 void node::impl::clear_pubsub_outbound_locked() {

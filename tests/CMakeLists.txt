@@ -874,6 +874,7 @@ add_executable(
 target_link_libraries(test_forge_quic_p2p forge Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 add_test(NAME test_forge_quic_p2p COMMAND test_forge_quic_p2p WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+set_tests_properties(test_forge_quic_p2p PROPERTIES TIMEOUT 300)
 
 add_executable(
    forge_interop_fixture

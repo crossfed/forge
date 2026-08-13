@@ -1,9 +1,7 @@
 #pragma once
 
 #include <chrono>
-#include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
 
 #include <boost/asio/awaitable.hpp>
@@ -11,18 +9,7 @@
 namespace forge::net::p2p {
 
 struct libp2p_identity_material;
-
-class cancellation_latch {
- public:
-   void set(std::function<void()> cancel);
-   void cancel() noexcept;
-   void clear() noexcept;
-
- private:
-   std::mutex mutex_;
-   std::function<void()> current_;
-   bool canceled_ = false;
-};
+class cancellation_latch;
 
 struct upgraded_session {
    peer_id peer;

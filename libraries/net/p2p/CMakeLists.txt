@@ -59,8 +59,12 @@ add_library(
    details/node_impl.hxx
    bootstrap_service.cpp
    details/bootstrap_service.hxx
+   cancellation_latch.cpp
+   details/cancellation_latch.hxx
    lifecycle_tracker.cpp
    details/lifecycle_tracker.hxx
+   lifecycle_wakeup.cpp
+   details/lifecycle_wakeup.hxx
    identify_service.cpp
    details/identify_service.hxx
    dht_exchange.cpp
@@ -77,6 +81,8 @@ add_library(
    details/peer_exchange_learning.hxx
    pubsub_outbound_budget.cpp
    details/pubsub_outbound_budget.hxx
+   pubsub_backoff.cpp
+   details/pubsub_backoff.hxx
    details/peer_failure.hxx
    relay_discovery.cpp
    details/relay_discovery.hxx

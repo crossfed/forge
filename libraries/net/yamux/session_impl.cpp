@@ -100,8 +100,8 @@ void session::impl::validate_options() const {
    if (options_.initial_window < detail::initial_stream_window ||
        options_.max_stream_window < options_.initial_window || options_.max_frame_size == 0 ||
        options_.max_streams == 0 || options_.max_pending_accepts == 0 ||
-       options_.max_stream_buffer < options_.initial_window ||
-       options_.max_session_buffer < options_.initial_window || options_.close_timeout.count() <= 0) {
+       options_.max_stream_buffer < options_.initial_window || options_.max_session_buffer < options_.initial_window ||
+       options_.close_timeout.count() <= 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid yamux options");
    }
    if (options_.max_frame_size > static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())) {
@@ -123,31 +123,64 @@ std::uint32_t session::impl::checked_peer_window(std::uint32_t current, std::uin
 
 boost::asio::awaitable<void> session::impl::ensure_started() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto start = false;
-   {
-      auto lock = std::scoped_lock{mutex_};
-      if (!executor_) {
-         executor_ = executor;
-      }
-      if (!started_) {
-         started_ = true;
-         start = true;
-      }
-   }
-   if (start) {
-      auto self = shared_from_this();
-      boost::asio::co_spawn(executor, self->read_loop(), [self](std::exception_ptr error) {
-         if (error) {
-            self->fail_session(exceptions::code::closed, "yamux read loop stopped");
-            self->finish_read_loop();
+   while (true) {
+      const auto observed = start_notification_.epoch();
+      auto owns_start = false;
+      auto start_error = std::exception_ptr{};
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (!executor_) {
+            executor_ = executor;
          }
-      });
+         switch (start_state_) {
+         case start_state::idle:
+            start_state_ = start_state::starting;
+            owns_start = true;
+            break;
+         case start_state::starting:
+            break;
+         case start_state::started:
+            co_return;
+         case start_state::failed:
+            start_error = start_error_;
+            break;
+         }
+      }
+      if (start_error) {
+         std::rethrow_exception(start_error);
+      }
+      if (!owns_start) {
+         (void)co_await start_notification_.async_wait(observed);
+         continue;
+      }
+
+      try {
+         auto self = shared_from_this();
+         boost::asio::co_spawn(executor, self->read_loop(), [self](std::exception_ptr error) {
+            if (error) {
+               self->fail_session(exceptions::code::closed, "yamux read loop stopped");
+               self->finish_read_loop();
+            }
+         });
+      } catch (...) {
+         auto error = std::current_exception();
+         fail_start(error);
+         std::rethrow_exception(error);
+      }
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (start_state_ == start_state::starting) {
+            start_state_ = start_state::started;
+         }
+      }
+      start_notification_.notify();
+      co_return;
    }
 }
 
 boost::asio::awaitable<void> session::impl::async_close() {
    co_await ensure_started();
-   if (!start_close()) {
+   if (!start_close(detail::go_away_normal)) {
       co_await wait_for_close();
       co_return;
    }
@@ -166,26 +199,28 @@ boost::asio::awaitable<void> session::impl::async_close() {
          }
          if (auto self = weak.lock()) {
             self->fail_session(exceptions::code::closed, "yamux close deadline expired");
-            self->stream_.cancel();
+            (void)self->cancel_transport_noexcept();
          }
       });
 
+      auto writes_drained = true;
+      transport_writes_.seal();
+      writes_drained = co_await transport_writes_.async_wait_until(deadline);
+      if (!writes_drained) {
+         write_gate_.close();
+         (void)cancel_transport_noexcept();
+      }
+
       auto terminal_writer = forge::asio::gate::ticket{};
-      auto writer_gate_closed = false;
       try {
          terminal_writer = co_await write_gate_.acquire();
       } catch (const forge::asio::exceptions::rejected&) {
-         writer_gate_closed = true;
-      }
-      if (writer_gate_closed) {
-         // A terminal transition rejects queued writers; an admitted lower write may still be draining.
-         co_await transport_writes_.async_wait();
       }
 
-      if (terminal_writer.active()) {
+      if (writes_drained) {
          try {
-            auto outbound = transport::chunk{
-                detail::encode_frame(detail::frame_type::go_away, 0, 0, detail::go_away_normal)};
+            auto outbound =
+                transport::chunk{detail::encode_frame(detail::frame_type::go_away, 0, 0, close_go_away_code())};
             co_await stream_.async_write(std::move(outbound));
          } catch (...) {
             // Closing is best-effort once the underlying byte stream has already failed.
@@ -197,15 +232,13 @@ boost::asio::awaitable<void> session::impl::async_close() {
       }
       fail_session(exceptions::code::closed, "yamux session closed");
       if (!co_await wait_for_read_loop_until(deadline)) {
-         stream_.cancel();
-         co_await wait_for_read_loop();
+         if (cancel_transport_noexcept()) {
+            co_await wait_for_read_loop();
+         }
       }
    } catch (...) {
       error = std::current_exception();
-      try {
-         stream_.cancel();
-      } catch (...) {
-      }
+      (void)cancel_transport_noexcept();
    }
    if (deadline_timer) {
       cancel_timer_noexcept(*deadline_timer);
@@ -222,7 +255,7 @@ void session::impl::cancel() {
 }
 
 std::shared_ptr<session::impl::stream_state> session::impl::make_stream_locked(std::uint32_t id,
-                                                                              std::uint32_t send_window) {
+                                                                               std::uint32_t send_window) {
    if (send_window > options_.max_stream_window) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "yamux peer window exceeds configured limit");
    }
@@ -249,8 +282,7 @@ bool session::impl::stream_valid(const std::shared_ptr<stream_state>& state) con
 }
 
 transport::stream session::impl::make_transport_stream(const std::shared_ptr<stream_state>& state) {
-   return transport::detail::stream_access::make(
-       std::make_shared<stream_model>(shared_from_this(), state));
+   return transport::detail::stream_access::make(std::make_shared<stream_model>(shared_from_this(), state));
 }
 
 void session::impl::rethrow_terminal_locked() const {
@@ -265,15 +297,27 @@ void session::impl::rethrow_terminal_locked() const {
    }
 }
 
-bool session::impl::start_close() {
-   auto lock = std::scoped_lock{mutex_};
-   if (close_started_) {
-      return false;
+bool session::impl::start_close(std::uint32_t go_away_code) {
+   {
+      auto lock = std::scoped_lock{mutex_};
+      if (go_away_code != detail::go_away_normal && close_go_away_code_ == detail::go_away_normal) {
+         close_go_away_code_ = go_away_code;
+      }
+      if (close_started_) {
+         return false;
+      }
+      close_started_ = true;
+      closed_ = true;
+      wake_all_locked();
    }
-   close_started_ = true;
-   closed_ = true;
-   wake_all_locked();
+   // Publish the terminal state before closing admission so rejected writers observe its exact cause.
+   transport_writes_.seal();
    return true;
+}
+
+std::uint32_t session::impl::close_go_away_code() const noexcept {
+   auto lock = std::scoped_lock{mutex_};
+   return close_go_away_code_;
 }
 
 boost::asio::awaitable<void> session::impl::wait_for_close() {
@@ -303,6 +347,41 @@ void session::impl::finish_close(std::exception_ptr error) noexcept {
    close_notification_.notify();
 }
 
+bool session::impl::cancel_transport_noexcept() noexcept {
+   try {
+      stream_.cancel();
+      return true;
+   } catch (...) {
+      return false;
+   }
+}
+
+void session::impl::fail_start(std::exception_ptr error) noexcept {
+   auto close_write_gate = false;
+   {
+      auto lock = std::scoped_lock{mutex_};
+      if (start_state_ == start_state::failed) {
+         return;
+      }
+      start_state_ = start_state::failed;
+      start_error_ = error;
+      read_loop_done_ = true;
+      if (!terminal_error_) {
+         terminal_error_ = std::move(error);
+         closed_ = true;
+         close_write_gate = true;
+      }
+      wake_all_locked();
+   }
+   if (close_write_gate) {
+      transport_writes_.seal();
+      write_gate_.close();
+   }
+   start_notification_.notify();
+   read_loop_notification_.notify();
+   (void)cancel_transport_noexcept();
+}
+
 void session::impl::fail_session(exceptions::code value, std::string message) {
    auto first_transition = false;
    {
@@ -323,6 +402,8 @@ void session::impl::fail_session(exceptions::code value, std::string message) {
       wake_all_locked();
    }
    if (first_transition) {
+      // Writers rejected after this point must see the terminal error published above.
+      transport_writes_.seal();
       write_gate_.close();
    }
 }
@@ -336,15 +417,25 @@ void session::impl::wake_all_locked() {
    }
 }
 
-boost::asio::awaitable<bool>
-session::impl::write_prepared(std::function<std::optional<detail::bytes>()> prepare, bool allow_after_close,
-                              std::shared_ptr<void> lifetime) {
+boost::asio::awaitable<bool> session::impl::write_prepared(std::function<std::optional<detail::bytes>()> prepare,
+                                                           bool allow_after_close, std::shared_ptr<void> lifetime) {
    if (!allow_after_close) {
       auto lock = std::scoped_lock{mutex_};
       rethrow_terminal_locked();
    }
 
-   auto transport_write = transport_writes_.reserve();
+   auto transport_write = transport_writes_.try_reserve();
+   if (!transport_write) {
+      auto lock = std::scoped_lock{mutex_};
+      rethrow_terminal_locked();
+      FORGE_THROW_EXCEPTION(exceptions::closed, "yamux transport write admission is closed");
+   }
+   auto operation_lifetime = std::move(lifetime);
+   co_return co_await write_admitted(std::move(prepare), allow_after_close, std::move(operation_lifetime));
+}
+
+boost::asio::awaitable<bool> session::impl::write_admitted(std::function<std::optional<detail::bytes>()> prepare,
+                                                           bool allow_after_close, std::shared_ptr<void> lifetime) {
    auto wrote = false;
    auto ticket = forge::asio::gate::ticket{};
    try {
@@ -383,8 +474,7 @@ session::impl::write_prepared(std::function<std::optional<detail::bytes>()> prep
 
 boost::asio::awaitable<void> session::impl::write_frame(detail::frame_type type, std::uint16_t flags,
                                                         std::uint32_t stream_id, std::uint32_t length,
-                                                        std::span<const std::uint8_t> payload,
-                                                        bool allow_after_close,
+                                                        std::span<const std::uint8_t> payload, bool allow_after_close,
                                                         std::shared_ptr<void> lifetime) {
    (void)co_await write_prepared(
        [type, flags, stream_id, length, payload]() -> std::optional<detail::bytes> {
@@ -406,8 +496,7 @@ boost::asio::awaitable<void> session::impl::wait_for_read_loop() {
    }
 }
 
-boost::asio::awaitable<bool>
-session::impl::wait_for_read_loop_until(std::chrono::steady_clock::time_point deadline) {
+boost::asio::awaitable<bool> session::impl::wait_for_read_loop_until(std::chrono::steady_clock::time_point deadline) {
    while (true) {
       const auto observed = read_loop_notification_.epoch();
       {

@@ -2,8 +2,6 @@
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 
 #include <atomic>
@@ -11,26 +9,18 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <vector>
 
 namespace forge::net::p2p::detail {
 
+class lifecycle_wakeup;
+
 class lifecycle_tracker {
  private:
-   struct waiter {
-      explicit waiter(boost::asio::any_io_executor executor);
-
-      boost::asio::strand<boost::asio::any_io_executor> strand;
-      boost::asio::steady_timer timer;
-   };
-
    struct state {
-      struct cancellation_context {
-         explicit cancellation_context(boost::asio::any_io_executor executor);
+      struct operation_context {
+         explicit operation_context(boost::asio::any_io_executor executor);
 
          boost::asio::strand<boost::asio::any_io_executor> strand;
-         boost::asio::cancellation_signal signal;
-         std::shared_ptr<std::atomic_bool> stop_requested = std::make_shared<std::atomic_bool>(false);
       };
 
       explicit state(boost::asio::any_io_executor executor_value);
@@ -41,11 +31,10 @@ class lifecycle_tracker {
       lifecycle_phase phase = lifecycle_phase::idle;
       bool stop_requested = false;
       std::uint64_t next_operation_id = 1;
-      std::map<std::uint64_t, std::shared_ptr<cancellation_context>> operations;
-      std::vector<std::shared_ptr<waiter>> waiters;
+      std::map<std::uint64_t, std::shared_ptr<operation_context>> operations;
+      std::shared_ptr<std::atomic_bool> stop_latch = std::make_shared<std::atomic_bool>(false);
+      std::shared_ptr<lifecycle_wakeup> changed;
    };
-
-   static void wake(const std::shared_ptr<waiter>& value) noexcept;
 
  public:
    class operation {
@@ -59,17 +48,15 @@ class lifecycle_tracker {
 
       [[nodiscard]] bool active() const noexcept;
       [[nodiscard]] boost::asio::any_io_executor executor() const noexcept;
-      [[nodiscard]] boost::asio::cancellation_slot cancellation_slot() const noexcept;
       [[nodiscard]] std::shared_ptr<const std::atomic_bool> stop_latch() const noexcept;
       void release() noexcept;
 
     private:
-      operation(std::shared_ptr<state> state, std::uint64_t id,
-                std::shared_ptr<state::cancellation_context> cancellation);
+      operation(std::shared_ptr<state> state, std::uint64_t id, std::shared_ptr<state::operation_context> context);
 
       std::shared_ptr<state> state_;
       std::uint64_t id_ = 0;
-      std::shared_ptr<state::cancellation_context> cancellation_;
+      std::shared_ptr<state::operation_context> context_;
 
       friend class lifecycle_tracker;
    };

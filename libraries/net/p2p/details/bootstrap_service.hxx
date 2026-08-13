@@ -2,7 +2,6 @@
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 
@@ -19,12 +18,22 @@
 
 #include "lifecycle_tracker.hxx"
 
+namespace forge::net::p2p {
+
+class cancellation_latch;
+
+} // namespace forge::net::p2p
+
 namespace forge::net::p2p::detail {
+
+class lifecycle_wakeup;
 
 class bootstrap_service : public std::enable_shared_from_this<bootstrap_service> {
  public:
    struct callbacks {
-      std::function<boost::asio::awaitable<peer_id>(bootstrap_peer, std::chrono::milliseconds)> connect;
+      std::function<boost::asio::awaitable<peer_id>(bootstrap_peer, std::chrono::milliseconds,
+                                                    std::shared_ptr<cancellation_latch>)>
+          connect;
       std::function<bool(const bootstrap_peer&, const peer_id&)> connected;
       std::function<void(const peer_id&)> protect;
       std::function<void(const peer_id&)> unprotect;
@@ -49,7 +58,7 @@ class bootstrap_service : public std::enable_shared_from_this<bootstrap_service>
       std::chrono::steady_clock::time_point next_attempt{};
       std::size_t failures = 0;
       std::uint64_t generation = 0;
-      std::shared_ptr<boost::asio::cancellation_signal> active_cancellation;
+      std::shared_ptr<cancellation_latch> active_cancellation;
    };
 
    struct batch_state {
@@ -94,7 +103,7 @@ class bootstrap_service : public std::enable_shared_from_this<bootstrap_service>
    callbacks callbacks_;
    mutable std::mutex mutex_;
    std::map<std::string, entry> entries_;
-   std::weak_ptr<boost::asio::steady_timer> retry_timer_;
+   std::shared_ptr<lifecycle_wakeup> retry_wakeup_;
    std::uint64_t next_generation_ = 1;
    std::string last_failure_;
    bool maintenance_started_ = false;

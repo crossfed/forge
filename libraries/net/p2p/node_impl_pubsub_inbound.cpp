@@ -83,11 +83,51 @@ bool node::impl::pubsub_control_over_limit(const pubsub::control& value) const n
           value.grafts.size() > options.limits.pubsub.limits.max_graft_per_peer;
 }
 
+bool node::impl::record_pubsub_subscription_locked(const peer_id& peer, const std::string& topic) {
+   if (const auto topics = pubsub_value.peer_topics.find(peer);
+       topics != pubsub_value.peer_topics.end() && topics->second.contains(topic)) {
+      return true;
+   }
+   const auto subscribed = static_cast<std::size_t>(
+       std::ranges::count_if(pubsub_value.peer_topics,
+                             [&topic](const auto& peer_topics) { return peer_topics.second.contains(topic); }));
+   if (subscribed >= options.limits.pubsub.limits.max_peers_per_topic) {
+      return false;
+   }
+   pubsub_value.peer_topics[peer].insert(topic);
+   return true;
+}
+
+void node::impl::penalize_pubsub_backoff_violation(const peer_id& peer) {
+   auto lock = std::scoped_lock{mutex};
+   ++metrics_value.pubsub_invalid_messages;
+   ++pubsub_value.scores[peer].invalid_messages;
+   pubsub_value.scores[peer].value -= 1.0;
+}
+
 boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::impl::session_state> session,
                                                        forge::net::p2p::stream stream) {
    if (!options.capabilities.has(capabilities::pubsub)) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "GossipSub is disabled");
    }
+
+   auto generation = std::uint64_t{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      generation = pubsub_value.next_inbound_generation++;
+      pubsub_value.inbound[session->info.remote_peer].emplace(generation, session->id);
+   }
+   try {
+      co_await handle_pubsub_stream(session, std::move(stream));
+   } catch (...) {
+      finish_pubsub_inbound(session->info.remote_peer, generation);
+      throw;
+   }
+   finish_pubsub_inbound(session->info.remote_peer, generation);
+}
+
+boost::asio::awaitable<void> node::impl::handle_pubsub_stream(std::shared_ptr<node::impl::session_state> session,
+                                                              forge::net::p2p::stream stream) {
 
    auto buffer = std::vector<std::uint8_t>{};
    while (true) {
@@ -109,7 +149,7 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
          close_after_error = true;
       }
       if (close_after_error) {
-         co_await stream.async_close();
+         stream.cancel();
          co_return;
       }
 
@@ -123,7 +163,7 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
          close_after_error = true;
       }
       if (close_after_error) {
-         co_await stream.async_close();
+         stream.cancel();
          co_return;
       }
 
@@ -133,20 +173,9 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
             auto lock = std::scoped_lock{mutex};
             for (const auto& subscription : value.subscriptions) {
                if (subscription.subscribe) {
-                  const auto topics = pubsub_value.peer_topics.find(session->info.remote_peer);
-                  if (topics != pubsub_value.peer_topics.end() &&
-                      topics->second.contains(subscription.subject.value)) {
-                     continue;
-                  }
-                  const auto subscribed = static_cast<std::size_t>(std::ranges::count_if(
-                      pubsub_value.peer_topics, [&subscription](const auto& peer_topics) {
-                         return peer_topics.second.contains(subscription.subject.value);
-                      }));
-                  if (subscribed >= options.limits.pubsub.limits.max_peers_per_topic) {
+                  if (!record_pubsub_subscription_locked(session->info.remote_peer, subscription.subject.value)) {
                      subscription_limit_reached = true;
-                     continue;
                   }
-                  pubsub_value.peer_topics[session->info.remote_peer].insert(subscription.subject.value);
                } else {
                   if (auto topics = pubsub_value.peer_topics.find(session->info.remote_peer);
                       topics != pubsub_value.peer_topics.end()) {
@@ -155,16 +184,15 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
                         pubsub_value.peer_topics.erase(topics);
                      }
                   }
-                  if (auto mesh = pubsub_value.mesh.find(subscription.subject.value);
-                      mesh != pubsub_value.mesh.end()) {
+                  if (auto mesh = pubsub_value.mesh.find(subscription.subject.value); mesh != pubsub_value.mesh.end()) {
                      mesh->second.erase(session->info.remote_peer);
                   }
                }
             }
-         }
-         if (subscription_limit_reached) {
-            increment_pubsub_invalid(session->info.remote_peer);
-            increment_protocol_rejected();
+            if (subscription_limit_reached) {
+               ++metrics_value.backpressure_rejections;
+               ++metrics_value.protocol_rejections;
+            }
          }
       }
 
@@ -173,19 +201,57 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
          if (pubsub_control_over_limit(*value.control_value)) {
             increment_pubsub_invalid(session->info.remote_peer);
             increment_protocol_rejected();
-            co_await stream.async_close();
+            stream.cancel();
             co_return;
          }
          auto missing = std::vector<std::vector<std::uint8_t>>{};
          auto cached = std::vector<pubsub::message>{};
+         auto rejected_grafts = std::vector<pubsub::control::prune>{};
+         auto capacity_rejected = false;
+         auto backoff_violations = std::size_t{};
          {
             auto lock = std::scoped_lock{mutex};
+            const auto now = std::chrono::steady_clock::now();
+            const auto backoff_limit = detail::pubsub_backoff::limit_for(
+                options.limits.pubsub.limits.max_topics, options.limits.max_sessions);
+            pubsub_value.backoffs.expire(now);
             for (const auto& graft : value.control_value->grafts) {
-               if (pubsub_value.handlers.contains(graft.subject.value)) {
+               if (!pubsub_value.handlers.contains(graft.subject.value)) {
+                  continue;
+               }
+               const auto local_backoff =
+                   pubsub_value.backoffs.local_status(graft.subject.value, session->info.remote_peer, now);
+               const auto remote_backoff =
+                   pubsub_value.backoffs.remote_status(graft.subject.value, session->info.remote_peer, now);
+               if (local_backoff != detail::pubsub_backoff::status::none ||
+                   remote_backoff != detail::pubsub_backoff::status::none) {
+                  if (local_backoff == detail::pubsub_backoff::status::exact ||
+                      remote_backoff == detail::pubsub_backoff::status::exact) {
+                     ++backoff_violations;
+                  }
+                  pubsub_value.backoffs.record_local(graft.subject.value, session->info.remote_peer,
+                                                      options.limits.pubsub.limits.prune_backoff, now, backoff_limit);
+                  rejected_grafts.push_back(pubsub::control::prune{
+                      .subject = graft.subject,
+                      .backoff = options.limits.pubsub.limits.prune_backoff,
+                  });
+               } else if (record_pubsub_subscription_locked(session->info.remote_peer, graft.subject.value)) {
                   pubsub_value.mesh[graft.subject.value].insert(session->info.remote_peer);
+               } else {
+                  capacity_rejected = true;
+                  pubsub_value.backoffs.record_local(graft.subject.value, session->info.remote_peer,
+                                                      options.limits.pubsub.limits.prune_backoff, now, backoff_limit);
+                  rejected_grafts.push_back(pubsub::control::prune{
+                      .subject = graft.subject,
+                      .backoff = options.limits.pubsub.limits.prune_backoff,
+                  });
                }
             }
             for (const auto& prune : value.control_value->prunes) {
+               const auto remote_backoff = detail::pubsub_backoff::remote_duration(
+                   prune.backoff, options.limits.pubsub.limits.prune_backoff);
+               pubsub_value.backoffs.record_remote(prune.subject.value, session->info.remote_peer, remote_backoff, now,
+                                                    backoff_limit);
                if (auto mesh = pubsub_value.mesh.find(prune.subject.value); mesh != pubsub_value.mesh.end()) {
                   mesh->second.erase(session->info.remote_peer);
                }
@@ -214,6 +280,26 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
                      cached.push_back(found->second);
                   }
                }
+            }
+         }
+         if (capacity_rejected) {
+            auto lock = std::scoped_lock{mutex};
+            ++metrics_value.backpressure_rejections;
+            ++metrics_value.protocol_rejections;
+         }
+         for (auto violation = std::size_t{}; violation < backoff_violations; ++violation) {
+            penalize_pubsub_backoff_violation(session->info.remote_peer);
+         }
+         if (backoff_violations != 0) {
+            increment_protocol_rejected();
+         }
+         if (!rejected_grafts.empty()) {
+            try {
+               co_await send_pubsub_rpc(
+                   session->info.remote_peer,
+                   pubsub::rpc{.control_value = pubsub::control{.prunes = std::move(rejected_grafts)}});
+            } catch (const forge::exceptions::base& error) {
+               record_pubsub_send_failure(session->info.remote_peer, error);
             }
          }
          if (!missing.empty()) {

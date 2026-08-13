@@ -1,69 +1,43 @@
 module;
 
-#include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/cancellation_type.hpp>
-#include <boost/asio/dispatch.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/system/error_code.hpp>
-
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
 
 module forge.net.p2p.node;
 
+import forge.asio.notification;
 import forge.net.p2p.lifecycle;
 
 #include "details/lifecycle_tracker.hxx"
+#include "details/lifecycle_wakeup.hxx"
 
 namespace forge::net::p2p::detail {
-lifecycle_tracker::waiter::waiter(boost::asio::any_io_executor executor)
-    : strand{boost::asio::make_strand(std::move(executor))},
-      timer{strand, boost::asio::steady_timer::time_point::max()} {}
-
-lifecycle_tracker::state::cancellation_context::cancellation_context(boost::asio::any_io_executor executor)
+lifecycle_tracker::state::operation_context::operation_context(boost::asio::any_io_executor executor)
     : strand{boost::asio::make_strand(std::move(executor))} {}
 
-void lifecycle_tracker::wake(const std::shared_ptr<waiter>& waiter) noexcept {
-   try {
-      boost::asio::dispatch(waiter->strand, [waiter] {
-         try {
-            waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
-            waiter->timer.cancel();
-         } catch (...) {
-            // Lifecycle completion notification is best effort and noexcept.
-         }
-      });
-   } catch (...) {
-      try {
-         waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
-         waiter->timer.cancel();
-      } catch (...) {
-         // Lifecycle completion notification is best effort and noexcept.
-      }
-   }
-}
-
-lifecycle_tracker::state::state(boost::asio::any_io_executor executor_value) : executor{std::move(executor_value)} {}
+lifecycle_tracker::state::state(boost::asio::any_io_executor executor_value)
+    : executor{std::move(executor_value)}, changed{std::make_shared<lifecycle_wakeup>()} {}
 
 void lifecycle_tracker::state::release(std::uint64_t id) noexcept {
-   auto ready = std::vector<std::shared_ptr<waiter>>{};
    try {
+      auto notify = false;
       {
          const auto lock = std::scoped_lock{mutex};
          operations.erase(id);
-         if (stop_requested && operations.empty()) {
-            ready.swap(waiters);
-         }
+         notify = stop_requested && operations.empty();
       }
-      for (const auto& item : ready) {
-         wake(item);
+      if (notify) {
+         changed->notify();
       }
    } catch (...) {
       // Operation destruction must remain noexcept during process teardown.
@@ -71,19 +45,18 @@ void lifecycle_tracker::state::release(std::uint64_t id) noexcept {
 }
 
 lifecycle_tracker::operation::operation(std::shared_ptr<state> state_value, std::uint64_t id,
-                                        std::shared_ptr<state::cancellation_context> cancellation)
-    : state_{std::move(state_value)}, id_{id}, cancellation_{std::move(cancellation)} {}
+                                        std::shared_ptr<state::operation_context> context)
+    : state_{std::move(state_value)}, id_{id}, context_{std::move(context)} {}
 
 lifecycle_tracker::operation::operation(operation&& other) noexcept
-    : state_{std::move(other.state_)}, id_{std::exchange(other.id_, 0)}, cancellation_{std::move(other.cancellation_)} {
-}
+    : state_{std::move(other.state_)}, id_{std::exchange(other.id_, 0)}, context_{std::move(other.context_)} {}
 
 lifecycle_tracker::operation& lifecycle_tracker::operation::operator=(operation&& other) noexcept {
    if (this != &other) {
       release();
       state_ = std::move(other.state_);
       id_ = std::exchange(other.id_, 0);
-      cancellation_ = std::move(other.cancellation_);
+      context_ = std::move(other.context_);
    }
    return *this;
 }
@@ -97,19 +70,15 @@ bool lifecycle_tracker::operation::active() const noexcept {
 }
 
 boost::asio::any_io_executor lifecycle_tracker::operation::executor() const noexcept {
-   return cancellation_ ? boost::asio::any_io_executor{cancellation_->strand} : boost::asio::any_io_executor{};
-}
-
-boost::asio::cancellation_slot lifecycle_tracker::operation::cancellation_slot() const noexcept {
-   return cancellation_ ? cancellation_->signal.slot() : boost::asio::cancellation_slot{};
+   return context_ ? boost::asio::any_io_executor{context_->strand} : boost::asio::any_io_executor{};
 }
 
 std::shared_ptr<const std::atomic_bool> lifecycle_tracker::operation::stop_latch() const noexcept {
-   return cancellation_ ? cancellation_->stop_requested : nullptr;
+   return state_ ? state_->stop_latch : nullptr;
 }
 
 void lifecycle_tracker::operation::release() noexcept {
-   cancellation_.reset();
+   context_.reset();
    if (auto state = std::move(state_)) {
       state->release(std::exchange(id_, 0));
    }
@@ -141,21 +110,20 @@ lifecycle_phase lifecycle_tracker::phase() const noexcept {
 
 lifecycle_tracker::operation lifecycle_tracker::track() noexcept {
    try {
-      const auto cancellation = std::make_shared<state::cancellation_context>(state_->executor);
+      const auto context = std::make_shared<state::operation_context>(state_->executor);
       const auto lock = std::scoped_lock{state_->mutex};
       if (state_->stop_requested) {
          return {};
       }
       const auto id = state_->next_operation_id++;
-      state_->operations.emplace(id, cancellation);
-      return operation{state_, id, cancellation};
+      state_->operations.emplace(id, context);
+      return operation{state_, id, context};
    } catch (...) {
       return {};
    }
 }
 
 void lifecycle_tracker::request_stop() noexcept {
-   auto ready = std::vector<std::shared_ptr<waiter>>{};
    try {
       {
          const auto lock = std::scoped_lock{state_->mutex};
@@ -164,22 +132,9 @@ void lifecycle_tracker::request_stop() noexcept {
          }
          state_->stop_requested = true;
          state_->phase = lifecycle_phase::stopping;
-         for (const auto& [_, cancellation] : state_->operations) {
-            cancellation->stop_requested->store(true, std::memory_order_release);
-            try {
-               boost::asio::post(cancellation->strand,
-                                 [cancellation] { cancellation->signal.emit(boost::asio::cancellation_type::all); });
-            } catch (...) {
-               // Resource teardown remains the final cancellation fallback.
-            }
-         }
-         if (state_->operations.empty()) {
-            ready.swap(state_->waiters);
-         }
+         state_->stop_latch->store(true, std::memory_order_release);
       }
-      for (const auto& waiter : ready) {
-         wake(waiter);
-      }
+      state_->changed->notify();
    } catch (...) {
       // Node-level resource teardown remains the final shutdown fallback.
    }
@@ -187,45 +142,26 @@ void lifecycle_tracker::request_stop() noexcept {
 
 boost::asio::awaitable<void> lifecycle_tracker::wait() const {
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
-   const auto executor = co_await boost::asio::this_coro::executor;
-   auto waiter = std::make_shared<lifecycle_tracker::waiter>(executor);
-
-   auto switch_error = boost::system::error_code{};
-   co_await boost::asio::dispatch(waiter->strand,
-                                  boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
-   if (switch_error) {
-      throw boost::system::system_error{switch_error};
-   }
-
-   auto ready = false;
-   {
-      const auto lock = std::scoped_lock{state_->mutex};
-      ready = state_->stop_requested && state_->operations.empty();
-      if (!ready) {
-         state_->waiters.push_back(waiter);
+   auto observed = state_->changed->epoch();
+   while (true) {
+      {
+         const auto lock = std::scoped_lock{state_->mutex};
+         if (state_->stop_requested && state_->operations.empty()) {
+            co_return;
+         }
       }
-   }
-   if (!ready) {
-      auto error = boost::system::error_code{};
-      co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      static_cast<void>(error);
+      observed = co_await state_->changed->async_wait(observed);
    }
 }
 
 void lifecycle_tracker::finish_stop() noexcept {
-   auto ready = std::vector<std::shared_ptr<waiter>>{};
    try {
       {
          const auto lock = std::scoped_lock{state_->mutex};
          state_->stop_requested = true;
          state_->phase = lifecycle_phase::stopped;
-         if (state_->operations.empty()) {
-            ready.swap(state_->waiters);
-         }
       }
-      for (const auto& waiter : ready) {
-         wake(waiter);
-      }
+      state_->changed->notify();
    } catch (...) {
       // Final teardown must remain noexcept.
    }

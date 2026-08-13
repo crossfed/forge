@@ -21,6 +21,8 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/system/error_code.hpp>
 
 module forge.net.yamux.session;
 
@@ -64,14 +66,59 @@ boost::asio::awaitable<void> session::impl::read_loop() {
       terminal = exceptions::code::closed;
       message = "yamux read loop stopped";
    }
-   if (go_away) {
+   fail_session(terminal, std::move(message));
+   const auto owns_close = go_away && start_close(*go_away);
+   if (owns_close) {
       try {
-         co_await write_frame(detail::frame_type::go_away, 0, 0, *go_away, {}, true);
+         co_await async_send_terminal_go_away(*go_away);
       } catch (...) {
+         (void)cancel_transport_noexcept();
       }
    }
-   fail_session(terminal, std::move(message));
    finish_read_loop();
+   if (owns_close) {
+      finish_close();
+   }
+}
+
+boost::asio::awaitable<void> session::impl::async_send_terminal_go_away(std::uint32_t code) {
+   auto executor = co_await boost::asio::this_coro::executor;
+   const auto deadline = std::chrono::steady_clock::now() + options_.close_timeout;
+   transport_writes_.seal();
+   if (!co_await transport_writes_.async_wait_until(deadline)) {
+      (void)cancel_transport_noexcept();
+      try {
+         co_await stream_.async_close();
+      } catch (...) {
+      }
+      co_return;
+   }
+
+   auto deadline_timer = boost::asio::steady_timer{executor, deadline};
+   auto weak = weak_from_this();
+   deadline_timer.async_wait([weak](const boost::system::error_code& error) {
+      if (!error) {
+         if (auto self = weak.lock()) {
+            (void)self->cancel_transport_noexcept();
+         }
+      }
+   });
+
+   try {
+      auto outbound = transport::chunk{detail::encode_frame(detail::frame_type::go_away, 0, 0, code)};
+      co_await stream_.async_write(std::move(outbound));
+   } catch (...) {
+      // The original typed protocol/resource failure is already terminal.
+   }
+   try {
+      co_await stream_.async_close();
+   } catch (...) {
+      // Transport teardown is best-effort and never replaces the protocol cause.
+   }
+   try {
+      deadline_timer.cancel();
+   } catch (...) {
+   }
 }
 
 void session::impl::compact_read_buffer(detail::bytes& buffer, std::size_t& consumed) {
@@ -123,8 +170,7 @@ session::impl::read_frame(detail::bytes& buffer, std::size_t& consumed) {
    if (header.type == detail::frame_type::data && header.length > options_.max_frame_size) {
       FORGE_THROW_EXCEPTION(exceptions::resource_limit, "yamux frame exceeds maximum size");
    }
-   const auto payload_size =
-       header.type == detail::frame_type::data ? static_cast<std::size_t>(header.length) : 0U;
+   const auto payload_size = header.type == detail::frame_type::data ? static_cast<std::size_t>(header.length) : 0U;
    while (buffer.size() - consumed < detail::header_size + payload_size) {
       compact_read_buffer(buffer, consumed);
       auto chunk = co_await stream_.async_read();
@@ -175,8 +221,9 @@ boost::asio::awaitable<void> session::impl::handle_data(const detail::frame_head
 
    if ((header.flags & detail::rst) != 0U) {
       auto lock = std::scoped_lock{mutex_};
-      if (const auto found = streams_.find(header.stream_id); found != streams_.end() &&
-          !found->second->reset && !(found->second->local_fin && found->second->remote_fin)) {
+      if (const auto found = streams_.find(header.stream_id);
+          found != streams_.end() && !found->second->reset &&
+          !(found->second->local_fin && found->second->remote_fin)) {
          reset_stream_locked(found->second);
       }
       co_return;
@@ -276,8 +323,9 @@ boost::asio::awaitable<void> session::impl::handle_window_update(const detail::f
 
    if ((header.flags & detail::rst) != 0U) {
       auto lock = std::scoped_lock{mutex_};
-      if (const auto found = streams_.find(header.stream_id); found != streams_.end() &&
-          !found->second->reset && !(found->second->local_fin && found->second->remote_fin)) {
+      if (const auto found = streams_.find(header.stream_id);
+          found != streams_.end() && !found->second->reset &&
+          !(found->second->local_fin && found->second->remote_fin)) {
          reset_stream_locked(found->second);
       }
       co_return;
@@ -336,8 +384,7 @@ session::impl::handle_stream_open(const detail::frame_header& header, std::uint3
       co_await write_frame(detail::frame_type::data, detail::rst, header.stream_id, 0);
       co_return std::shared_ptr<stream_state>{};
    }
-   co_await write_frame(detail::frame_type::window_update, detail::ack, header.stream_id,
-                        local_window_delta());
+   co_await write_frame(detail::frame_type::window_update, detail::ack, header.stream_id, local_window_delta());
    co_return state;
 }
 

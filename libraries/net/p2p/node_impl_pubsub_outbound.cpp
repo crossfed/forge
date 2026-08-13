@@ -164,87 +164,139 @@ boost::asio::awaitable<void> node::impl::send_pubsub_rpc(const peer_id& peer, co
       }
    }
    const auto encoded = pubsub::codec::encode(value, options.limits.pubsub);
-   reserve_pubsub_outbound_bytes(peer, encoded.size());
-   auto release_bytes = [this, peer, bytes = encoded.size()](void*) noexcept {
-      release_pubsub_outbound_bytes(peer, bytes);
+   auto reserved_bytes = encoded.size();
+   reserve_pubsub_outbound_bytes(peer, reserved_bytes);
+   auto release_bytes = [this, peer, &reserved_bytes](void*) noexcept {
+      release_pubsub_outbound_bytes(peer, reserved_bytes);
    };
    auto reservation = std::unique_ptr<void, decltype(release_bytes)>{this, std::move(release_bytes)};
    try {
-      // Connection singleflight is acquired before the write gate. A synchronous subscription announce can
-      // therefore reuse the remembered session without re-entering this publication generation.
       auto session = co_await ensure_pubsub_direct_session(peer);
-      const auto session_id = session->id;
-      auto write_gate = std::shared_ptr<forge::asio::gate>{};
-      {
-         auto lock = std::scoped_lock{mutex};
-         const auto current_session = sessions.find(session_id);
-         if (stopped || current_session == sessions.end() || current_session->second != session || session->closed) {
-            FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub direct session closed before publication");
-         }
-         auto current = pubsub_value.outbound.find(peer);
-         if (current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
-             !current->second.write_gate || current->second.write_gate->closed()) {
-            if (current != pubsub_value.outbound.end()) {
-               current->second.write_gate->close();
+      while (true) {
+         auto session_id = std::uint64_t{};
+         auto write_gate = std::shared_ptr<forge::asio::gate>{};
+         {
+            auto lock = std::scoped_lock{mutex};
+            if (stopped) {
+               FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub direct session closed before publication");
             }
-            pubsub_value.outbound[peer] = pubsub_state::outbound_generation{
-                .session_id = session_id,
-                .write_gate = std::make_shared<forge::asio::gate>(),
-            };
+            auto current = pubsub_value.outbound.find(peer);
+            if (current != pubsub_value.outbound.end()) {
+               const auto owner_session = sessions.find(current->second.session_id);
+               const auto owner_live = owner_session != sessions.end() && !owner_session->second->closed;
+               if (owner_live && current->second.write_gate && !current->second.write_gate->closed()) {
+                  session = owner_session->second;
+               } else {
+                  const auto owner_id = current->second.session_id;
+                  const auto owner_gate = current->second.write_gate;
+                  invalidate_pubsub_outbound_locked(peer, owner_id, owner_gate);
+                  current = pubsub_value.outbound.end();
+               }
+            }
+            const auto selected_session = sessions.find(session->id);
+            if (selected_session == sessions.end() || selected_session->second != session || session->closed) {
+               FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub direct session closed before publication");
+            }
+            if (current == pubsub_value.outbound.end()) {
+               pubsub_value.outbound[peer] = pubsub_state::outbound_generation{
+                   .session_id = session->id,
+                   .write_gate = std::make_shared<forge::asio::gate>(),
+               };
+            }
+            session_id = pubsub_value.outbound.at(peer).session_id;
+            write_gate = pubsub_value.outbound.at(peer).write_gate;
          }
-         write_gate = pubsub_value.outbound.at(peer).write_gate;
-      }
-      auto write_ticket = forge::asio::gate::ticket{};
-      try {
-         write_ticket = co_await write_gate->acquire();
-      } catch (const forge::asio::exceptions::canceled&) {
-         FORGE_THROW_EXCEPTION(exceptions::canceled, "GossipSub publication canceled while waiting for peer stream");
-      } catch (const forge::asio::exceptions::rejected&) {
-         FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream closed while waiting for publication");
-      }
-      auto outbound = std::shared_ptr<forge::net::p2p::stream>{};
-      {
-         auto lock = std::scoped_lock{mutex};
-         const auto current = pubsub_value.outbound.find(peer);
-         if (stopped || current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
-             current->second.write_gate != write_gate) {
-            FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream was closed before publication");
+
+         auto write_ticket = forge::asio::gate::ticket{};
+         try {
+            write_ticket = co_await write_gate->acquire();
+         } catch (const forge::asio::exceptions::canceled&) {
+            FORGE_THROW_EXCEPTION(exceptions::canceled, "GossipSub publication canceled while waiting for peer stream");
+         } catch (const forge::asio::exceptions::rejected&) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream closed while waiting for publication");
          }
-         if (current->second.stream && current->second.stream->valid()) {
-            outbound = current->second.stream;
-         }
-      }
-      if (!outbound) {
-         const auto open_timeout =
-             attempt_timeout(options.limits.discovery.query_timeout, node::open_options{}.direct_attempt_timeout,
-                             "GossipSub protocol open direct attempt");
-         auto stream = co_await open_protocol_on_direct_session(peer, protocol, session, open_timeout);
-         outbound = std::make_shared<forge::net::p2p::stream>(std::move(stream));
-         auto stale = false;
+
+         auto outbound = std::shared_ptr<forge::net::p2p::stream>{};
+         auto replace_generation = false;
          {
             auto lock = std::scoped_lock{mutex};
             const auto current = pubsub_value.outbound.find(peer);
-            stale = stopped || current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
-                    current->second.write_gate != write_gate;
-            if (!stale) {
-               current->second.stream = outbound;
+            if (stopped || current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
+                current->second.write_gate != write_gate) {
+               FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream was closed before publication");
+            }
+            if (current->second.stream && !current->second.stream->valid()) {
+               const auto dead_stream = current->second.stream;
+               invalidate_pubsub_outbound_locked(peer, session_id, write_gate, dead_stream);
+               replace_generation = true;
+            } else {
+               outbound = current->second.stream;
             }
          }
-         if (stale) {
-            outbound->cancel();
-            FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream closed while opening publication stream");
+         if (replace_generation) {
+            write_ticket.release();
+            continue;
          }
-      }
-      try {
-         co_await outbound->async_write(encoded);
-      } catch (const forge::exceptions::base&) {
-         auto lock = std::scoped_lock{mutex};
-         const auto current = pubsub_value.outbound.find(peer);
-         if (current != pubsub_value.outbound.end() && current->second.session_id == session_id &&
-             current->second.stream == outbound) {
-            invalidate_pubsub_outbound_locked(peer, session_id);
+
+         try {
+            if (!outbound) {
+               const auto open_timeout =
+                   attempt_timeout(options.limits.discovery.query_timeout, node::open_options{}.direct_attempt_timeout,
+                                   "GossipSub protocol open direct attempt");
+               auto stream = co_await open_protocol_on_direct_session(peer, protocol, session, open_timeout);
+               outbound = std::make_shared<forge::net::p2p::stream>(std::move(stream));
+               auto stale = false;
+               {
+                  auto lock = std::scoped_lock{mutex};
+                  const auto current = pubsub_value.outbound.find(peer);
+                  stale = stopped || current == pubsub_value.outbound.end() ||
+                          current->second.session_id != session_id || current->second.write_gate != write_gate;
+                  if (!stale) {
+                     current->second.stream = outbound;
+                  }
+               }
+               if (stale) {
+                  outbound->cancel();
+                  FORGE_THROW_EXCEPTION(exceptions::closed,
+                                        "GossipSub peer stream closed while opening publication stream");
+               }
+            }
+
+            auto snapshot_pending = false;
+            {
+               auto lock = std::scoped_lock{mutex};
+               const auto current = pubsub_value.outbound.find(peer);
+               if (stopped || current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
+                   current->second.write_gate != write_gate || current->second.stream != outbound) {
+                  FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer stream was replaced before publication");
+               }
+               snapshot_pending = current->second.snapshot_pending;
+            }
+            if (snapshot_pending) {
+               auto subscriptions = local_pubsub_subscriptions();
+               if (!subscriptions.empty()) {
+                  const auto snapshot = pubsub::codec::encode(pubsub::rpc{.subscriptions = std::move(subscriptions)},
+                                                              options.limits.pubsub);
+                  reserve_pubsub_outbound_bytes(peer, snapshot.size());
+                  reserved_bytes += snapshot.size();
+                  co_await outbound->async_write(snapshot);
+               }
+               auto lock = std::scoped_lock{mutex};
+               const auto current = pubsub_value.outbound.find(peer);
+               if (stopped || current == pubsub_value.outbound.end() || current->second.session_id != session_id ||
+                   current->second.write_gate != write_gate || current->second.stream != outbound) {
+                  FORGE_THROW_EXCEPTION(exceptions::closed,
+                                        "GossipSub peer stream was replaced after subscription snapshot");
+               }
+               current->second.snapshot_pending = false;
+            }
+            co_await outbound->async_write(encoded);
+         } catch (...) {
+            auto lock = std::scoped_lock{mutex};
+            invalidate_pubsub_outbound_locked(peer, session_id, write_gate, outbound);
+            throw;
          }
-         throw;
+         break;
       }
    } catch (...) {
       reservation.reset();
