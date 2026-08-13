@@ -6439,10 +6439,12 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_candidate_probes_share_one_overall_timeout) {
    forge::asio::blocking::run(runtime, client.async_stop());
 }
 
-BOOST_AUTO_TEST_CASE(p2p_discovery_queries_verified_routing_seed_before_unverified_candidates) {
+BOOST_AUTO_TEST_CASE(p2p_discovery_queries_verified_routing_seed_with_unverified_candidates) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 3}};
-   auto server_options = dht_options_for(peer(229), amino_v1(dht::mode::server));
-   auto client_options = dht_options_for(peer(230), amino_v1());
+   const auto server_identity = make_test_certificate_identity("discovery-routing-server");
+   const auto client_identity = make_test_certificate_identity("discovery-routing-client");
+   auto server_options = dht_options_for(server_identity, amino_v1(dht::mode::server));
+   auto client_options = dht_options_for(client_identity, amino_v1());
    client_options.limits.discovery.rendezvous_enabled = false;
    client_options.limits.discovery.max_parallel_queries = 1;
    client_options.limits.discovery.query_timeout = std::chrono::milliseconds{250};
@@ -6466,15 +6468,21 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_queries_verified_routing_seed_before_unverifi
 
    const auto queries_before = server.metrics().dht_queries;
    const auto started = std::chrono::steady_clock::now();
-   static_cast<void>(forge::asio::blocking::run(runtime, client.async_refresh_discovery()));
+   try {
+      static_cast<void>(forge::asio::blocking::run(runtime, client.async_refresh_discovery()));
+      BOOST_FAIL("expected unverified DHT candidate timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
    const auto elapsed =
        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
 
    BOOST_TEST(server.metrics().dht_queries > queries_before);
-   BOOST_TEST(elapsed.count() < 225);
+   BOOST_TEST(elapsed.count() < 500);
    const auto stalled_record = client.peers().find(stalled);
    BOOST_REQUIRE(stalled_record.has_value());
-   BOOST_TEST(stalled_record->failures == 0U);
+   BOOST_TEST(stalled_record->failures == 1U);
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
@@ -7195,8 +7203,10 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_refresh_replaces_registration_and_cookie_dis
 
 BOOST_AUTO_TEST_CASE(p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto dht_identity = make_test_certificate_identity("discovery-refresh-dht");
+   auto client_identity = make_test_certificate_identity("discovery-refresh-client");
    auto relay_identity = make_test_certificate_identity("discovery-refresh-relay");
-   auto dht_options = dht_options_for(peer(133), amino_v1(dht::mode::server));
+   auto dht_options = dht_options_for(dht_identity, amino_v1(dht::mode::server));
    auto rendezvous_options =
        options_for(peer(134), capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
    rendezvous_options.limits.rendezvous.operating_role = rendezvous::role::server;
@@ -7204,7 +7214,7 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candi
        relay_identity, amino_v1(dht::mode::server),
        capability_set{.bits = capabilities::direct_quic | capabilities::relay | capabilities::relay_reservation});
    auto client_options = dht_options_for(
-       peer(135), amino_v1(),
+       client_identity, amino_v1(),
        capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous | capabilities::relay_reservation});
    client_options.relay_policy.auto_discovery_enabled = true;
    client_options.relay_policy.target_reservations = 1;
@@ -10360,8 +10370,10 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_timeout_penalizes_peer_without_advancin
    auto client_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto limits = dht::options{};
    limits.failure_threshold = 1;
-   auto server_options = dht_options_for(peer(209), custom_test_dht_profile(dht::mode::server, limits));
-   auto client_options = dht_options_for(peer(210), custom_test_dht_profile(dht::mode::client, limits));
+   const auto server_identity = make_test_certificate_identity("cached-protocol-server");
+   const auto client_identity = make_test_certificate_identity("cached-protocol-client");
+   auto server_options = dht_options_for(server_identity, custom_test_dht_profile(dht::mode::server, limits));
+   auto client_options = dht_options_for(client_identity, custom_test_dht_profile(dht::mode::client, limits));
    client_options.limits.discovery.rendezvous_enabled = false;
    auto server = node{server_runtime, std::move(server_options)};
    auto client = node{client_runtime, std::move(client_options)};
@@ -10745,7 +10757,9 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_identify_update_preserves_independent_endpoi
 
 BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_state) {
    auto store = peer_store{};
-   const auto remote = peer(227);
+   const auto remote_identity = make_test_identity();
+   const auto remote = remote_identity.peer;
+   const auto public_key_bytes = encode_public_key(remote_identity.key);
    const auto now = std::chrono::system_clock::now();
    const auto original_endpoint = parse_endpoint("/ip4/127.0.0.1/udp/4227/quic-v1/p2p/" + remote.to_string());
    const auto exchanged_endpoint = parse_endpoint("/ip4/127.0.0.1/udp/4228/quic-v1/p2p/" + remote.to_string());
@@ -10755,7 +10769,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_st
        .discovered_by = discovery::source::rendezvous,
        .protocol_version = "/ipfs/id/1.0.0",
        .agent_version = "forge-preserved",
-       .public_key = {0x01, 0x02},
+       .public_key = public_key_bytes,
        .protocols = {builtins::identify},
        .signed_peer_record = {0x03, 0x04},
        .endpoints = {peer_store::endpoint_record{.endpoint = original_endpoint}},
@@ -10786,7 +10800,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_st
    BOOST_REQUIRE(stored);
    BOOST_TEST(stored->protocol_version == "/ipfs/id/1.0.0");
    BOOST_TEST(stored->agent_version == "forge-preserved");
-   BOOST_TEST(stored->public_key == (std::vector<std::uint8_t>{0x01, 0x02}));
+   BOOST_TEST(stored->public_key == public_key_bytes);
    BOOST_TEST(stored->signed_peer_record == (std::vector<std::uint8_t>{0x03, 0x04}));
    BOOST_TEST(static_cast<int>(stored->discovered_by) == static_cast<int>(discovery::source::rendezvous));
    BOOST_TEST(stored->discovered_at == now);

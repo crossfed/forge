@@ -85,7 +85,7 @@ namespace forge::net::p2p {
 void remember_dht_peer(peer_store& store, const protocol_id& protocol, dht::routing_table& routing,
                        std::chrono::milliseconds refresh_interval, const dht::peer& value,
                        dht::routing_admission admission);
-void mark_dht_failure(peer_store& store, dht::routing_table& routing, const peer_id& peer);
+void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer);
 [[nodiscard]] bool remote_peer_attributable_failure(std::mutex& mutex, const bool& stopped,
                                                     const forge::exceptions::base& error);
 [[nodiscard]] host_addresses::learning_context third_party_discovery_context();
@@ -179,7 +179,7 @@ boost::asio::awaitable<dht_query::result> run_lookup(const auto& self, const pro
           return remote_peer_attributable_failure(self->mutex, self->stopped, error);
        });
    for (const auto& failed : result.failed) {
-      mark_dht_failure(self->store, state.routing, failed);
+      mark_dht_routing_failure(state.routing, failed);
    }
    (void)remaining_timeout(started, query_options.timeout, "P2P DHT lookup");
    co_return result;
@@ -233,7 +233,7 @@ boost::asio::awaitable<std::size_t> publish_provider(const auto& self, const pro
                 throw;
              }
              auto& current = self->dht_profile(protocol);
-             mark_dht_failure(self->store, current.routing, candidate);
+             mark_dht_routing_failure(current.routing, candidate);
              co_return false;
           }
        });
@@ -458,7 +458,7 @@ boost::asio::awaitable<dht::value_put_result> node::async_put_value(protocol_id 
                 throw;
              }
              auto& current = self->dht_profile(protocol);
-             mark_dht_failure(self->store, current.routing, peer);
+             mark_dht_routing_failure(current.routing, peer);
              co_return false;
           }
        });

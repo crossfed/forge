@@ -77,6 +77,7 @@ import forge.net.yamux.session;
 #include "details/host_addresses.hxx"
 #include "details/node_impl.hxx"
 #include "details/operation_deadline.hxx"
+#include "details/peer_failure.hxx"
 
 namespace forge::net::p2p {
 
@@ -87,6 +88,24 @@ discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::opt
 namespace {
 
 constexpr auto provider_address_ttl = std::chrono::hours{24};
+
+[[nodiscard]] bool protocol_open_failure_requires_peer_penalty(const forge::exceptions::base& error) {
+   const auto kind = p2p_code(error);
+   return kind == exceptions::code::unsupported_protocol || kind == exceptions::code::protocol_error ||
+          kind == exceptions::code::codec_error;
+}
+
+void record_dht_exchange_failure(std::mutex& mutex, const bool& stopped, peer_store& store, const peer_id& peer,
+                                 const forge::exceptions::base& error) {
+   auto node_stopped = false;
+   {
+      auto lock = std::scoped_lock{mutex};
+      node_stopped = stopped;
+   }
+   if (detail::remote_peer_attributable_failure(p2p_code(error), node_stopped)) {
+      store.mark_failure(peer);
+   }
+}
 
 [[nodiscard]] dht::peer sanitize_discovered_peer_for_session(dht::peer value, const auto& session) {
    value.endpoints = host_addresses::sanitize_discovered_endpoints(
@@ -143,19 +162,45 @@ boost::asio::awaitable<dht::message> node::impl::exchange_dht(const protocol_id&
                                                               dht::message request, std::chrono::milliseconds timeout) {
    const auto started = std::chrono::steady_clock::now();
    auto& state = dht_profile(protocol);
-   auto stream = co_await open_protocol_direct(peer, protocol, timeout);
-   co_return co_await detail::async_exchange_dht(std::move(stream), std::move(request), state.profile,
-                                                 runtime.context(),
-                                                 remaining_timeout(started, timeout, "P2P DHT exchange"));
+   auto stream = std::optional<forge::net::p2p::stream>{};
+   try {
+      stream.emplace(co_await open_protocol_direct(peer, protocol, timeout));
+   } catch (const forge::exceptions::base& error) {
+      if (protocol_open_failure_requires_peer_penalty(error)) {
+         store.mark_failure(peer);
+      }
+      throw;
+   }
+   try {
+      co_return co_await detail::async_exchange_dht(std::move(*stream), std::move(request), state.profile,
+                                                    runtime.context(),
+                                                    remaining_timeout(started, timeout, "P2P DHT exchange"));
+   } catch (const forge::exceptions::base& error) {
+      record_dht_exchange_failure(mutex, stopped, store, peer, error);
+      throw;
+   }
 }
 
 boost::asio::awaitable<void> node::impl::send_dht(const protocol_id& protocol, const peer_id& peer,
                                                   dht::message request, std::chrono::milliseconds timeout) {
    const auto started = std::chrono::steady_clock::now();
    auto& state = dht_profile(protocol);
-   auto stream = co_await open_protocol_direct(peer, protocol, timeout);
-   co_await detail::async_send_dht(std::move(stream), std::move(request), state.profile, runtime.context(),
-                                   remaining_timeout(started, timeout, "P2P DHT send"));
+   auto stream = std::optional<forge::net::p2p::stream>{};
+   try {
+      stream.emplace(co_await open_protocol_direct(peer, protocol, timeout));
+   } catch (const forge::exceptions::base& error) {
+      if (protocol_open_failure_requires_peer_penalty(error)) {
+         store.mark_failure(peer);
+      }
+      throw;
+   }
+   try {
+      co_await detail::async_send_dht(std::move(*stream), std::move(request), state.profile, runtime.context(),
+                                      remaining_timeout(started, timeout, "P2P DHT send"));
+   } catch (const forge::exceptions::base& error) {
+      record_dht_exchange_failure(mutex, stopped, store, peer, error);
+      throw;
+   }
 }
 
 boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::session_state> session,

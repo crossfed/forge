@@ -91,8 +91,7 @@ void remember_dht_peer(peer_store& store, const protocol_id& protocol, dht::rout
    routing.upsert(value, admission);
 }
 
-void mark_dht_failure(peer_store& store, dht::routing_table& routing, const peer_id& peer) {
-   store.mark_failure(peer);
+void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) {
    routing.mark_failure(peer);
 }
 
