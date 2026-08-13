@@ -2,8 +2,8 @@
 
 `forge_asio` owns the shared async runtime primitives used by FORGE networking and
 applications. It wraps Boost.Asio with explicit runtime ownership, blocking
-boundaries, a priority task scheduler, a bounded CPU compute pool, FIFO gates
-and single-thread affine execution.
+boundaries, a priority task scheduler, a bounded CPU compute pool, FIFO gates,
+race-safe notifications and single-thread affine execution.
 
 ## When To Use
 
@@ -26,6 +26,7 @@ and single-thread affine execution.
 - `forge.asio.task` — bounded priority scheduler and task handles.
 - `forge.asio.compute` — bounded FIFO execution for synchronous CPU work.
 - `forge.asio.gate` — cancellation-aware FIFO admission with RAII tickets.
+- `forge.asio.notification` — sticky epoch notifications for shared async state.
 - `forge.asio.affine` — bounded synchronous execution on one owned OS thread.
 
 Target: `forge_asio`.
@@ -34,11 +35,12 @@ Dependencies: Boost.Asio and threads.
 
 ## Stability
 
-The `forge.asio.task`, `forge.asio.compute`, `forge.asio.gate` and
-`forge.asio.affine` public C++ APIs are Preview in Forge 8.x. MINOR releases may
-make documented source-level changes to these surfaces. Runtime ownership,
-bounded admission and deterministic shutdown are production requirements, but
-the exact type vocabulary may still evolve before it is declared Stable.
+The `forge.asio.task`, `forge.asio.compute`, `forge.asio.gate`,
+`forge.asio.notification` and `forge.asio.affine` public C++ APIs are Preview in
+Forge 8.x. MINOR releases may make documented source-level changes to these
+surfaces. Runtime ownership, bounded admission and deterministic shutdown are
+production requirements, but the exact type vocabulary may still evolve before
+it is declared Stable.
 
 The 8.3 migration from `forge.asio.task_scheduler` to `forge.asio.task` is
 documented in the Forge 8.3 release notes.
@@ -223,6 +225,26 @@ co_await mutate_shared_state();
 The gate does not start detached work and does not own an executor. Waiting
 coroutines remain owned by their callers. A ticket may be released from another
 thread.
+
+### Wait For Shared State Changes
+
+`notification` publishes a monotonically changing epoch. A waiter supplies the
+epoch it has already observed; it completes immediately if that epoch has since
+changed, so a notification cannot be lost between checking state and starting
+the wait. `async_wait_until()` adds a bounded deadline, and caller cancellation
+remains scoped to that waiter.
+
+```cpp
+import forge.asio.notification;
+
+forge::asio::notification changed;
+
+const auto observed = changed.epoch();
+publish_shared_state();
+changed.notify();
+
+const auto current = co_await changed.async_wait(observed);
+```
 
 ### Execute Thread-Affine Native Work
 

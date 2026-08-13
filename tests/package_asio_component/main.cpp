@@ -2,6 +2,7 @@ import forge.asio.blocking;
 import forge.asio.affine;
 import forge.asio.compute;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.asio.task;
 
@@ -10,10 +11,12 @@ int main() {
    auto scheduler = forge::asio::task::scheduler{runtime};
    auto compute = forge::asio::compute::pool{forge::asio::compute::pool::options{.worker_threads = 1}};
    auto gate = forge::asio::gate{};
+   auto notification = forge::asio::notification{};
    auto lane = forge::asio::affine::lane{};
 
    auto ticket = forge::asio::blocking::run(runtime, gate.acquire());
    ticket.release();
+   notification.notify();
 
    const auto result = forge::asio::blocking::run(
        runtime, compute.get_executor().execute({.name = "package-smoke"}, [] { return 42; }));

@@ -4,6 +4,8 @@ add_library(
    async_waiter.cpp
    compute.cpp
    gate.cpp
+   notification.cpp
+   notification_impl.cpp
    runtime.cpp
    stop_state.cpp
    task.cpp

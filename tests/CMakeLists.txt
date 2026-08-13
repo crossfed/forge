@@ -702,6 +702,7 @@ add_executable(
    asio/affine_tests.cpp
    asio/compute_tests.cpp
    asio/gate_tests.cpp
+   asio/notification_tests.cpp
    asio/task_tests.cpp
 )
 target_link_libraries(test_forge_asio forge_asio Boost::included_unit_test_framework)
