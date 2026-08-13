@@ -199,9 +199,10 @@ void validate(const dht::profile& profile) {
    if (profile.limits.replication == 0 || profile.limits.alpha == 0 ||
        profile.limits.alpha > profile.limits.replication || profile.limits.max_outbound_message_size == 0 ||
        profile.limits.max_inbound_message_size == 0 || profile.limits.max_record_size == 0 ||
-       profile.limits.max_provider_peers == 0 || profile.limits.max_peer_endpoints == 0 ||
-       profile.limits.max_query_peers == 0 || profile.limits.replacement_cache_size == 0 ||
-       profile.limits.failure_threshold == 0 || profile.limits.query_timeout <= std::chrono::milliseconds::zero() ||
+       profile.limits.max_closer_peers == 0 || profile.limits.max_provider_peers == 0 ||
+       profile.limits.max_peer_endpoints == 0 || profile.limits.max_query_peers == 0 ||
+       profile.limits.replacement_cache_size == 0 || profile.limits.failure_threshold == 0 ||
+       profile.limits.query_timeout <= std::chrono::milliseconds::zero() ||
        profile.limits.refresh_interval <= std::chrono::milliseconds::zero() ||
        profile.limits.provider_record_ttl <= std::chrono::seconds::zero() ||
        profile.limits.provider_address_ttl <= std::chrono::seconds::zero() ||

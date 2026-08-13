@@ -164,6 +164,13 @@ BOOST_AUTO_TEST_CASE(dht_custom_profile_rejects_overlapping_value_policy_namespa
                      exceptions::invalid_options);
 }
 
+BOOST_AUTO_TEST_CASE(dht_custom_profile_rejects_zero_closer_peer_bound_before_runtime_use) {
+   auto limits = dht::options{};
+   limits.max_closer_peers = 0;
+
+   BOOST_CHECK_THROW(static_cast<void>(custom_profile(limits)), exceptions::invalid_options);
+}
+
 BOOST_AUTO_TEST_CASE(dht_codec_accepts_exact_amino_payload_boundary_and_rejects_next_byte) {
    const auto limits = amino_v1().limits;
    auto message = dht::message{
