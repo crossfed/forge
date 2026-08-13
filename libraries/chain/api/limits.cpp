@@ -36,10 +36,6 @@ template <typename Value> void require_packed_request(const Value& value, const 
    require_request_within_limits<Value>(value, limits);
 }
 
-bool bytes_less(const protocol::bytes& left, const protocol::bytes& right) {
-   return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end());
-}
-
 void require_items(std::size_t count, std::uint32_t requested, const protocol::service_limits& limits,
                    std::string_view field) {
    const auto allowed = std::min<std::size_t>(requested, limits.max_page_size);
@@ -48,6 +44,20 @@ void require_items(std::size_t count, std::uint32_t requested, const protocol::s
                             forge::exceptions::ctx("field", field), forge::exceptions::ctx("count", count),
                             forge::exceptions::ctx("limit", allowed));
    }
+}
+
+template <typename Batch>
+void require_mutations(const std::vector<Batch>& blocks, std::uint32_t requested,
+                       const protocol::service_limits& limits) {
+   auto count = std::size_t{};
+   const auto allowed = std::min<std::size_t>(requested, limits.max_page_size);
+   for (const auto& block : blocks) {
+      if (block.mutations.size() > allowed - std::min(count, allowed)) {
+         require_items(allowed + 1U, requested, limits, "mutations");
+      }
+      count += block.mutations.size();
+   }
+   require_items(count, requested, limits, "mutations");
 }
 
 forge::raw::unpack_limits allocation_limits(const forge::api::core::bytes& payload,
@@ -70,7 +80,7 @@ forge::raw::unpack_limits request_allocation_limits(std::string_view api, std::s
    if (api == "forge.chain.api.submission" && method == "submit_batch") {
       return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_transaction_batch_size);
    }
-   if (api == "forge.chain.api.state" && method == "get_changes") {
+   if (api == "forge.chain.api.state" && (method == "get_table_changes" || method == "get_account_changes")) {
       return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size);
    }
    if (api == "forge.chain.api.state" && method == "get_accounts_by_authorizers") {
@@ -206,14 +216,15 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
          return request.limit;
       }
    } else if (api == "forge.chain.api.state") {
-      if (method == "get_range") {
-         const auto request = unpack_request<protocol::state_range_request>(payload, limits);
+      if (method == "get_table_changes") {
+         const auto request =
+             unpack_request<protocol::table_changes_request>(payload, limits, limits.max_state_batch_size);
          require_request_within_limits(request, limits);
          return request.limit;
       }
-      if (method == "get_changes") {
+      if (method == "get_account_changes") {
          const auto request =
-             unpack_request<protocol::state_changes_request>(payload, limits, limits.max_state_batch_size);
+             unpack_request<protocol::account_changes_request>(payload, limits, limits.max_state_batch_size);
          require_request_within_limits(request, limits);
          return request.limit;
       }
@@ -293,12 +304,12 @@ void require_method_response(std::string_view api, std::string_view method, bool
                        limits, "rows");
       }
    } else if (api == "forge.chain.api.state") {
-      if (method == "get_range") {
-         require_items(unpack_response<protocol::state_range_response>(payload, limits).rows.size(), *requested_items,
-                       limits, "rows");
-      } else if (method == "get_changes") {
-         require_items(unpack_response<protocol::state_changes_response>(payload, limits).blocks.size(),
-                       *requested_items, limits, "blocks");
+      if (method == "get_table_changes") {
+         require_mutations(unpack_response<protocol::table_changes_response>(payload, limits).blocks, *requested_items,
+                           limits);
+      } else if (method == "get_account_changes") {
+         require_mutations(unpack_response<protocol::account_changes_response>(payload, limits).blocks,
+                           *requested_items, limits);
       } else if (method == "get_table_rows") {
          require_items(unpack_response<protocol::table_rows_response>(payload, limits).rows.size(), *requested_items,
                        limits, "rows");
@@ -349,35 +360,27 @@ void require_request_within_limits(const protocol::producers_request& value, con
    require_page(value.limit, limits.max_page_size, "limit", true);
 }
 
-void require_request_within_limits(const protocol::state_range_request& value, const protocol::service_limits& limits) {
-   require_packed_request(value, limits);
-   require_page(value.limit, limits.max_page_size, "limit");
-   if (value.range.lower && value.range.upper && bytes_less(*value.range.upper, *value.range.lower)) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "state range lower bound exceeds its upper bound");
-   }
-}
-
-void require_request_within_limits(const protocol::state_changes_request& value,
+void require_request_within_limits(const protocol::account_changes_request& value,
                                    const protocol::service_limits& limits) {
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit");
    if (value.from_block > value.to_block) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "state changes interval is reversed");
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "account changes interval is reversed");
    }
-   if (value.ranges.size() > limits.max_state_batch_size) {
-      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "state changes range count exceeds the configured maximum",
-                            forge::exceptions::ctx("count", value.ranges.size()),
+   if (value.accounts.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "account changes require at least one account");
+   }
+   if (value.accounts.size() > limits.max_state_batch_size) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted,
+                            "account changes account count exceeds the configured maximum",
+                            forge::exceptions::ctx("count", value.accounts.size()),
                             forge::exceptions::ctx("limit", limits.max_state_batch_size));
    }
-   for (const auto& range : value.ranges) {
-      if (range.lower && range.upper && bytes_less(*range.upper, *range.lower)) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_request, "state changes range lower bound exceeds its upper bound");
-      }
+   if (!std::ranges::is_sorted(value.accounts) || std::ranges::adjacent_find(value.accounts) != value.accounts.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "account changes accounts must be sorted and unique");
    }
-   const auto range_count = value.ranges.empty() ? std::size_t{1U} : value.ranges.size();
-   if (value.cursor && (value.cursor->range >= range_count || value.cursor->block <= value.from_block ||
-                        value.cursor->block > value.to_block)) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "state changes cursor is outside the requested interval");
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "account changes cursor must not be empty");
    }
 }
 
@@ -385,6 +388,30 @@ void require_request_within_limits(const protocol::table_rows_request& value, co
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit", true);
    validate_table_rows_request(value);
+}
+
+void require_request_within_limits(const protocol::table_changes_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_page(value.limit, limits.max_page_size, "limit");
+   if (value.from_block > value.to_block) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "table changes interval is reversed");
+   }
+   if (value.tables.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "table changes require at least one selector");
+   }
+   if (value.tables.size() > limits.max_state_batch_size) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted,
+                            "table changes selector count exceeds the configured maximum",
+                            forge::exceptions::ctx("count", value.tables.size()),
+                            forge::exceptions::ctx("limit", limits.max_state_batch_size));
+   }
+   if (!std::ranges::is_sorted(value.tables) || std::ranges::adjacent_find(value.tables) != value.tables.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "table changes selectors must be sorted and unique");
+   }
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "table changes cursor must not be empty");
+   }
 }
 
 void require_request_within_limits(const protocol::table_scope_request& value, const protocol::service_limits& limits) {
@@ -491,18 +518,18 @@ void require_response_within_limits(const protocol::producers_response& response
    require_items(response.rows.size(), request.limit, limits, "rows");
 }
 
-void require_response_within_limits(const protocol::state_range_response& response,
-                                    const protocol::state_range_request& request,
+void require_response_within_limits(const protocol::account_changes_response& response,
+                                    const protocol::account_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
-   require_items(response.rows.size(), request.limit, limits, "rows");
+   require_mutations(response.blocks, request.limit, limits);
 }
 
-void require_response_within_limits(const protocol::state_changes_response& response,
-                                    const protocol::state_changes_request& request,
+void require_response_within_limits(const protocol::table_changes_response& response,
+                                    const protocol::table_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
-   require_items(response.blocks.size(), request.limit, limits, "blocks");
+   require_mutations(response.blocks, request.limit, limits);
 }
 
 void require_response_within_limits(const protocol::table_rows_response& response,

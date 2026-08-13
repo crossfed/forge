@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -81,12 +82,22 @@ concept exposes_indirect_submission =
 template <typename Client>
 concept exposes_administration = requires(Client& client) { client.admin(); };
 
+template <typename State>
+concept exposes_state_point = requires { &State::get_point; };
+template <typename State>
+concept exposes_state_range = requires { &State::get_range; };
+template <typename State>
+concept exposes_state_changes = requires { &State::get_changes; };
+
 static_assert(!exposes_raw_client<forge::chain::api::verified_client>);
 static_assert(!exposes_administration<forge::chain::api::raw_client>);
 static_assert(!exposes_submission<forge::chain::api::verified_client>);
 static_assert(exposes_submission<forge::chain::api::submission_client>);
 static_assert(!exposes_submission<forge::chain::api::transaction>);
 static_assert(!exposes_indirect_submission<forge::chain::api::raw_client>);
+static_assert(!exposes_state_point<forge::chain::api::state>);
+static_assert(!exposes_state_range<forge::chain::api::state>);
+static_assert(!exposes_state_changes<forge::chain::api::state>);
 
 using forge::api::http::cache_policy;
 using forge::api::http::route;
@@ -174,56 +185,45 @@ class info_service final : public forge::chain::api::info {
 
 class state_service final : public forge::chain::api::state {
  public:
-   explicit state_service(forge::chain::protocol::state_changes_response response) : response_{std::move(response)} {}
-   explicit state_service(forge::chain::protocol::state_point_response response)
-       : point_response_{std::move(response)} {}
-   explicit state_service(forge::chain::protocol::state_range_response response)
-       : range_response_{std::move(response)} {}
+   explicit state_service(forge::chain::protocol::table_changes_response response)
+       : table_changes_response_{std::move(response)} {}
+   explicit state_service(forge::chain::protocol::account_changes_response response)
+       : account_changes_response_{std::move(response)} {}
    explicit state_service(forge::chain::protocol::account_response response) : account_response_{std::move(response)} {}
 
-   boost::asio::awaitable<forge::chain::protocol::state_point_response>
-   get_point(forge::chain::protocol::state_point_request request) override {
-      last_point_request = std::move(request);
-      if (point_failure == failure::standard) {
+   boost::asio::awaitable<forge::chain::protocol::account_response>
+   get_account(forge::chain::protocol::account_request request) override {
+      last_account_request = std::move(request);
+      if (account_failure == failure::standard) {
          throw std::runtime_error{"test state service failure"};
       }
-      if (point_failure == failure::nonstandard) {
+      if (account_failure == failure::nonstandard) {
          throw 7;
       }
-      if (point_failure == failure::canceled) {
+      if (account_failure == failure::canceled) {
          throw boost::system::system_error{boost::asio::error::operation_aborted};
       }
-      if (point_failure == failure::timed_out) {
+      if (account_failure == failure::timed_out) {
          throw boost::system::system_error{boost::asio::error::timed_out};
       }
-      if (point_failure == failure::api_canceled) {
+      if (account_failure == failure::api_canceled) {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::cancelled, "test API transport cancellation");
       }
-      if (point_failure == failure::api_deadline) {
+      if (account_failure == failure::api_deadline) {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::deadline_exceeded, "test API transport deadline");
       }
-      if (point_failure == failure::foreign_forge) {
+      if (account_failure == failure::foreign_forge) {
          FORGE_THROW_EXCEPTION(forge::asio::exceptions::internal, "test foreign Forge service failure");
       }
-      if (point_failure == failure::chain_api) {
+      if (account_failure == failure::chain_api) {
          FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_request, "test Chain API failure");
       }
-      co_return point_response_;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::state_range_response>
-   get_range(forge::chain::protocol::state_range_request) override {
-      co_return range_response_;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::state_changes_response>
-   get_changes(forge::chain::protocol::state_changes_request) override {
-      co_return response_;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::account_response>
-   get_account(forge::chain::protocol::account_request) override {
       co_return account_response_;
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::account_changes_response>
+   get_account_changes(forge::chain::protocol::account_changes_request) override {
+      co_return account_changes_response_;
    }
 
    boost::asio::awaitable<forge::chain::protocol::code_response>
@@ -234,6 +234,11 @@ class state_service final : public forge::chain::api::state {
    boost::asio::awaitable<forge::chain::protocol::table_rows_response>
    get_table_rows(forge::chain::protocol::table_rows_request) override {
       co_return forge::chain::protocol::table_rows_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::table_changes_response>
+   get_table_changes(forge::chain::protocol::table_changes_request) override {
+      co_return table_changes_response_;
    }
 
    boost::asio::awaitable<forge::chain::protocol::table_scope_response>
@@ -261,7 +266,7 @@ class state_service final : public forge::chain::api::state {
       co_return forge::chain::protocol::authorizers_response{};
    }
 
-   std::optional<forge::chain::protocol::state_point_request> last_point_request;
+   std::optional<forge::chain::protocol::account_request> last_account_request;
    enum class failure : std::uint8_t {
       none,
       standard,
@@ -273,13 +278,12 @@ class state_service final : public forge::chain::api::state {
       foreign_forge,
       chain_api
    };
-   failure point_failure = failure::none;
+   failure account_failure = failure::none;
 
  private:
-   forge::chain::protocol::state_point_response point_response_;
-   forge::chain::protocol::state_range_response range_response_;
-   forge::chain::protocol::state_changes_response response_;
    forge::chain::protocol::account_response account_response_;
+   forge::chain::protocol::account_changes_response account_changes_response_;
+   forge::chain::protocol::table_changes_response table_changes_response_;
 };
 
 class transaction_service final : public forge::chain::api::transaction {
@@ -404,7 +408,7 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    void verify_finality(const forge::chain::protocol::state_anchor&,
                         const forge::chain::protocol::proof_blob&) override {}
    std::optional<forge::chain::protocol::bytes> verify_state_point(const forge::chain::protocol::state_anchor&,
-                                                                   const forge::chain::protocol::state_point_request&,
+                                                                   const forge::chain::protocol::bytes&,
                                                                    const forge::chain::protocol::proof_blob&) override {
       ++state_point_verifications;
       if (throw_nonstandard_state_point) {
@@ -412,23 +416,30 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
       }
       return point_value;
    }
-   forge::chain::protocol::state_range_response verify_state_range(const forge::chain::protocol::state_anchor&,
-                                                                   const forge::chain::protocol::state_range_request&,
+   forge::chain::api::authenticated_state_range verify_state_range(const forge::chain::protocol::state_anchor&,
+                                                                   const forge::chain::api::authenticated_range_query&,
                                                                    const forge::chain::protocol::proof_blob&) override {
       ++state_range_verifications;
       return range_result;
    }
-   forge::chain::protocol::state_change_range verify_state_changes(const forge::chain::protocol::state_anchor&,
-                                                                   const forge::chain::protocol::key_range& range,
-                                                                   std::uint32_t,
-                                                                   const forge::chain::protocol::proof_blob&) override {
+   forge::chain::api::authenticated_change_range
+   verify_state_changes(const forge::chain::protocol::state_anchor& anchor,
+                        const forge::chain::api::authenticated_range_query&,
+                        const forge::chain::protocol::proof_blob& proof) override {
       ++state_change_verifications;
-      if (state_change_result) {
-         auto result = *state_change_result;
-         result.range = range;
-         return result;
+      if (expected_state_change_proofs) {
+         const auto index = state_change_anchors.size();
+         if (index >= expected_state_change_proofs->size() ||
+             (*expected_state_change_proofs)[index] != std::pair{anchor.block_num, proof.scheme}) {
+            FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof,
+                                  "test state change proof is associated with the wrong block anchor");
+         }
       }
-      return forge::chain::protocol::state_change_range{.range = range};
+      state_change_anchors.push_back(anchor);
+      if (state_change_result) {
+         return *state_change_result;
+      }
+      return forge::chain::api::authenticated_change_range{};
    }
    void verify_ancestry(const forge::chain::protocol::state_anchor& finalized,
                         std::span<const forge::chain::protocol::state_anchor> intermediate,
@@ -453,10 +464,12 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    std::size_t transaction_verifications = 0;
    std::size_t ancestry_verifications = 0;
    std::optional<forge::chain::protocol::bytes> point_value;
-   forge::chain::protocol::state_range_response range_result;
-   std::optional<forge::chain::protocol::state_change_range> state_change_result;
+   forge::chain::api::authenticated_state_range range_result;
+   std::optional<forge::chain::api::authenticated_change_range> state_change_result;
+   std::optional<std::vector<std::pair<std::uint32_t, std::string>>> expected_state_change_proofs;
    std::optional<forge::chain::protocol::state_anchor> ancestry_finalized;
    std::vector<forge::chain::protocol::state_anchor> ancestry_intermediate;
+   std::vector<forge::chain::protocol::state_anchor> state_change_anchors;
    std::optional<forge::chain::protocol::proof_blob> ancestry_proof;
    bool throw_standard_context = false;
    bool throw_nonstandard_state_point = false;
@@ -471,18 +484,13 @@ class account_projection_verifier final : public forge::chain::api::projection_v
                const forge::chain::protocol::account_response& response,
                const forge::chain::protocol::audit_bundle& audit,
                forge::chain::api::audit_verifier& verifier) override {
-      if (!response.context.anchor || audit.state.size() != 1U) {
+      if (response.account != request.account || !response.context.anchor || audit.state.size() != 1U) {
          FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof,
-                               "test account projection requires one authenticated source");
+                               "test account projection requires the requested account and one authenticated source");
       }
       ++verifications;
-      const auto value = verifier.verify_state_point(*response.context.anchor,
-                                                     forge::chain::protocol::state_point_request{
-                                                         .key = {9U},
-                                                         .anchor = request.anchor,
-                                                         .audit = forge::chain::protocol::audit_mode::required,
-                                                     },
-                                                     audit.state.front());
+      const auto value =
+          verifier.verify_state_point(*response.context.anchor, forge::chain::protocol::bytes{9U}, audit.state.front());
       if (value != forge::chain::protocol::bytes{1U, 2U}) {
          FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof,
                                "test account projection rejected its authenticated source");
@@ -503,6 +511,145 @@ class throwing_account_projection_verifier final : public forge::chain::api::pro
    }
 
    bool nonstandard = false;
+};
+
+class typed_changes_projection_verifier final : public forge::chain::api::projection_verifier {
+ public:
+   void verify(const forge::chain::protocol::table_changes_request& request,
+               const forge::chain::protocol::table_changes_response& response,
+               const forge::chain::protocol::audit_bundle& audit,
+               forge::chain::api::audit_verifier& verifier) override {
+      require_change_envelope(response, audit);
+      if (expected_chain && response.context.chain != *expected_chain) {
+         reject("table changes cursor is bound to another chain");
+      }
+      if (expected_table_cursor != request.cursor || expected_next != response.next) {
+         reject("table changes cursor binding is invalid");
+      }
+      if (response.context.anchor->block_num != request.to_block) {
+         reject("table changes cursor is bound to another target anchor");
+      }
+      if (expected_anchor && response.context.anchor->block != *expected_anchor) {
+         reject("table changes cursor is bound to another target block");
+      }
+      if (expected_tables && request.tables != *expected_tables) {
+         reject("table changes cursor is bound to another selector set");
+      }
+      if (expected_table_blocks && response.blocks != *expected_table_blocks) {
+         reject("table changes projection is incomplete or reordered");
+      }
+
+      if (expected_table_proofs_per_batch && expected_table_proofs_per_batch->size() != response.blocks.size()) {
+         reject("table changes proof layout does not match its block batches");
+      }
+      auto proof_position = std::size_t{};
+      for (std::size_t index = 0; index < response.blocks.size(); ++index) {
+         const auto& block = response.blocks[index];
+         auto identities = std::set<std::tuple<forge::chain::protocol::account_name, forge::chain::protocol::name,
+                                               forge::chain::protocol::name, std::uint64_t>>{};
+         for (const auto& mutation : block.mutations) {
+            if (!identities.emplace(mutation.table.code, mutation.table.scope, mutation.table.table, mutation.primary)
+                     .second) {
+               reject("table change batch violates last-write-wins identity uniqueness");
+            }
+         }
+         const auto proof_count = expected_table_proofs_per_batch ? (*expected_table_proofs_per_batch)[index] : 1U;
+         for (auto proof = std::size_t{}; proof < proof_count; ++proof) {
+            if (proof_position >= audit.state.size()) {
+               reject("table changes response omits a block-bound authenticated proof");
+            }
+            static_cast<void>(verifier.verify_state_changes(
+                block.anchor, forge::chain::api::authenticated_range_query{.limit = request.limit},
+                audit.state[proof_position++]));
+         }
+      }
+      if (proof_position != audit.state.size()) {
+         reject("table changes response contains an unauthenticated trailing proof");
+      }
+      last_table_request = request;
+      ++table_verifications;
+   }
+
+   void verify(const forge::chain::protocol::account_changes_request& request,
+               const forge::chain::protocol::account_changes_response& response,
+               const forge::chain::protocol::audit_bundle& audit,
+               forge::chain::api::audit_verifier& verifier) override {
+      require_change_envelope(response, audit);
+      if (expected_chain && response.context.chain != *expected_chain) {
+         reject("account changes cursor is bound to another chain");
+      }
+      if (expected_account_cursor != request.cursor || expected_next != response.next) {
+         reject("account changes cursor binding is invalid");
+      }
+      if (response.context.anchor->block_num != request.to_block) {
+         reject("account changes cursor is bound to another target anchor");
+      }
+      if (expected_anchor && response.context.anchor->block != *expected_anchor) {
+         reject("account changes cursor is bound to another target block");
+      }
+      if (expected_accounts && request.accounts != *expected_accounts) {
+         reject("account changes cursor is bound to another account set");
+      }
+      if (expected_account_blocks && response.blocks != *expected_account_blocks) {
+         reject("account changes projection is incomplete or reordered");
+      }
+
+      if (expected_account_proofs_per_batch && expected_account_proofs_per_batch->size() != response.blocks.size()) {
+         reject("account changes proof layout does not match its block batches");
+      }
+      auto proof_position = std::size_t{};
+      for (std::size_t index = 0; index < response.blocks.size(); ++index) {
+         const auto& block = response.blocks[index];
+         auto identities = std::set<forge::chain::protocol::account_name>{};
+         for (const auto& mutation : block.mutations) {
+            if (!identities.insert(mutation.account).second) {
+               reject("account change batch violates last-write-wins identity uniqueness");
+            }
+         }
+         const auto proof_count = expected_account_proofs_per_batch ? (*expected_account_proofs_per_batch)[index] : 1U;
+         for (auto proof = std::size_t{}; proof < proof_count; ++proof) {
+            if (proof_position >= audit.state.size()) {
+               reject("account changes response omits a block-bound authenticated proof");
+            }
+            static_cast<void>(verifier.verify_state_changes(
+                block.anchor, forge::chain::api::authenticated_range_query{.limit = request.limit},
+                audit.state[proof_position++]));
+         }
+      }
+      if (proof_position != audit.state.size()) {
+         reject("account changes response contains an unauthenticated trailing proof");
+      }
+      last_account_request = request;
+      ++account_verifications;
+   }
+
+   std::optional<forge::chain::protocol::chain_id> expected_chain;
+   std::optional<forge::chain::protocol::block_id> expected_anchor;
+   std::optional<std::vector<forge::chain::protocol::table_change_selector>> expected_tables;
+   std::optional<std::vector<forge::chain::protocol::table_change_batch>> expected_table_blocks;
+   std::optional<std::vector<std::size_t>> expected_table_proofs_per_batch;
+   std::optional<std::vector<forge::chain::protocol::account_name>> expected_accounts;
+   std::optional<std::vector<forge::chain::protocol::account_change_batch>> expected_account_blocks;
+   std::optional<std::vector<std::size_t>> expected_account_proofs_per_batch;
+   std::optional<forge::chain::protocol::bytes> expected_table_cursor;
+   std::optional<forge::chain::protocol::bytes> expected_account_cursor;
+   std::optional<forge::chain::protocol::bytes> expected_next;
+   std::optional<forge::chain::protocol::table_changes_request> last_table_request;
+   std::optional<forge::chain::protocol::account_changes_request> last_account_request;
+   std::size_t table_verifications = 0;
+   std::size_t account_verifications = 0;
+
+ private:
+   [[noreturn]] static void reject(std::string_view message) {
+      FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof, message);
+   }
+
+   template <typename Response>
+   static void require_change_envelope(const Response& response, const forge::chain::protocol::audit_bundle& audit) {
+      if (!response.context.anchor || response.blocks.empty() || audit.state.empty()) {
+         reject("typed changes projection requires block batches and authenticated sources");
+      }
+   }
 };
 
 class recording_finality_verifier final : public forge::chain::api::finality_verifier {
@@ -999,7 +1146,7 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(state, method::get,
                   {"get_account", "get_code", "get_table_rows", "get_table_scope", "get_currency_balance",
                    "get_currency_stats", "get_scheduled_transactions"});
-   require_routes(state, method::post, {"get_point", "get_range", "get_changes", "get_accounts_by_authorizers"});
+   require_routes(state, method::post, {"get_account_changes", "get_table_changes", "get_accounts_by_authorizers"});
    require_routes(transactions, method::get, {"get_status", "await_transaction"});
    require_routes(transactions, method::post,
                   {"get_required_keys", "compute_transaction", "send_read_only_transaction"});
@@ -1018,16 +1165,65 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_audited_get_finality_anchor(transactions);
 }
 
+BOOST_AUTO_TEST_CASE(chain_state_v2_declares_only_typed_change_feeds_and_public_history_error) {
+   const auto descriptor = forge::chain::api::state::describe();
+   BOOST_TEST(descriptor.version.major == 2U);
+   BOOST_TEST(descriptor.version.revision == 0U);
+   BOOST_TEST(forge::api::core::find_method(descriptor, "get_point") == nullptr);
+   BOOST_TEST(forge::api::core::find_method(descriptor, "get_range") == nullptr);
+   BOOST_TEST(forge::api::core::find_method(descriptor, "get_changes") == nullptr);
+
+   const auto history = forge::api::core::exception_identity<forge::chain::api::exceptions::history_unavailable>();
+   for (const auto name : {"get_table_changes", "get_account_changes"}) {
+      const auto* method = forge::api::core::find_method(descriptor, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, history, &forge::api::core::error_descriptor::identity) !=
+                  method->errors.end());
+      BOOST_CHECK(std::ranges::none_of(method->errors, [](const auto& error) { return error.name == "history_lost"; }));
+   }
+
+   for (const auto& [owner, name] : {std::pair{forge::chain::api::block::describe(), "get_canonical_range"},
+                                     std::pair{forge::chain::api::transaction::describe(), "get_status"}}) {
+      const auto* method = forge::api::core::find_method(owner, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, history, &forge::api::core::error_descriptor::identity) !=
+                  method->errors.end());
+      BOOST_CHECK(std::ranges::none_of(method->errors, [](const auto& error) { return error.name == "history_lost"; }));
+   }
+}
+
+BOOST_AUTO_TEST_CASE(chain_audit_class_names_and_numeric_values_remain_stable) {
+   using forge::chain::protocol::audit_class;
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::none) == 0U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::finality) == 1U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::state_point) == 2U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::state_range) == 3U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::state_changes) == 4U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::transaction_inclusion) == 5U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::deterministic_composite) == 6U);
+   BOOST_TEST(static_cast<std::uint8_t>(audit_class::unsupported) == 7U);
+}
+
 BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes) {
    auto limits = forge::chain::protocol::service_limits{};
-   auto request = forge::chain::protocol::state_point_request{.key = {1U, 2U, 3U}};
+   auto request = forge::chain::protocol::table_changes_request{
+       .from_block = 10U,
+       .to_block = 11U,
+       .tables = {{.code = forge::chain::protocol::account_name{"tester"},
+                   .scope = forge::chain::protocol::name{"scope"},
+                   .table = forge::chain::protocol::name{"rows"}}},
+   };
    limits.max_request_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(request));
    BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(request, limits));
    --limits.max_request_bytes;
    BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
                      forge::chain::api::exceptions::resource_exhausted);
 
-   auto response = forge::chain::protocol::state_point_response{.value = forge::chain::protocol::bytes{4U, 5U}};
+   auto response = forge::chain::protocol::table_changes_response{
+       .blocks = {{.mutations = {{.table = request.tables.front(),
+                                  .primary = 7U,
+                                  .row = forge::chain::protocol::table_row{.value = {4U, 5U}}}}}},
+   };
    limits.max_response_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(response));
    BOOST_CHECK_NO_THROW(forge::chain::api::require_response_within_limits(response, limits));
    --limits.max_response_bytes;
@@ -1049,31 +1245,55 @@ BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes
    BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(table, limits),
                      forge::chain::api::exceptions::invalid_request);
 
-   auto range = forge::chain::protocol::state_range_request{.limit = limits.max_page_size + 1U};
-   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(range, limits),
+   auto account_changes = forge::chain::protocol::account_changes_request{
+       .from_block = 10U,
+       .to_block = 11U,
+       .accounts = {forge::chain::protocol::account_name{"alice"}},
+       .limit = limits.max_page_size + 1U,
+   };
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(account_changes, limits),
                      forge::chain::api::exceptions::resource_exhausted);
+
+   account_changes.limit = 1U;
+   account_changes.accounts = {
+       forge::chain::protocol::account_name{"bob"},
+       forge::chain::protocol::account_name{"alice"},
+   };
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(account_changes, limits),
+                     forge::chain::api::exceptions::invalid_request);
+   account_changes.accounts = {forge::chain::protocol::account_name{"alice"}};
+   account_changes.cursor = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(account_changes, limits),
+                     forge::chain::api::exceptions::invalid_request);
 
    table.lower_bound = forge::chain::protocol::bytes(16U, 0U);
    table.index.kind = static_cast<forge::chain::protocol::table_index_kind>(0xffU);
    BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(table, limits),
                      forge::chain::api::exceptions::invalid_request);
 
-   auto range_request = forge::chain::protocol::state_range_request{.limit = 1U};
-   auto range_response = forge::chain::protocol::state_range_response{
-       .rows =
+   auto table_changes = request;
+   table_changes.limit = 1U;
+   auto table_changes_response = forge::chain::protocol::table_changes_response{
+       .blocks =
            {
-               {.key = {1U}, .value = {1U}},
-               {.key = {2U}, .value = {2U}},
+               {.mutations = {{.table = request.tables.front()}}},
+               {.mutations = {{.table = request.tables.front(), .primary = 1U}}},
            },
    };
-   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(range_response, range_request, limits),
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(table_changes_response, table_changes, limits),
                      forge::chain::api::exceptions::resource_exhausted);
 
-   auto changes = forge::chain::protocol::state_changes_request{
-       .from_block = 10U,
-       .to_block = 9U,
-   };
-   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(changes, limits),
+   request.to_block = 9U;
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
+                     forge::chain::api::exceptions::invalid_request);
+
+   request.to_block = 11U;
+   request.tables.push_back(request.tables.front());
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
+                     forge::chain::api::exceptions::invalid_request);
+   request.tables.resize(1U);
+   request.cursor = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
                      forge::chain::api::exceptions::invalid_request);
 
    auto waiting = forge::chain::protocol::transaction_await_request{.timeout_ms = limits.max_await_ms + 1U};
@@ -1108,25 +1328,31 @@ BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes
 BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_enforces_owner_request_and_response_limits) {
    auto limits = forge::chain::protocol::service_limits{};
    limits.max_page_size = 4U;
-   auto service = std::make_shared<state_service>(forge::chain::protocol::state_range_response{
-       .rows =
+   auto service = std::make_shared<state_service>(forge::chain::protocol::table_changes_response{
+       .blocks =
            {
-               {.key = {1U}, .value = {1U}},
-               {.key = {2U}, .value = {2U}},
+               {.mutations = {{.table = {.code = forge::chain::protocol::account_name{"tester"}}, .primary = 1U}}},
+               {.mutations = {{.table = {.code = forge::chain::protocol::account_name{"tester"}}, .primary = 2U}}},
            },
    });
    const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::state>(limits);
-   const auto* method = forge::api::core::find_method(descriptor, "get_range");
+   const auto* method = forge::api::core::find_method(descriptor, "get_table_changes");
    BOOST_REQUIRE(method != nullptr);
 
-   const auto request = forge::chain::protocol::state_range_request{.limit = 1U};
+   const auto request = forge::chain::protocol::table_changes_request{
+       .from_block = 10U,
+       .to_block = 11U,
+       .tables = {{.code = forge::chain::protocol::account_name{"tester"}}},
+       .limit = 1U,
+   };
    const auto request_bytes = forge::raw::pack(request);
    method->request_validator(request_bytes);
    const auto response_bytes = run(method->raw_invoker(service, request_bytes));
    BOOST_CHECK_THROW(method->response_validator(request_bytes, response_bytes),
                      forge::chain::api::exceptions::resource_exhausted);
 
-   const auto oversized = forge::chain::protocol::state_range_request{.limit = limits.max_page_size + 1U};
+   auto oversized = request;
+   oversized.limit = limits.max_page_size + 1U;
    BOOST_CHECK_THROW(method->request_validator(forge::raw::pack(oversized)),
                      forge::chain::api::exceptions::resource_exhausted);
 }
@@ -1623,6 +1849,26 @@ BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_json_bytes_cursor_and_nex
    BOOST_TEST(properties["next"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
 }
 
+BOOST_AUTO_TEST_CASE(chain_typed_changes_openapi_uses_post_bodies_and_opaque_bytes_cursors) {
+   const auto document = forge::api::http::openapi<forge::chain::api::state>();
+   for (const auto path : {"/v1/chain/state/table-changes", "/v1/chain/state/account-changes"}) {
+      const auto& operation = document["paths"][path]["post"];
+      const auto& request = operation["requestBody"]["content"]["application/json"]["schema"]["properties"];
+      BOOST_TEST(request["cursor"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
+      BOOST_TEST(request["from_block"]["type"].as_string() == "integer");
+      BOOST_TEST(request["to_block"]["type"].as_string() == "integer");
+      const auto& response = operation["responses"]["200"]["content"]["application/json"]["schema"]["properties"];
+      BOOST_TEST(response["next"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
+      BOOST_TEST(response["blocks"]["type"].as_string() == "array");
+      BOOST_TEST(!response.get_object().contains("changes"));
+      const auto& batch = response["blocks"]["items"]["properties"];
+      BOOST_TEST(batch.get_object().contains("anchor"));
+      BOOST_TEST(batch["mutations"]["type"].as_string() == "array");
+      const auto& mutation = batch["mutations"]["items"]["properties"].get_object();
+      BOOST_TEST(mutation.contains(path == std::string_view{"/v1/chain/state/table-changes"} ? "table" : "account"));
+   }
+}
+
 BOOST_AUTO_TEST_CASE(verified_block_response_is_bound_to_the_requested_identity) {
    auto response = forge::chain::protocol::block_response{};
    response.id = response.block.calculate_id();
@@ -1746,57 +1992,44 @@ BOOST_AUTO_TEST_CASE(verified_header_is_bound_to_its_request_and_finalized_ancho
                      forge::chain::api::exceptions::invalid_finality);
 }
 
-BOOST_AUTO_TEST_CASE(verified_raw_state_queries_delegate_content_proofs) {
+BOOST_AUTO_TEST_CASE(verified_typed_state_query_delegates_authenticated_projection) {
    auto anchor = forge::chain::protocol::state_anchor{};
    anchor.block._hash[0] = 21U;
    anchor.block_num = 21U;
-   const auto audit = forge::chain::protocol::audit_bundle{
+   auto response = forge::chain::protocol::account_response{};
+   response.account = forge::chain::protocol::account_name{"alice"};
+   response.context.anchor = anchor;
+   response.audit = forge::chain::protocol::audit_bundle{
        .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
        .state = {forge::chain::protocol::proof_blob{.scheme = "test.state"}},
    };
 
-   {
-      auto response = forge::chain::protocol::state_point_response{};
-      response.context.anchor = anchor;
-      response.audit = audit;
-      auto services = forge::api::core::registry{};
-      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
-      auto verifier = std::make_shared<accepting_audit_verifier>();
-      auto client = forge::chain::api::verified_client{
-          forge::chain::api::raw_client{forge::chain::api::service_handles{
-              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
-          }},
-          verifier,
-      };
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   verifier->point_value = forge::chain::protocol::bytes{1U, 2U};
+   auto projections = std::make_shared<account_projection_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       verifier,
+       projections,
+   };
 
-      static_cast<void>(run(client.get_point({.key = {1U}, .anchor = anchor.block})));
-      BOOST_TEST(verifier->state_point_verifications == 1U);
-   }
-
-   {
-      auto response = forge::chain::protocol::state_range_response{};
-      response.context.anchor = anchor;
-      response.audit = audit;
-      auto services = forge::api::core::registry{};
-      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
-      auto verifier = std::make_shared<accepting_audit_verifier>();
-      auto client = forge::chain::api::verified_client{
-          forge::chain::api::raw_client{forge::chain::api::service_handles{
-              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
-          }},
-          verifier,
-      };
-
-      static_cast<void>(run(client.get_range({.anchor = anchor.block})));
-      BOOST_TEST(verifier->state_range_verifications == 1U);
-   }
+   const auto result =
+       run(client.get_account({.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block}));
+   BOOST_TEST(result.account.value == forge::chain::protocol::account_name{"alice"}.value);
+   BOOST_TEST(verifier->state_point_verifications == 1U);
+   BOOST_TEST(projections->verifications == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_uses_preferred_finality_anchor_without_overwriting_an_explicit_anchor) {
    auto anchor = forge::chain::protocol::state_anchor{};
    anchor.block._hash[0] = 21U;
    anchor.block_num = 21U;
-   auto response = forge::chain::protocol::state_point_response{};
+   auto response = forge::chain::protocol::account_response{};
+   response.account = forge::chain::protocol::account_name{"alice"};
    response.context.anchor = anchor;
    response.audit = forge::chain::protocol::audit_bundle{
        .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
@@ -1807,6 +2040,7 @@ BOOST_AUTO_TEST_CASE(verified_client_uses_preferred_finality_anchor_without_over
    auto service = std::make_shared<state_service>(response);
    services.install<forge::chain::api::state>(service);
    auto verifier = std::make_shared<accepting_audit_verifier>();
+   verifier->point_value = forge::chain::protocol::bytes{1U, 2U};
    auto preferred = forge::chain::protocol::block_id{};
    preferred._hash[0] = 8U;
    verifier->preferred_anchor = preferred;
@@ -1815,30 +2049,33 @@ BOOST_AUTO_TEST_CASE(verified_client_uses_preferred_finality_anchor_without_over
            .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
        }},
        verifier,
+       std::make_shared<account_projection_verifier>(),
    };
 
-   static_cast<void>(run(client.get_point({.key = {1U}, .anchor = anchor.block})));
-   BOOST_REQUIRE(service->last_point_request.has_value());
-   BOOST_REQUIRE(service->last_point_request->finality_from.has_value());
-   BOOST_TEST(*service->last_point_request->finality_from == preferred);
+   static_cast<void>(
+       run(client.get_account({.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block})));
+   BOOST_REQUIRE(service->last_account_request.has_value());
+   BOOST_REQUIRE(service->last_account_request->finality_from.has_value());
+   BOOST_TEST(*service->last_account_request->finality_from == preferred);
 
    auto explicit_anchor = forge::chain::protocol::block_id{};
    explicit_anchor._hash[0] = 13U;
-   static_cast<void>(run(client.get_point({
-       .key = {1U},
+   static_cast<void>(run(client.get_account({
+       .account = forge::chain::protocol::account_name{"alice"},
        .anchor = anchor.block,
        .finality_from = explicit_anchor,
    })));
-   BOOST_REQUIRE(service->last_point_request.has_value());
-   BOOST_REQUIRE(service->last_point_request->finality_from.has_value());
-   BOOST_TEST(*service->last_point_request->finality_from == explicit_anchor);
+   BOOST_REQUIRE(service->last_account_request.has_value());
+   BOOST_REQUIRE(service->last_account_request->finality_from.has_value());
+   BOOST_TEST(*service->last_account_request->finality_from == explicit_anchor);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_errors) {
    auto anchor = forge::chain::protocol::state_anchor{};
    anchor.block._hash[0] = 21U;
    anchor.block_num = 21U;
-   auto response = forge::chain::protocol::state_point_response{};
+   auto response = forge::chain::protocol::account_response{};
+   response.account = forge::chain::protocol::account_name{"alice"};
    response.context.anchor = anchor;
    response.audit = forge::chain::protocol::audit_bundle{
        .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
@@ -1846,6 +2083,7 @@ BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_erro
    };
 
    const auto make_client = [&](const std::shared_ptr<accepting_audit_verifier>& verifier) {
+      verifier->point_value = forge::chain::protocol::bytes{1U, 2U};
       auto services = std::make_shared<forge::api::core::registry>();
       services->install<forge::chain::api::state>(std::make_shared<state_service>(response));
       return std::pair{
@@ -1854,6 +2092,7 @@ BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_erro
                   .state_queries = services->get<forge::chain::api::state>(forge::chain::api::state::ref()),
               }},
               verifier,
+              std::make_shared<account_projection_verifier>(),
           },
           std::move(services),
       };
@@ -1862,54 +2101,58 @@ BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_erro
    auto context_verifier = std::make_shared<accepting_audit_verifier>();
    context_verifier->throw_standard_context = true;
    auto context_client = make_client(context_verifier);
-   BOOST_CHECK_THROW(static_cast<void>(run(context_client.first.get_point({.key = {1U}, .anchor = anchor.block}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(context_client.first.get_account(
+                         {.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block}))),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    auto point_verifier = std::make_shared<accepting_audit_verifier>();
    point_verifier->throw_nonstandard_state_point = true;
    auto point_client = make_client(point_verifier);
-   BOOST_CHECK_THROW(static_cast<void>(run(point_client.first.get_point({.key = {1U}, .anchor = anchor.block}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(point_client.first.get_account(
+                         {.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block}))),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    auto anchor_verifier = std::make_shared<accepting_audit_verifier>();
    anchor_verifier->throw_standard_preferred_anchor = true;
    auto anchor_client = make_client(anchor_verifier);
-   BOOST_CHECK_THROW(static_cast<void>(run(anchor_client.first.get_point({.key = {1U}, .anchor = anchor.block}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(anchor_client.first.get_account(
+                         {.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block}))),
                      forge::chain::api::exceptions::anchor_unavailable);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_translates_service_failures_and_cancellation) {
    auto services = forge::api::core::registry{};
-   auto service = std::make_shared<state_service>(forge::chain::protocol::state_point_response{});
+   auto service = std::make_shared<state_service>(forge::chain::protocol::account_response{});
    services.install<forge::chain::api::state>(service);
    auto client = forge::chain::api::verified_client{
        forge::chain::api::raw_client{forge::chain::api::service_handles{
            .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
        }},
        std::make_shared<accepting_audit_verifier>(),
+       std::make_shared<account_projection_verifier>(),
    };
 
-   service->point_failure = state_service::failure::standard;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
-                     forge::chain::api::exceptions::unavailable);
-   service->point_failure = state_service::failure::nonstandard;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
-                     forge::chain::api::exceptions::unavailable);
-   service->point_failure = state_service::failure::canceled;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))), forge::asio::exceptions::canceled);
-   service->point_failure = state_service::failure::timed_out;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+   const auto request = forge::chain::protocol::account_request{
+       .account = forge::chain::protocol::account_name{"alice"},
+   };
+   service->account_failure = state_service::failure::standard;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))), forge::chain::api::exceptions::unavailable);
+   service->account_failure = state_service::failure::nonstandard;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))), forge::chain::api::exceptions::unavailable);
+   service->account_failure = state_service::failure::canceled;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))), forge::asio::exceptions::canceled);
+   service->account_failure = state_service::failure::timed_out;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))),
                      forge::chain::api::exceptions::deadline_exceeded);
-   service->point_failure = state_service::failure::api_canceled;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))), forge::asio::exceptions::canceled);
-   service->point_failure = state_service::failure::api_deadline;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+   service->account_failure = state_service::failure::api_canceled;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))), forge::asio::exceptions::canceled);
+   service->account_failure = state_service::failure::api_deadline;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))),
                      forge::chain::api::exceptions::deadline_exceeded);
-   service->point_failure = state_service::failure::foreign_forge;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
-                     forge::chain::api::exceptions::unavailable);
-   service->point_failure = state_service::failure::chain_api;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+   service->account_failure = state_service::failure::foreign_forge;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))), forge::chain::api::exceptions::unavailable);
+   service->account_failure = state_service::failure::chain_api;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_account(request))),
                      forge::chain::api::exceptions::invalid_request);
 }
 
@@ -2324,9 +2567,13 @@ BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_wi
 
    BOOST_CHECK_THROW(run(client.get_account(forge::chain::protocol::account_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
+   BOOST_CHECK_THROW(run(client.get_account_changes(forge::chain::protocol::account_changes_request{})),
+                     forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.get_code(forge::chain::protocol::code_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.get_table_rows(forge::chain::protocol::table_rows_request{})),
+                     forge::chain::api::exceptions::audit_not_supported);
+   BOOST_CHECK_THROW(run(client.get_table_changes(forge::chain::protocol::table_changes_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.get_table_scope(forge::chain::protocol::table_scope_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
@@ -2347,178 +2594,256 @@ BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_wi
                      forge::chain::api::exceptions::audit_not_supported);
 }
 
-BOOST_AUTO_TEST_CASE(verified_changes_cover_the_requested_interval_and_terminal_anchor) {
-   auto first = forge::chain::protocol::state_anchor{.block_num = 11U};
-   first.block._hash[0] = 11U;
-   auto second = forge::chain::protocol::state_anchor{.block_num = 12U};
-   second.block._hash[0] = 12U;
-
-   const auto make_response = [&] {
-      auto response = forge::chain::protocol::state_changes_response{};
-      response.context.anchor = second;
-      response.blocks = {
-          {.anchor = first, .ranges = {{.range = {}}}},
-          {.anchor = second, .ranges = {{.range = {}}}},
-      };
-      response.audit = forge::chain::protocol::audit_bundle{};
-      response.audit->finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"};
-      response.audit->ancestry = forge::chain::protocol::proof_blob{.scheme = "test.ancestry"};
-      response.audit->state = {
-          forge::chain::protocol::proof_blob{.scheme = "test.changes"},
-          forge::chain::protocol::proof_blob{.scheme = "test.changes"},
-      };
-      return response;
+BOOST_AUTO_TEST_CASE(verified_table_changes_bind_opaque_cursor_and_enforce_lww_projection) {
+   auto anchor = make_finality_anchor();
+   anchor.block_num = 12U;
+   auto intermediate = anchor;
+   intermediate.block._hash[0] = 11U;
+   intermediate.block_num = 11U;
+   const auto tables = std::vector{
+       forge::chain::protocol::table_change_selector{.code = forge::chain::protocol::account_name{"alpha"}},
+       forge::chain::protocol::table_change_selector{.code = forge::chain::protocol::account_name{"beta"}},
    };
-   const auto request = forge::chain::protocol::state_changes_request{
+   const auto cursor = forge::chain::protocol::bytes{0x01U, 0x02U};
+   const auto next = forge::chain::protocol::bytes{0x03U, 0x04U};
+   const auto request = forge::chain::protocol::table_changes_request{
        .from_block = 10U,
        .to_block = 12U,
+       .tables = tables,
+       .limit = 8U,
+       .cursor = cursor,
    };
-   const auto verify = [&](forge::chain::protocol::state_changes_response response) {
-      auto services = forge::api::core::registry{};
-      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
-      auto verifier = std::make_shared<accepting_audit_verifier>();
-      auto client = forge::chain::api::verified_client{
-          forge::chain::api::raw_client{forge::chain::api::service_handles{
-              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
-          }},
-          verifier,
-      };
-      return std::pair{run(client.get_changes(request)), std::move(verifier)};
-   };
-
-   const auto valid = verify(make_response());
-   BOOST_TEST(valid.first.blocks.size() == 2U);
-   BOOST_TEST(valid.second->state_change_verifications == 2U);
-   BOOST_TEST(valid.second->ancestry_verifications == 1U);
-   BOOST_REQUIRE(valid.second->ancestry_finalized);
-   BOOST_TEST(valid.second->ancestry_finalized->block == second.block);
-   BOOST_REQUIRE_EQUAL(valid.second->ancestry_intermediate.size(), 1U);
-   BOOST_TEST(valid.second->ancestry_intermediate.front().block == first.block);
-   BOOST_REQUIRE(valid.second->ancestry_proof);
-   BOOST_TEST(valid.second->ancestry_proof->scheme == "test.ancestry");
-
-   auto missing_ancestry = make_response();
-   missing_ancestry.audit->ancestry.reset();
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(missing_ancestry))),
-                     forge::chain::api::exceptions::invalid_finality);
-
-   auto omitted = make_response();
-   omitted.blocks.erase(omitted.blocks.begin());
-   omitted.audit->state.erase(omitted.audit->state.begin());
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted))), forge::chain::api::exceptions::invalid_state_proof);
-
-   auto stalled = forge::chain::protocol::state_changes_response{};
-   stalled.context.anchor = second;
-   stalled.next = forge::chain::protocol::state_changes_cursor{.block = 11U};
-   stalled.audit = forge::chain::protocol::audit_bundle{
-       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
-   };
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(stalled))), forge::chain::api::exceptions::invalid_state_proof);
-
-   auto forged_terminal = make_response();
-   forged_terminal.blocks.back().anchor.state_root._hash[0] = 99U;
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(forged_terminal))),
-                     forge::chain::api::exceptions::invalid_state_proof);
-}
-
-BOOST_AUTO_TEST_CASE(verified_changes_reject_unauthenticated_trailing_ranges_and_cross_block_batches) {
-   auto first = forge::chain::protocol::state_anchor{.block_num = 11U};
-   first.block._hash[0] = 11U;
-   auto finalized = forge::chain::protocol::state_anchor{.block_num = 12U};
-   finalized.block._hash[0] = 12U;
-
-   const auto request = forge::chain::protocol::state_changes_request{
-       .from_block = 10U,
-       .to_block = 12U,
-   };
-   const auto verify = [&](forge::chain::protocol::state_changes_response response,
-                           std::optional<forge::chain::protocol::bytes> next_key = std::nullopt) {
-      auto services = forge::api::core::registry{};
-      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
-      auto verifier = std::make_shared<accepting_audit_verifier>();
-      if (next_key) {
-         verifier->state_change_result = forge::chain::protocol::state_change_range{.next_key = std::move(next_key)};
-      }
-      auto client = forge::chain::api::verified_client{
-          forge::chain::api::raw_client{forge::chain::api::service_handles{
-              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
-          }},
-          std::move(verifier),
-      };
-      return run(client.get_changes(request));
-   };
-   const auto make_audit = [] {
-      return forge::chain::protocol::audit_bundle{
-          .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
-          .ancestry = forge::chain::protocol::proof_blob{.scheme = "test.ancestry"},
-          .state =
-              {
-                  forge::chain::protocol::proof_blob{.scheme = "test.changes"},
-                  forge::chain::protocol::proof_blob{.scheme = "test.changes"},
-              },
-      };
-   };
-
-   auto trailing = forge::chain::protocol::state_changes_response{};
-   trailing.context.anchor = finalized;
-   trailing.blocks = {{.anchor = first, .ranges = {{.range = {}}, {.range = {}}}}};
-   trailing.next = forge::chain::protocol::state_changes_cursor{
-       .block = 11U,
-       .key = forge::chain::protocol::bytes{0x20U},
-   };
-   trailing.audit = make_audit();
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(trailing), forge::chain::protocol::bytes{0x20U})),
-                     forge::chain::api::exceptions::invalid_state_proof);
-
-   auto crossing = forge::chain::protocol::state_changes_response{};
-   crossing.context.anchor = finalized;
-   crossing.blocks = {{.anchor = first, .ranges = {{.range = {}}, {.range = {}}}}};
-   crossing.audit = make_audit();
-   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(crossing))),
-                     forge::chain::api::exceptions::invalid_state_proof);
-}
-
-BOOST_AUTO_TEST_CASE(verified_changes_accept_paginated_proof_ranges_without_rewriting_the_requested_range) {
-   auto anchor = forge::chain::protocol::state_anchor{.block_num = 11U};
-   anchor.block._hash[0] = 11U;
-   const auto requested = forge::chain::protocol::key_range{
-       .lower = forge::chain::protocol::bytes{0x10U},
-       .upper = forge::chain::protocol::bytes{0x40U},
-   };
-   const auto continuation = forge::chain::protocol::bytes{0x20U};
-
-   auto response = forge::chain::protocol::state_changes_response{};
-   response.context.anchor = anchor;
-   response.blocks = {{.anchor = anchor, .ranges = {{.range = requested}}}};
-   response.audit = forge::chain::protocol::audit_bundle{};
-   response.audit->finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"};
-   response.audit->state = {forge::chain::protocol::proof_blob{.scheme = "test.changes"}};
-
-   auto services = forge::api::core::registry{};
-   services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
-   auto verifier = std::make_shared<accepting_audit_verifier>();
-   auto client = forge::chain::api::verified_client{
-       forge::chain::api::raw_client{forge::chain::api::service_handles{
-           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
-       }},
-       verifier,
-   };
-
-   const auto result = run(client.get_changes({
-       .from_block = 10U,
-       .to_block = 11U,
-       .ranges = {requested},
-       .cursor =
-           forge::chain::protocol::state_changes_cursor{
-               .block = 11U,
-               .key = continuation,
+   auto response = forge::chain::protocol::table_changes_response{
+       .blocks =
+           {
+               {.anchor = intermediate,
+                .mutations = {{.table = tables.front(),
+                               .primary = 7U,
+                               .row = forge::chain::protocol::table_row{.value = {0xaaU}}},
+                              {.table = tables.front(),
+                               .primary = 8U,
+                               .row = forge::chain::protocol::table_row{.value = {0xbbU}}}}},
+               {.anchor = anchor, .mutations = {{.table = tables.back(), .primary = 9U}}},
            },
-   }));
+       .next = next,
+   };
+   response.context = {.chain = anchor.chain, .head = anchor.block, .finalized = anchor.block, .anchor = anchor};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .ancestry = forge::chain::protocol::proof_blob{.scheme = "test.ancestry"},
+       .state = {forge::chain::protocol::proof_blob{.scheme = "test.changes.11.a"},
+                 forge::chain::protocol::proof_blob{.scheme = "test.changes.11.b"},
+                 forge::chain::protocol::proof_blob{.scheme = "test.changes.12"}},
+   };
 
-   BOOST_REQUIRE_EQUAL(result.blocks.size(), 1U);
-   BOOST_REQUIRE_EQUAL(result.blocks.front().ranges.size(), 1U);
-   BOOST_CHECK(result.blocks.front().ranges.front().range == requested);
-   BOOST_TEST(verifier->state_change_verifications == 1U);
+   const auto verify = [&](forge::chain::protocol::table_changes_response candidate,
+                           std::vector<forge::chain::protocol::table_change_selector> expected_tables) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(candidate)));
+      auto audit = std::make_shared<accepting_audit_verifier>();
+      audit->expected_state_change_proofs = std::vector<std::pair<std::uint32_t, std::string>>{
+          {11U, "test.changes.11.a"}, {11U, "test.changes.11.b"}, {12U, "test.changes.12"}};
+      auto projections = std::make_shared<typed_changes_projection_verifier>();
+      projections->expected_chain = anchor.chain;
+      projections->expected_anchor = anchor.block;
+      projections->expected_tables = std::move(expected_tables);
+      projections->expected_table_blocks = response.blocks;
+      projections->expected_table_proofs_per_batch = std::vector<std::size_t>{2U, 1U};
+      projections->expected_table_cursor = cursor;
+      projections->expected_next = next;
+      auto client = forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+          }},
+          audit,
+          projections,
+      };
+      return std::tuple{run(client.get_table_changes(request)), std::move(audit), std::move(projections)};
+   };
+
+   const auto [result, audit, projections] = verify(response, tables);
+   BOOST_TEST(result.blocks.size() == 2U);
+   BOOST_TEST(!result.blocks.back().mutations.back().row.has_value());
+   BOOST_TEST(audit->state_change_verifications == 3U);
+   BOOST_TEST(audit->ancestry_verifications == 1U);
+   BOOST_REQUIRE(audit->ancestry_finalized);
+   BOOST_CHECK(*audit->ancestry_finalized == anchor);
+   BOOST_REQUIRE_EQUAL(audit->ancestry_intermediate.size(), 1U);
+   BOOST_CHECK(audit->ancestry_intermediate.front() == intermediate);
+   BOOST_REQUIRE_EQUAL(audit->state_change_anchors.size(), 3U);
+   BOOST_CHECK(audit->state_change_anchors.front() == intermediate);
+   BOOST_CHECK(audit->state_change_anchors[1] == intermediate);
+   BOOST_CHECK(audit->state_change_anchors.back() == anchor);
+   BOOST_TEST(projections->table_verifications == 1U);
+   BOOST_REQUIRE(projections->last_table_request);
+   BOOST_TEST(static_cast<std::uint8_t>(projections->last_table_request->audit) ==
+              static_cast<std::uint8_t>(forge::chain::protocol::audit_mode::required));
+
+   auto duplicate = response;
+   duplicate.blocks.front().mutations.push_back(duplicate.blocks.front().mutations.front());
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(duplicate), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto reordered_mutations = response;
+   std::ranges::reverse(reordered_mutations.blocks.front().mutations);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(reordered_mutations), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted_mutation = response;
+   omitted_mutation.blocks.front().mutations.pop_back();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted_mutation), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto reordered = response;
+   std::ranges::reverse(reordered.blocks);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(reordered), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted = response;
+   omitted.blocks.pop_back();
+   omitted.audit->state.pop_back();
+   omitted.next.reset();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto mismatched_proofs = response;
+   std::ranges::reverse(mismatched_proofs.audit->state);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(mismatched_proofs), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted_proof = response;
+   omitted_proof.audit->state.pop_back();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted_proof), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_anchor = response;
+   wrong_anchor.context.anchor->block_num = 13U;
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(wrong_anchor), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_target_block = response;
+   wrong_target_block.context.anchor->block._hash[0] ^= 0xffU;
+   wrong_target_block.blocks.back().anchor = *wrong_target_block.context.anchor;
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(wrong_target_block), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_chain = response;
+   wrong_chain.context.chain._hash[0] ^= 0xffU;
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(wrong_chain), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_position = response;
+   wrong_position.next = forge::chain::protocol::bytes{0xffU};
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(wrong_position), tables)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_tables = tables;
+   wrong_tables.back().code = forge::chain::protocol::account_name{"gamma"};
+   BOOST_CHECK_THROW(static_cast<void>(verify(response, std::move(wrong_tables))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+}
+
+BOOST_AUTO_TEST_CASE(verified_account_changes_reuse_account_state_and_reject_malicious_projections) {
+   auto anchor = make_finality_anchor();
+   anchor.block_num = 22U;
+   auto intermediate = anchor;
+   intermediate.block._hash[0] = 21U;
+   intermediate.block_num = 21U;
+   const auto accounts =
+       std::vector{forge::chain::protocol::account_name{"alice"}, forge::chain::protocol::account_name{"bob"}};
+   const auto cursor = forge::chain::protocol::bytes{0xa1U};
+   const auto request = forge::chain::protocol::account_changes_request{
+       .from_block = 20U,
+       .to_block = 22U,
+       .accounts = accounts,
+       .cursor = cursor,
+   };
+   auto response = forge::chain::protocol::account_changes_response{
+       .blocks = {{.anchor = intermediate,
+                   .mutations = {{.account = accounts.front(), .state = forge::chain::protocol::account_state{}},
+                                 {.account = accounts.back(), .state = forge::chain::protocol::account_state{}}}},
+                  {.anchor = anchor, .mutations = {{.account = accounts.back()}}}},
+   };
+   response.context = {.chain = anchor.chain, .head = anchor.block, .finalized = anchor.block, .anchor = anchor};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .ancestry = forge::chain::protocol::proof_blob{.scheme = "test.ancestry"},
+       .state = {forge::chain::protocol::proof_blob{.scheme = "test.changes.21"},
+                 forge::chain::protocol::proof_blob{.scheme = "test.changes.22"}},
+   };
+
+   const auto verify = [&](forge::chain::protocol::account_changes_response candidate,
+                           std::optional<forge::chain::protocol::bytes> expected_cursor = std::nullopt) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(candidate)));
+      auto audit = std::make_shared<accepting_audit_verifier>();
+      audit->expected_state_change_proofs = std::vector<std::pair<std::uint32_t, std::string>>{
+          {21U, "test.changes.21"}, {22U, "test.changes.22"}};
+      auto projections = std::make_shared<typed_changes_projection_verifier>();
+      projections->expected_chain = anchor.chain;
+      projections->expected_anchor = anchor.block;
+      projections->expected_accounts = accounts;
+      projections->expected_account_blocks = response.blocks;
+      projections->expected_account_proofs_per_batch = std::vector<std::size_t>{1U, 1U};
+      projections->expected_account_cursor = expected_cursor.value_or(cursor);
+      auto client = forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+          }},
+          audit,
+          projections,
+      };
+      return std::tuple{run(client.get_account_changes(request)), std::move(audit), std::move(projections)};
+   };
+
+   const auto [result, audit, projections] = verify(response);
+   BOOST_TEST(result.blocks.size() == 2U);
+   BOOST_REQUIRE(result.blocks.front().mutations.front().state);
+   BOOST_TEST(!result.blocks.back().mutations.back().state.has_value());
+   BOOST_TEST(audit->state_change_verifications == 2U);
+   BOOST_REQUIRE_EQUAL(audit->state_change_anchors.size(), 2U);
+   BOOST_CHECK(audit->state_change_anchors.front() == intermediate);
+   BOOST_CHECK(audit->state_change_anchors.back() == anchor);
+   BOOST_TEST(projections->account_verifications == 1U);
+
+   BOOST_CHECK_THROW(static_cast<void>(verify(response, forge::chain::protocol::bytes{0x01U, 0x02U})),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto duplicate = response;
+   duplicate.blocks.front().mutations.push_back(duplicate.blocks.front().mutations.front());
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(duplicate))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto reordered_mutations = response;
+   std::ranges::reverse(reordered_mutations.blocks.front().mutations);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(reordered_mutations))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted_mutation = response;
+   omitted_mutation.blocks.front().mutations.pop_back();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted_mutation))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto reordered = response;
+   std::ranges::reverse(reordered.blocks);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(reordered))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted = response;
+   omitted.blocks.pop_back();
+   omitted.audit->state.pop_back();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto mismatched_proofs = response;
+   std::ranges::reverse(mismatched_proofs.audit->state);
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(mismatched_proofs))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto omitted_proof = response;
+   omitted_proof.audit->state.pop_back();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted_proof))),
+                     forge::chain::api::exceptions::invalid_state_proof);
 }
 
 BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_accepts_real_point_membership_and_nonmembership) {
@@ -2535,16 +2860,14 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_accepts_real_point_membership_
    };
 
    const auto membership = authenticated_point_proof(fixture, "alpha");
-   const auto membership_value =
-       verifier.verify_state_point(anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")},
-                                   authenticated_proof_blob("forge.db.authenticated.point", membership));
+   const auto membership_value = verifier.verify_state_point(
+       anchor, protocol_bytes("alpha"), authenticated_proof_blob("forge.db.authenticated.point", membership));
    BOOST_REQUIRE(membership_value.has_value());
    BOOST_CHECK(*membership_value == protocol_bytes("one"));
 
    const auto nonmembership = authenticated_point_proof(fixture, "beta");
-   const auto absent =
-       verifier.verify_state_point(anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("beta")},
-                                   authenticated_proof_blob("forge.db.authenticated.point", nonmembership));
+   const auto absent = verifier.verify_state_point(
+       anchor, protocol_bytes("beta"), authenticated_proof_blob("forge.db.authenticated.point", nonmembership));
    BOOST_TEST(!absent.has_value());
 }
 
@@ -2564,16 +2887,16 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_membership_without_val
    BOOST_REQUIRE(proof.terminal.has_value());
    proof.terminal->value.reset();
 
-   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(
-                         anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")},
-                         authenticated_proof_blob("forge.db.authenticated.point", proof))),
-                     forge::chain::api::exceptions::invalid_state_proof);
+   BOOST_CHECK_THROW(
+       static_cast<void>(verifier.verify_state_point(anchor, protocol_bytes("alpha"),
+                                                     authenticated_proof_blob("forge.db.authenticated.point", proof))),
+       forge::chain::api::exceptions::invalid_state_proof);
 }
 
 BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_wrong_scheme_version_limits_chain_and_root) {
    const auto fixture = make_authenticated_point_fixture();
    const auto anchor = authenticated_anchor(fixture.root);
-   const auto request = forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")};
+   const auto key = protocol_bytes("alpha");
    const auto proof = authenticated_point_proof(fixture, "alpha");
    const auto valid = authenticated_proof_blob("forge.db.authenticated.point", proof);
    auto finality = std::make_shared<recording_finality_verifier>();
@@ -2588,12 +2911,12 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_wrong_scheme_version_l
 
    auto wrong_scheme = valid;
    wrong_scheme.scheme = "forge.db.authenticated.range";
-   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, request, wrong_scheme)),
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, key, wrong_scheme)),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    auto wrong_version = valid;
    ++wrong_version.version;
-   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, request, wrong_version)),
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, key, wrong_version)),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    BOOST_REQUIRE(valid.payload.size() > 1U);
@@ -2607,12 +2930,12 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_wrong_scheme_version_l
        },
        std::make_shared<recording_finality_verifier>(),
    };
-   BOOST_CHECK_THROW(static_cast<void>(limited.verify_state_point(anchor, request, valid)),
+   BOOST_CHECK_THROW(static_cast<void>(limited.verify_state_point(anchor, key, valid)),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    auto wrong_root = anchor;
    ++wrong_root.state_root._hash[0];
-   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(wrong_root, request, valid)),
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(wrong_root, key, valid)),
                      forge::chain::api::exceptions::invalid_state_proof);
 
    const auto context = forge::chain::protocol::response_context{.chain = authenticated_chain(), .anchor = anchor};
@@ -2641,8 +2964,10 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_ranked_range_and_chan
        },
        std::make_shared<recording_finality_verifier>(),
    };
-   const auto range = forge::chain::protocol::key_range{.lower = protocol_bytes("b")};
-   const auto request = forge::chain::protocol::state_range_request{.range = range, .limit = 2U};
+   const auto request = forge::chain::api::authenticated_range_query{
+       .range = {.lower = protocol_bytes("b")},
+       .limit = 2U,
+   };
    const auto proof = authenticated_ranked_proof(ranked, authenticated::range_request{
                                                              .lower = authenticated_bytes("b"),
                                                              .limit = 2U,
@@ -2658,8 +2983,8 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_ranked_range_and_chan
    BOOST_REQUIRE(result.next_key.has_value());
    BOOST_CHECK(*result.next_key == protocol_bytes("d"));
 
-   const auto reverse_request = forge::chain::protocol::state_range_request{
-       .range = range,
+   const auto reverse_request = forge::chain::api::authenticated_range_query{
+       .range = {.lower = protocol_bytes("b")},
        .limit = 2U,
        .reverse = true,
    };
@@ -2689,25 +3014,24 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_ranked_range_and_chan
        },
        std::make_shared<recording_finality_verifier>(),
    };
-   const auto change_range = forge::chain::protocol::key_range{};
+   const auto change_request = forge::chain::api::authenticated_range_query{.limit = 2U};
    const auto change_proof =
        authenticated_changes_proof(changes, authenticated::range_request{.limit = 2U, .include_values = true});
    const auto change_result =
-       changes_verifier.verify_state_changes(authenticated_anchor(changes.root), change_range, 2U,
+       changes_verifier.verify_state_changes(authenticated_anchor(changes.root), change_request,
                                              authenticated_proof_blob("forge.db.authenticated.changes", change_proof));
-   BOOST_CHECK(change_result.range == change_range);
-   BOOST_REQUIRE_EQUAL(change_result.mutations.size(), 2U);
-   BOOST_CHECK(change_result.mutations[0].key == protocol_bytes("alpha"));
-   BOOST_TEST(!change_result.mutations[0].value.has_value());
-   BOOST_CHECK(change_result.mutations[1].key == protocol_bytes("beta"));
-   BOOST_REQUIRE(change_result.mutations[1].value.has_value());
-   BOOST_CHECK(*change_result.mutations[1].value == protocol_bytes("updated"));
+   BOOST_REQUIRE_EQUAL(change_result.changes.size(), 2U);
+   BOOST_CHECK(change_result.changes[0].key == protocol_bytes("alpha"));
+   BOOST_TEST(!change_result.changes[0].value.has_value());
+   BOOST_CHECK(change_result.changes[1].key == protocol_bytes("beta"));
+   BOOST_REQUIRE(change_result.changes[1].value.has_value());
+   BOOST_CHECK(*change_result.changes[1].value == protocol_bytes("updated"));
    BOOST_TEST(!change_result.next_key.has_value());
 }
 
 BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_reordered_and_forged_ranked_inputs) {
    const auto fixture = make_authenticated_ranked_fixture();
-   const auto request = forge::chain::protocol::state_range_request{
+   const auto request = forge::chain::api::authenticated_range_query{
        .range = {.lower = protocol_bytes("b"), .upper = protocol_bytes("d")},
        .limit = 2U,
    };

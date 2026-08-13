@@ -189,7 +189,8 @@ class accepting_finality final : public chain_api::finality_verifier {
 };
 
 constexpr auto chain_api_protocol = std::string_view{"/spine/chain/api/1"};
-constexpr auto chain_api_max_frame_size = std::uint32_t{64U * 1024U};
+constexpr auto chain_api_max_request_size = std::uint32_t{64U * 1024U};
+constexpr auto chain_api_max_frame_size = std::uint32_t{512U * 1024U};
 
 void require(bool condition, std::string_view message) {
    if (!condition) {
@@ -210,7 +211,10 @@ protocol::audit_class audit_class_for(std::string_view api, std::string_view met
       return unsupported;
    }
    if (api == "forge.chain.api.state") {
-      return unsupported;
+      if (method == "get_table_changes" || method == "get_account_changes") {
+         return state_changes;
+      }
+      return state_range;
    }
    if (api == "forge.chain.api.transaction") {
       return unsupported;
@@ -239,8 +243,8 @@ protocol::service_limits package_limits() {
        .max_transaction_batch_size = 16,
        .max_container_elements = 1'024,
        .max_transaction_status_candidates = 512,
-       .max_request_bytes = chain_api_max_frame_size,
-       .max_response_bytes = chain_api_max_frame_size,
+       .max_request_bytes = chain_api_max_request_size,
+       .max_response_bytes = chain_api_max_request_size,
        .max_proof_bytes = 1U << 20U,
        .max_await_ms = 300'000,
        .state_retention_blocks = 512,
@@ -359,11 +363,27 @@ protocol::block_state_response make_block_state_response(const protocol::info_re
    return response;
 }
 
-protocol::state_point_response make_state_point_response(const protocol::info_response& source) {
-   auto response = protocol::state_point_response{};
+protocol::table_changes_response make_table_changes_response(const protocol::info_response& source) {
+   auto response = protocol::table_changes_response{};
    response.context = source.context;
    response.audit = source.audit;
-   response.value = protocol::bytes{0x41, 0x42, 0x43};
+   if (response.audit) {
+      response.audit->state = {protocol::proof_blob{
+          .scheme = "forge.db.authenticated.changes",
+          .version = 1,
+          .payload = {0x10, 0x11, 0x12, 0x13},
+      }};
+   }
+   response.blocks = {{
+       .anchor = *source.context.anchor,
+       .mutations = {{
+           .table = {.code = protocol::account_name{"tester"},
+                     .scope = protocol::name{"scope"},
+                     .table = protocol::name{"rows"}},
+           .primary = 7U,
+           .row = protocol::table_row{.value = {0x41, 0x42, 0x43}},
+       }},
+   }};
    return response;
 }
 
@@ -436,24 +456,15 @@ class block_implementation final : public chain_api::block {
 
 class state_implementation final : public chain_api::state {
  public:
-   explicit state_implementation(protocol::state_point_response response) : response_{std::move(response)} {}
-
-   boost::asio::awaitable<protocol::state_point_response> get_point(protocol::state_point_request request) override {
-      last_audit.store(request.audit, std::memory_order_relaxed);
-      calls.fetch_add(1, std::memory_order_relaxed);
-      co_return response_;
-   }
-
-   boost::asio::awaitable<protocol::state_range_response> get_range(protocol::state_range_request) override {
-      co_return protocol::state_range_response{};
-   }
-
-   boost::asio::awaitable<protocol::state_changes_response> get_changes(protocol::state_changes_request) override {
-      co_return protocol::state_changes_response{};
-   }
+   explicit state_implementation(protocol::table_changes_response response) : response_{std::move(response)} {}
 
    boost::asio::awaitable<protocol::account_response> get_account(protocol::account_request) override {
       co_return protocol::account_response{};
+   }
+
+   boost::asio::awaitable<protocol::account_changes_response>
+   get_account_changes(protocol::account_changes_request) override {
+      co_return protocol::account_changes_response{};
    }
 
    boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request) override {
@@ -462,6 +473,13 @@ class state_implementation final : public chain_api::state {
 
    boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request) override {
       co_return protocol::table_rows_response{};
+   }
+
+   boost::asio::awaitable<protocol::table_changes_response>
+   get_table_changes(protocol::table_changes_request request) override {
+      last_audit.store(request.audit, std::memory_order_relaxed);
+      calls.fetch_add(1, std::memory_order_relaxed);
+      co_return response_;
    }
 
    boost::asio::awaitable<protocol::table_scope_response> get_table_scope(protocol::table_scope_request) override {
@@ -492,7 +510,7 @@ class state_implementation final : public chain_api::state {
    std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
 
  private:
-   protocol::state_point_response response_;
+   protocol::table_changes_response response_;
 };
 
 class transaction_implementation final : public chain_api::transaction {
@@ -724,7 +742,7 @@ struct chain_api_services {
 struct http_responses {
    protocol::info_response information;
    protocol::block_state_response block;
-   protocol::state_point_response state;
+   protocol::table_changes_response state;
    protocol::transaction_read_only_response transaction;
    protocol::producer_status_response administration;
    bool oversized_request_rejected = false;
@@ -772,7 +790,7 @@ http_responses run_http_e2e(const chain_api_services& services) {
 
    auto server = forge::net::http::server{
        runtime,
-       forge::net::http::server_config{.max_request_body_bytes = 64U * 1024U},
+       forge::net::http::server_config{.max_request_body_bytes = chain_api_max_frame_size},
        std::move(router),
    };
    forge::asio::blocking::run(runtime, server.async_start());
@@ -855,10 +873,15 @@ http_responses run_http_e2e(const chain_api_services& services) {
                                                                 .num = 40,
                                                                 .audit = protocol::audit_mode::required,
                                                             }));
-      responses.state = forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
-                                                                .key = {0x01, 0x02, 0x03},
-                                                                .audit = protocol::audit_mode::required,
-                                                            }));
+      responses.state =
+          forge::asio::blocking::run(runtime, state_remote->get_table_changes(protocol::table_changes_request{
+                                                  .from_block = 39,
+                                                  .to_block = 40,
+                                                  .tables = {{.code = protocol::account_name{"tester"},
+                                                              .scope = protocol::name{"scope"},
+                                                              .table = protocol::name{"rows"}}},
+                                                  .audit = protocol::audit_mode::required,
+                                              }));
       responses.transaction = forge::asio::blocking::run(
           runtime, transaction_remote->compute_transaction(protocol::transaction_read_only_request{
                        .audit = protocol::audit_mode::required,
@@ -894,13 +917,17 @@ http_responses run_http_e2e(const chain_api_services& services) {
       require_long_poll_transport(runtime, transaction_remote, services.transactions, "HTTP", true);
       const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
       try {
-         static_cast<void>(forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
-                                                                   .key = protocol::bytes(70U * 1024U, 0x5aU),
-                                                               })));
-      } catch (const std::exception&) {
+         static_cast<void>(
+             forge::asio::blocking::run(runtime, state_remote->get_table_changes(protocol::table_changes_request{
+                                                     .from_block = 39,
+                                                     .to_block = 40,
+                                                     .tables = {{.code = protocol::account_name{"tester"}}},
+                                                     .cursor = protocol::bytes(70U * 1024U, 0x5aU),
+                                                 })));
+      } catch (const forge::chain::api::exceptions::resource_exhausted&) {
          responses.oversized_request_rejected = true;
       }
-      require(responses.oversized_request_rejected, "HTTP chain API accepted an oversized request body");
+      require(responses.oversized_request_rejected, "HTTP chain API accepted an oversized typed-state request");
       require(services.state->calls.load(std::memory_order_relaxed) == calls_before_oversized,
               "HTTP oversized request reached the owner service");
    } catch (...) {
@@ -931,7 +958,7 @@ class chain_api_publisher final : public forge::app::plugin {
               .serve(context.apis())
               .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
               .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
-              .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 2, .min_revision = 0})
               .export_api<chain_api::transaction>(
                   {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
               .export_api<chain_api::submission>({.id = {"forge.chain.api.submission"}, .major = 1, .min_revision = 0})
@@ -1036,7 +1063,7 @@ void require_advertised_api(const auto& apis, std::string_view id) {
 struct p2p_responses {
    protocol::info_response information;
    protocol::block_state_response block;
-   protocol::state_point_response state;
+   protocol::table_changes_response state;
    protocol::transaction_read_only_response transaction;
    protocol::producer_status_response administration;
    bool internal_error_preserved = false;
@@ -1124,8 +1151,12 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
                                                            .audit = protocol::audit_mode::required,
                                                        }));
       responses.state =
-          forge::asio::blocking::run(client.runtime(), state_remote->get_point(protocol::state_point_request{
-                                                           .key = {0x01, 0x02, 0x03},
+          forge::asio::blocking::run(client.runtime(), state_remote->get_table_changes(protocol::table_changes_request{
+                                                           .from_block = 39,
+                                                           .to_block = 40,
+                                                           .tables = {{.code = protocol::account_name{"tester"},
+                                                                       .scope = protocol::name{"scope"},
+                                                                       .table = protocol::name{"rows"}}},
                                                            .audit = protocol::audit_mode::required,
                                                        }));
       responses.transaction = forge::asio::blocking::run(
@@ -1143,14 +1174,17 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
       require_long_poll_transport(client.runtime(), transaction_remote, services.transactions, "P2P", true);
       const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
       try {
-         static_cast<void>(
-             forge::asio::blocking::run(client.runtime(), state_remote->get_point(protocol::state_point_request{
-                                                              .key = protocol::bytes(70U * 1024U, 0x5aU),
-                                                          })));
-      } catch (const std::exception&) {
+         static_cast<void>(forge::asio::blocking::run(client.runtime(),
+                                                      state_remote->get_table_changes(protocol::table_changes_request{
+                                                          .from_block = 39,
+                                                          .to_block = 40,
+                                                          .tables = {{.code = protocol::account_name{"tester"}}},
+                                                          .cursor = protocol::bytes(70U * 1024U, 0x5aU),
+                                                      })));
+      } catch (const forge::chain::api::exceptions::resource_exhausted&) {
          responses.oversized_request_rejected = true;
       }
-      require(responses.oversized_request_rejected, "P2P chain API accepted an oversized request frame");
+      require(responses.oversized_request_rejected, "P2P chain API accepted an oversized typed-state request");
       require(services.state->calls.load(std::memory_order_relaxed) == calls_before_oversized,
               "P2P oversized request reached the owner service");
       try {
@@ -1184,15 +1218,20 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
    }
 }
 
-void require_audit_semantics(const protocol::audited_response& response) {
+void require_audit_semantics(const protocol::audited_response& response, std::size_t state_proofs = 2U) {
    require(response.context.anchor.has_value(), "transport dropped the audit anchor");
    require(response.audit.has_value(), "transport dropped the audit bundle");
    require(response.audit->finality.has_value(), "transport dropped the finality proof");
    require(response.audit->finality->payload == protocol::bytes{0x01, 0x02, 0x03},
            "transport changed finality proof bytes");
-   require(response.audit->state.size() == 2, "transport changed state proof cardinality");
-   require(response.audit->state[1].scheme == "forge.db.authenticated.range",
-           "transport changed ranked range proof metadata");
+   require(response.audit->state.size() == state_proofs, "transport changed state proof cardinality");
+   if (state_proofs == 1U) {
+      require(response.audit->state.front().scheme == "forge.db.authenticated.changes",
+              "transport changed typed change proof metadata");
+   } else {
+      require(response.audit->state[1].scheme == "forge.db.authenticated.range",
+              "transport changed ranked range proof metadata");
+   }
    require(response.audit->transaction.has_value(), "transport dropped transaction inclusion proof");
    require(response.audit->transaction->path.size() == 2, "transport changed transaction proof path");
 }
@@ -1213,6 +1252,15 @@ int main() {
    static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.next), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_request{}.cursor), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::table_changes_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::account_changes_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::table_mutation{}.table), protocol::table_change_selector>);
+   static_assert(
+       std::is_same_v<decltype(protocol::table_changes_response{}.blocks), std::vector<protocol::table_change_batch>>);
+   static_assert(std::is_same_v<decltype(protocol::account_changes_response{}.blocks),
+                                std::vector<protocol::account_change_batch>>);
+   static_assert(std::is_same_v<decltype(protocol::account_response{}.state), protocol::account_state>);
+   require(chain_api::state::ref().major == 2U, "installed state API does not expose version 2");
 
    const auto finality_delegate = std::make_shared<accepting_finality>();
    const auto finality = std::make_shared<chain_api::cached_finality_verifier>(finality_delegate, 4U);
@@ -1248,7 +1296,11 @@ int main() {
    }
    require(verified_rejected, "installed verified client did not reject a missing transport");
 
-   auto request = protocol::state_point_request{};
+   auto request = protocol::table_changes_request{
+       .from_block = 39,
+       .to_block = 40,
+       .tables = {{.code = protocol::account_name{"tester"}}},
+   };
    auto block = protocol::block_request{};
    auto transaction = protocol::transaction_status_request{};
    const auto table_key = forge::chain::api::encode_table_key(std::uint64_t{42U});
@@ -1259,7 +1311,7 @@ int main() {
 
    const auto expected_info = make_info_response();
    const auto expected_block = make_block_state_response(expected_info);
-   const auto expected_state = make_state_point_response(expected_info);
+   const auto expected_state = make_table_changes_response(expected_info);
    const auto expected_transaction = make_transaction_response(expected_info);
    const auto expected_admin = make_admin_response();
    const auto services = chain_api_services{
@@ -1282,13 +1334,13 @@ int main() {
    require(http_response.state == expected_state, "HTTP state API changed chain audit DTO semantics");
    require(http_response.transaction == expected_transaction, "HTTP transaction API changed typed DTO semantics");
    require(http_response.administration == expected_admin, "HTTP admin API changed typed DTO semantics");
-   require(http_response.oversized_request_rejected, "HTTP transport limit was not exercised");
+   require(http_response.oversized_request_rejected, "HTTP Chain API request limit was not exercised");
    require(p2p_response.information == expected_info, "P2P info API changed chain audit DTO semantics");
    require(p2p_response.block == expected_block, "P2P block API changed typed DTO semantics");
    require(p2p_response.state == expected_state, "P2P state API changed typed DTO semantics");
    require(p2p_response.transaction == expected_transaction, "P2P transaction API changed typed DTO semantics");
    require(p2p_response.administration == expected_admin, "P2P admin API changed typed DTO semantics");
-   require(p2p_response.oversized_request_rejected, "P2P transport limit was not exercised");
+   require(p2p_response.oversized_request_rejected, "P2P Chain API request limit was not exercised");
    require(http_response.information == p2p_response.information, "HTTP and P2P info API responses diverged");
    require(http_response.block == p2p_response.block, "HTTP and P2P block API responses diverged");
    require(http_response.state == p2p_response.state, "HTTP and P2P state API responses diverged");
@@ -1306,11 +1358,11 @@ int main() {
            "HTTP and P2P admin canonical bytes diverged");
    require_audit_semantics(http_response.information);
    require_audit_semantics(http_response.block);
-   require_audit_semantics(http_response.state);
+   require_audit_semantics(http_response.state, 1U);
    require_audit_semantics(http_response.transaction);
    require_audit_semantics(p2p_response.information);
    require_audit_semantics(p2p_response.block);
-   require_audit_semantics(p2p_response.state);
+   require_audit_semantics(p2p_response.state, 1U);
    require_audit_semantics(p2p_response.transaction);
    require(services.information->calls.load(std::memory_order_relaxed) == 2,
            "info transport E2E did not dispatch both typed calls");

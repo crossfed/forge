@@ -129,6 +129,78 @@ BOOST_AUTO_TEST_CASE(table_scope_pagination_roundtrips_opaque_bytes_in_exact_jso
    BOOST_CHECK(exact_response.value == response);
 }
 
+BOOST_AUTO_TEST_CASE(typed_state_changes_roundtrip_opaque_cursors_and_shared_account_state) {
+   const auto table_request = protocol::table_changes_request{
+       .from_block = 10U,
+       .to_block = 12U,
+       .tables =
+           {
+               {.code = protocol::account_name{"alpha"},
+                .scope = protocol::name{"scope"},
+                .table = protocol::name{"rows"}},
+               {.code = protocol::account_name{"beta"},
+                .scope = protocol::name{"scope"},
+                .table = protocol::name{"rows"}},
+           },
+       .limit = 25U,
+       .cursor = protocol::bytes{0x00U, 0x2fU, 0xffU},
+       .audit = protocol::audit_mode::required,
+   };
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::table_changes_request>(forge::raw::pack(table_request)) ==
+               table_request);
+   const auto table_json = forge::codec::json::write(table_request);
+   BOOST_REQUIRE(table_json.ok());
+   const auto decoded_table = forge::codec::json::read<protocol::table_changes_request>(
+       table_json.text, {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(decoded_table.ok());
+   BOOST_CHECK(decoded_table.value == table_request);
+
+   auto first_anchor = protocol::state_anchor{.block_num = 11U};
+   first_anchor.block._hash[0] = 0x11U;
+   auto target_anchor = protocol::state_anchor{.block_num = 12U};
+   target_anchor.block._hash[0] = 0x12U;
+   const auto table_response = protocol::table_changes_response{
+       .blocks =
+           {
+               {.anchor = first_anchor,
+                .mutations = {{.table = table_request.tables.front(),
+                               .primary = 7U,
+                               .row = protocol::table_row{.value = {0xaaU}}}}},
+               {.anchor = target_anchor, .mutations = {{.table = table_request.tables.back(), .primary = 9U}}},
+           },
+       .next = protocol::bytes{0x01U, 0x02U},
+   };
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::table_changes_response>(forge::raw::pack(table_response)) ==
+               table_response);
+   const auto table_response_json = forge::codec::json::write(table_response);
+   BOOST_REQUIRE(table_response_json.ok());
+   const auto table_response_value = forge::codec::json::read_value(table_response_json.text);
+   BOOST_REQUIRE(table_response_value.ok());
+   BOOST_TEST(table_response_value.value.get_object().contains("blocks"));
+   BOOST_TEST(!table_response_value.value.get_object().contains("changes"));
+
+   const auto account = protocol::account_state{
+       .permissions = {{.name = protocol::permission_name{"active"}}},
+   };
+   const auto account_name = protocol::account_name{"alice"};
+   const auto account_response = protocol::account_response{.account = account_name, .state = account};
+   const auto changes = protocol::account_changes_response{
+       .blocks = {{.anchor = target_anchor,
+                   .mutations = {{.account = account_name, .state = account},
+                                 {.account = protocol::account_name{"bob"}}}}},
+       .next = protocol::bytes{0x01U, 0x02U},
+   };
+   const auto decoded_account =
+       forge::raw::unpack_exact<protocol::account_response>(forge::raw::pack(account_response));
+   BOOST_CHECK(decoded_account.account == account_name);
+   BOOST_CHECK(decoded_account.state == account);
+   const auto decoded_changes = forge::raw::unpack_exact<protocol::account_changes_response>(forge::raw::pack(changes));
+   BOOST_CHECK(decoded_changes == changes);
+   BOOST_REQUIRE(decoded_changes.blocks.front().mutations.front().state);
+   BOOST_CHECK(decoded_changes.blocks.front().mutations.front().state == account_response.state);
+   BOOST_TEST(!decoded_changes.blocks.front().mutations.back().state.has_value());
+}
+
 BOOST_AUTO_TEST_CASE(transaction_trace_is_one_typed_protocol_record_across_api_surfaces) {
    auto trace = protocol::transaction_trace{};
    trace.id._hash[0] = 0x42U;

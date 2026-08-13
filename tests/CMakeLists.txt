@@ -286,6 +286,14 @@ add_test(
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 set_tests_properties(test_forge_chain_api_spring_manifest PROPERTIES SKIP_RETURN_CODE 125)
+add_test(
+   NAME test_forge_chain_api_typed_state_surface
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_typed_state_surface.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 add_executable(
    test_forge_plugins_http_server

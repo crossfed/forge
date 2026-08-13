@@ -13,6 +13,9 @@ interfaces.
 Table-scope pagination carries opaque authenticated keys as `bytes` in
 `table_scope_request::cursor` and `table_scope_response::next`; callers must
 not parse or reconstruct them from contract scope names.
+Typed table/account change pagination likewise carries only opaque `bytes`
+cursors. Raw authenticated-tree point, range, key and mutation records are not
+part of this protocol library.
 
 Package component: `chain_protocol`. Public namespace:
 `forge::chain::protocol`.
@@ -51,6 +54,9 @@ Package component: `chain_protocol`. Public namespace:
 - `forge.chain.protocol.audit`, `info`, `block_query`, `state_query`,
   `transaction_query`, `admin`: common audit envelopes and
   endpoint wire records for the transport-neutral Chain API.
+  Typed table/account change feeds expose ordered per-block batches with a
+  `state_anchor` on every batch; product protocol does not expose raw proof
+  keys, point/range records or authenticated change-range DTOs.
 
 The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,
 `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric`

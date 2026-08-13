@@ -22,12 +22,12 @@ enum class code : std::uint16_t {
    invalid_state_proof = 6,
    invalid_transaction_proof = 7,
    trust_required = 8,
-   history_lost = 9,
    deadline_exceeded = 10,
    unavailable = 11,
    resource_exhausted = 12,
    conflict = 13,
    admission_rejected = 14,
+   history_unavailable = 15,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -40,12 +40,12 @@ using invalid_finality = forge::exceptions::coded_exception<code, code::invalid_
 using invalid_state_proof = forge::exceptions::coded_exception<code, code::invalid_state_proof>;
 using invalid_transaction_proof = forge::exceptions::coded_exception<code, code::invalid_transaction_proof>;
 using trust_required = forge::exceptions::coded_exception<code, code::trust_required>;
-using history_lost = forge::exceptions::coded_exception<code, code::history_lost>;
 using deadline_exceeded = forge::exceptions::coded_exception<code, code::deadline_exceeded>;
 using unavailable = forge::exceptions::coded_exception<code, code::unavailable>;
 using resource_exhausted = forge::exceptions::coded_exception<code, code::resource_exhausted>;
 using conflict = forge::exceptions::coded_exception<code, code::conflict>;
 using admission_rejected = forge::exceptions::coded_exception<code, code::admission_rejected>;
+using history_unavailable = forge::exceptions::coded_exception<code, code::history_unavailable>;
 
 namespace descriptor {
 
@@ -71,8 +71,8 @@ template <auto Method, typename Builder> void declare_audited_query(Builder& met
 
 template <auto Method, typename Builder> void declare_historical_query(Builder& method) {
    declare_audited_query<Method>(method);
-   method.template error<history_lost>(
-       "history_lost", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
+   method.template error<history_unavailable>(
+       "history_unavailable", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }
 
 template <typename Builder> void declare_deadline(Builder& method) {

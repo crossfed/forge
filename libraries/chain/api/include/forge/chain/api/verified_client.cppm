@@ -19,6 +19,49 @@ export namespace forge::chain::api {
                                                              protocol::digest expected,
                                                              std::optional<std::uint64_t> expected_size = std::nullopt);
 
+struct authenticated_key_range {
+   std::optional<protocol::bytes> lower;
+   std::optional<protocol::bytes> upper;
+
+   bool operator==(const authenticated_key_range&) const = default;
+};
+
+struct authenticated_range_query {
+   authenticated_key_range range;
+   std::uint32_t limit = 256;
+   bool reverse = false;
+
+   bool operator==(const authenticated_range_query&) const = default;
+};
+
+struct authenticated_state_item {
+   protocol::bytes key;
+   protocol::bytes value;
+
+   bool operator==(const authenticated_state_item&) const = default;
+};
+
+struct authenticated_state_range {
+   std::vector<authenticated_state_item> rows;
+   std::optional<protocol::bytes> next_key;
+
+   bool operator==(const authenticated_state_range&) const = default;
+};
+
+struct authenticated_state_change {
+   protocol::bytes key;
+   std::optional<protocol::bytes> value;
+
+   bool operator==(const authenticated_state_change&) const = default;
+};
+
+struct authenticated_change_range {
+   std::vector<authenticated_state_change> changes;
+   std::optional<protocol::bytes> next_key;
+
+   bool operator==(const authenticated_change_range&) const = default;
+};
+
 class audit_verifier {
  public:
    virtual ~audit_verifier() = default;
@@ -28,14 +71,14 @@ class audit_verifier {
    virtual void verify_context(const protocol::response_context& context) = 0;
    virtual void verify_finality(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) = 0;
    virtual std::optional<protocol::bytes> verify_state_point(const protocol::state_anchor& anchor,
-                                                             const protocol::state_point_request& request,
+                                                             const protocol::bytes& key,
                                                              const protocol::proof_blob& proof) = 0;
-   virtual protocol::state_range_response verify_state_range(const protocol::state_anchor& anchor,
-                                                             const protocol::state_range_request& request,
-                                                             const protocol::proof_blob& proof) = 0;
-   virtual protocol::state_change_range verify_state_changes(const protocol::state_anchor& anchor,
-                                                             const protocol::key_range& range, std::uint32_t limit,
-                                                             const protocol::proof_blob& proof) = 0;
+   virtual authenticated_state_range verify_state_range(const protocol::state_anchor& anchor,
+                                                        const authenticated_range_query& request,
+                                                        const protocol::proof_blob& proof) = 0;
+   virtual authenticated_change_range verify_state_changes(const protocol::state_anchor& anchor,
+                                                           const authenticated_range_query& request,
+                                                           const protocol::proof_blob& proof) = 0;
    virtual void verify_ancestry(const protocol::state_anchor& finalized,
                                 std::span<const protocol::state_anchor> intermediate,
                                 const protocol::proof_blob& proof) = 0;
@@ -67,9 +110,14 @@ class projection_verifier {
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
    virtual void verify(const protocol::account_request& request, const protocol::account_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::account_changes_request& request,
+                       const protocol::account_changes_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
    virtual void verify(const protocol::code_request& request, const protocol::code_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
    virtual void verify(const protocol::table_rows_request& request, const protocol::table_rows_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::table_changes_request& request, const protocol::table_changes_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
    virtual void verify(const protocol::table_scope_request& request, const protocol::table_scope_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
@@ -106,12 +154,12 @@ class verified_client {
    get_producer_schedule(protocol::anchored_request request);
    boost::asio::awaitable<protocol::finalizer_info_response> get_finalizer_info(protocol::anchored_request request);
 
-   boost::asio::awaitable<protocol::state_point_response> get_point(protocol::state_point_request request);
-   boost::asio::awaitable<protocol::state_range_response> get_range(protocol::state_range_request request);
-   boost::asio::awaitable<protocol::state_changes_response> get_changes(protocol::state_changes_request request);
    boost::asio::awaitable<protocol::account_response> get_account(protocol::account_request request);
+   boost::asio::awaitable<protocol::account_changes_response>
+   get_account_changes(protocol::account_changes_request request);
    boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request request);
    boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request request);
+   boost::asio::awaitable<protocol::table_changes_response> get_table_changes(protocol::table_changes_request request);
    boost::asio::awaitable<protocol::table_scope_response> get_table_scope(protocol::table_scope_request request);
    boost::asio::awaitable<protocol::currency_balance_response>
    get_currency_balance(protocol::currency_balance_request request);
@@ -136,10 +184,10 @@ class verified_client {
    const protocol::audit_bundle& verify_envelope(const protocol::audited_response& response);
    void verify_requested_anchor(const std::optional<protocol::block_id>& requested,
                                 const protocol::audited_response& response);
-   void verify_point(const protocol::state_point_request& request, const protocol::state_point_response& response);
-   void verify_range(const protocol::state_range_request& request, const protocol::state_range_response& response);
-   void verify_changes(const protocol::state_changes_request& request,
-                       const protocol::state_changes_response& response);
+   void verify_change_batches(std::uint32_t from_block, std::uint32_t to_block, bool has_request_cursor,
+                              const protocol::audited_response& response,
+                              std::span<const protocol::state_anchor> anchors, bool has_next,
+                              const protocol::audit_bundle& audit);
    void verify_transaction_status(const forge::chain::protocol::transaction_id& expected,
                                   const protocol::transaction_status_response& response);
 
