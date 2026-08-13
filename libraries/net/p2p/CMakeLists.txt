@@ -46,6 +46,10 @@ add_library(
    details/libp2p_identity_material.hxx
    node_impl.cpp
    node_impl_pubsub.cpp
+   node_impl_pubsub_outbound.cpp
+   node_impl_pubsub_validation.cpp
+   node_impl_pubsub_heartbeat.cpp
+   node_impl_pubsub_inbound.cpp
    node_impl_streams.cpp
    node_impl_sessions.cpp
    node_impl_relay.cpp

@@ -7328,18 +7328,27 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_forwards_between_subscribed_peers) {
    hub.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
                               capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
 
+   const auto subject = pubsub::topic{.value = "forge.mesh"};
+   forge::asio::blocking::run(
+       runtime, hub.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
    auto received = std::make_shared<std::promise<std::vector<std::uint8_t>>>();
    auto future = received->get_future();
    forge::asio::blocking::run(
        runtime, subscriber.async_subscribe(
-                    pubsub::topic{.value = "forge.mesh"},
+                    subject,
                     [received](pubsub::event event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
                        received->set_value(event.value.data);
                        co_return pubsub::validation_result::accept;
                     }));
+   for (auto poll = 0; poll < 200 && hub.pubsub_snapshot().mesh_edges == 0U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{5}, "GossipSub heartbeat GRAFT");
+   }
+   BOOST_REQUIRE(hub.pubsub_snapshot().mesh_edges >= 1U);
 
-   forge::asio::blocking::run(runtime, publisher.async_publish(pubsub::topic{.value = "forge.mesh"},
-                                                               std::vector<std::uint8_t>{'m', 'e', 's', 'h'}));
+   forge::asio::blocking::run(runtime,
+                              publisher.async_publish(subject, std::vector<std::uint8_t>{'m', 'e', 's', 'h'}));
 
    if (future.wait_for(std::chrono::milliseconds{5'000}) != std::future_status::ready) {
       const auto hub_metrics = hub.metrics();
@@ -7357,6 +7366,65 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_forwards_between_subscribed_peers) {
    forge::asio::blocking::run(runtime, publisher.async_stop());
    forge::asio::blocking::run(runtime, hub.async_stop());
    forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_subscription_is_idempotent_and_does_not_create_mesh_edge) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto server_options = pubsub_options_for();
+   server_options.limits.resources.max_streams_per_protocol = 1;
+   server_options.limits.pubsub.limits.heartbeat_initial_delay = std::chrono::seconds{60};
+   auto client_options = pubsub_options_for();
+   client_options.explicit_peer_id = peer(219);
+
+   auto server = node{runtime, std::move(server_options)};
+   auto client = node{runtime, std::move(client_options)};
+   const auto server_endpoint = listen(server, runtime);
+   client.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   auto stream = forge::asio::blocking::run(
+       runtime, client.async_open_protocol_stream(server.local_peer(), builtins::meshsub_v11));
+   const auto subject = pubsub::topic{.value = "forge.subscription.idempotent"};
+   forge::asio::blocking::run(
+       runtime, server.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+   const auto denied_before = server.diagnostics().resources.denied_streams;
+
+   const auto subscribe = pubsub::codec::encode(pubsub::rpc{
+       .subscriptions = std::vector<pubsub::subscription>{
+           pubsub::subscription{.subscribe = true, .subject = subject},
+       },
+   });
+   forge::asio::blocking::run(runtime, stream.async_write(subscribe));
+   forge::asio::blocking::run(runtime, stream.async_write(subscribe));
+   for (auto poll = 0; poll < 100 && server.pubsub_snapshot().peers == 0U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{5}, "GossipSub subscription processing");
+   }
+   BOOST_REQUIRE(server.pubsub_snapshot().peers == 1U);
+   BOOST_TEST(server.pubsub_snapshot().mesh_edges == 0U);
+   BOOST_TEST(server.diagnostics().resources.denied_streams == denied_before);
+
+   const auto graft = pubsub::codec::encode(pubsub::rpc{
+       .control_value = pubsub::control{
+           .grafts = std::vector<pubsub::control::graft>{
+               pubsub::control::graft{.subject = subject},
+           },
+       },
+   });
+   forge::asio::blocking::run(runtime, stream.async_write(graft));
+   for (auto poll = 0; poll < 100 && server.pubsub_snapshot().mesh_edges == 0U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{5}, "GossipSub GRAFT processing");
+   }
+   BOOST_REQUIRE(server.pubsub_snapshot().mesh_edges == 1U);
+
+   forge::asio::blocking::run(runtime, stream.async_write(graft));
+   wait_on_runtime(runtime, std::chrono::milliseconds{25}, "duplicate GossipSub GRAFT processing");
+   BOOST_TEST(server.pubsub_snapshot().mesh_edges == 1U);
+
+   forge::asio::blocking::run(runtime, stream.async_close());
+   forge::asio::blocking::run(runtime, client.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_control_spam_is_penalized_without_stopping_node) {
