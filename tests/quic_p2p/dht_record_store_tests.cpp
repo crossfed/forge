@@ -164,6 +164,14 @@ BOOST_AUTO_TEST_CASE(dht_record_store_publishes_post_commit_uncertain_value_and_
    BOOST_TEST(status.degraded);
    BOOST_TEST(status.durability_uncertain);
 
+   const auto pruned = forge::asio::blocking::run(runtime, store.async_prune_expired(now));
+   BOOST_TEST(pruned.values.empty());
+   BOOST_TEST(pruned.providers.empty());
+   BOOST_TEST(pruned.provider_address_updates.empty());
+   status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+
    forge::asio::blocking::run(runtime, store.async_flush());
    status = store.persistence_state();
    BOOST_TEST(status.failure_count == 1U);

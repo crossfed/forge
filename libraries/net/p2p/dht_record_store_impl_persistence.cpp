@@ -296,7 +296,13 @@ dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_poi
          throw;
       }
       apply_prune_locked(result);
-      apply_durability_result_locked(result.durability);
+      const auto changed =
+          !result.values.empty() || !result.providers.empty() || !result.provider_address_updates.empty();
+      if (changed || !result.durability.durability_confirmed) {
+         apply_durability_result_locked(result.durability);
+      } else {
+         mark_persistence_healthy_locked(false);
+      }
    }
    if (!result.durability.durability_confirmed) {
       throw_durability_uncertain(result.durability);
