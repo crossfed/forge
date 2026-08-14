@@ -128,8 +128,12 @@ The named DB Store must provide an Object layer dedicated to P2P peer and DHT
 record state.
 One authoritative schema marker versions the complete private row family, so
 startup validates the format without scanning durable history. A missing marker
-in nonempty storage or a version mismatch fails startup; the v2 recovery path is
-to remove the peer cache and hydrate it again from configured bootstrap peers.
+in nonempty storage or a version mismatch fails startup. With
+`schema-policy: reset`, the v2 recovery path atomically removes the complete private P2P row
+family, including peer, Rendezvous, DHT value/provider and sequence records.
+Normal node startup hydrates peer candidates from configured bootstrap peers;
+it does not recover DHT values, local provider ownership or Rendezvous
+registrations. Products must publish or register those records again.
 Secret policies must allow
 `p2p.identity.certificate` and `p2p.identity.private-key` respectively.
 `allow-insecure-test-mode` is for local tests only. Programmatic low-level node

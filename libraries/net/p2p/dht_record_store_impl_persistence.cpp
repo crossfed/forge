@@ -110,9 +110,13 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
    auto providers_by_key = std::map<value_key, std::set<peer_id>>{};
    auto total_bytes = std::size_t{};
    auto expiry_updates = std::vector<dht::record_store::value_record>{};
+   auto expired_values = std::vector<dht::key>{};
+   auto provider_updates = std::vector<dht::record_store::provider_record>{};
    auto stale_local_providers = std::vector<dht::record_store::provider_key>{};
+   auto expired_providers = std::vector<dht::record_store::provider_key>{};
    for (auto& value : hydrated_values) {
       if (expired(value.expires_at, now)) {
+         expired_values.push_back(value.record.key_value);
          continue;
       }
       const auto persisted_expiry = value.expires_at;
@@ -135,11 +139,17 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
          continue;
       }
       if (expired(value.provider_expires_at, now)) {
+         expired_providers.push_back(dht::record_store::provider_key{.key = value.key, .provider = value.provider});
          continue;
       }
       if (expired(value.addresses_expires_at, now)) {
+         const auto requires_update =
+             !value.endpoints.empty() || value.addresses_expires_at != std::chrono::system_clock::time_point{};
          value.endpoints.clear();
          value.addresses_expires_at = {};
+         if (requires_update) {
+            provider_updates.push_back(value);
+         }
       }
       validate_provider(value, now);
       const auto key = provider_map_key{value.key.bytes, value.provider};
@@ -159,10 +169,15 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
    }
 
    auto cleanup_result = std::optional<dht::record_store::apply_result>{};
-   if (!expiry_updates.empty() || !stale_local_providers.empty()) {
+   if (!expiry_updates.empty() || !expired_values.empty() || !provider_updates.empty() ||
+       !stale_local_providers.empty() || !expired_providers.empty()) {
       auto batch = dht::record_store::mutation_batch{};
       batch.value_upserts = std::move(expiry_updates);
+      batch.value_removals = std::move(expired_values);
+      batch.provider_upserts = std::move(provider_updates);
       batch.provider_removals = std::move(stale_local_providers);
+      batch.provider_removals.insert(batch.provider_removals.end(), std::make_move_iterator(expired_providers.begin()),
+                                     std::make_move_iterator(expired_providers.end()));
       try {
          cleanup_result = co_await persistence_->async_apply(std::move(batch));
       } catch (...) {
@@ -265,15 +280,15 @@ dht::record_store::impl::async_prune_expired(std::chrono::system_clock::time_poi
       mark_persistence_failure_locked(current_failure_message());
       throw;
    }
-   if (result.values.size() > options_.prune_page_limit ||
-       result.providers.size() > options_.prune_page_limit - result.values.size() ||
-       result.provider_address_updates.size() >
-           options_.prune_page_limit - result.values.size() - result.providers.size()) {
-      FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence exceeded the prune result bound");
-   }
    {
       auto lock = std::scoped_lock{mutex_};
       try {
+         if (result.values.size() > options_.prune_page_limit ||
+             result.providers.size() > options_.prune_page_limit - result.values.size() ||
+             result.provider_address_updates.size() >
+                 options_.prune_page_limit - result.values.size() - result.providers.size()) {
+            FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence exceeded the prune result bound");
+         }
          validate_prune_result_locked(result, now);
       } catch (...) {
          reconciliation_required_ = true;

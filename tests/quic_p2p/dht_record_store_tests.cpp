@@ -440,6 +440,91 @@ BOOST_AUTO_TEST_CASE(dht_record_store_requires_local_provider_reconfirmation_aft
    BOOST_TEST(durable.providers.front().provider.to_string() == remote.to_string());
 }
 
+BOOST_AUTO_TEST_CASE(dht_record_store_hydration_reconciles_expired_rows_and_provider_addresses) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = dht::record_store::make_memory_persistence();
+   const auto now = std::chrono::system_clock::now();
+   const auto live_key = test_key('l');
+   const auto expired_key = test_key('x');
+   const auto expired_provider_key = test_key('e');
+   const auto address_expired_key = test_key('a');
+   const auto expired_provider = test_peer(73);
+   const auto address_expired_provider = test_peer(74);
+
+   auto batch = dht::record_store::mutation_batch{};
+   batch.value_upserts.push_back(test_value(live_key, 1, now + std::chrono::hours{1}));
+   batch.value_upserts.push_back(test_value(expired_key, 2, now - std::chrono::minutes{1}));
+   batch.provider_upserts.push_back(test_provider(expired_provider_key, expired_provider, now - std::chrono::minutes{1},
+                                                  now - std::chrono::minutes{2}));
+   batch.provider_upserts.push_back(test_provider(address_expired_key, address_expired_provider,
+                                                  now + std::chrono::hours{1}, now - std::chrono::minutes{1}));
+   forge::asio::blocking::run(runtime, persistence->async_apply(std::move(batch)));
+
+   auto store = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   forge::asio::blocking::run(runtime, store.async_hydrate(now));
+
+   BOOST_REQUIRE(store.find_value(live_key, now));
+   BOOST_TEST(!store.find_value(expired_key, now));
+   BOOST_TEST(store.find_providers(expired_provider_key, 1, now).empty());
+   const auto operational = store.find_providers(address_expired_key, 1, now);
+   BOOST_REQUIRE_EQUAL(operational.size(), 1U);
+   BOOST_TEST(operational.front().endpoints.empty());
+
+   const auto durable_values =
+       forge::asio::blocking::run(runtime, persistence->async_hydrate(dht::record_store::hydration_request{
+                                               .kind = dht::record_store::hydration_kind::values,
+                                               .limit = 20,
+                                           }));
+   BOOST_REQUIRE_EQUAL(durable_values.values.size(), 1U);
+   BOOST_CHECK(durable_values.values.front().record.key_value == live_key);
+
+   const auto durable_providers =
+       forge::asio::blocking::run(runtime, persistence->async_hydrate(dht::record_store::hydration_request{
+                                               .kind = dht::record_store::hydration_kind::providers,
+                                               .limit = 20,
+                                           }));
+   BOOST_REQUIRE_EQUAL(durable_providers.providers.size(), 1U);
+   BOOST_CHECK(durable_providers.providers.front().provider == address_expired_provider);
+   BOOST_TEST(durable_providers.providers.front().endpoints.empty());
+   BOOST_CHECK(durable_providers.providers.front().addresses_expires_at == std::chrono::system_clock::time_point{});
+
+   const auto pruned = forge::asio::blocking::run(runtime, store.async_prune_expired(now));
+   BOOST_TEST(pruned.values.empty());
+   BOOST_TEST(pruned.providers.empty());
+   BOOST_TEST(pruned.provider_address_updates.empty());
+   BOOST_TEST(!store.persistence_state().degraded);
+   BOOST_TEST(!store.persistence_state().durability_uncertain);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_marks_oversized_committed_prune_result_for_reconciliation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto store =
+       dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence, .prune_page_limit = 1}};
+   const auto now = std::chrono::system_clock::now();
+
+   auto oversized = dht::record_store::prune_result{};
+   oversized.values.push_back(test_key('1'));
+   oversized.values.push_back(test_key('2'));
+   persistence->return_next_prune_result(std::move(oversized));
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_prune_expired(now))), exceptions::internal);
+   auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+   BOOST_TEST(status.last_failure.find("invalid committed prune result") != std::string::npos);
+
+   forge::asio::blocking::run(runtime, store.async_flush());
+   status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_hydrate(now));
+   status = store.persistence_state();
+   BOOST_TEST(!status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+}
+
 BOOST_AUTO_TEST_CASE(dht_record_store_prunes_expiry_in_bounded_steps_and_closes_idempotently) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto store = dht::record_store{test_profile(), dht::record_store::options{.prune_page_limit = 1}};
