@@ -27,6 +27,7 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <map>
@@ -162,12 +163,36 @@ void node::impl::initialize_lifecycle() {
               if (!self) {
                  co_return;
               }
-              static_cast<void>(co_await self->store.async_prune_expired());
+              auto failure = std::exception_ptr{};
+              try {
+                 static_cast<void>(co_await self->store.async_prune_expired());
+              } catch (...) {
+                 failure = std::current_exception();
+              }
+              for (auto& [_, state] : self->dht_profiles) {
+                 try {
+                    // One bounded page per profile keeps maintenance fair.
+                    static_cast<void>(co_await state->records.async_prune_expired());
+                 } catch (...) {
+                    if (!failure) {
+                       failure = std::current_exception();
+                    }
+                 }
+              }
+              if (failure) {
+                 std::rethrow_exception(failure);
+              }
            },
        });
 }
 
 void node::impl::request_lifecycle_stop() noexcept {
+   if (routing_refresh) {
+      routing_refresh->request_stop();
+   }
+   if (provider_registry) {
+      provider_registry->seal();
+   }
    lifecycle.request_stop();
    bootstrap->request_stop();
    identify_service.close();
@@ -176,12 +201,38 @@ void node::impl::request_lifecycle_stop() noexcept {
 }
 
 boost::asio::awaitable<void> node::impl::async_hydrate_peer_state() {
-   co_await store.async_hydrate();
-   for (const auto& record : store.candidates(capabilities::dht, options.peer_state.max_peers)) {
-      if (record.peer != local && lifecycle_queryable(record)) {
-         routing.upsert(lifecycle_dht_peer(record), dht::routing_admission::candidate);
+   auto hydration = co_await peer_state_hydration_gate.acquire();
+   {
+      const auto lock = std::scoped_lock{mutex};
+      if (peer_state_hydrated) {
+         co_return;
+      }
+      if (stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
       }
    }
+   co_await store.async_hydrate();
+   for (auto& [_, state] : dht_profiles) {
+      co_await state->records.async_hydrate();
+   }
+   for (const auto& record : store.snapshot(options.peer_state.max_peers)) {
+      if (record.peer == local || !lifecycle_queryable(record)) {
+         continue;
+      }
+      for (auto& [protocol, state] : dht_profiles) {
+         if (std::ranges::find(record.protocols, protocol) != record.protocols.end()) {
+            state->routing.upsert(lifecycle_dht_peer(record), dht::routing_admission::candidate);
+         }
+      }
+   }
+   {
+      const auto lock = std::scoped_lock{mutex};
+      if (stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node stopped during peer-state hydration");
+      }
+      peer_state_hydrated = true;
+   }
+   provider_registry->open_admission();
 }
 
 void node::impl::listen(forge::net::p2p::endpoint endpoint) {

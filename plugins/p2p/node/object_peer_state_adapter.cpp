@@ -18,7 +18,6 @@ module;
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,7 +30,6 @@ import forge.db.object.object;
 import forge.db.object.snapshot;
 import forge.db.object.transaction;
 import forge.exceptions;
-import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
@@ -44,14 +42,14 @@ import forge.net.p2p.scoring;
 import forge.plugins.db.store.api;
 import forge.raw.raw;
 
-#include "details/peer_state_schema.hxx"
+#include "details/p2p_state_schema.hxx"
 #include "details/object_peer_state_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 namespace {
 
 namespace p2p = forge::net::p2p;
-using schema = forge::plugins::p2p::node::detail::peer_state_schema;
+using schema = forge::plugins::p2p::node::detail::p2p_state_schema;
 
 [[nodiscard]] std::string current_exception_message() {
    try {
@@ -75,10 +73,10 @@ void require_row(bool condition, std::string_view message) {
 }
 
 void require_format(std::uint32_t format_version, std::string_view model) {
-   if (format_version != schema::peer_state_format_version) {
+   if (format_version != schema::format_version) {
       FORGE_THROW_EXCEPTION(forge::db::object::exceptions::incompatible_version,
                             "peer state row format version is incompatible", forge::exceptions::ctx("model", model),
-                            forge::exceptions::ctx("expected", schema::peer_state_format_version),
+                            forge::exceptions::ctx("expected", schema::format_version),
                             forge::exceptions::ctx("actual", format_version));
    }
 }
@@ -125,20 +123,6 @@ void validate_peer_row_bounds(const schema::peer_row& value, const p2p::peer_sto
    }
 }
 
-void validate_provider_row_bounds(const schema::provider_row& value, const p2p::peer_store::options& limits) {
-   require_row(value.endpoints.size() <= limits.max_endpoints_per_peer,
-               "provider endpoint count exceeds configured limit");
-   auto bytes = std::size_t{};
-   add_bounded_size(bytes, value.key.size(), limits.max_peer_record_bytes,
-                    "provider row exceeds configured byte limit");
-   add_bounded_size(bytes, value.peer.size(), limits.max_peer_record_bytes,
-                    "provider row exceeds configured byte limit");
-   for (const auto& endpoint : value.endpoints) {
-      add_bounded_size(bytes, endpoint.size(), limits.max_peer_record_bytes,
-                       "provider row exceeds configured byte limit");
-   }
-}
-
 void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p2p::peer_store::options& limits) {
    require_row(value.endpoints.size() <= limits.max_endpoints_per_peer,
                "Rendezvous endpoint count exceeds configured limit");
@@ -150,21 +134,6 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
       add_bounded_size(bytes, endpoint.size(), limits.max_peer_record_bytes,
                        "Rendezvous row exceeds configured byte limit");
    }
-}
-
-[[nodiscard]] std::string binary_text(const std::vector<std::uint8_t>& value) {
-   if (value.empty()) {
-      return {};
-   }
-   return std::string{reinterpret_cast<const char*>(value.data()), value.size()};
-}
-
-[[nodiscard]] std::vector<std::uint8_t> binary_bytes(std::string_view value) {
-   if (value.empty()) {
-      return {};
-   }
-   const auto* first = reinterpret_cast<const std::uint8_t*>(value.data());
-   return std::vector<std::uint8_t>{first, first + value.size()};
 }
 
 [[nodiscard]] std::int64_t time_to_ns(std::chrono::system_clock::time_point value) {
@@ -246,21 +215,6 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
       return p2p::reachability::state::relay_only;
    default:
       malformed("reachability state is outside the supported range");
-   }
-}
-
-[[nodiscard]] p2p::dht::connection_type parse_connection_type(std::uint16_t value) {
-   switch (value) {
-   case 0:
-      return p2p::dht::connection_type::not_connected;
-   case 1:
-      return p2p::dht::connection_type::connected;
-   case 2:
-      return p2p::dht::connection_type::can_connect;
-   case 3:
-      return p2p::dht::connection_type::cannot_connect;
-   default:
-      malformed("DHT connection type is outside the supported range");
    }
 }
 
@@ -421,48 +375,6 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
    return record;
 }
 
-[[nodiscard]] schema::provider_row to_provider_row(const p2p::peer_store::provider_record& value) {
-   require_row(!value.key.bytes.empty(), "provider key is empty");
-   require_row(p2p::valid_peer_id(value.provider.id), "provider peer ID is invalid");
-   (void)parse_connection_type(static_cast<std::uint16_t>(value.provider.connection));
-   (void)parse_discovery_source(static_cast<std::uint16_t>(value.discovered_by));
-   auto row = schema::provider_row{
-       .key = binary_text(value.key.bytes),
-       .peer = value.provider.id.value,
-       .connection = static_cast<std::uint16_t>(value.provider.connection),
-       .discovered_by = static_cast<std::uint16_t>(value.discovered_by),
-       .expires_at_ns = time_to_ns(value.expires_at),
-       .successes = value.successes,
-       .failures = value.failures,
-   };
-   row.endpoints.reserve(value.provider.endpoints.size());
-   for (const auto& endpoint : value.provider.endpoints) {
-      row.endpoints.push_back(endpoint.to_string());
-   }
-   return row;
-}
-
-[[nodiscard]] p2p::peer_store::provider_record from_provider_row(const schema::provider_row& value) {
-   require_row(!value.key.empty(), "provider key is empty");
-   auto record = p2p::peer_store::provider_record{
-       .key = p2p::dht::key{.bytes = binary_bytes(value.key)},
-       .provider =
-           p2p::dht::peer{
-               .id = parse_peer(value.peer),
-               .connection = parse_connection_type(value.connection),
-           },
-       .discovered_by = parse_discovery_source(value.discovered_by),
-       .expires_at = time_from_ns(value.expires_at_ns),
-       .successes = value.successes,
-       .failures = value.failures,
-   };
-   record.provider.endpoints.reserve(value.endpoints.size());
-   for (const auto& endpoint : value.endpoints) {
-      record.provider.endpoints.push_back(parse_endpoint_strict(endpoint));
-   }
-   return record;
-}
-
 [[nodiscard]] schema::rendezvous_row to_rendezvous_row(const p2p::rendezvous::registration& value) {
    require_row(!value.namespace_name.empty() && value.namespace_name.size() <= 255, "Rendezvous namespace is invalid");
    require_row(p2p::valid_peer_id(value.peer), "Rendezvous peer ID is invalid");
@@ -563,24 +475,6 @@ void set_cursor(p2p::peer_store::hydration_page& out, const std::optional<forge:
    }
 }
 
-boost::asio::awaitable<bool> has_application_rows(forge::db::object::transaction& objects) {
-   const auto one = forge::db::core::page_request{.limit = 1};
-   auto peers = co_await objects.index<schema::peer_object, schema::by_peer_id>().lower_bound(std::string{}).page(one);
-   if (!peers.items.empty()) {
-      co_return true;
-   }
-   auto providers = co_await objects.index<schema::provider_object, schema::by_provider_key_peer>()
-                        .lower_bound(std::string{})
-                        .page(one);
-   if (!providers.items.empty()) {
-      co_return true;
-   }
-   auto registrations = co_await objects.index<schema::rendezvous_object, schema::by_rendezvous_namespace_peer>()
-                            .lower_bound(std::string{})
-                            .page(one);
-   co_return !registrations.items.empty();
-}
-
 } // namespace
 
 object_peer_state_adapter::object_peer_state_adapter(forge::plugins::db::store::api* db,
@@ -588,37 +482,10 @@ object_peer_state_adapter::object_peer_state_adapter(forge::plugins::db::store::
                                                      p2p::peer_store::options limits)
     : db_{db}, store_{std::move(store)}, limits_{std::move(limits)} {}
 
-void object_peer_state_adapter::register_schema(const forge::plugins::db::store::store_handle& store) {
-   auto objects = store.objects();
-   objects.register_object<schema::schema_state_object>();
-   objects.register_object<schema::peer_object>();
-   objects.register_object<schema::provider_object>();
-   objects.register_object<schema::rendezvous_object>();
-}
-
 boost::asio::awaitable<std::shared_ptr<object_peer_state_adapter>>
 object_peer_state_adapter::async_open(forge::plugins::db::store::api* db, forge::plugins::db::store::store_handle store,
-                                      p2p::peer_store::options limits) {
-   if (!db || !store) {
-      FORGE_THROW_EXCEPTION(p2p::exceptions::invalid_options, "ObjectDB peer state requires a named DB Store handle");
-   }
-
-   auto transaction = co_await store.begin_transaction();
-   auto objects = co_await store.objects().join(transaction);
-   auto state = co_await objects.find(schema::schema_state_id);
-   if (!state) {
-      if (co_await has_application_rows(objects)) {
-         FORGE_THROW_EXCEPTION(forge::db::object::exceptions::incompatible_version,
-                               "peer state schema marker is missing from nonempty storage",
-                               forge::exceptions::ctx("store", store.name()));
-      }
-      auto initial = schema::schema_state{};
-      initial.id = schema::schema_state_id;
-      co_await objects.insert(initial);
-   } else {
-      require_format(state->format_version, "schema_state");
-   }
-   co_await transaction.commit();
+                                      p2p::peer_store::options limits, bool reset_incompatible_cache) {
+   co_await schema::async_prepare(db, store, reset_incompatible_cache);
 
    co_return std::shared_ptr<object_peer_state_adapter>{
        new object_peer_state_adapter{db, std::move(store), std::move(limits)}};
@@ -655,27 +522,6 @@ object_peer_state_adapter::async_hydrate(p2p::peer_store::hydration_request requ
          }
          validate_peer_row_bounds(page.items.front(), limits_);
          out.peers.push_back(from_peer_row(page.items.front()));
-         set_cursor(out, page.next);
-         if (!page.next) {
-            break;
-         }
-         next = page.next;
-      }
-      break;
-   }
-   case p2p::peer_store::hydration_kind::providers: {
-      out.providers.reserve(request.limit);
-      auto next = page_request.after;
-      while (out.providers.size() < request.limit) {
-         auto page = co_await objects.index<schema::provider_object, schema::by_provider_hydration>()
-                         .lower_bound(std::numeric_limits<std::int64_t>::max())
-                         .page({.after = next, .limit = 1});
-         if (page.items.empty()) {
-            out.cursor.reset();
-            break;
-         }
-         validate_provider_row_bounds(page.items.front(), limits_);
-         out.providers.push_back(from_provider_row(page.items.front()));
          set_cursor(out, page.next);
          if (!page.next) {
             break;
@@ -729,13 +575,6 @@ object_peer_state_adapter::async_apply(p2p::peer_store::mutation_batch batch) {
          co_await objects.erase(existing->id);
       }
    }
-   for (const auto& value : batch.provider_upserts) {
-      auto row = to_provider_row(value);
-      const auto key = row.key;
-      const auto peer = row.peer;
-      co_await upsert_row<schema::provider_object, schema::by_provider_key_peer>(objects, std::move(row), key, peer);
-   }
-
    auto high_watermark = std::max(state.rendezvous_sequence, batch.rendezvous_sequence_high_watermark);
    for (const auto& value : batch.rendezvous_upserts) {
       auto row = to_rendezvous_row(value);
@@ -789,9 +628,9 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
    const auto state = co_await objects.get(schema::schema_state_id);
    require_format(state.format_version, "schema_state");
 
-   const auto first_kind = next_prune_kind_.fetch_add(1, std::memory_order_relaxed) % 3U;
-   for (auto offset = std::uint8_t{0}; offset < 3U && remaining > 0; ++offset) {
-      switch ((first_kind + offset) % 3U) {
+   const auto first_kind = next_prune_kind_.fetch_add(1, std::memory_order_relaxed) % 2U;
+   for (auto offset = std::uint8_t{0}; offset < 2U && remaining > 0; ++offset) {
+      switch ((first_kind + offset) % 2U) {
       case 0: {
          auto rows = co_await expired_rows<schema::peer_object, schema::by_peer_expiry>(objects, 1, now_ns, remaining);
          for (const auto& row : rows) {
@@ -802,16 +641,6 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
          break;
       }
       case 1: {
-         auto rows =
-             co_await expired_rows<schema::provider_object, schema::by_provider_expiry>(objects, 1, now_ns, remaining);
-         for (const auto& row : rows) {
-            result.providers.push_back(from_provider_row(row));
-            co_await objects.erase(row.id);
-         }
-         remaining -= static_cast<std::uint32_t>(rows.size());
-         break;
-      }
-      case 2: {
          auto rows = co_await expired_rows<schema::rendezvous_object, schema::by_rendezvous_expiry>(objects, 0, now_ns,
                                                                                                     remaining);
          for (const auto& row : rows) {
@@ -828,7 +657,6 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
 
    result.may_have_more =
        co_await has_expired_rows<schema::peer_object, schema::by_peer_expiry>(objects, 1, now_ns) ||
-       co_await has_expired_rows<schema::provider_object, schema::by_provider_expiry>(objects, 1, now_ns) ||
        co_await has_expired_rows<schema::rendezvous_object, schema::by_rendezvous_expiry>(objects, 0, now_ns);
    co_await transaction.commit();
    co_return result;

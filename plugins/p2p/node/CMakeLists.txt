@@ -6,12 +6,15 @@ add_library(
       plugin_pubsub_source_adapter.cpp
       config.cpp
       plugin_impl.cpp
+      object_dht_record_store_adapter.cpp
       object_peer_state_adapter.cpp
+      p2p_state_schema.cpp
       details/lifecycle_phase.hxx
+      details/object_dht_record_store_adapter.hxx
       details/object_peer_state_adapter.hxx
+      details/p2p_state_schema.hxx
       details/plugin_diagnostics_source_adapter.hxx
       details/plugin_pubsub_source_adapter.hxx
-      details/peer_state_schema.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_node plugins/p2p/node)
 

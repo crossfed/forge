@@ -10,8 +10,6 @@ namespace forge::net::p2p {
          out.add(capabilities::relay_reservation);
       } else if (protocol == builtins::peer_exchange) {
          out.add(capabilities::peer_exchange);
-      } else if (protocol == builtins::kad_dht) {
-         out.add(capabilities::dht);
       } else if (protocol == builtins::rendezvous) {
          out.add(capabilities::rendezvous);
       } else if (protocol == builtins::dcutr) {

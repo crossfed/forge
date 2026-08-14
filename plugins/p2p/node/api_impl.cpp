@@ -20,6 +20,7 @@ import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.asio.task;
 import forge.api.p2p.binding;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;

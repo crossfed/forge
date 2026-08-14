@@ -53,13 +53,14 @@
   "public_surface_snapshots": {
     "net.p2p.node": {
       "owner": "net.p2p.node",
-      "module_count": 22,
+      "module_count": 25,
       "modules": [
-        "forge.net.p2p.dht",        "forge.net.p2p.diagnostics",      "forge.net.p2p.discovery",
-        "forge.net.p2p.endpoint",   "forge.net.p2p.envelope",         "forge.net.p2p.exceptions",
-        "forge.net.p2p.hole_punch", "forge.net.p2p.identify",         "forge.net.p2p.identity",
-        "forge.net.p2p.lifecycle",  "forge.net.p2p.message",          "forge.net.p2p.negotiation",
-        "forge.net.p2p.node",       "forge.net.p2p.peer_store",       "forge.net.p2p.protocol",
+        "forge.net.p2p.dht",        "forge.net.p2p.dht.record_store", "forge.net.p2p.diagnostics",
+        "forge.net.p2p.discovery",  "forge.net.p2p.endpoint",         "forge.net.p2p.envelope",
+        "forge.net.p2p.exceptions", "forge.net.p2p.hole_punch",       "forge.net.p2p.identify",
+        "forge.net.p2p.identity",   "forge.net.p2p.ipns",             "forge.net.p2p.lifecycle",
+        "forge.net.p2p.message",    "forge.net.p2p.negotiation",      "forge.net.p2p.node",
+        "forge.net.p2p.peer_store", "forge.net.p2p.protocol",         "forge.net.p2p.provider_registration",
         "forge.net.p2p.pubsub",     "forge.net.p2p.reachability",     "forge.net.p2p.relay",
         "forge.net.p2p.rendezvous", "forge.net.p2p.resource_manager", "forge.net.p2p.scoring",
         "forge.net.p2p.stream"
@@ -67,6 +68,7 @@
       "headers": [],
       "module_features": {
         "forge.net.p2p.dht": [ "protocol.kademlia", "state.kademlia_routing_table" ],
+        "forge.net.p2p.dht.record_store": [ "protocol.kademlia" ],
         "forge.net.p2p.diagnostics": [
           "state.peer_store", "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes",
           "topology.connection_manager"
@@ -104,6 +106,7 @@
         "forge.net.p2p.hole_punch": [ "protocol.dcutr", "state.hole_punch_attempt" ],
         "forge.net.p2p.identify": [ "protocol.identify" ],
         "forge.net.p2p.identity": [ "identity.secure_transport_authentication" ],
+        "forge.net.p2p.ipns": [ "protocol.kademlia" ],
         "forge.net.p2p.lifecycle": [ "lifecycle.bootstrap" ],
         "forge.net.p2p.message": [ "protocol.peer_exchange" ],
         "forge.net.p2p.negotiation": [ "protocol.multistream_select" ],
@@ -138,6 +141,7 @@
           "protocol.echo", "protocol.ping", "protocol.identify", "protocol.peer_exchange", "protocol.autonat",
           "protocol.relay", "protocol.dcutr", "protocol.kademlia", "protocol.rendezvous", "protocol.gossipsub"
         ],
+        "forge.net.p2p.provider_registration": [ "protocol.kademlia" ],
         "forge.net.p2p.pubsub": [ "protocol.gossipsub" ],
         "forge.net.p2p.reachability": [ "protocol.autonat" ],
         "forge.net.p2p.relay": [ "protocol.relay" ],
@@ -148,7 +152,7 @@
         "forge.net.p2p.stream": [ "resource.streams", "resource.queued_bytes" ]
       },
       "header_features": {},
-      "sha256": "94ecf07a13a2a6ff577a24b47dfacf9b7fb56053d81a4c46b1f40ee8fc24e780",
+      "sha256": "08035498d7c78ecf79ddf3eae37b8a207e1a03f630355ef8072ac9bf6e464072",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -191,7 +195,7 @@
         "forge.plugins.p2p.node.types": [ "plugin.node" ]
       },
       "header_features": {},
-      "sha256": "5647b6f6b0860cc0492892eb64f4ddb795ab46e3817710f223c1421effce3848",
+      "sha256": "446e0a95cca45796d6b5e134eef08f7d99ae9b7c8116167576d4cbaf51d89526",
       "feature_ids": [ "plugin.node" ]
     },
     "plugin.p2p.resolver": {
@@ -529,26 +533,31 @@
     },
     {
       "id": "protocol.kademlia",
-      "state": "stub",
+      "state": "partial",
       "owner": "net.p2p.node",
-      "normal_activation": "inbound_or_explicit_caller",
-      "configuration": "capability bit; no complete role/profile configuration",
-      "resource_ownership": "bounded iterative queries over node-owned k-buckets",
-      "persistence":
-          "peer/provider history uses async peer persistence; values are intentionally unsupported until Stage 4",
-      "maintenance": "no routing refresh or provider registration lifetime",
-      "diagnostics": "query metrics do not prove a maintained DHT",
-      "intended_disposition": "replace_stub_with_full_standard_profile",
+      "normal_activation": "node_lifecycle_and_explicit_record_operations",
+      "configuration": "isolated fixed Amino and product-owned custom profiles with explicit capabilities",
+      "resource_ownership": "bounded per-profile routing, iterative queries, record store and provider registrations",
+      "persistence": "validated values and provider records use async dht::record_store persistence",
+      "maintenance": "node-owned routing refresh, expiry pruning and jittered local provider republish",
+      "diagnostics": "per-profile routing, record persistence, refresh and provider-registration status",
+      "intended_disposition": "preserve_and_integrate_stage5_topology",
       "builtin_protocols": [ "kad_dht" ],
-      "capabilities": [ "dht" ],
+      "capabilities": [],
+      "public_components": [ "record_store::persistence" ],
       "evidence": {
-        "layers": [ "codec", "state_machine", "raw_node", "donor_interop" ],
-        "source_paths": [ "libraries/net/p2p/node_impl.cpp", "libraries/net/p2p/dht.cpp" ],
-        "tests": [ "test_forge_quic_p2p", "test_forge_libp2p_interop" ],
+        "layers": [ "codec", "state_machine", "raw_node", "official_plugin", "restart_scale", "adversarial", "donor_interop" ],
+        "source_paths": [
+          "libraries/net/p2p/dht.cpp", "libraries/net/p2p/dht_record_store.cpp",
+          "libraries/net/p2p/dht_routing_refresh.cpp", "libraries/net/p2p/node_dht.cpp",
+          "libraries/net/p2p/ipns.cpp", "plugins/p2p/node/object_dht_record_store_adapter.cpp"
+        ],
+        "tests": [ "test_forge_quic_p2p", "test_forge_plugins_db_store", "test_forge_libp2p_interop" ],
         "donor_sources": [ "docs/donors/fcl-p2p-dht-rendezvous-v1.md" ],
         "donor_cases": [
           "dht.message_codec_and_provider_records", "dht.iterative_lookup_and_provider_publication",
-          "interop.live_dht_provider_lookup"
+          "dht.validated_pk_ipns_values", "interop.live_dht_provider_lookup",
+          "interop.live_dht_pk_ipns_values"
         ]
       }
     },
@@ -621,7 +630,7 @@
           "libraries/net/p2p/peer_store.cpp", "libraries/net/p2p/peer_store_impl.cpp",
           "libraries/net/p2p/memory_peer_store_persistence.cpp", "libraries/net/p2p/details/peer_store_impl.hxx",
           "libraries/net/p2p/include/forge/net/p2p/peer_store.cppm", "plugins/p2p/node/object_peer_state_adapter.cpp",
-          "plugins/p2p/node/details/object_peer_state_adapter.hxx", "plugins/p2p/node/details/peer_state_schema.hxx"
+          "plugins/p2p/node/details/object_peer_state_adapter.hxx", "plugins/p2p/node/details/p2p_state_schema.hxx"
         ],
         "tests": [ "test_forge_quic_p2p", "test_forge_plugins_db_store" ],
         "donor_sources": [ "docs/donors/fcl-p2p-dht-rendezvous-v1.md" ],
@@ -637,9 +646,9 @@
       "resource_ownership": "node-owned bounded XOR-distance k-buckets and replacement lists",
       "persistence": "none",
       "maintenance":
-          "Identify and hydration add candidates; validated DHT exchanges admit servers; failures evict active and replacement entries; autonomous refresh remains Stage 3",
-      "diagnostics": "bounded active, replacement, candidate and non-empty bucket counts",
-      "intended_disposition": "integrate_refresh_and_topology_maintenance",
+          "Identify and hydration add candidates; validated DHT exchanges admit servers; node lifecycle refreshes stale non-empty buckets with jitter and backoff",
+      "diagnostics": "bounded routing counts plus startup-pending, in-flight, failure and next-attempt maintenance state",
+      "intended_disposition": "integrate_stage5_topology_maintenance",
       "builtin_protocols": [],
       "capabilities": [],
       "public_components": [ "dht::routing_table" ],
@@ -649,7 +658,8 @@
           "libraries/net/p2p/dht.cpp", "libraries/net/p2p/dht_routing_table_impl.cpp",
           "libraries/net/p2p/dht_exchange.cpp", "libraries/net/p2p/details/dht_routing_table_impl.hxx",
           "libraries/net/p2p/details/dht_exchange.hxx", "libraries/net/p2p/include/forge/net/p2p/dht.cppm",
-          "libraries/net/p2p/node.cpp", "libraries/net/p2p/node_impl.cpp"
+          "libraries/net/p2p/node.cpp", "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/dht_routing_refresh.cpp"
         ],
         "tests": [ "test_forge_quic_p2p" ],
         "donor_sources": [ "docs/donors/fcl-p2p-dht-rendezvous-v1.md" ],
@@ -676,7 +686,7 @@
           "libraries/net/p2p/bootstrap_service.cpp", "libraries/net/p2p/node_impl_lifecycle.cpp",
           "libraries/net/p2p/node_lifecycle.cpp", "plugins/p2p/node/plugin.cpp",
           "plugins/p2p/node/object_peer_state_adapter.cpp", "plugins/p2p/node/details/object_peer_state_adapter.hxx",
-          "plugins/p2p/node/details/peer_state_schema.hxx"
+          "plugins/p2p/node/details/p2p_state_schema.hxx"
         ],
         "tests": [ "test_forge_quic_p2p", "test_forge_plugins", "test_forge_plugins_db_store" ],
         "donor_sources": [ "docs/donors/forge-p2p-node-lifecycle-v1.md" ],

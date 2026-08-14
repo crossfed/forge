@@ -351,13 +351,8 @@ void validate(const node::options& options) {
        options.limits.resources.max_malformed_messages_per_peer == 0 ||
        options.limits.discovery.query_timeout.count() <= 0 || options.limits.discovery.refresh_interval.count() <= 0 ||
        options.limits.discovery.max_parallel_queries == 0 || options.limits.discovery.max_results == 0 ||
-       options.limits.dht.replication == 0 || options.limits.dht.alpha == 0 ||
-       options.limits.dht.replacement_cache_size == 0 || options.limits.dht.failure_threshold == 0 ||
-       options.limits.dht.max_message_size == 0 || options.limits.dht.max_record_size == 0 ||
-       options.limits.dht.max_closer_peers == 0 || options.limits.dht.max_provider_peers == 0 ||
-       options.limits.dht.query_timeout.count() <= 0 || options.limits.dht.refresh_interval.count() <= 0 ||
-       options.limits.dht.provider_record_ttl.count() <= 0 || options.limits.rendezvous.default_ttl.count() <= 0 ||
-       options.limits.rendezvous.min_ttl.count() <= 0 || options.limits.rendezvous.max_ttl.count() <= 0 ||
+       options.limits.rendezvous.default_ttl.count() <= 0 || options.limits.rendezvous.min_ttl.count() <= 0 ||
+       options.limits.rendezvous.max_ttl.count() <= 0 ||
        options.limits.rendezvous.min_ttl > options.limits.rendezvous.max_ttl ||
        options.limits.rendezvous.max_namespace_size == 0 || options.limits.rendezvous.max_registrations_per_peer == 0 ||
        options.limits.rendezvous.max_discover_limit == 0 || options.limits.rendezvous.max_message_size == 0 ||
@@ -410,6 +405,30 @@ void validate(const node::options& options) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P node lifecycle options");
    }
    validate_bootstrap(lifecycle.bootstrap, lifecycle.requirement == bootstrap_requirement::require_connection);
+   constexpr auto max_dht_profiles = std::size_t{64};
+   if (options.dht_profiles.size() > max_dht_profiles) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P DHT profile count exceeds the supported limit");
+   }
+   auto dht_protocols = std::set<protocol_id>{};
+   for (const auto& profile : options.dht_profiles) {
+      forge::net::p2p::validate(profile);
+      if (!dht_protocols.insert(profile.protocol).second) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P DHT profile protocol IDs must be unique");
+      }
+      if (!options.allow_insecure_test_mode) {
+         const auto persistence = options.dht_record_persistence.find(profile.protocol);
+         if (persistence == options.dht_record_persistence.end() || !persistence->second) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                                  "production P2P DHT profile requires durable record persistence");
+         }
+      }
+   }
+   for (const auto& [protocol, persistence] : options.dht_record_persistence) {
+      if (!persistence || !dht_protocols.contains(protocol)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P DHT persistence must reference one configured profile");
+      }
+   }
    const auto& identify = options.identify;
    if (identify.timeout.count() <= 0 || identify.max_message_size == 0 || identify.max_total_message_size == 0 ||
        identify.max_own_message_size == 0 || identify.max_own_message_size > identify.max_message_size ||
@@ -440,7 +459,9 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
       teardown(runtime_value.context().get_executor()), lifecycle(runtime_value.context().get_executor()),
       lifecycle_wakeup(std::make_shared<detail::lifecycle_wakeup>()),
       identify_service(runtime_value.context().get_executor()), store(options.peer_state),
-      routing(local, options.limits.dht) {
+      dht_profiles(
+          detail::make_dht_profile_states(local, options.dht_profiles, options.dht_record_persistence,
+                                          [this](const peer_id& peer) { return store.find_public_key(peer); })) {
    if (!options.allow_insecure_test_mode) {
       const auto identity_peer = make_peer_id(decode_public_key(identity.public_key));
       if (local != identity_peer) {
@@ -454,22 +475,31 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
    }
 }
 
+detail::dht_profile_state& node::impl::dht_profile(const protocol_id& protocol) {
+   const auto found = dht_profiles.find(protocol);
+   if (found == dht_profiles.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "P2P DHT profile is not configured");
+   }
+   return *found->second;
+}
+
+const detail::dht_profile_state& node::impl::dht_profile(const protocol_id& protocol) const {
+   const auto found = dht_profiles.find(protocol);
+   if (found == dht_profiles.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "P2P DHT profile is not configured");
+   }
+   return *found->second;
+}
+
 bool node::impl::launch_tracked(std::function<boost::asio::awaitable<void>()> task) noexcept {
    auto operation = lifecycle.track();
    if (!operation.active()) {
       return false;
    }
    const auto executor = operation.executor();
-   const auto stop_latch = operation.stop_latch();
    try {
       asio::co_spawn(
-          executor,
-          [task = std::move(task), stop_latch]() mutable -> asio::awaitable<void> {
-             if (stop_latch && stop_latch->load(std::memory_order_acquire)) {
-                co_return;
-             }
-             co_await task();
-          },
+          executor, [task = std::move(task)]() mutable -> asio::awaitable<void> { co_await task(); },
           [operation = std::move(operation)](std::exception_ptr error) mutable {
              static_cast<void>(error);
              operation.release();
@@ -518,8 +548,10 @@ std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control_l
    if (options.capabilities.has(capabilities::peer_exchange)) {
       out.push_back(builtins::peer_exchange);
    }
-   if (options.capabilities.has(capabilities::dht) && options.limits.dht.operating_mode == dht::mode::server) {
-      out.push_back(builtins::kad_dht);
+   for (const auto& [protocol, state] : dht_profiles) {
+      if (state->profile.operating_mode == dht::mode::server) {
+         out.push_back(protocol);
+      }
    }
    if (options.capabilities.has(capabilities::rendezvous) &&
        (options.limits.rendezvous.operating_role == rendezvous::role::server ||

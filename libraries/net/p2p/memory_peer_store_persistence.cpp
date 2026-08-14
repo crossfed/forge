@@ -15,7 +15,6 @@ module;
 #include <set>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -44,22 +43,8 @@ namespace {
    return result;
 }
 
-[[nodiscard]] std::string hex_bytes(const std::vector<std::uint8_t>& value) {
-   auto result = std::string{};
-   result.reserve(value.size() * 2U);
-   for (const auto byte : value) {
-      result.push_back(hex_digit(byte >> 4U));
-      result.push_back(hex_digit(byte));
-   }
-   return result;
-}
-
 [[nodiscard]] std::string peer_token(const peer_id& peer) {
    return "0:" + hex_text(peer.value);
-}
-
-[[nodiscard]] std::string provider_token(const peer_store::provider_record& value) {
-   return "1:" + hex_bytes(value.key.bytes) + ':' + hex_text(value.provider.id.value);
 }
 
 [[nodiscard]] std::string rendezvous_token(const rendezvous::registration& value) {
@@ -112,19 +97,6 @@ memory_peer_store_persistence::async_hydrate(peer_store::hydration_request reque
       }
       break;
    }
-   case peer_store::hydration_kind::providers: {
-      auto iterator = after ? providers_by_cursor_.upper_bound(*after) : providers_by_cursor_.begin();
-      auto last_token = std::string{};
-      for (auto count = std::size_t{}; iterator != providers_by_cursor_.end() && count < request.limit;
-           ++iterator, ++count) {
-         last_token = iterator->first;
-         page.providers.push_back(providers_.at(iterator->second));
-      }
-      if (iterator != providers_by_cursor_.end()) {
-         page.cursor = cursor_bytes(last_token);
-      }
-      break;
-   }
    case peer_store::hydration_kind::rendezvous: {
       auto iterator = after ? rendezvous_by_cursor_.upper_bound(*after) : rendezvous_by_cursor_.begin();
       auto last_token = std::string{};
@@ -150,9 +122,6 @@ memory_peer_store_persistence::async_apply(peer_store::mutation_batch batch) {
    auto peers = peers_;
    auto peers_by_cursor = peers_by_cursor_;
    auto peers_by_expiry = peers_by_expiry_;
-   auto providers = providers_;
-   auto providers_by_cursor = providers_by_cursor_;
-   auto providers_by_expiry = providers_by_expiry_;
    auto rendezvous_values = rendezvous_;
    auto rendezvous_by_cursor = rendezvous_by_cursor_;
    auto rendezvous_by_expiry = rendezvous_by_expiry_;
@@ -175,19 +144,6 @@ memory_peer_store_persistence::async_apply(peer_store::mutation_batch batch) {
       }
       peers_by_cursor.erase(peer_token(value));
       peers.erase(value);
-   }
-   for (auto& value : batch.provider_upserts) {
-      const auto key = provider_key{value.key.bytes, value.provider.id};
-      if (const auto current = providers.find(key);
-          current != providers.end() && current->second.expires_at != std::chrono::system_clock::time_point{}) {
-         providers_by_expiry.erase(
-             {current->second.expires_at, current->second.key.bytes, current->second.provider.id});
-      }
-      providers_by_cursor.insert_or_assign(provider_token(value), key);
-      if (value.expires_at != std::chrono::system_clock::time_point{}) {
-         providers_by_expiry.emplace(value.expires_at, value.key.bytes, value.provider.id);
-      }
-      providers.insert_or_assign(key, std::move(value));
    }
    for (auto& value : batch.rendezvous_upserts) {
       const auto key = rendezvous_map_key{value.namespace_name, value.peer};
@@ -214,9 +170,6 @@ memory_peer_store_persistence::async_apply(peer_store::mutation_batch batch) {
    peers_.swap(peers);
    peers_by_cursor_.swap(peers_by_cursor);
    peers_by_expiry_.swap(peers_by_expiry);
-   providers_.swap(providers);
-   providers_by_cursor_.swap(providers_by_cursor);
-   providers_by_expiry_.swap(providers_by_expiry);
    rendezvous_.swap(rendezvous_values);
    rendezvous_by_cursor_.swap(rendezvous_by_cursor);
    rendezvous_by_expiry_.swap(rendezvous_by_expiry);
@@ -244,19 +197,6 @@ memory_peer_store_persistence::async_prune_expired(std::chrono::system_clock::ti
       result.peers.push_back(peer);
       ++removed;
    }
-   while (removed < limit && !providers_by_expiry_.empty() && std::get<0>(*providers_by_expiry_.begin()) <= now) {
-      const auto key =
-          provider_key{std::get<1>(*providers_by_expiry_.begin()), std::get<2>(*providers_by_expiry_.begin())};
-      providers_by_expiry_.erase(providers_by_expiry_.begin());
-      const auto current = providers_.find(key);
-      if (current == providers_.end()) {
-         continue;
-      }
-      result.providers.push_back(current->second);
-      providers_by_cursor_.erase(provider_token(current->second));
-      providers_.erase(current);
-      ++removed;
-   }
    while (removed < limit && !rendezvous_by_expiry_.empty() && rendezvous_by_expiry_.begin()->first <= now) {
       const auto key = rendezvous_by_expiry_.begin()->second;
       rendezvous_by_expiry_.erase(rendezvous_by_expiry_.begin());
@@ -270,7 +210,6 @@ memory_peer_store_persistence::async_prune_expired(std::chrono::system_clock::ti
       ++removed;
    }
    result.may_have_more = (!peers_by_expiry_.empty() && peers_by_expiry_.begin()->first <= now) ||
-                          (!providers_by_expiry_.empty() && std::get<0>(*providers_by_expiry_.begin()) <= now) ||
                           (!rendezvous_by_expiry_.empty() && rendezvous_by_expiry_.begin()->first <= now);
    co_return result;
 }

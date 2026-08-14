@@ -8,12 +8,14 @@ use std::{
 };
 
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
+use libp2p::kad::store::RecordStore;
 use libp2p::{
-    autonat, dcutr, gossipsub, identify, identity, kad,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, autonat, dcutr, gossipsub, identify, identity,
+    kad,
     multiaddr::Protocol,
     noise, ping, relay, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, tls, yamux, Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
+    tcp, tls, yamux,
 };
 use libp2p_stream as raw_stream;
 use rand::rngs::OsRng;
@@ -184,6 +186,51 @@ fn dht_provider_key() -> kad::RecordKey {
         0x9d, 0xeb, 0x2d, 0x2e, 0x3f, 0xb6, 0x86, 0x6d, 0x1c, 0xac, 0x9e, 0x37, 0x3f, 0x5e, 0x5d,
         0x4a, 0x62, 0xad, 0xf9,
     ])
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    if value.len() % 2 != 0 {
+        return Err("hex fixture has odd length".into());
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let text = std::str::from_utf8(pair)?;
+            Ok(u8::from_str_radix(text, 16)?)
+        })
+        .collect()
+}
+
+fn is_dht_value_scenario(scenario: &str) -> bool {
+    scenario == "dht_pk_put_get" || scenario == "dht_ipns_put_get"
+}
+
+fn dht_value_fixture(scenario: &str) -> Result<(kad::RecordKey, Vec<u8>), Box<dyn Error>> {
+    const IDENTITY_MULTIHASH: &str =
+        "00240801122079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664";
+    let (prefix, value) = match scenario {
+        "dht_pk_put_get" => (
+            "2f706b2f",
+            "0801122079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664".to_string(),
+        ),
+        "dht_ipns_put_get" => (
+            "2f69706e732f",
+            [
+                "0a1f2f697066732f6261666b716163336a6f627868676964736e3572777734796b1240b7be19b36e1955d2e1ccddd889d25c",
+                "4eaef61aa72763bc44db9696697be7587e35d2efb2a625e7ac19b05f8c348086114103ee042a5a4041683e39c4ac0c460118",
+                "00221e323033302d30312d30325430333a30343a30352e3132333435363738395a28073080f092cbdd0842408904024a1b09",
+                "b52636334f17b9098f648f9a00214e6c6c89bb954c01300b00f54d085ddcacbe42952f2f819d70a48ff453d13329bb775d66",
+                "e5a4b6165c38a40a4a76a56354544c1b00000045d964b8006556616c7565581f2f697066732f6261666b716163336a6f6278",
+                "68676964736e3572777734796b6853657175656e6365076856616c6964697479581e323033302d30312d30325430333a30343a",
+                "30352e3132333435363738395a6c56616c69646974795479706500",
+            ]
+            .concat(),
+        ),
+        other => return Err(format!("unknown DHT value fixture {other}").into()),
+    };
+    let key = decode_hex(&format!("{prefix}{IDENTITY_MULTIHASH}"))?;
+    Ok((kad::RecordKey::new(&key), decode_hex(&value)?))
 }
 
 fn transport_addr(mut address: Multiaddr) -> Multiaddr {
@@ -439,6 +486,65 @@ async fn wait_dht_provide_find_provider(
     }
 }
 
+async fn wait_dht_put_get(
+    swarm: &mut libp2p::Swarm<Behaviour>,
+    scenario: &str,
+    operation: &str,
+) -> Result<usize, Box<dyn Error>> {
+    let (key, expected) = dht_value_fixture(scenario)?;
+    let mut put_id = None;
+    let mut get_id = None;
+    if operation == "get_only" {
+        get_id = Some(swarm.behaviour_mut().kad.get_record(key.clone()));
+    } else {
+        put_id = Some(swarm.behaviour_mut().kad.put_record(
+            kad::Record::new(key.clone(), expected.clone()),
+            kad::Quorum::One,
+        )?);
+    }
+    let deadline = tokio::time::sleep(Duration::from_secs(30));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return Err("timed out waiting for Kademlia value proof".into()),
+            event = swarm.select_next_some() => {
+                match event {
+                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
+                        id,
+                        result: kad::QueryResult::PutRecord(result),
+                        ..
+                    })) if Some(id) == put_id => {
+                        result?;
+                        if operation == "put_only" {
+                            return Ok(expected.len());
+                        }
+                        get_id = Some(swarm.behaviour_mut().kad.get_record(key.clone()));
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
+                        id,
+                        result: kad::QueryResult::GetRecord(Ok(kad::GetRecordOk::FoundRecord(found))),
+                        ..
+                    })) if Some(id) == get_id => {
+                        if found.record.key != key || found.record.value != expected {
+                            return Err("Kademlia GetRecord returned a different value".into());
+                        }
+                        return Ok(found.record.value.len());
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
+                        id,
+                        result: kad::QueryResult::GetRecord(Err(error)),
+                        ..
+                    })) if Some(id) == get_id => {
+                        return Err(format!("Kademlia GetRecord failed: {error:?}").into());
+                    }
+                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 async fn wait_rendezvous_register_discover(
     swarm: &mut libp2p::Swarm<Behaviour>,
     remote_peer: PeerId,
@@ -522,9 +628,38 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
     let mut seeded = false;
     let mut payloads = HashSet::<String>::new();
     let mut duplicates = 0usize;
+    let expected_record = if is_dht_value_scenario(&opts.scenario) {
+        Some(dht_value_fixture(&opts.scenario)?)
+    } else {
+        None
+    };
+    let mut record_reported = false;
     loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                if ready && !record_reported {
+                    if let Some((key, expected)) = &expected_record {
+                        let found = swarm
+                            .behaviour_mut()
+                            .kad
+                            .store_mut()
+                            .get(key)
+                            .is_some_and(|record| record.value == *expected);
+                        if found {
+                            write_json(
+                                &opts.result_file,
+                                json!({
+                                    "implementation": "rust",
+                                    "role": "listener",
+                                    "scenario": opts.scenario,
+                                    "status": "ok",
+                                    "record_persisted": true
+                                }),
+                            )?;
+                            record_reported = true;
+                        }
+                    }
+                }
                 if ready && !seeded && opts.scenario == "gossipsub_mixed_mesh_stress" && opts.seed_file.exists() {
                     let seeds = fs::read_to_string(&opts.seed_file)?;
                     for line in seeds.lines().filter(|line| !line.is_empty()) {
@@ -726,6 +861,27 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     "scenario": opts.scenario,
                     "status": "ok",
                     "provider_count": count
+                }),
+            )?;
+            return Ok(());
+        }
+        "dht_pk_put_get" | "dht_ipns_put_get" => {
+            let bytes = wait_dht_put_get(&mut swarm, &opts.scenario, &opts.payload).await?;
+            let operation = match opts.payload.as_str() {
+                "put_only" => "put_only",
+                "get_only" => "get_only",
+                _ => "put_get",
+            };
+            write_json(
+                &opts.result_file,
+                json!({
+                    "implementation": "rust",
+                    "role": "dialer",
+                    "scenario": opts.scenario,
+                    "status": "ok",
+                    "operation": operation,
+                    "remote_get": operation == "get_only",
+                    "value_bytes": bytes
                 }),
             )?;
             return Ok(());

@@ -10,6 +10,7 @@
 
 #include "config.hxx"
 #include "lifecycle_phase.hxx"
+#include "object_dht_record_store_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 
@@ -32,6 +33,7 @@ struct plugin::impl {
    forge::plugins::crypto::secrets::api* secrets = nullptr;
    std::shared_ptr<forge::plugins::db::store::store_handle> peer_state_store;
    std::shared_ptr<forge::net::p2p::peer_store::persistence> peer_state;
+   std::vector<std::pair<forge::net::p2p::protocol_id, std::shared_ptr<object_dht_record_store_adapter>>> dht_state;
    forge::net::p2p::pubsub::options pubsub_options{};
    std::shared_ptr<forge::net::p2p::node> node;
    forge::asio::runtime* runtime = nullptr;
@@ -39,6 +41,7 @@ struct plugin::impl {
    std::atomic<lifecycle_phase> phase = lifecycle_phase::idle;
    mutable std::mutex configuration_mutex;
    bool pubsub_requested = false;
+   bool reset_incompatible_peer_state = true;
 
    [[nodiscard]] std::optional<std::vector<route>> begin_startup();
    void mark_started() noexcept;

@@ -147,10 +147,12 @@ full durable-store scan.
 ### 5.4 ObjectDB adapter
 
 `plugins.p2p.node` owns private ObjectDB adapter components over a dedicated
-named `plugins.db.store` Object layer. Schema v1 stores peer and endpoint facts,
-Identify data, provider records, Rendezvous registrations, relay metadata and
-monotonic sequence state. Indexes cover hydration priority, expiry, provider
-key, namespace/sequence and uniqueness.
+named `plugins.db.store` Object layer. The Stage 2 schema v1 stores peer and
+endpoint facts, Identify data, Rendezvous registrations, relay metadata and
+monotonic sequence state. Indexes cover hydration priority, expiry,
+namespace/sequence and uniqueness. Stage 4 replaces provider rows with a
+separate per-profile DHT record-store schema while retaining the same physical
+ObjectDB store.
 
 Read-modify-write and sequence changes share one ObjectDB transaction. Schema
 mismatch fails startup with a typed error. The v1 recovery path is explicit
@@ -225,6 +227,11 @@ Focused evidence includes
 
 ## 7. Stage 4: Complete Kademlia And Durable Record Lifetimes
 
+> **Implementation status:** present on `forge-p2p-kademlia-v1`; the exit gate
+> remains unverified until the focused persistence, adversarial, package and
+> three-process Go/Rust interoperability suites pass on the exact reviewed head.
+> This status does not yet promote Kademlia or the P2P host to production.
+
 ### Standard profile
 
 When `/ipfs/kad/1.0.0` is enabled, Forge implements:
@@ -234,15 +241,27 @@ When `/ipfs/kad/1.0.0` is enabled, Forge implements:
 - value put/get with application-selected validators and selectors, conflict
   handling, expiry and bounded persistence.
 
-`PUT_VALUE` echo behavior is removed before the profile can be enabled. A node
-without a value validator/store rejects value operations deterministically and
-does not advertise the standard full profile.
+The iterative shortlist starts with the local `k` closest peers; `alpha` only
+bounds concurrent RPCs. Provider quorum determines operation acceptance, not
+fanout width, so reaching quorum does not cancel publication to the remaining
+closest peers. Third-party provider results are never promoted to durable local
+ownership without an authenticated `ADD_PROVIDER` from that provider.
+
+`PUT_VALUE` performs bounds checking, validation, deterministic selection and a
+durable commit before returning the donor-compatible echo. A node without the
+complete Amino validator/store contract rejects the profile during
+configuration and does not advertise `/ipfs/kad/1.0.0`.
 
 ### Provider registration lifetime
 
 Providing is represented by an owned registration that supports renewal,
 withdrawal and shutdown. The node owns TTL republish while the caller owns the
 decision that content remains available.
+
+Peer-directory persistence and DHT record persistence are distinct async
+ports. The official plugin maps both to one physical ObjectDB store, using the
+private cache schema v2 for isolated profile values/providers. A v1 cache is
+recoverable state and is explicitly reset and rehydrated; it is not migrated.
 
 ### Provider-only deployments
 
@@ -261,6 +280,10 @@ interoperability with the standard Kademlia profile.
 The current `dht_find_peer` fixture connects directly to the searched peer and
 can be satisfied from the local peer store. It is not live outbound DHT evidence
 until a third-peer route or explicit Kademlia negotiation is proven.
+The `/pk` and `/ipns` fixture uses writer-only PUT, listener persistence
+confirmation and reader-only GET from a distinct fresh process whose local
+store is reset before each attempt. The focused exact-head matrix emits all
+three roles in each evidence artifact.
 
 ## 8. Stage 5+: Production Host Completion
 

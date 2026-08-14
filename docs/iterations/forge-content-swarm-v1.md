@@ -168,7 +168,7 @@ The low-level P2P node already provides DHT operations, where DHT means a
 distributed hash table:
 
 ```cpp
-async_provide(dht::key);
+auto availability = co_await async_provide(profile, dht::key);
 async_find_providers(dht::key);
 ```
 
@@ -197,9 +197,12 @@ DHT find providers
 ```
 
 The provider key is domain-separated from other DHT records and derived from
-the swarm realm plus swarm identity. Provider records expire, and the content
-plugin refreshes announcements before their TTL. Stopping or losing local
-availability stops refresh; v1 does not require an immediate global unprovide.
+the swarm realm plus swarm identity. The content plugin retains the move-only
+`provider_registration` for exactly as long as local content remains
+available. The P2P node owns initial publication, bounded jittered republish
+and withdrawal on registration release or shutdown. Remote provider records
+expire naturally; restart requires the product to confirm availability and
+create a fresh registration.
 
 No public raw `open_protocol_stream()` escape hatch is added for Swarm.
 

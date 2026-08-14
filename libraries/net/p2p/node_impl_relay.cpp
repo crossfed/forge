@@ -676,8 +676,8 @@ boost::asio::awaitable<void> node::impl::handle_relayed_yamux_stream(std::shared
       co_await handle_identify_push(session, std::move(admitted.stream));
    } else if (admitted.protocol == builtins::dcutr) {
       co_await handle_dcutr(session, std::move(admitted.stream));
-   } else if (admitted.protocol == builtins::kad_dht) {
-      co_await handle_dht(session, std::move(admitted.stream));
+   } else if (dht_profiles.contains(admitted.protocol)) {
+      co_await handle_dht(session, admitted.protocol, std::move(admitted.stream));
    } else if (admitted.protocol == builtins::rendezvous) {
       co_await handle_rendezvous(session, std::move(admitted.stream));
    } else if (admitted.protocol == builtins::meshsub_v11 || admitted.protocol == builtins::meshsub_v10) {

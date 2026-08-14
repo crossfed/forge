@@ -24,14 +24,12 @@ and autonomous topology are complete.
 
 The following surfaces are not production claims yet:
 
-- Kademlia, Rendezvous, Peer Exchange, Ping sampling and AutoNAT are explicit or
-  inbound operations without complete node-owned maintenance;
-- Kademlia now has bounded node-owned k-buckets, DHT-exchange-verified server
-  admission and failure eviction; Identify and hydrated records remain
-  candidates until a valid DHT response, while autonomous refresh and the
-  standard value profile are still Stage 4 work;
-- standard Kademlia value operations do not have a value store or validation
-  policy;
+- Kademlia now provides isolated Amino and product profiles, bounded node-owned
+  k-buckets, autonomous refresh, durable validated values, owned provider
+  registration and `/pk`/`/ipns` interoperability; it remains `partial` until
+  Stage 5 topology and complete production-host evidence are finished;
+- Rendezvous, Peer Exchange, Ping sampling and AutoNAT still lack the complete
+  unified topology lifecycle planned for Stage 5+;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
   reachability feed;
 - GossipSub scoring and autonomous topology remain incomplete.
@@ -69,7 +67,8 @@ donor run.
   `forge.net.p2p.lifecycle`.
 - `forge.net.p2p.protocol`, `forge.net.p2p.message`, `forge.net.p2p.negotiation`.
 - `forge.net.p2p.peer_store`, `forge.net.p2p.discovery`, `forge.net.p2p.dht`,
-  `forge.net.p2p.rendezvous`.
+  `forge.net.p2p.dht.record_store`, `forge.net.p2p.ipns`,
+  `forge.net.p2p.provider_registration`, `forge.net.p2p.rendezvous`.
 - `forge.net.p2p.pubsub`.
 - `forge.net.p2p.relay`, `forge.net.p2p.scoring`,
   `forge.net.p2p.resource_manager`.
@@ -80,7 +79,8 @@ Target: `forge_net_p2p`.
 Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`,
 `forge_net_tcp`, `forge_net_quic`, `forge_net_yamux`, `forge_multiformats` and
 Boost.Asio. The library has no database dependency; durable state is supplied
-through the asynchronous `peer_store::persistence` port.
+through the asynchronous `peer_store::persistence` and
+`dht::record_store::persistence` ports.
 
 Foundation compatibility modules below P2P live in `forge_multiformats`:
 `forge.multiformats.varint`, `forge.multiformats.multicodec`,
@@ -213,24 +213,27 @@ must use the same private direct profile boundary.
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint
 compatibility convenience for older single-listen consumers.
 
-### Peer State Persistence
+### Peer And DHT Record Persistence
 
 The low-level node requires `peer_store::persistence` outside explicit insecure
 tests. The backend-neutral asynchronous contract provides paged hydration,
 atomic mutation batches, bounded expiry pruning, flush and deterministic close.
-Prune returns the exact peer, provider and Rendezvous identities removed, so
+Prune returns the exact peer and Rendezvous identities removed, so
 the bounded operational directory applies the same deletion set even when the
 durable store contains older records that were not hydrated.
 The operational directory remains bounded and performs indexed point/candidate
 queries without scanning durable history. Per-peer endpoint, protocol, relay and
 total variable-byte limits prevent one remote peer from bypassing the global
 peer and persistence-queue bounds. The endpoint and total variable-byte limits
-also apply to each provider and Rendezvous record, including records returned
-during hydration, before any operational state is changed.
+also apply to each Rendezvous record, including records returned during
+hydration, before any operational state is changed. DHT provider/value bounds
+belong to the profile-scoped `dht::record_store` described below.
 
 Identify address provenance is operational metadata used to replace each live
 unsigned or certified snapshot without appending stale addresses. The existing
-ObjectDB schema v1 is unchanged: hydrated endpoints conservatively re-enter as
+ObjectDB cache schema v2 separates peer/Rendezvous rows from profile-scoped DHT
+value/provider rows while retaining one physical named store. Hydrated peer
+endpoints conservatively re-enter as
 learned cache facts and age through the existing peer-health/expiry policy;
 the next verified Identify refresh establishes provenance for its live
 snapshot.
@@ -249,6 +252,52 @@ may implement the persistence port over their own lifecycle owner. The memory
 implementation is deterministic but intended only for tests and explicit local
 experiments.
 
+Peer state and DHT records are intentionally separate operational domains even
+when the official plugin stores them in one physical ObjectDB store. Each DHT
+profile owns an isolated routing table, value/provider record store, query and
+maintenance lifecycle. The Amino profile fixes `/ipfs/kad/1.0.0`, `k=20`,
+`alpha=10`, `/pk` and `/ipns`; product validators/selectors require a distinct
+product protocol ID. Queries initialize the shortlist from the local `k`
+closest peers and use `alpha` only as the concurrent RPC bound.
+Per-profile diagnostics expose whether autonomous maintenance is enabled, the
+startup lookup and in-flight state, consecutive failures and the bounded delay
+until the next attempt.
+
+Custom value validators report deterministic record invalidity with
+`exceptions::record_rejected`. Capacity, persistence, key resolution and other
+operational failures must retain their original typed error so a GET quorum
+cannot silently discard a locally valid record.
+`record_store::async_put_received()` is the explicit network-ingress boundary:
+it returns an empty result only for validator-origin record rejection. Durable
+apply failures, including a backend exception carrying the same error code,
+still propagate and mark persistence degraded. Direct application writes use
+`async_put()` and never silently discard an invalid value.
+Value retention is controlled independently by `value_record_ttl`; provider
+identity, provider addresses and provider republishing retain their separate
+TTL settings. All wire-derived lifetimes are positive and bounded by the DHT
+`uint32` TTL representation before deadline arithmetic.
+
+Amino keeps the donor-compatible 16 KiB outbound message limit and accepts the
+larger bounded inbound messages used by Go/Rust implementations. Inbound peer
+lists and endpoint lists are parsed into fixed local bounds instead of rejecting
+an otherwise valid response solely because it contains more candidates than
+Forge will retain.
+
+`async_provide()` returns a move-only `provider_registration`. Its first
+publication is acknowledged only after the local record is durable and the
+requested remote quorum succeeds. The node renews that exact endpoint snapshot
+with jitter while an owner remains; the last withdrawal removes local
+ownership. Restart never resumes publication without a fresh product-owned
+registration. Reaching the caller's quorum does not stop publication to the
+remaining closest peers: the node attempts the complete `k`-bounded fanout and
+reports success only when the requested quorum was reached.
+
+Only an authenticated `ADD_PROVIDER` from the claimed provider creates durable
+remote ownership. Providers returned by third-party `GET_PROVIDERS` responses
+are bounded discovery results and are not assigned a fresh local TTL. Likewise,
+`GET_VALUE` returns the remaining lifetime of a stored record rather than
+replaying the TTL from the original request.
+
 For a mutation requesting durable acknowledgement, persistence distinguishes a
 failed commit from a commit whose subsequent durable flush could not be
 confirmed. The latter is applied to operational state, marks the store degraded
@@ -260,10 +309,16 @@ only by a later confirmed durable apply or explicit flush.
 count and last persistence failure so operators do not have to infer durable
 health from a transient call error.
 
-Production ObjectDB hydration validates one raw row at a time through one shared
-snapshot. Per-record limits are checked before conversion into operational peer
-state, so a malformed durable row cannot force an unbounded hydration page into
-memory. DHT deadlines bound the remote wire exchanges. Once a provider or
+Production ObjectDB hydration validates one raw row at a time. Each bounded
+page is read through its own operation-scoped snapshot; no unbounded snapshot is
+held across the complete hydration sequence. Per-record limits are checked
+before conversion into operational peer or DHT state, so a malformed durable
+row cannot force an unbounded hydration page into memory. Before live-record
+capacity is enforced, DHT hydration removes expired durable rows in bounded
+prune pages. `max_hydration_pages` bounds each startup phase; exhaustion
+returns typed backpressure instead of holding the persistence gate forever, and
+a later hydration attempt continues from the already committed cleanup. DHT
+deadlines bound the remote wire exchanges. Once a provider or
 Rendezvous record has been accepted for durable acknowledgement, its persistence
 step remains owned and awaited by the caller instead of being abandoned after a
 possibly committed transaction.

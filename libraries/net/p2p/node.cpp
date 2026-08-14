@@ -83,14 +83,15 @@ import forge.net.yamux.session;
 
 namespace forge::net::p2p {
 
-void remember_dht_peer(peer_store& store, dht::routing_table& routing, std::chrono::milliseconds refresh_interval,
-                       const dht::peer& value, dht::routing_admission admission) {
-   store.upsert_routing_peer(value, discovery::source::dht, std::chrono::system_clock::now() + refresh_interval);
+void remember_dht_peer(peer_store& store, const protocol_id& protocol, dht::routing_table& routing,
+                       std::chrono::milliseconds refresh_interval, const dht::peer& value,
+                       dht::routing_admission admission) {
+   store.upsert_routing_peer(protocol, value, discovery::source::dht,
+                             std::chrono::system_clock::now() + refresh_interval);
    routing.upsert(value, admission);
 }
 
-void mark_dht_failure(peer_store& store, dht::routing_table& routing, const peer_id& peer) {
-   store.mark_failure(peer);
+void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) {
    routing.mark_failure(peer);
 }
 
@@ -299,13 +300,51 @@ exchange_rendezvous(const auto& self, const peer_id& peer, rendezvous::message r
    }
 }
 
+boost::asio::awaitable<void> async_stop_owned(auto self) {
+   auto failure = std::exception_ptr{};
+   try {
+      co_await self->provider_registry->async_drain();
+   } catch (...) {
+      failure = std::current_exception();
+   }
+   co_await self->lifecycle.wait();
+   co_await self->teardown.wait();
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
+   for (auto& [_, profile] : self->dht_profiles) {
+      try {
+         co_await profile->records.async_close();
+      } catch (...) {
+         if (!failure) {
+            failure = std::current_exception();
+         }
+      }
+   }
+   try {
+      co_await self->store.async_close();
+   } catch (...) {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   }
+   self->lifecycle.finish_stop();
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
+}
+
 } // namespace
 
 node::node(forge::asio::runtime& runtime, node::options options) {
    validate(options);
    impl_ = std::make_shared<impl>(runtime, std::move(options));
    impl_->validate_local_identify_document();
+   impl_->initialize_dht_provider_registry();
    impl_->initialize_lifecycle();
+   // Launch the self-owning maintenance task only after every throwing
+   // constructor step has completed.
+   impl_->initialize_dht_routing_refresh();
 }
 
 node::~node() {
@@ -368,6 +407,39 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
    const auto retained_identify_attempts = impl_->identify_service.retained();
    const auto records =
        options.max_peers > 0 ? impl_->store.snapshot(options.max_peers) : std::vector<peer_store::record>{};
+   auto dht_profiles = std::vector<forge::net::p2p::diagnostics::dht_profile_state>{};
+   dht_profiles.reserve(std::min(options.max_dht_profiles, impl_->dht_profiles.size()));
+   for (const auto& [protocol, state] : impl_->dht_profiles) {
+      if (dht_profiles.size() == options.max_dht_profiles) {
+         break;
+      }
+      const auto routing = state->routing.status();
+      const auto records_state = state->records.persistence_state();
+      const auto maintenance = impl_->routing_refresh ? impl_->routing_refresh->status(protocol) : std::nullopt;
+      dht_profiles.push_back(forge::net::p2p::diagnostics::dht_profile_state{
+          .protocol = protocol,
+          .kind = state->profile.kind == dht::profile_kind::amino_v1 ? "amino-v1" : "custom",
+          .mode = state->profile.operating_mode == dht::mode::server ? "server" : "client",
+          .peers = state->profile.capabilities.peers,
+          .providers = state->profile.capabilities.providers,
+          .values = state->profile.capabilities.values,
+          .routing_active = routing.active,
+          .routing_replacements = routing.replacements,
+          .routing_candidates = routing.candidates,
+          .routing_nonempty_buckets = routing.nonempty_buckets,
+          .maintenance_enabled = maintenance.has_value(),
+          .maintenance_startup_pending = maintenance && maintenance->startup_lookup_pending,
+          .maintenance_in_flight = maintenance && maintenance->in_flight,
+          .maintenance_failures = maintenance ? maintenance->failures : 0,
+          .maintenance_next_attempt = maintenance ? maintenance->next_attempt_in : std::chrono::milliseconds{0},
+          .persistence_failures = records_state.failure_count,
+          .persistence_degraded = records_state.degraded,
+          .durability_uncertain = records_state.durability_uncertain,
+          .persistence_closing = records_state.closing,
+          .persistence_closed = records_state.closed,
+          .last_persistence_failure = records_state.last_failure,
+      });
+   }
    auto lock = std::scoped_lock{impl_->mutex};
    auto out = forge::net::p2p::diagnostics::snapshot{};
    out.network = forge::net::p2p::diagnostics::network_state{
@@ -398,6 +470,7 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
        .closed = persistence.closed,
        .last_failure = persistence.last_failure,
    };
+   out.dht_profiles = std::move(dht_profiles);
 
    const auto now = std::chrono::steady_clock::now();
    out.sessions.reserve(connection_snapshot.sessions.size());
@@ -445,8 +518,8 @@ const peer_store& node::peers() const noexcept {
    return impl_->store;
 }
 
-dht::routing_status node::routing_status() const {
-   return impl_->routing.status();
+dht::routing_status node::routing_status(const protocol_id& profile) const {
+   return impl_->dht_profile(profile).routing.status();
 }
 
 void node::protect_peer(peer_id peer, std::string tag) {
@@ -779,16 +852,9 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
 }
 
 boost::asio::awaitable<void> node::async_stop() {
+   auto self = impl_;
    stop();
-   co_await impl_->lifecycle.wait();
-   co_await impl_->teardown.wait();
-   try {
-      co_await impl_->store.async_close();
-   } catch (...) {
-      impl_->lifecycle.finish_stop();
-      throw;
-   }
-   impl_->lifecycle.finish_stop();
+   return async_stop_owned(std::move(self));
 }
 
 void node::stop() {

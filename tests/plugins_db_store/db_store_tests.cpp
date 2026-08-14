@@ -818,7 +818,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_descriptor_keeps_production_dependencies_an
 
    const auto plugin = descriptor.factory();
    BOOST_REQUIRE(plugin != nullptr);
-   BOOST_TEST(plugin->version() == "2.0.0");
+   BOOST_TEST(plugin->version() == "3.0.0");
 
    const auto api_descriptor = p2p_node::api::describe();
    BOOST_TEST(api_descriptor.id.value == "forge.plugins.p2p.node");

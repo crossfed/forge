@@ -31,7 +31,8 @@ namespace capabilities {
 inline constexpr std::uint64_t direct_quic = 1ULL << 0;
 inline constexpr std::uint64_t relay = 1ULL << 1;
 inline constexpr std::uint64_t peer_exchange = 1ULL << 2;
-inline constexpr std::uint64_t dht = 1ULL << 3;
+// Bit 3 was the pre-profile DHT capability. Keep the gap so the remaining
+// persisted diagnostic bits retain their numeric values.
 inline constexpr std::uint64_t autonat = 1ULL << 4;
 inline constexpr std::uint64_t hole_punching = 1ULL << 5;
 inline constexpr std::uint64_t relay_reservation = 1ULL << 6;
