@@ -22,7 +22,7 @@ public failure is a typed Forge exception and a downstream backend proves both
 supported deployment modes:
 
 - self-contained mode, where the native backend serves the installed frontend
-  bundle;
+  bundle and terminates HTTPS itself;
 - reverse-proxy mode, where nginx, Caddy or an ingress serves the same bundle
   and proxies only the typed backend API.
 
@@ -59,7 +59,8 @@ Forge already provides the required foundations:
 | Need | Existing owner |
 | --- | --- |
 | Async runtime and cancellation | `forge_app`, `forge_asio`, Boost.Asio |
-| HTTP server, router and files | `forge_net_http`, Boost.Beast, Boost.URL |
+| HTTP client, server, router and files | `forge_net_http`, Boost.Beast, Boost.URL |
+| TLS contexts and PKI validation | OpenSSL, Forge Crypto PKI and existing STCP donor mechanics |
 | Typed API and OpenAPI | `forge_api_core`, `forge_api_http` |
 | HTTP lifecycle and middleware | `forge_plugins_http_server` |
 | Cryptographic random | `forge_crypto_core`, backed by OpenSSL `RAND_bytes` |
@@ -80,6 +81,22 @@ OIDC, JOSE/JWT, JWKS, enterprise identity, password authentication and RBAC are
 outside v1. A future multi-user block must select a mature implementation after
 a separate donor and security review. JWT or OIDC must not be implemented
 manually with Boost.JSON and OpenSSL primitives.
+
+### Mandatory server-side TLS gap
+
+Current `forge_net_http` TLS support is asymmetric. The HTTP client creates a
+verified `boost::beast::ssl_stream<boost::beast::tcp_stream>` for HTTPS, while
+the HTTP server accepts a plain TCP socket and creates only
+`boost::beast::tcp_stream`. `forge::net::http::server_config` and the HTTP
+Server plugin consequently expose no certificate, private key, trust or TLS
+handshake policy.
+
+Linking OpenSSL into `forge_net_http` does not make the inbound listener a TLS
+server. Closing this gap is mandatory in this iteration. Self-contained
+production mode must provide native HTTPS without nginx, Caddy or an ingress.
+
+The implementation uses Boost.Beast TLS server streams. It must not add a new
+HTTP server backend and must not shell out to an external TLS process.
 
 ## Library Ownership
 
@@ -157,6 +174,36 @@ around these neutral functions.
 
 ## Existing Forge Changes
 
+### `forge_net_tls`
+
+Create a focused TLS leaf shared by secure TCP and HTTP server mechanics:
+
+```text
+target:     forge_net_tls
+namespace:  forge::net::tls
+modules:    forge.net.tls.options
+            forge.net.tls.context
+            forge.net.tls.exceptions
+```
+
+It owns reusable OpenSSL and Boost.Asio TLS mechanics:
+
+- bounded certificate chain, private key and trust-anchor loading;
+- certificate/private-key consistency validation;
+- TLS protocol floor and secure context defaults;
+- server and client verification modes;
+- optional client-certificate validation for mTLS;
+- SNI and ALPN policy values;
+- peer certificate extraction and typed verification failures;
+- immutable context snapshots suitable for atomic credential rotation.
+
+The existing STCP implementation is the donor for these mechanics. Shared
+context construction is extracted rather than copied. STCP public behavior and
+P2P contracts do not change as part of the extraction.
+
+`forge_net_tls` does not own HTTP, TCP listening, secret ids, config documents,
+certificate issuance, ACME or product trust policy.
+
 ### `forge_crypto_core`
 
 Add one public constant-time byte comparison primitive backed by the existing
@@ -198,6 +245,34 @@ responses. It must provide:
 
 It does not build TypeScript, upload files, watch source directories, execute
 Node.js or become a general web framework.
+
+The existing HTTP server additionally gains native TLS sessions based on:
+
+```cpp
+boost::beast::ssl_stream<boost::beast::tcp_stream>
+```
+
+The listener selects plain or TLS mode once from immutable server options. In
+TLS mode every accepted socket completes a bounded server handshake before any
+HTTP bytes are parsed. A failed handshake closes the connection and never
+falls back to plaintext.
+
+HTTP TLS server requirements:
+
+- TLS 1.3 by default, with any broader policy explicit;
+- bounded handshake timeout and concurrent pending handshakes;
+- one immutable server identity snapshot per accepted connection;
+- optional mTLS with required trust anchors;
+- `http/1.1` ALPN only until Forge implements another HTTP protocol;
+- the existing body, header, idle, cancellation and shutdown limits after the
+  handshake;
+- no clear private key in public status, logs or typed diagnostics;
+- context rotation for new connections without invalidating established
+  sessions.
+
+`forge::net::http::server_config` receives transport-level TLS options or an
+immutable TLS context provider. It does not receive Forge Secret ids because a
+network library must not depend on a runtime plugin.
 
 ### `forge_plugins_http_server`
 
@@ -272,6 +347,37 @@ Both paths can still share one browser origin because the reverse proxy serves
 `/admin` locally and forwards `/admin-ui/v1` to the native backend. The backend
 must not trust forwarded scheme, address or identity headers unless the proxy
 source is explicitly configured as trusted.
+
+The HTTP Server plugin also exposes schema-driven TLS policy. A representative
+product configuration is:
+
+```yaml
+plugins:
+  http:
+    server:
+      bind-address: 0.0.0.0
+      port: 443
+      tls:
+        mode: server
+        certificate-chain-secret: admin-http-certificate
+        private-key-secret: admin-http-private-key
+        minimum-version: tls1.3
+        handshake-timeout-ms: 10000
+```
+
+`mode` is `disabled`, `server` or `mutual`. Mutual TLS additionally requires a
+trusted client-CA secret. Secret names are configuration values; clear PEM and
+private key material are resolved through Forge Crypto Secrets during plugin
+lifecycle and are never emitted by config or status APIs. Missing Secrets
+support, missing material, malformed PEM or a certificate/key mismatch fail
+startup. TLS failure never silently starts a plaintext listener on the
+configured port.
+
+The plugin owns an explicit local credential-reload operation. Reload resolves
+and validates a complete new identity first, then atomically swaps the context
+used by new connections. Existing connections retain their original context.
+Partial or invalid rotation leaves the previous identity active and returns a
+typed failure.
 
 Middleware responses also gain an append operation or a typed cookie operation
 that preserves repeated `Set-Cookie` fields. HTTP requires one header field per
@@ -381,6 +487,10 @@ the browser an opaque Secure HttpOnly session cookie.
 - Session, CSRF and pre-session cookies use distinct names and secrets.
 - Production browser access requires HTTPS. Plain HTTP is restricted to an
   explicit loopback development policy.
+- TLS-enabled startup fails closed when identity or trust material is missing,
+  malformed or inconsistent.
+- Native TLS and reverse-proxy TLS expose the same authenticated product API;
+  neither mode changes session or authorization semantics.
 - Assets and API share one origin, but asset paths never bypass API middleware
   or expose arbitrary filesystem files.
 - Disabling the embedded asset mount does not weaken API authentication; an
@@ -390,17 +500,21 @@ the browser an opaque Secure HttpOnly session cookie.
 
 ## Delivery Order
 
-1. Add `forge.crypto.core` constant-time comparison and migrate Bearer auth.
-2. Add `forge_auth_pairing` with deterministic transition and adversarial
+1. Extract the reusable `forge_net_tls` context and verification substrate from
+   existing STCP mechanics without changing STCP behavior.
+2. Add Boost.Beast server-side TLS to `forge_net_http` and schema-driven TLS
+   lifecycle to `forge_plugins_http_server`.
+3. Add `forge.crypto.core` constant-time comparison and migrate Bearer auth.
+4. Add `forge_auth_pairing` with deterministic transition and adversarial
    tests.
-3. Add `forge_auth_session` with fixation, expiry, rotation and revocation
+5. Add `forge_auth_session` with fixation, expiry, rotation and revocation
    tests.
-4. Add `forge.net.http.cookie` and repeated `Set-Cookie` preservation.
-5. Add `forge_auth_http` and middleware integration tests.
-6. Add `forge.net.http.assets` and constrained server-plugin asset mounting.
-7. Add package components, relocation consumers, READMEs and donor
+6. Add `forge.net.http.cookie` and repeated `Set-Cookie` preservation.
+7. Add `forge_auth_http` and middleware integration tests.
+8. Add `forge.net.http.assets` and constrained server-plugin asset mounting.
+9. Add package components, relocation consumers, READMEs and donor
    traceability.
-8. Integrate the released components into a downstream native admin backend.
+10. Integrate the released components into a downstream native admin backend.
 
 Each new library follows the current `create-library` skill. The HTTP server
 plugin extension additionally follows `create-plugin`. Aggregate targets,
@@ -420,6 +534,15 @@ Crypto and auth:
 
 HTTP:
 
+- live TLS 1.3 server handshake through Boost.Beast;
+- verified hostname and CA HTTPS client against the live Forge server;
+- missing certificate, missing key, mismatched identity and malformed PEM;
+- plaintext request to a TLS listener and TLS request to a plaintext listener;
+- handshake timeout, cancellation, bounded pending handshakes and clean
+  shutdown;
+- optional mTLS acceptance and rejection;
+- certificate context rotation while existing sessions remain valid;
+- no plaintext fallback after TLS startup or handshake failure;
 - strict cookie parse/format round trips;
 - cookie attribute injection and header-splitting rejection;
 - multiple `Set-Cookie` fields preserved through middleware and a live server;
@@ -439,7 +562,8 @@ Assets:
 
 Integration:
 
-- one typed workflow API and asset bundle on the same origin;
+- one typed workflow API and asset bundle on the same native HTTPS origin;
+- equivalent authenticated behavior behind a trusted TLS reverse proxy;
 - first-owner pairing through a private local approval boundary;
 - restart with durable pending/session state;
 - credential rotation/revocation without restarting the HTTP server;
@@ -455,3 +579,4 @@ Integration:
 - OIDC, JOSE/JWT, JWKS, SSO, multi-user RBAC or password login.
 - Browser-held private signing keys or long-lived downstream credentials.
 - A new HTTP transport, Chain API client, database engine or crypto vendor.
+- HTTP/2, HTTP/3, ACME certificate issuance or a general certificate manager.
