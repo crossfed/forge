@@ -6157,6 +6157,22 @@ BOOST_AUTO_TEST_CASE(p2p_relay_only_open_does_not_record_direct_failure_or_evict
       wait_on_runtime(runtime, std::chrono::milliseconds{50}, "inbound DHT Identify admission");
    }
    BOOST_REQUIRE(source.routing_status(content_swarm_test_dht).active > 0U);
+   for (auto attempt = 0U; attempt < 40U; ++attempt) {
+      const auto state = source.diagnostics();
+      const auto profile = std::ranges::find_if(
+          state.dht_profiles, [](const auto& value) { return value.protocol == content_swarm_test_dht; });
+      BOOST_REQUIRE(profile != state.dht_profiles.end());
+      if (!profile->maintenance_startup_pending && !profile->maintenance_in_flight) {
+         break;
+      }
+      wait_on_runtime(runtime, std::chrono::milliseconds{50}, "startup DHT maintenance completion");
+   }
+   const auto stable = source.diagnostics();
+   const auto stable_profile = std::ranges::find_if(
+       stable.dht_profiles, [](const auto& value) { return value.protocol == content_swarm_test_dht; });
+   BOOST_REQUIRE(stable_profile != stable.dht_profiles.end());
+   BOOST_REQUIRE(!stable_profile->maintenance_startup_pending);
+   BOOST_REQUIRE(!stable_profile->maintenance_in_flight);
    (void)forge::asio::blocking::run(runtime, source.async_reserve_relay(relay_node.local_peer()));
    (void)forge::asio::blocking::run(runtime, target.async_reserve_relay(relay_node.local_peer()));
 
