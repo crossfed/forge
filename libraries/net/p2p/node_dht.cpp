@@ -77,6 +77,7 @@ import forge.net.yamux.session;
 
 #include "details/dht_fanout.hxx"
 #include "details/dht_query.hxx"
+#include "details/dht_time.hxx"
 #include "details/identity_signature.hxx"
 #include "details/node_impl.hxx"
 
@@ -115,15 +116,22 @@ namespace {
                                                           : dht::connection_type::can_connect};
 }
 
-void merge_provider(std::vector<dht::peer>& output, dht::peer value, std::size_t limit) {
+void merge_provider(std::vector<dht::peer>& output, dht::peer value, std::size_t peer_limit,
+                    std::size_t endpoint_limit) {
    const auto current = std::ranges::find_if(output, [&](const auto& item) { return item.id == value.id; });
    if (current == output.end()) {
-      if (output.size() < limit) {
+      if (output.size() < peer_limit) {
+         if (value.endpoints.size() > endpoint_limit) {
+            value.endpoints.resize(endpoint_limit);
+         }
          output.push_back(std::move(value));
       }
       return;
    }
    for (auto& endpoint : value.endpoints) {
+      if (current->endpoints.size() >= endpoint_limit) {
+         break;
+      }
       const auto known = std::ranges::any_of(
           current->endpoints, [&](const auto& item) { return item.to_string() == endpoint.to_string(); });
       if (!known) {
@@ -252,13 +260,13 @@ boost::asio::awaitable<std::size_t> publish_provider(const auto& self, const pro
 
 } // namespace
 
-boost::asio::awaitable<bool> node::impl::async_refresh_dht_routing(protocol_id protocol, dht::key target) {
+boost::asio::awaitable<bool> node::impl::async_refresh_dht_routing(protocol_id protocol, dht::key target,
+                                                                   std::chrono::milliseconds timeout) {
    auto self = shared_from_this();
+   const auto requested_count = dht_profile(protocol).profile.limits.replication;
    const auto result =
        co_await run_lookup(self, protocol, std::move(target), std::nullopt, dht::message_type::find_node,
-                           dht::query_options{.requested_count = dht_profile(protocol).profile.limits.replication,
-                                              .quorum = 1,
-                                              .timeout = std::chrono::seconds{10}});
+                           dht::query_options{.requested_count = requested_count, .quorum = 1, .timeout = timeout});
    co_return result.converged;
 }
 
@@ -281,8 +289,8 @@ void node::impl::initialize_dht_provider_registry() {
               const auto self = weak.lock();
               return self && self->launch_tracked(std::move(task));
            },
-       .prepare = [weak](protocol_id protocol, dht::key key,
-                         detail::dht_provider_registry::schedule renewal) -> boost::asio::awaitable<dht::peer> {
+       .prepare = [weak](protocol_id protocol, dht::key key, detail::dht_provider_registry::schedule renewal)
+           -> boost::asio::awaitable<detail::dht_provider_registry::prepared_provider> {
           const auto self = weak.lock();
           if (!self) {
              FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node no longer owns DHT provider state");
@@ -293,17 +301,25 @@ void node::impl::initialize_dht_provider_registry() {
                                    "DHT provider publication requires an advertised endpoint");
           }
           auto& state = self->dht_profile(protocol);
+          if (endpoints.size() > state.profile.limits.max_peer_endpoints) {
+             endpoints.resize(state.profile.limits.max_peer_endpoints);
+          }
+          const auto stamped_at = std::chrono::steady_clock::now();
           const auto now = std::chrono::system_clock::now();
           co_await state.records.async_upsert_provider(dht::record_store::provider_record{
               .key = key,
               .provider = self->local,
               .endpoints = endpoints,
-              .provider_expires_at = now + renewal.provider_ttl,
-              .addresses_expires_at = now + renewal.address_ttl,
+              .provider_expires_at = detail::dht_expiry_after(now, renewal.provider_ttl),
+              .addresses_expires_at = detail::dht_expiry_after(now, renewal.address_ttl),
               .local_owned = true,
           });
-          co_return dht::peer{
-              .id = self->local, .endpoints = std::move(endpoints), .connection = dht::connection_type::connected};
+          co_return detail::dht_provider_registry::prepared_provider{
+              .provider = dht::peer{.id = self->local,
+                                    .endpoints = std::move(endpoints),
+                                    .connection = dht::connection_type::connected},
+              .stamped_at = stamped_at,
+          };
        },
        .publish = [weak](protocol_id protocol, dht::key key, dht::peer provider,
                          dht::query_options query) -> boost::asio::awaitable<std::size_t> {
@@ -396,7 +412,7 @@ boost::asio::awaitable<std::vector<dht::peer>> async_find_providers_owned(auto s
    validate_query_options(options);
    auto output = std::vector<dht::peer>{};
    for (const auto& provider : state.records.find_providers(key, options.requested_count)) {
-      merge_provider(output, provider_peer(provider), options.requested_count);
+      merge_provider(output, provider_peer(provider), options.requested_count, state.profile.limits.max_peer_endpoints);
    }
    if (output.size() >= options.requested_count) {
       co_return output;
@@ -409,7 +425,7 @@ boost::asio::awaitable<std::vector<dht::peer>> async_find_providers_owned(auto s
       // A third-party GET_PROVIDERS response is discovery evidence, not an
       // authenticated provider announcement. Only inbound ADD_PROVIDER stores
       // durable provider ownership.
-      merge_provider(output, std::move(provider), options.requested_count);
+      merge_provider(output, std::move(provider), options.requested_count, state.profile.limits.max_peer_endpoints);
    }
    co_return output;
 }
@@ -499,17 +515,16 @@ boost::asio::awaitable<dht::value_get_result> async_get_value_owned(auto self, p
                               if (!response.record_value) {
                                  co_return false;
                               }
-                              try {
-                                 const auto now = std::chrono::system_clock::now();
-                                 const auto stored = co_await state.records.async_put(
-                                     {.record = *response.record_value,
-                                      .expires_at = dht_value_expiry(*response.record_value, now, state.profile)},
-                                     now);
-                                 result.selected = stored.selected.record;
-                                 ++result.valid_records;
-                              } catch (const forge::exceptions::base&) {
-                                 // Invalid remote values do not poison the local winner or abort the remaining quorum.
+                              const auto now = std::chrono::system_clock::now();
+                              const auto stored = co_await state.records.async_put_received(
+                                  {.record = *response.record_value,
+                                   .expires_at = dht_value_expiry(*response.record_value, now, state.profile)},
+                                  now);
+                              if (!stored) {
+                                 co_return false;
                               }
+                              result.selected = stored->selected.record;
+                              ++result.valid_records;
                               co_return result.valid_records >= quorum;
                            });
    result.responses = lookup.value_responses.size();

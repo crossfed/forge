@@ -120,7 +120,7 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
          continue;
       }
       const auto persisted_expiry = value.expires_at;
-      static_cast<void>(prepare_value(value, now));
+      static_cast<void>(prepare_value(value, now, false));
       if (value.expires_at != persisted_expiry) {
          expiry_updates.push_back(value);
       }

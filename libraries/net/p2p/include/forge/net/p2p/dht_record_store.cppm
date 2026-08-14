@@ -127,6 +127,9 @@ class record_store {
 
    boost::asio::awaitable<put_result>
    async_put(value_record incoming, std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
+   boost::asio::awaitable<std::optional<put_result>>
+   async_put_received(value_record incoming,
+                      std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
    boost::asio::awaitable<void>
    async_upsert_provider(provider_record value,
                          std::chrono::system_clock::time_point now = std::chrono::system_clock::now());

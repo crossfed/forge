@@ -10,7 +10,11 @@ module;
 #include <stdexcept>
 #include <utility>
 
+#include <forge/exceptions/macros.hpp>
+
 module forge.test.net.p2p.dht_record_store_fixture;
+
+import forge.net.p2p.exceptions;
 
 namespace forge::test::net::p2p {
 
@@ -30,6 +34,11 @@ dht_record_store_persistence::async_apply(forge::net::p2p::dht::record_store::mu
       if (fail_next_apply_) {
          fail_next_apply_ = false;
          throw std::runtime_error{"injected DHT record persistence failure"};
+      }
+      if (reject_next_apply_as_record_) {
+         reject_next_apply_as_record_ = false;
+         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::record_rejected,
+                               "injected typed DHT record persistence failure");
       }
       uncertain = std::exchange(uncertain_next_apply_, false);
    }
@@ -86,6 +95,11 @@ boost::asio::awaitable<void> dht_record_store_persistence::async_close() {
 void dht_record_store_persistence::fail_next_apply() {
    auto lock = std::scoped_lock{mutex_};
    fail_next_apply_ = true;
+}
+
+void dht_record_store_persistence::reject_next_apply_as_record() {
+   auto lock = std::scoped_lock{mutex_};
+   reject_next_apply_as_record_ = true;
 }
 
 void dht_record_store_persistence::fail_next_flush() {

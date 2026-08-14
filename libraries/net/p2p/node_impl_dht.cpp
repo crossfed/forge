@@ -74,6 +74,7 @@ import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/dht_exchange.hxx"
+#include "details/dht_time.hxx"
 #include "details/host_addresses.hxx"
 #include "details/node_impl.hxx"
 #include "details/operation_deadline.hxx"
@@ -87,8 +88,11 @@ discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::opt
 
 [[nodiscard]] std::chrono::system_clock::time_point
 dht_value_expiry(const dht::record& value, std::chrono::system_clock::time_point now, const dht::profile& profile) {
-   const auto requested = value.ttl.count() > 0 ? value.ttl : profile.limits.provider_record_ttl;
-   return now + std::min(requested, profile.limits.provider_record_ttl);
+   const auto requested = value.ttl.count() > 0 ? value.ttl : profile.limits.value_record_ttl;
+   const auto bounded = std::chrono::duration_cast<std::chrono::system_clock::duration>(
+       std::min(requested, profile.limits.value_record_ttl));
+   const auto maximum = (std::chrono::system_clock::time_point::max)();
+   return now > maximum - bounded ? maximum : now + bounded;
 }
 
 namespace {
@@ -348,13 +352,14 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
                }
             }
             if (accepted) {
-               const auto addresses_expire = accepted->endpoints.empty() ? std::chrono::system_clock::time_point{}
-                                                                         : now + profile.limits.provider_address_ttl;
+               const auto addresses_expire = accepted->endpoints.empty()
+                                                 ? std::chrono::system_clock::time_point{}
+                                                 : detail::dht_expiry_after(now, profile.limits.provider_address_ttl);
                co_await state.records.async_upsert_provider(dht::record_store::provider_record{
                    .key = request.key_value,
                    .provider = accepted->id,
                    .endpoints = std::move(accepted->endpoints),
-                   .provider_expires_at = now + profile.limits.provider_record_ttl,
+                   .provider_expires_at = detail::dht_expiry_after(now, profile.limits.provider_record_ttl),
                    .addresses_expires_at = addresses_expire,
                });
             }

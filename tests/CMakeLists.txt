@@ -877,7 +877,10 @@ add_executable(
    quic_p2p/dht_record_store_fixture.cpp
    quic_p2p/dht_record_store_tests.cpp
    quic_p2p/dht_profile_tests.cpp
+   quic_p2p/dht_provider_registry_tests.cpp
+   quic_p2p/dht_query_tests.cpp
    quic_p2p/dht_routing_refresh_tests.cpp
+   quic_p2p/dht_time_tests.cpp
    quic_p2p/ipns_tests.cpp
    quic_p2p/quic_tests.cpp
    quic_p2p/p2p_lifecycle_tests.cpp

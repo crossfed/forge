@@ -60,6 +60,39 @@ namespace {
    FORGE_THROW_EXCEPTION(exceptions::closed, "P2P DHT provider admission is not ready before hydration");
 }
 
+constexpr auto max_provider_lifetime = std::chrono::seconds{(std::numeric_limits<std::uint32_t>::max)()};
+
+void validate_provider_renewal(const dht::query_options& query, const dht_provider_registry::schedule& renewal) {
+   const auto minimum_ttl = std::min(renewal.provider_ttl, renewal.address_ttl);
+   if (minimum_ttl <= std::chrono::seconds::zero() || renewal.provider_ttl > max_provider_lifetime ||
+       renewal.address_ttl > max_provider_lifetime || renewal.republish_interval <= std::chrono::seconds::zero() ||
+       renewal.republish_interval >= minimum_ttl || query.timeout <= std::chrono::milliseconds::zero() ||
+       query.timeout >= std::chrono::duration_cast<std::chrono::milliseconds>(minimum_ttl)) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::invalid_options,
+          "DHT provider renewal requires bounded positive TTLs and a publication budget below expiry");
+   }
+}
+
+template <typename Clock>
+[[nodiscard]] std::chrono::time_point<Clock> saturating_deadline(std::chrono::time_point<Clock> stamped_at,
+                                                                 std::chrono::milliseconds delay) noexcept {
+   if (delay <= std::chrono::milliseconds::zero()) {
+      return stamped_at;
+   }
+   const auto converted = std::chrono::duration_cast<typename Clock::duration>(delay);
+   const auto base = stamped_at.time_since_epoch().count();
+   const auto increment = converted.count();
+   const auto maximum = (std::numeric_limits<typename Clock::duration::rep>::max)();
+   if (increment <= 0) {
+      return stamped_at;
+   }
+   if (base > maximum - increment) {
+      return (std::chrono::time_point<Clock>::max)();
+   }
+   return std::chrono::time_point<Clock>{typename Clock::duration{base + increment}};
+}
+
 } // namespace
 
 dht_provider_registry::dht_provider_registry(callbacks callbacks_value)
@@ -110,6 +143,7 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
    }
 
    auto registration = registration_key{.protocol = std::move(protocol), .key = std::move(key)};
+   validate_provider_renewal(query, renewal);
    auto initial_endpoint_generation = std::uint64_t{};
    while (true) {
       auto observed = changed_->epoch();
@@ -147,6 +181,7 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
             merged.requested_count = std::max(existing->query.requested_count, query.requested_count);
             merged.quorum = std::max(existing->query.quorum, query.quorum);
             merged.timeout = std::max(existing->query.timeout, query.timeout);
+            validate_provider_renewal(merged, existing->renewal);
             if (merged.requested_count == existing->query.requested_count && merged.quorum == existing->query.quorum &&
                 merged.timeout == existing->query.timeout) {
                co_return lease{add_owner_locked(existing)};
@@ -175,9 +210,18 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
          continue;
       }
 
-      auto provider = co_await callbacks_.prepare(registration.protocol, registration.key, existing->renewal);
+      auto publication = co_await existing->publication.acquire();
+      {
+         const auto lock = std::scoped_lock{mutex_};
+         const auto found = entries_.find(registration);
+         if (sealed_ || found == entries_.end() || found->second != existing || existing->stop_requested) {
+            continue;
+         }
+      }
+      auto prepared = co_await callbacks_.prepare(registration.protocol, registration.key, existing->renewal);
+      const auto stamped_at = prepared.stamped_at;
       const auto published =
-          co_await async_publish(registration.protocol, registration.key, std::move(provider), merged);
+          co_await async_publish(registration.protocol, registration.key, std::move(prepared.provider), merged);
       if (published < merged.quorum) {
          FORGE_THROW_EXCEPTION(exceptions::peer_not_found,
                                "DHT provide did not reach the strengthened requested quorum");
@@ -192,6 +236,8 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
             continue;
          }
          existing->query = merged;
+         existing->last_successful_publication = stamped_at;
+         existing->next_republish = renewal_deadline(*existing, stamped_at);
          co_return lease{add_owner_locked(existing)};
       }
    }
@@ -206,9 +252,10 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
    auto failure = std::exception_ptr{};
    try {
       persist_attempted = true;
-      auto provider = co_await callbacks_.prepare(registration.protocol, registration.key, renewal);
+      auto prepared = co_await callbacks_.prepare(registration.protocol, registration.key, renewal);
+      const auto stamped_at = prepared.stamped_at;
       const auto published =
-          co_await async_publish(registration.protocol, registration.key, std::move(provider), query);
+          co_await async_publish(registration.protocol, registration.key, std::move(prepared.provider), query);
       if (published < query.quorum) {
          FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "DHT provide did not reach the requested quorum");
       }
@@ -219,7 +266,8 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
             throw_registry_closed();
          }
          value->observed_endpoint_generation = initial_endpoint_generation;
-         value->next_republish = std::chrono::steady_clock::now() + republish_delay(*value);
+         value->last_successful_publication = stamped_at;
+         value->next_republish = renewal_deadline(*value, stamped_at);
          owner = add_owner_locked(value);
          const auto [_, inserted] = entries_.emplace(value->registration, value);
          if (!inserted) {
@@ -460,9 +508,11 @@ void dht_provider_registry::release_publication(const protocol_id& protocol) noe
    }
 }
 
-boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shared_ptr<entry>& value) {
-   auto failure = std::exception_ptr{};
+boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shared_ptr<entry>& value,
+                                                                 std::exception_ptr prior_failure) {
+   auto failure = std::move(prior_failure);
    try {
+      auto publication = co_await value->publication.acquire();
       co_await callbacks_.remove(value->registration.protocol, value->registration.key);
    } catch (...) {
       failure = std::current_exception();
@@ -541,6 +591,36 @@ std::chrono::milliseconds dht_provider_registry::republish_delay(const entry& va
    return interval + std::chrono::milliseconds{offset};
 }
 
+std::chrono::steady_clock::time_point dht_provider_renewal_deadline(std::chrono::steady_clock::time_point stamped_at,
+                                                                    dht_provider_registry::schedule renewal,
+                                                                    std::chrono::milliseconds publication_budget,
+                                                                    std::chrono::milliseconds nominal_delay) noexcept {
+   const auto ttl =
+       std::chrono::duration_cast<std::chrono::milliseconds>(std::min(renewal.provider_ttl, renewal.address_ttl));
+   const auto margin = std::max(std::chrono::milliseconds{1}, publication_budget);
+   const auto latest = saturating_deadline(stamped_at, ttl > margin ? ttl - margin : std::chrono::milliseconds::zero());
+   const auto bounded_nominal = std::min(ttl, std::max(std::chrono::milliseconds::zero(), nominal_delay));
+   return std::min(saturating_deadline(stamped_at, bounded_nominal), latest);
+}
+
+std::chrono::steady_clock::time_point
+dht_provider_retry_deadline(std::chrono::steady_clock::time_point now,
+                            std::chrono::steady_clock::time_point last_successful_publication,
+                            dht_provider_registry::schedule renewal, std::chrono::milliseconds publication_budget,
+                            std::chrono::milliseconds retry_delay) noexcept {
+   const auto paced = saturating_deadline(now, std::max(std::chrono::milliseconds{1}, retry_delay));
+   const auto ttl =
+       std::chrono::duration_cast<std::chrono::milliseconds>(std::min(renewal.provider_ttl, renewal.address_ttl));
+   const auto expiry_cap = dht_provider_renewal_deadline(last_successful_publication, renewal, publication_budget, ttl);
+   return expiry_cap > now ? std::min(paced, expiry_cap) : paced;
+}
+
+std::chrono::steady_clock::time_point
+dht_provider_registry::renewal_deadline(const entry& value,
+                                        std::chrono::steady_clock::time_point stamped_at) const noexcept {
+   return dht_provider_renewal_deadline(stamped_at, value.renewal, value.query.timeout, republish_delay(value));
+}
+
 std::chrono::milliseconds dht_provider_registry::retry_delay(const entry& value) const noexcept {
    const auto exponent = std::min<std::uint32_t>(value.publish_failures > 0 ? value.publish_failures - 1U : 0U, 9U);
    const auto base = std::chrono::seconds{std::uint64_t{1} << exponent};
@@ -590,40 +670,55 @@ boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<en
             continue;
          }
 
+         auto publication = co_await value->publication.acquire();
+         {
+            const auto lock = std::scoped_lock{mutex_};
+            if (sealed_ || value->stop_requested) {
+               continue;
+            }
+            attempt_generation = endpoint_generation_;
+            republish = value->observed_endpoint_generation != endpoint_generation_ ||
+                        value->next_republish <= std::chrono::steady_clock::now();
+            query = value->query;
+         }
+         if (!republish) {
+            continue;
+         }
+
          auto failure = std::exception_ptr{};
+         auto stamped_at = std::chrono::steady_clock::time_point{};
          try {
-            auto provider =
+            auto prepared =
                 co_await callbacks_.prepare(value->registration.protocol, value->registration.key, value->renewal);
+            stamped_at = prepared.stamped_at;
             const auto published = co_await async_publish(value->registration.protocol, value->registration.key,
-                                                          std::move(provider), query);
+                                                          std::move(prepared.provider), query);
             if (published < query.quorum) {
                FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "DHT provider republish did not reach quorum");
             }
          } catch (...) {
             failure = std::current_exception();
          }
+         const auto retry_started = std::chrono::steady_clock::now();
 
          {
             const auto lock = std::scoped_lock{mutex_};
             value->observed_endpoint_generation = attempt_generation;
             if (failure) {
                value->publish_failures = std::min<std::uint32_t>(value->publish_failures + 1U, 10U);
-               value->next_republish = std::chrono::steady_clock::now() + retry_delay(*value);
+               value->next_republish = dht_provider_retry_deadline(retry_started, value->last_successful_publication,
+                                                                   value->renewal, query.timeout, retry_delay(*value));
             } else {
                value->publish_failures = 0;
-               value->next_republish = std::chrono::steady_clock::now() + republish_delay(*value);
+               value->last_successful_publication = stamped_at;
+               value->next_republish = renewal_deadline(*value, stamped_at);
             }
          }
       }
    } catch (...) {
       failure = std::current_exception();
    }
-   try {
-      co_await callbacks_.remove(value->registration.protocol, value->registration.key);
-   } catch (...) {
-      failure = std::current_exception();
-   }
-   finish_entry(value, failure);
+   co_await async_remove(value, failure);
 }
 
 void dht_provider_registry::notify_endpoints_changed() noexcept {

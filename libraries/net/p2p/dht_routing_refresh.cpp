@@ -84,7 +84,8 @@ dht_routing_refresh::dht_routing_refresh(peer_id local, std::vector<profile> pro
    }
    profiles_.reserve(profiles.size());
    for (auto& value : profiles) {
-      if (value.routing == nullptr || value.interval <= std::chrono::milliseconds::zero()) {
+      if (value.routing == nullptr || value.interval <= std::chrono::milliseconds::zero() ||
+          value.query_timeout <= std::chrono::milliseconds::zero()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT routing refresh profile is invalid");
       }
       profiles_.push_back(profile_state{.config = std::move(value)});
@@ -193,7 +194,8 @@ boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_
       if (should_run_startup_lookup) {
          auto startup_lookup_pending = true;
          try {
-            startup_lookup_pending = !co_await query_(state.config.protocol, make_dht_key(local_));
+            startup_lookup_pending =
+                !co_await query_(state.config.protocol, make_dht_key(local_), state.config.query_timeout);
             failed = startup_lookup_pending;
          } catch (...) {
             failed = true;
@@ -216,7 +218,7 @@ boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_
          }
          try {
             const auto target = refresh_target(state, bucket.common_prefix_length);
-            if (co_await query_(state.config.protocol, target)) {
+            if (co_await query_(state.config.protocol, target, state.config.query_timeout)) {
                static_cast<void>(state.config.routing->mark_refreshed(bucket, time_.now()));
             } else {
                failed = true;

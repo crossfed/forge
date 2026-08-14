@@ -30,6 +30,8 @@ add_library(
    details/dht_profile_state.hxx
    dht_provider_registry.cpp
    details/dht_provider_registry.hxx
+   dht_time.cpp
+   details/dht_time.hxx
    provider_registration.cpp
    provider_registration_impl.cpp
    details/provider_registration_impl.hxx

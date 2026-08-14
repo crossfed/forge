@@ -66,6 +66,7 @@ BOOST_AUTO_TEST_CASE(dht_amino_profile_is_fixed_and_complete) {
    BOOST_TEST(profile.limits.failure_threshold == 3U);
    BOOST_TEST(profile.limits.query_timeout == std::chrono::seconds{10});
    BOOST_TEST(profile.limits.refresh_interval == std::chrono::minutes{10});
+   BOOST_TEST(profile.limits.value_record_ttl == std::chrono::hours{48});
    BOOST_TEST(profile.limits.provider_record_ttl == std::chrono::hours{48});
    BOOST_REQUIRE_EQUAL(profile.value_policies.size(), 2U);
    BOOST_TEST(profile.value_policies[0].key_prefix == bytes("/pk/"));
@@ -146,6 +147,64 @@ BOOST_AUTO_TEST_CASE(dht_custom_profile_keeps_protocol_limits_and_validators_iso
        (custom_dht_profile(builtins::kad_dht, dht::mode::client,
                            dht::profile_capabilities{.peers = true, .providers = false, .values = false})),
        exceptions::invalid_options);
+}
+
+BOOST_AUTO_TEST_CASE(dht_values_only_profile_ignores_unused_provider_lifetime) {
+   auto limits = dht::options{};
+   limits.query_timeout = std::chrono::seconds{5};
+   limits.provider_record_ttl = std::chrono::seconds{1};
+   limits.provider_address_ttl = std::chrono::seconds{1};
+   limits.provider_republish_interval = std::chrono::seconds{2};
+   const auto profile = custom_dht_profile(
+       protocol_id{.value = "/forge/values-only/1.0.0"}, dht::mode::server,
+       dht::profile_capabilities{.peers = false, .providers = false, .values = true},
+       {dht::value_policy{
+           .key_prefix = bytes("/value/"),
+           .validate = [](const dht::record&, dht::value_validation_context) {},
+           .select = [](std::span<const dht::record>) { return std::size_t{}; },
+           .expiry = [](const dht::record&, dht::value_expiry_context context) { return context.supplied_expires_at; },
+       }},
+       limits);
+   const auto message = dht::message{
+       .type = dht::message_type::get_value,
+       .key_value = dht::key{.bytes = bytes("/value/key")},
+   };
+
+   const auto encoded = dht::codec::encode(message, profile);
+   const auto decoded = dht::codec::decode(encoded, profile);
+   BOOST_TEST(decoded.key_value.bytes == message.key_value.bytes);
+}
+
+BOOST_AUTO_TEST_CASE(dht_value_profile_requires_bounded_positive_record_lifetime) {
+   const auto make_profile = [](dht::options limits) {
+      return custom_dht_profile(
+          protocol_id{.value = "/forge/value-lifetime/1.0.0"}, dht::mode::server,
+          dht::profile_capabilities{.peers = false, .providers = false, .values = true},
+          {dht::value_policy{
+              .key_prefix = bytes("/value/"),
+              .validate = [](const dht::record&, dht::value_validation_context) {},
+              .select = [](std::span<const dht::record>) { return std::size_t{}; },
+              .expiry = [](const dht::record&,
+                           dht::value_expiry_context context) { return context.supplied_expires_at; },
+          }},
+          limits);
+   };
+
+   auto limits = dht::options{};
+   limits.value_record_ttl = std::chrono::seconds::zero();
+   BOOST_CHECK_THROW(static_cast<void>(make_profile(limits)), exceptions::invalid_options);
+
+   limits.value_record_ttl =
+       std::chrono::seconds{static_cast<std::int64_t>((std::numeric_limits<std::uint32_t>::max)()) + 1};
+   BOOST_CHECK_THROW(static_cast<void>(make_profile(limits)), exceptions::invalid_options);
+}
+
+BOOST_AUTO_TEST_CASE(dht_provider_profile_rejects_ttl_beyond_uint32_seconds) {
+   auto limits = dht::options{};
+   limits.provider_record_ttl =
+       std::chrono::seconds{static_cast<std::int64_t>((std::numeric_limits<std::uint32_t>::max)()) + 1};
+
+   BOOST_CHECK_THROW(static_cast<void>(custom_profile(limits)), exceptions::invalid_options);
 }
 
 BOOST_AUTO_TEST_CASE(dht_custom_profile_rejects_overlapping_value_policy_namespaces) {

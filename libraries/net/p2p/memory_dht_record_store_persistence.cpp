@@ -281,6 +281,16 @@ memory_dht_record_store_persistence::async_prune_expired(std::chrono::system_clo
       if (current == providers.end() || current->second.addresses_expires_at != addresses_expiry) {
          continue;
       }
+      if (current->second.provider_expires_at <= now) {
+         result.providers.push_back(
+             dht::record_store::provider_key{.key = current->second.key, .provider = current->second.provider});
+         providers_by_expiry.erase(
+             {current->second.provider_expires_at, current->second.key.bytes, current->second.provider});
+         providers_by_cursor.erase(provider_token(current->second));
+         providers.erase(current);
+         ++count;
+         continue;
+      }
       current->second.endpoints.clear();
       current->second.addresses_expires_at = {};
       result.provider_address_updates.push_back(current->second);

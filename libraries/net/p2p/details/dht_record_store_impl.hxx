@@ -27,6 +27,8 @@ struct dht::record_store::impl {
 
    boost::asio::awaitable<dht::record_store::put_result> async_put(dht::record_store::value_record incoming,
                                                                    std::chrono::system_clock::time_point now);
+   boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+   async_put_received(dht::record_store::value_record incoming, std::chrono::system_clock::time_point now);
    boost::asio::awaitable<void> async_upsert_provider(dht::record_store::provider_record value,
                                                       std::chrono::system_clock::time_point now);
    boost::asio::awaitable<void> async_remove_provider(dht::record_store::provider_key key);
@@ -39,6 +41,9 @@ struct dht::record_store::impl {
    static boost::asio::awaitable<dht::record_store::put_result>
    async_put_owned(std::shared_ptr<impl> self, dht::record_store::value_record incoming,
                    std::chrono::system_clock::time_point now);
+   static boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+   async_put_received_owned(std::shared_ptr<impl> self, dht::record_store::value_record incoming,
+                            std::chrono::system_clock::time_point now);
    static boost::asio::awaitable<void> async_upsert_provider_owned(std::shared_ptr<impl> self,
                                                                    dht::record_store::provider_record value,
                                                                    std::chrono::system_clock::time_point now);
@@ -74,7 +79,10 @@ struct dht::record_store::impl {
 
    void ensure_open_locked() const;
    [[nodiscard]] const dht::value_policy& prepare_value(dht::record_store::value_record& value,
-                                                        std::chrono::system_clock::time_point now) const;
+                                                        std::chrono::system_clock::time_point now, bool incoming) const;
+   boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+   async_put_impl(dht::record_store::value_record incoming, std::chrono::system_clock::time_point now,
+                  bool discard_rejected);
    void validate_provider(const dht::record_store::provider_record& value,
                           std::chrono::system_clock::time_point now) const;
    [[nodiscard]] std::size_t value_bytes(const dht::record_store::value_record& value) const;

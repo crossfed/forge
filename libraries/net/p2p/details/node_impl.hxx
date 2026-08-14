@@ -363,7 +363,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    [[nodiscard]] detail::dht_profile_state& dht_profile(const protocol_id& protocol);
    [[nodiscard]] const detail::dht_profile_state& dht_profile(const protocol_id& protocol) const;
-   boost::asio::awaitable<bool> async_refresh_dht_routing(protocol_id protocol, dht::key target);
+   boost::asio::awaitable<bool> async_refresh_dht_routing(protocol_id protocol, dht::key target,
+                                                          std::chrono::milliseconds timeout);
    void notify_dht_routing_refresh() noexcept;
 
    void increment_rendezvous_registration();

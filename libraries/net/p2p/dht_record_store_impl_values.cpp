@@ -27,6 +27,17 @@ import forge.net.p2p.exceptions;
 #include "details/dht_record_store_impl.hxx"
 
 namespace forge::net::p2p {
+namespace {
+
+[[noreturn]] void throw_record_rejected(bool incoming, std::string message) {
+   if (incoming) {
+      FORGE_THROW_EXCEPTION(exceptions::record_rejected, std::move(message));
+   }
+   FORGE_THROW_EXCEPTION(exceptions::internal, "Persisted DHT value record failed validation",
+                         forge::exceptions::ctx("reason", std::move(message)));
+}
+
+} // namespace
 
 std::size_t dht::record_store::impl::value_bytes(const dht::record_store::value_record& value) const {
    const auto publisher_bytes = value.record.publisher ? value.record.publisher->value.size() : 0U;
@@ -35,33 +46,41 @@ std::size_t dht::record_store::impl::value_bytes(const dht::record_store::value_
 }
 
 const dht::value_policy& dht::record_store::impl::prepare_value(dht::record_store::value_record& value,
-                                                                std::chrono::system_clock::time_point now) const {
+                                                                std::chrono::system_clock::time_point now,
+                                                                bool incoming) const {
    if (!profile_.capabilities.values) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable value records");
    }
    if (value.record.key_value.bytes.empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT value record key must not be empty");
+      throw_record_rejected(incoming, "DHT value record key must not be empty");
    }
    if (value.expires_at == std::chrono::system_clock::time_point{} || value.expires_at <= now) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT value record expiry must be in the future");
+      throw_record_rejected(incoming, "DHT value record expiry must be in the future");
    }
    const auto* policy = value_policy_for(profile_, value.record.key_value.bytes);
    if (!policy) {
-      FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT value key has no configured policy");
+      throw_record_rejected(incoming, "DHT value key has no configured policy");
    }
    if (value.record.value.size() > profile_.limits.max_record_size) {
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT wire value payload exceeds profile limit");
+      throw_record_rejected(incoming, "DHT wire value payload exceeds profile limit");
    }
    if (value_bytes(value) > options_.max_record_bytes) {
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT value record byte limit exceeded");
    }
-   policy->validate(value.record,
-                    dht::value_validation_context{
-                        .now = now, .public_keys = options_.public_keys ? &options_.public_keys : nullptr});
-   value.expires_at =
-       policy->expiry(value.record, dht::value_expiry_context{.now = now, .supplied_expires_at = value.expires_at});
+   try {
+      policy->validate(value.record,
+                       dht::value_validation_context{
+                           .now = now, .public_keys = options_.public_keys ? &options_.public_keys : nullptr});
+      value.expires_at =
+          policy->expiry(value.record, dht::value_expiry_context{.now = now, .supplied_expires_at = value.expires_at});
+   } catch (const forge::exceptions::base& error) {
+      if (exceptions::is(error, exceptions::code::record_rejected)) {
+         throw_record_rejected(incoming, error.what());
+      }
+      throw;
+   }
    if (value.expires_at == std::chrono::system_clock::time_point{} || value.expires_at <= now) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT value policy expiry must be in the future");
+      throw_record_rejected(incoming, "DHT value policy expiry must be in the future");
    }
    return *policy;
 }
@@ -99,9 +118,33 @@ void dht::record_store::impl::erase_value_locked(const dht::key& key) {
 boost::asio::awaitable<dht::record_store::put_result>
 dht::record_store::impl::async_put(dht::record_store::value_record incoming,
                                    std::chrono::system_clock::time_point now) {
+   auto result = co_await async_put_impl(std::move(incoming), now, false);
+   if (!result) {
+      FORGE_THROW_EXCEPTION(exceptions::internal, "DHT value validation unexpectedly discarded a direct put");
+   }
+   co_return std::move(*result);
+}
+
+boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+dht::record_store::impl::async_put_received(dht::record_store::value_record incoming,
+                                            std::chrono::system_clock::time_point now) {
+   co_return co_await async_put_impl(std::move(incoming), now, true);
+}
+
+boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+dht::record_store::impl::async_put_impl(dht::record_store::value_record incoming,
+                                        std::chrono::system_clock::time_point now, bool discard_rejected) {
    auto admission = admit_operation();
    auto ticket = co_await persistence_gate_.acquire();
-   const auto& policy = prepare_value(incoming, now);
+   const auto* policy = static_cast<const dht::value_policy*>(nullptr);
+   try {
+      policy = &prepare_value(incoming, now, true);
+   } catch (const exceptions::record_rejected&) {
+      if (discard_rejected) {
+         co_return std::nullopt;
+      }
+      throw;
+   }
 
    auto current = std::optional<dht::record_store::value_record>{};
    {
@@ -112,9 +155,9 @@ dht::record_store::impl::async_put(dht::record_store::value_record incoming,
       }
    }
    if (current) {
-      static_cast<void>(prepare_value(*current, now));
+      static_cast<void>(prepare_value(*current, now, false));
       const auto candidates = std::array<dht::record, 2>{incoming.record, current->record};
-      const auto selected = policy.select(candidates);
+      const auto selected = policy->select(candidates);
       if (selected >= candidates.size()) {
          FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT value selector returned an invalid index");
       }

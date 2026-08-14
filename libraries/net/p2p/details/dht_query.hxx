@@ -21,10 +21,11 @@ struct result {
 };
 
 [[nodiscard]] bool has_endpoint(const dht::peer& value) noexcept;
-void merge_peer(dht::peer& target, const dht::peer& source);
-void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t limit,
-                 const dht::key& target);
-void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value, std::size_t limit);
+void merge_peer(dht::peer& target, const dht::peer& source, std::size_t max_endpoints);
+void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t peer_limit,
+                 std::size_t endpoint_limit, const dht::key& target);
+void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value, std::size_t peer_limit,
+                    std::size_t endpoint_limit);
 [[nodiscard]] std::vector<dht::peer> sorted_peers(const std::map<peer_id, dht::peer>& known, const dht::key& target);
 [[nodiscard]] std::optional<dht::peer> next_peer(const std::map<peer_id, dht::peer>& known,
                                                  const std::set<peer_id>& attempted, const dht::key& target);
@@ -57,7 +58,7 @@ run_on_strand(request value, std::shared_ptr<query_callables<Query, IsPeerFailur
    }
    auto known = std::map<peer_id, dht::peer>{};
    for (const auto& peer : value.seeds) {
-      merge_known(known, peer, value.options.max_query_peers, value.target);
+      merge_known(known, peer, value.options.max_query_peers, value.options.max_peer_endpoints, value.target);
    }
 
    auto attempted = std::set<peer_id>{};
@@ -149,13 +150,15 @@ run_on_strand(request value, std::shared_ptr<query_callables<Query, IsPeerFailur
             application_complete = co_await postprocess(item.peer, *item.response);
             if (!application_complete) {
                for (const auto& closer : item.response->closer_peers) {
-                  merge_known(known, closer, value.options.max_query_peers, value.target);
+                  merge_known(known, closer, value.options.max_query_peers, value.options.max_peer_endpoints,
+                              value.target);
                   if (value.target_peer && closer.id == *value.target_peer) {
                      out.query.complete = true;
                   }
                }
                for (const auto& provider : item.response->provider_peers) {
-                  merge_provider(out.query.provider_peers, provider, value.requested_provider_count);
+                  merge_provider(out.query.provider_peers, provider, value.requested_provider_count,
+                                 value.options.max_peer_endpoints);
                }
             }
          }

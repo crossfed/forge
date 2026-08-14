@@ -1,6 +1,8 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/asio/awaitable.hpp>
 
+#include <forge/exceptions/macros.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -43,7 +45,7 @@ namespace {
            .validate =
                [](const dht::record& value, dht::value_validation_context) {
                   if (value.value.empty()) {
-                     throw std::runtime_error{"empty test DHT value"};
+                     FORGE_THROW_EXCEPTION(exceptions::record_rejected, "empty test DHT value");
                   }
                },
            .select =
@@ -130,6 +132,51 @@ BOOST_AUTO_TEST_CASE(dht_record_store_rolls_back_operational_value_when_persiste
    BOOST_TEST(status.degraded);
    BOOST_TEST(!status.durability_uncertain);
    BOOST_TEST(status.last_failure.find("injected DHT record persistence failure") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_propagates_operational_validator_failures) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto profile = test_profile();
+   profile.value_policies.front().validate = [](const dht::record&, dht::value_validation_context) {
+      throw std::runtime_error{"validator unavailable"};
+   };
+   auto store = dht::record_store{std::move(profile)};
+   const auto now = std::chrono::system_clock::now();
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(
+                         runtime, store.async_put(test_value(test_key('o'), 1, now + std::chrono::hours{1}), now))),
+                     std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_discards_code_based_rejection_only_at_network_ingress) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto profile = test_profile();
+   profile.value_policies.front().validate = [](const dht::record&, dht::value_validation_context) {
+      FORGE_THROW_CODE(exceptions::code::record_rejected, "rejected by test DHT policy");
+   };
+   auto store = dht::record_store{std::move(profile)};
+   const auto now = std::chrono::system_clock::now();
+   const auto key = test_key('n');
+
+   const auto result = forge::asio::blocking::run(
+       runtime, store.async_put_received(test_value(key, 1, now + std::chrono::hours{1}), now));
+   BOOST_CHECK(!result);
+   BOOST_CHECK(!store.find_value(key, now));
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_propagates_typed_rejection_from_persistence) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto store = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   const auto now = std::chrono::system_clock::now();
+   const auto key = test_key('p');
+
+   persistence->reject_next_apply_as_record();
+   BOOST_CHECK_THROW((forge::asio::blocking::run(
+                         runtime, store.async_put_received(test_value(key, 1, now + std::chrono::hours{1}), now))),
+                     exceptions::record_rejected);
+   BOOST_CHECK(!store.find_value(key, now));
+   BOOST_TEST(store.persistence_state().degraded);
 }
 
 BOOST_AUTO_TEST_CASE(dht_record_store_publishes_post_commit_uncertain_value_and_flush_recovers_status) {
@@ -577,6 +624,26 @@ BOOST_AUTO_TEST_CASE(dht_record_store_prunes_expiry_in_bounded_steps_and_closes_
    forge::asio::blocking::run(runtime, store.async_close());
    forge::asio::blocking::run(runtime, store.async_close());
    BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_flush())), exceptions::closed);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_prunes_fully_expired_provider_without_address_update) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto store = dht::record_store{test_profile()};
+   const auto now = std::chrono::system_clock::now();
+   const auto key = test_key('j');
+   const auto provider = test_peer(12);
+   forge::asio::blocking::run(
+       runtime, store.async_upsert_provider(
+                    test_provider(key, provider, now + std::chrono::minutes{2}, now + std::chrono::minutes{1}), now));
+
+   const auto pruned = forge::asio::blocking::run(runtime, store.async_prune_expired(now + std::chrono::minutes{2}));
+   BOOST_REQUIRE_EQUAL(pruned.providers.size(), 1U);
+   BOOST_CHECK(pruned.providers.front().key == key);
+   BOOST_CHECK(pruned.providers.front().provider == provider);
+   BOOST_TEST(pruned.provider_address_updates.empty());
+   BOOST_TEST(!pruned.may_have_more);
+   BOOST_TEST(store.find_providers(key, 1, now + std::chrono::minutes{2}).empty());
+   BOOST_TEST(!store.persistence_state().degraded);
 }
 
 BOOST_AUTO_TEST_CASE(dht_record_store_close_retries_after_flush_failure) {

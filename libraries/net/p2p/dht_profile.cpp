@@ -6,6 +6,9 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,9 +32,14 @@ constexpr auto amino_max_query_peers = std::size_t{256};
 constexpr auto amino_max_closer_peers = std::size_t{21};
 constexpr auto amino_max_provider_peers = std::size_t{256};
 constexpr auto amino_max_peer_endpoints = std::size_t{64};
+constexpr auto max_wire_lifetime = std::chrono::seconds{(std::numeric_limits<std::uint32_t>::max)()};
 
 [[noreturn]] void throw_invalid_profile(std::string message) {
    FORGE_THROW_EXCEPTION(exceptions::invalid_options, std::move(message));
+}
+
+[[noreturn]] void throw_record_rejected(std::string message) {
+   FORGE_THROW_EXCEPTION(exceptions::record_rejected, std::move(message));
 }
 
 [[nodiscard]] std::vector<std::uint8_t> bytes(std::string_view value) {
@@ -46,13 +54,12 @@ constexpr auto amino_max_peer_endpoints = std::size_t{64};
 }
 
 void validate_public_key_record(const dht::record& value, dht::value_validation_context) {
-   const auto peer = peer_id::from_bytes(suffix(value.key_value, bytes(public_key_prefix)));
-   public_key key;
    try {
-      key = decode_public_key(value.value);
+      const auto peer = peer_id::from_bytes(suffix(value.key_value, bytes(public_key_prefix)));
+      const auto key = decode_public_key(value.value);
       validate_public_key(key, peer);
    } catch (const forge::exceptions::base& error) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, std::string{"invalid /pk record: "} + error.what());
+      throw_record_rejected(std::string{"invalid /pk record: "} + error.what());
    }
 }
 
@@ -69,13 +76,56 @@ void validate_public_key_record(const dht::record& value, dht::value_validation_
 }
 
 void validate_ipns_record(const dht::record& value, dht::value_validation_context context) {
-   const auto peer = peer_id::from_bytes(suffix(value.key_value, bytes(ipns_prefix)));
-   auto decoded = ipns::decode(value.value);
+   const auto peer = [&]() {
+      try {
+         return peer_id::from_bytes(suffix(value.key_value, bytes(ipns_prefix)));
+      } catch (const forge::exceptions::base& error) {
+         throw_record_rejected(std::string{"invalid /ipns record: "} + error.what());
+      }
+   }();
+   const auto decoded = [&]() {
+      try {
+         return ipns::decode(value.value);
+      } catch (const forge::exceptions::base& error) {
+         throw_record_rejected(std::string{"invalid /ipns record: "} + error.what());
+      }
+   }();
    const auto now = std::chrono::time_point_cast<std::chrono::nanoseconds>(context.now);
+   const auto deterministic_validation_failure = [](const forge::exceptions::base& error) {
+      const auto code = exceptions::code_of(error);
+      return code == exceptions::code::codec_error || code == exceptions::code::protocol_error ||
+             code == exceptions::code::invalid_identity;
+   };
    if (context.public_keys) {
-      ipns::validate(decoded, peer, *context.public_keys, now);
-   } else {
+      auto resolver_failure = std::exception_ptr{};
+      const auto resolver = public_key_resolver{[&](const peer_id& requested) -> std::optional<public_key> {
+         try {
+            return (*context.public_keys)(requested);
+         } catch (...) {
+            resolver_failure = std::current_exception();
+            return std::nullopt;
+         }
+      }};
+      try {
+         ipns::validate(decoded, peer, resolver, now);
+         return;
+      } catch (const forge::exceptions::base& error) {
+         if (resolver_failure) {
+            std::rethrow_exception(resolver_failure);
+         }
+         if (deterministic_validation_failure(error)) {
+            throw_record_rejected(std::string{"invalid /ipns record: "} + error.what());
+         }
+         throw;
+      }
+   }
+   try {
       ipns::validate(decoded, peer, std::nullopt, now);
+   } catch (const forge::exceptions::base& error) {
+      if (deterministic_validation_failure(error)) {
+         throw_record_rejected(std::string{"invalid /ipns record: "} + error.what());
+      }
+      throw;
    }
 }
 
@@ -122,6 +172,7 @@ dht::profile amino_v1(dht::mode operating_mode) {
    limits.max_peer_endpoints = amino_max_peer_endpoints;
    limits.max_query_peers = amino_max_query_peers;
    limits.replacement_cache_size = 20;
+   limits.value_record_ttl = std::chrono::hours{48};
    limits.provider_record_ttl = std::chrono::hours{48};
    limits.provider_address_ttl = std::chrono::hours{24};
    limits.provider_republish_interval = std::chrono::hours{22};
@@ -185,6 +236,7 @@ void validate(const dht::profile& profile) {
           profile.limits.max_query_peers != amino_max_query_peers || profile.limits.replacement_cache_size != 20 ||
           profile.limits.failure_threshold != 3 || profile.limits.query_timeout != std::chrono::seconds{10} ||
           profile.limits.refresh_interval != std::chrono::minutes{10} ||
+          profile.limits.value_record_ttl != std::chrono::hours{48} ||
           profile.limits.provider_record_ttl != std::chrono::hours{48} ||
           profile.limits.provider_address_ttl != std::chrono::hours{24} ||
           profile.limits.provider_republish_interval != std::chrono::hours{22} || profile.value_policies.size() != 2 ||
@@ -196,6 +248,20 @@ void validate(const dht::profile& profile) {
    if (!profile.capabilities.peers && !profile.capabilities.providers && !profile.capabilities.values) {
       throw_invalid_profile("DHT profile must enable at least one operation family");
    }
+   const auto invalid_provider_lifetime =
+       profile.capabilities.providers &&
+       (profile.limits.provider_record_ttl <= std::chrono::seconds::zero() ||
+        profile.limits.provider_address_ttl <= std::chrono::seconds::zero() ||
+        profile.limits.provider_republish_interval <= std::chrono::seconds::zero() ||
+        profile.limits.provider_record_ttl > max_wire_lifetime ||
+        profile.limits.provider_address_ttl > max_wire_lifetime ||
+        profile.limits.provider_republish_interval >= profile.limits.provider_record_ttl ||
+        profile.limits.provider_republish_interval >= profile.limits.provider_address_ttl ||
+        profile.limits.query_timeout >= std::chrono::duration_cast<std::chrono::milliseconds>(std::min(
+                                            profile.limits.provider_record_ttl, profile.limits.provider_address_ttl)));
+   const auto invalid_value_lifetime =
+       profile.capabilities.values && (profile.limits.value_record_ttl <= std::chrono::seconds::zero() ||
+                                       profile.limits.value_record_ttl > max_wire_lifetime);
    if (profile.limits.replication == 0 || profile.limits.alpha == 0 ||
        profile.limits.alpha > profile.limits.replication || profile.limits.max_outbound_message_size == 0 ||
        profile.limits.max_inbound_message_size == 0 || profile.limits.max_record_size == 0 ||
@@ -203,12 +269,8 @@ void validate(const dht::profile& profile) {
        profile.limits.max_peer_endpoints == 0 || profile.limits.max_query_peers == 0 ||
        profile.limits.replacement_cache_size == 0 || profile.limits.failure_threshold == 0 ||
        profile.limits.query_timeout <= std::chrono::milliseconds::zero() ||
-       profile.limits.refresh_interval <= std::chrono::milliseconds::zero() ||
-       profile.limits.provider_record_ttl <= std::chrono::seconds::zero() ||
-       profile.limits.provider_address_ttl <= std::chrono::seconds::zero() ||
-       profile.limits.provider_republish_interval <= std::chrono::seconds::zero() ||
-       profile.limits.provider_republish_interval >= profile.limits.provider_record_ttl ||
-       profile.limits.provider_republish_interval >= profile.limits.provider_address_ttl) {
+       profile.limits.refresh_interval <= std::chrono::milliseconds::zero() || invalid_value_lifetime ||
+       invalid_provider_lifetime) {
       throw_invalid_profile("DHT profile limits must be positive and alpha must not exceed k");
    }
    if (profile.capabilities.values != !profile.value_policies.empty()) {

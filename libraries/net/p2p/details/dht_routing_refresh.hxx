@@ -30,9 +30,10 @@ class dht_routing_refresh final {
       protocol_id protocol;
       dht::routing_table* routing = nullptr;
       std::chrono::milliseconds interval{};
+      std::chrono::milliseconds query_timeout{};
    };
 
-   using query_callback = std::function<boost::asio::awaitable<bool>(protocol_id, dht::key)>;
+   using query_callback = std::function<boost::asio::awaitable<bool>(protocol_id, dht::key, std::chrono::milliseconds)>;
 
    struct time_source {
       std::function<time_point()> now;

@@ -41,12 +41,15 @@ bool has_endpoint(const dht::peer& value) noexcept {
    return !value.endpoints.empty();
 }
 
-void merge_peer(dht::peer& target, const dht::peer& source) {
+void merge_peer(dht::peer& target, const dht::peer& source, std::size_t max_endpoints) {
    if (target.id.value.empty()) {
       target.id = source.id;
    }
    target.connection = source.connection;
    for (const auto& endpoint : source.endpoints) {
+      if (target.endpoints.size() >= max_endpoints) {
+         break;
+      }
       const auto exists = std::ranges::any_of(
           target.endpoints, [&](const auto& current) { return current.to_string() == endpoint.to_string(); });
       if (!exists) {
@@ -55,17 +58,17 @@ void merge_peer(dht::peer& target, const dht::peer& source) {
    }
 }
 
-void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t limit,
-                 const dht::key& target) {
+void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t peer_limit,
+                 std::size_t endpoint_limit, const dht::key& target) {
    if (!valid_peer_id(value.id)) {
       return;
    }
    const auto found = known.find(value.id);
    if (found != known.end()) {
-      merge_peer(found->second, value);
+      merge_peer(found->second, value, endpoint_limit);
       return;
    }
-   if (known.size() >= limit) {
+   if (known.size() >= peer_limit) {
       const auto ordered = [&](const dht::peer& left, const dht::peer& right) {
          const auto left_distance = distance_between(left.id.to_bytes(), target.bytes);
          const auto right_distance = distance_between(right.id.to_bytes(), target.bytes);
@@ -82,21 +85,24 @@ void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, st
       known.erase(farthest);
    }
    auto [inserted, _] = known.emplace(value.id, dht::peer{});
-   merge_peer(inserted->second, value);
+   merge_peer(inserted->second, value, endpoint_limit);
 }
 
-void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value, std::size_t limit) {
+void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value, std::size_t peer_limit,
+                    std::size_t endpoint_limit) {
    if (!valid_peer_id(value.id)) {
       return;
    }
    const auto found = std::ranges::find_if(providers, [&](const auto& current) { return current.id == value.id; });
    if (found == providers.end()) {
-      if (providers.size() < limit) {
-         providers.push_back(value);
+      if (providers.size() < peer_limit) {
+         auto inserted = dht::peer{};
+         merge_peer(inserted, value, endpoint_limit);
+         providers.push_back(std::move(inserted));
       }
       return;
    }
-   merge_peer(*found, value);
+   merge_peer(*found, value, endpoint_limit);
 }
 
 std::vector<dht::peer> sorted_peers(const std::map<peer_id, dht::peer>& known, const dht::key& target) {

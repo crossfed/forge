@@ -87,6 +87,12 @@ dht::record_store::impl::async_put_owned(std::shared_ptr<impl> self, dht::record
    co_return co_await self->async_put(std::move(incoming), now);
 }
 
+boost::asio::awaitable<std::optional<dht::record_store::put_result>>
+dht::record_store::impl::async_put_received_owned(std::shared_ptr<impl> self, dht::record_store::value_record incoming,
+                                                  std::chrono::system_clock::time_point now) {
+   co_return co_await self->async_put_received(std::move(incoming), now);
+}
+
 boost::asio::awaitable<void> dht::record_store::impl::async_upsert_provider_owned(
     std::shared_ptr<impl> self, dht::record_store::provider_record value, std::chrono::system_clock::time_point now) {
    co_await self->async_upsert_provider(std::move(value), now);

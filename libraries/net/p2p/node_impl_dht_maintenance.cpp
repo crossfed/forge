@@ -90,6 +90,7 @@ void node::impl::initialize_dht_routing_refresh() {
           .protocol = protocol,
           .routing = &state->routing,
           .interval = state->profile.limits.refresh_interval,
+          .query_timeout = state->profile.limits.query_timeout,
       });
    }
    if (profiles.empty()) {
@@ -98,12 +99,14 @@ void node::impl::initialize_dht_routing_refresh() {
 
    const auto weak = weak_from_this();
    routing_refresh = std::make_shared<detail::dht_routing_refresh>(
-       local, std::move(profiles), [weak](protocol_id protocol, dht::key target) -> boost::asio::awaitable<bool> {
+       local, std::move(profiles),
+       [weak](protocol_id protocol, dht::key target,
+              std::chrono::milliseconds timeout) -> boost::asio::awaitable<bool> {
           const auto self = weak.lock();
           if (!self) {
              co_return false;
           }
-          co_return co_await self->async_refresh_dht_routing(std::move(protocol), std::move(target));
+          co_return co_await self->async_refresh_dht_routing(std::move(protocol), std::move(target), timeout);
        });
    const auto self = shared_from_this();
    const auto service = routing_refresh;

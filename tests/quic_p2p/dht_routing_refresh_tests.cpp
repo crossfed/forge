@@ -86,8 +86,10 @@ BOOST_AUTO_TEST_CASE(dht_routing_refresh_uses_fake_time_and_coalesces_early_wake
            .protocol = builtins::kad_dht,
            .routing = &routing,
            .interval = std::chrono::minutes{10},
+           .query_timeout = std::chrono::milliseconds{75},
        }},
-       [&queries](protocol_id, dht::key) -> boost::asio::awaitable<bool> {
+       [&queries](protocol_id, dht::key, std::chrono::milliseconds timeout) -> boost::asio::awaitable<bool> {
+          BOOST_TEST(timeout == std::chrono::milliseconds{75});
           queries.fetch_add(1, std::memory_order_acq_rel);
           co_return true;
        },
@@ -127,8 +129,10 @@ BOOST_AUTO_TEST_CASE(dht_routing_refresh_fake_time_proves_retry_backoff_and_canc
            .protocol = builtins::kad_dht,
            .routing = &routing,
            .interval = std::chrono::minutes{10},
+           .query_timeout = std::chrono::milliseconds{125},
        }},
-       [&queries](protocol_id, dht::key) -> boost::asio::awaitable<bool> {
+       [&queries](protocol_id, dht::key, std::chrono::milliseconds timeout) -> boost::asio::awaitable<bool> {
+          BOOST_TEST(timeout == std::chrono::milliseconds{125});
           queries.fetch_add(1, std::memory_order_acq_rel);
           co_return false;
        },
@@ -167,8 +171,10 @@ BOOST_AUTO_TEST_CASE(dht_routing_refresh_status_is_synchronized_with_wakeup_resc
            .protocol = builtins::kad_dht,
            .routing = &routing,
            .interval = std::chrono::milliseconds{1},
+           .query_timeout = std::chrono::milliseconds{250},
        }},
-       [&queries](protocol_id, dht::key) -> boost::asio::awaitable<bool> {
+       [&queries](protocol_id, dht::key, std::chrono::milliseconds timeout) -> boost::asio::awaitable<bool> {
+          BOOST_TEST(timeout == std::chrono::milliseconds{250});
           queries.fetch_add(1, std::memory_order_acq_rel);
           co_return true;
        },

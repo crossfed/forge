@@ -41,15 +41,10 @@ constexpr auto amino_provider_key_limit = std::size_t{80};
    return parse_endpoint(forge::multiformats::multiaddr::from_bytes(value).to_string());
 }
 
-void validate_options(const dht::options& opts) {
-   if (opts.replication == 0 || opts.alpha == 0 || opts.max_outbound_message_size == 0 ||
-       opts.max_inbound_message_size == 0 || opts.max_record_size == 0 || opts.max_closer_peers == 0 ||
-       opts.max_provider_peers == 0 || opts.max_peer_endpoints == 0 || opts.query_timeout.count() <= 0 ||
-       opts.refresh_interval.count() <= 0 || opts.provider_record_ttl.count() <= 0 ||
-       opts.provider_address_ttl.count() <= 0 || opts.provider_republish_interval.count() <= 0 ||
-       opts.provider_republish_interval >= opts.provider_record_ttl ||
-       opts.provider_republish_interval >= opts.provider_address_ttl) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid DHT options");
+void validate_codec_options(const dht::options& opts) {
+   if (opts.max_outbound_message_size == 0 || opts.max_inbound_message_size == 0 || opts.max_record_size == 0 ||
+       opts.max_closer_peers == 0 || opts.max_provider_peers == 0 || opts.max_peer_endpoints == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid DHT codec options");
    }
 }
 
@@ -318,7 +313,7 @@ std::vector<std::uint8_t> dht::codec::encode(const dht::message& value) {
 }
 
 std::vector<std::uint8_t> dht::codec::encode(const dht::message& value, const dht::options& opts) {
-   validate_options(opts);
+   validate_codec_options(opts);
    const auto payload = encode_payload(value, opts);
    if (payload.size() > opts.max_outbound_message_size) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT message exceeds max size");
@@ -331,7 +326,7 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes) {
 }
 
 dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::options& opts) {
-   validate_options(opts);
+   validate_codec_options(opts);
    const auto payload = detail::unwrap_message(bytes, opts.max_inbound_message_size);
    auto out = dht::message{.type = dht::message_type::put_value};
    auto in = detail::reader{payload};

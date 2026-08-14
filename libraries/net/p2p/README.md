@@ -263,6 +263,20 @@ Per-profile diagnostics expose whether autonomous maintenance is enabled, the
 startup lookup and in-flight state, consecutive failures and the bounded delay
 until the next attempt.
 
+Custom value validators report deterministic record invalidity with
+`exceptions::record_rejected`. Capacity, persistence, key resolution and other
+operational failures must retain their original typed error so a GET quorum
+cannot silently discard a locally valid record.
+`record_store::async_put_received()` is the explicit network-ingress boundary:
+it returns an empty result only for validator-origin record rejection. Durable
+apply failures, including a backend exception carrying the same error code,
+still propagate and mark persistence degraded. Direct application writes use
+`async_put()` and never silently discard an invalid value.
+Value retention is controlled independently by `value_record_ttl`; provider
+identity, provider addresses and provider republishing retain their separate
+TTL settings. All wire-derived lifetimes are positive and bounded by the DHT
+`uint32` TTL representation before deadline arithmetic.
+
 Amino keeps the donor-compatible 16 KiB outbound message limit and accepts the
 larger bounded inbound messages used by Go/Rust implementations. Inbound peer
 lists and endpoint lists are parsed into fixed local bounds instead of rejecting

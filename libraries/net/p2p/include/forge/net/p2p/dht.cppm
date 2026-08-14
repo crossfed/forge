@@ -55,6 +55,7 @@ struct options {
    std::size_t failure_threshold = 3;
    std::chrono::milliseconds query_timeout{10'000};
    std::chrono::milliseconds refresh_interval{600'000};
+   std::chrono::seconds value_record_ttl{172'800};
    std::chrono::seconds provider_record_ttl{172'800};
    std::chrono::seconds provider_address_ttl{86'400};
    std::chrono::seconds provider_republish_interval{79'200};

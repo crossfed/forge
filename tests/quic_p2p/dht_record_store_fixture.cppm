@@ -28,6 +28,7 @@ class dht_record_store_persistence final : public forge::net::p2p::dht::record_s
    boost::asio::awaitable<void> async_close() override;
 
    void fail_next_apply();
+   void reject_next_apply_as_record();
    void fail_next_flush();
    void fail_next_close();
    void make_next_apply_durability_uncertain();
@@ -38,6 +39,7 @@ class dht_record_store_persistence final : public forge::net::p2p::dht::record_s
    std::shared_ptr<forge::net::p2p::dht::record_store::persistence> inner_;
    std::mutex mutex_;
    bool fail_next_apply_ = false;
+   bool reject_next_apply_as_record_ = false;
    bool fail_next_flush_ = false;
    bool fail_next_close_ = false;
    bool uncertain_next_apply_ = false;

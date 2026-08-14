@@ -28,10 +28,15 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
       std::chrono::seconds republish_interval{};
    };
 
+   struct prepared_provider {
+      dht::peer provider;
+      std::chrono::steady_clock::time_point stamped_at{};
+   };
+
    struct callbacks {
       std::function<std::shared_ptr<void>()> track;
       std::function<bool(std::function<boost::asio::awaitable<void>()>)> launch;
-      std::function<boost::asio::awaitable<dht::peer>(protocol_id, dht::key, schedule)> prepare;
+      std::function<boost::asio::awaitable<prepared_provider>(protocol_id, dht::key, schedule)> prepare;
       std::function<boost::asio::awaitable<std::size_t>(protocol_id, dht::key, dht::peer, dht::query_options)> publish;
       std::function<boost::asio::awaitable<void>(protocol_id, dht::key)> remove;
       std::function<std::size_t(const protocol_id&)> publication_limit;
@@ -87,7 +92,9 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
       registration_key registration;
       dht::query_options query;
       schedule renewal;
+      forge::asio::gate publication;
       std::map<std::uint64_t, std::weak_ptr<owner_state>> owners;
+      std::chrono::steady_clock::time_point last_successful_publication{};
       std::chrono::steady_clock::time_point next_republish{};
       std::uint64_t observed_endpoint_generation = 0;
       std::uint32_t publish_failures = 0;
@@ -103,7 +110,8 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    void request_release_owner(const std::shared_ptr<owner_state>& owner) noexcept;
    boost::asio::awaitable<void> async_release_owner(const std::shared_ptr<owner_state>& owner);
    boost::asio::awaitable<void> async_run(std::shared_ptr<entry> value);
-   boost::asio::awaitable<void> async_remove(const std::shared_ptr<entry>& value);
+   boost::asio::awaitable<void> async_remove(const std::shared_ptr<entry>& value,
+                                             std::exception_ptr prior_failure = {});
    void claim_removal_retry_locked(const std::shared_ptr<entry>& value) noexcept;
    boost::asio::awaitable<void> async_rollback(const registration_key& registration);
    boost::asio::awaitable<std::size_t> async_publish(protocol_id protocol, dht::key key, dht::peer provider,
@@ -113,6 +121,8 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    static void finish_owner(const std::shared_ptr<owner_state>& owner, std::exception_ptr failure) noexcept;
    static boost::asio::awaitable<void> async_wait_owner(const std::shared_ptr<owner_state>& owner);
    [[nodiscard]] std::chrono::milliseconds republish_delay(const entry& value) const noexcept;
+   [[nodiscard]] std::chrono::steady_clock::time_point
+   renewal_deadline(const entry& value, std::chrono::steady_clock::time_point stamped_at) const noexcept;
    [[nodiscard]] std::chrono::milliseconds retry_delay(const entry& value) const noexcept;
 
    static constexpr std::size_t max_entries_per_profile = 1'024;
@@ -129,5 +139,16 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    bool admission_open_ = false;
    bool sealed_ = false;
 };
+
+[[nodiscard]] std::chrono::steady_clock::time_point
+dht_provider_renewal_deadline(std::chrono::steady_clock::time_point stamped_at, dht_provider_registry::schedule renewal,
+                              std::chrono::milliseconds publication_budget,
+                              std::chrono::milliseconds nominal_delay) noexcept;
+
+[[nodiscard]] std::chrono::steady_clock::time_point
+dht_provider_retry_deadline(std::chrono::steady_clock::time_point now,
+                            std::chrono::steady_clock::time_point last_successful_publication,
+                            dht_provider_registry::schedule renewal, std::chrono::milliseconds publication_budget,
+                            std::chrono::milliseconds retry_delay) noexcept;
 
 } // namespace forge::net::p2p::detail
