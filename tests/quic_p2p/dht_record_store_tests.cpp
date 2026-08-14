@@ -159,6 +159,11 @@ BOOST_AUTO_TEST_CASE(dht_record_store_publishes_post_commit_uncertain_value_and_
    BOOST_TEST(status.durability_uncertain);
    BOOST_TEST(status.last_failure.find("post-commit DHT durability failure") != std::string::npos);
 
+   forge::asio::blocking::run(runtime, store.async_hydrate(now));
+   status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+
    forge::asio::blocking::run(runtime, store.async_flush());
    status = store.persistence_state();
    BOOST_TEST(status.failure_count == 1U);
@@ -301,6 +306,11 @@ BOOST_AUTO_TEST_CASE(dht_record_store_rejects_invalid_committed_prune_results_be
    BOOST_TEST(status.last_failure.find("invalid committed prune result") != std::string::npos);
 
    forge::asio::blocking::run(runtime, store.async_hydrate(now));
+   status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_flush());
    status = store.persistence_state();
    BOOST_TEST(!status.degraded);
    BOOST_TEST(!status.durability_uncertain);
@@ -520,6 +530,11 @@ BOOST_AUTO_TEST_CASE(dht_record_store_marks_oversized_committed_prune_result_for
    BOOST_TEST(status.durability_uncertain);
 
    forge::asio::blocking::run(runtime, store.async_hydrate(now));
+   status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_flush());
    status = store.persistence_state();
    BOOST_TEST(!status.degraded);
    BOOST_TEST(!status.durability_uncertain);

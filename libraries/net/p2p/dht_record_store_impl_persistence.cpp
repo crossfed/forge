@@ -199,9 +199,9 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
       if (cleanup_result) {
          apply_durability_result_locked(*cleanup_result);
       } else {
-         // A complete successful hydration is the reconciliation boundary:
-         // runtime state now exactly reflects the durable store.
-         mark_persistence_healthy_locked(true);
+         // Hydration reconciles runtime state with committed persistence, but
+         // only a mutation or flush can confirm that persistence is durable.
+         mark_persistence_healthy_locked(false);
       }
    }
    if (cleanup_result && !cleanup_result->durability_confirmed) {
