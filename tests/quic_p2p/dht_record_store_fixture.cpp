@@ -54,14 +54,18 @@ boost::asio::awaitable<forge::net::p2p::dht::record_store::prune_result>
 dht_record_store_persistence::async_prune_expired(std::chrono::system_clock::time_point now, std::size_t limit) {
    auto uncertain = false;
    auto injected = std::optional<forge::net::p2p::dht::record_store::prune_result>{};
+   auto repeated = std::optional<forge::net::p2p::dht::record_store::prune_result>{};
    {
       auto lock = std::scoped_lock{mutex_};
       uncertain = std::exchange(uncertain_next_prune_, false);
       injected = std::exchange(next_prune_result_, std::nullopt);
+      repeated = repeated_prune_result_;
    }
    auto result = forge::net::p2p::dht::record_store::prune_result{};
    if (injected) {
       result = std::move(*injected);
+   } else if (repeated) {
+      result = std::move(*repeated);
    } else {
       result = co_await inner_->async_prune_expired(now, limit);
    }
@@ -125,6 +129,11 @@ void dht_record_store_persistence::make_next_prune_durability_uncertain() {
 void dht_record_store_persistence::return_next_prune_result(forge::net::p2p::dht::record_store::prune_result result) {
    auto lock = std::scoped_lock{mutex_};
    next_prune_result_ = std::move(result);
+}
+
+void dht_record_store_persistence::repeat_prune_result(forge::net::p2p::dht::record_store::prune_result result) {
+   auto lock = std::scoped_lock{mutex_};
+   repeated_prune_result_ = std::move(result);
 }
 
 } // namespace forge::test::net::p2p

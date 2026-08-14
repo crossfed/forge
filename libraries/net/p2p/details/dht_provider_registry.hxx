@@ -124,6 +124,8 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
    [[nodiscard]] std::chrono::steady_clock::time_point
    renewal_deadline(const entry& value, std::chrono::steady_clock::time_point stamped_at) const noexcept;
    [[nodiscard]] std::chrono::milliseconds retry_delay(const entry& value) const noexcept;
+   [[nodiscard]] bool should_republish_locked(const entry& value,
+                                              std::chrono::steady_clock::time_point now) const noexcept;
 
    static constexpr std::size_t max_entries_per_profile = 1'024;
 

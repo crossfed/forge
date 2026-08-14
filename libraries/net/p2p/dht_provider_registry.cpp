@@ -211,12 +211,14 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
       }
 
       auto publication = co_await existing->publication.acquire();
+      auto strengthened_endpoint_generation = std::uint64_t{};
       {
          const auto lock = std::scoped_lock{mutex_};
          const auto found = entries_.find(registration);
          if (sealed_ || found == entries_.end() || found->second != existing || existing->stop_requested) {
             continue;
          }
+         strengthened_endpoint_generation = endpoint_generation_;
       }
       auto prepared = co_await callbacks_.prepare(registration.protocol, registration.key, existing->renewal);
       const auto stamped_at = prepared.stamped_at;
@@ -236,6 +238,8 @@ dht_provider_registry::async_acquire(protocol_id protocol, dht::key key, dht::qu
             continue;
          }
          existing->query = merged;
+         existing->observed_endpoint_generation = strengthened_endpoint_generation;
+         existing->publish_failures = 0;
          existing->last_successful_publication = stamped_at;
          existing->next_republish = renewal_deadline(*existing, stamped_at);
          co_return lease{add_owner_locked(existing)};
@@ -636,6 +640,14 @@ std::chrono::milliseconds dht_provider_registry::retry_delay(const entry& value)
    return std::chrono::duration_cast<std::chrono::milliseconds>(bounded + std::chrono::seconds{jitter});
 }
 
+bool dht_provider_registry::should_republish_locked(const entry& value,
+                                                    std::chrono::steady_clock::time_point now) const noexcept {
+   if (value.next_republish <= now) {
+      return true;
+   }
+   return value.publish_failures == 0 && value.observed_endpoint_generation != endpoint_generation_;
+}
+
 boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<entry> value) {
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
    auto failure = std::exception_ptr{};
@@ -656,8 +668,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<en
                value->removal_failure = {};
             }
             attempt_generation = endpoint_generation_;
-            republish = !remove && (value->observed_endpoint_generation != endpoint_generation_ ||
-                                    value->next_republish <= std::chrono::steady_clock::now());
+            republish = !remove && should_republish_locked(*value, std::chrono::steady_clock::now());
             deadline = value->next_republish;
             query = value->query;
          }
@@ -677,8 +688,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<en
                continue;
             }
             attempt_generation = endpoint_generation_;
-            republish = value->observed_endpoint_generation != endpoint_generation_ ||
-                        value->next_republish <= std::chrono::steady_clock::now();
+            republish = should_republish_locked(*value, std::chrono::steady_clock::now());
             query = value->query;
          }
          if (!republish) {

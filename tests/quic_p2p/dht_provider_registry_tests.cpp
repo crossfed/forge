@@ -208,6 +208,8 @@ BOOST_AUTO_TEST_CASE(dht_provider_failed_republish_retries_before_stamped_expiry
            dht::query_options{.requested_count = 1, .quorum = 1, .timeout = std::chrono::seconds{1}}, renewal));
 
    BOOST_REQUIRE(second_finished_future.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   registry->notify_endpoints_changed();
+   registry->notify_endpoints_changed();
    BOOST_CHECK(third_entered_future.wait_for(std::chrono::milliseconds{300}) != std::future_status::ready);
    BOOST_REQUIRE(third_entered_future.wait_for(std::chrono::milliseconds{2'500}) == std::future_status::ready);
 

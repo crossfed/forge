@@ -470,6 +470,128 @@ BOOST_AUTO_TEST_CASE(dht_record_store_hydrates_bounded_pages_across_reopen) {
    BOOST_REQUIRE_EQUAL(reader.find_providers(test_key('q'), 1, now).size(), 1U);
 }
 
+BOOST_AUTO_TEST_CASE(dht_record_store_prunes_expired_rows_before_hydration_capacity) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = dht::record_store::make_memory_persistence();
+   const auto now = std::chrono::system_clock::now();
+   const auto live_value = test_key('v');
+   const auto live_provider_key = test_key('p');
+   const auto live_provider = test_peer(79);
+
+   auto batch = dht::record_store::mutation_batch{};
+   batch.value_upserts.push_back(test_value(test_key('a'), 1, now - std::chrono::minutes{2}));
+   batch.value_upserts.push_back(test_value(test_key('b'), 2, now - std::chrono::minutes{1}));
+   batch.value_upserts.push_back(test_value(live_value, 3, now + std::chrono::hours{1}));
+   batch.provider_upserts.push_back(
+       test_provider(test_key('c'), test_peer(77), now - std::chrono::minutes{2}, now - std::chrono::minutes{3}));
+   batch.provider_upserts.push_back(
+       test_provider(test_key('d'), test_peer(78), now - std::chrono::minutes{1}, now - std::chrono::minutes{2}));
+   batch.provider_upserts.push_back(
+       test_provider(live_provider_key, live_provider, now + std::chrono::hours{1}, now + std::chrono::minutes{30}));
+   forge::asio::blocking::run(runtime, persistence->async_apply(std::move(batch)));
+
+   auto store = dht::record_store{test_profile(), dht::record_store::options{
+                                                      .persistence = persistence,
+                                                      .max_values = 1,
+                                                      .max_providers = 1,
+                                                      .max_providers_per_key = 1,
+                                                      .hydration_page_limit = 1,
+                                                      .prune_page_limit = 1,
+                                                  }};
+   forge::asio::blocking::run(runtime, store.async_hydrate(now));
+
+   BOOST_REQUIRE(store.find_value(live_value, now));
+   BOOST_REQUIRE_EQUAL(store.find_providers(live_provider_key, 1, now).size(), 1U);
+   BOOST_CHECK(store.find_providers(live_provider_key, 1, now).front().provider == live_provider);
+
+   const auto durable_values =
+       forge::asio::blocking::run(runtime, persistence->async_hydrate(dht::record_store::hydration_request{
+                                               .kind = dht::record_store::hydration_kind::values,
+                                               .limit = 10,
+                                           }));
+   const auto durable_providers =
+       forge::asio::blocking::run(runtime, persistence->async_hydrate(dht::record_store::hydration_request{
+                                               .kind = dht::record_store::hydration_kind::providers,
+                                               .limit = 10,
+                                           }));
+   BOOST_REQUIRE_EQUAL(durable_values.values.size(), 1U);
+   BOOST_REQUIRE_EQUAL(durable_providers.providers.size(), 1U);
+   BOOST_CHECK(durable_values.values.front().record.key_value == live_value);
+   BOOST_CHECK(durable_providers.providers.front().provider == live_provider);
+
+   auto over_capacity_persistence = dht::record_store::make_memory_persistence();
+   auto over_capacity_batch = dht::record_store::mutation_batch{};
+   over_capacity_batch.value_upserts.push_back(test_value(test_key('y'), 1, now + std::chrono::hours{1}));
+   over_capacity_batch.value_upserts.push_back(test_value(test_key('z'), 2, now + std::chrono::hours{1}));
+   forge::asio::blocking::run(runtime, over_capacity_persistence->async_apply(std::move(over_capacity_batch)));
+   auto over_capacity = dht::record_store{test_profile(), dht::record_store::options{
+                                                              .persistence = over_capacity_persistence,
+                                                              .max_values = 1,
+                                                              .hydration_page_limit = 1,
+                                                              .prune_page_limit = 1,
+                                                          }};
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, over_capacity.async_hydrate(now))),
+                     exceptions::backpressure_rejected);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_rejects_nonprogressing_hydration_prune) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto invalid = dht::record_store::prune_result{.may_have_more = true};
+   persistence->return_next_prune_result(std::move(invalid));
+
+   auto store = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_hydrate(std::chrono::system_clock::now()))),
+                     exceptions::internal);
+   const auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.durability_uncertain);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_bounds_repeating_nonempty_hydration_prune) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto repeating = dht::record_store::prune_result{.values = {test_key('r')}, .may_have_more = true};
+   persistence->repeat_prune_result(std::move(repeating));
+
+   auto store = dht::record_store{test_profile(), dht::record_store::options{
+                                                      .persistence = persistence,
+                                                      .max_hydration_pages = 2,
+                                                  }};
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_hydrate(std::chrono::system_clock::now()))),
+                     exceptions::backpressure_rejected);
+   const auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_bounds_live_hydration_pages_and_releases_persistence_gate) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = dht::record_store::make_memory_persistence();
+   const auto now = std::chrono::system_clock::now();
+   auto batch = dht::record_store::mutation_batch{};
+   batch.value_upserts.push_back(test_value(test_key('a'), 1, now + std::chrono::hours{1}));
+   batch.value_upserts.push_back(test_value(test_key('b'), 2, now + std::chrono::hours{1}));
+   forge::asio::blocking::run(runtime, persistence->async_apply(std::move(batch)));
+
+   auto store = dht::record_store{test_profile(), dht::record_store::options{
+                                                      .persistence = persistence,
+                                                      .max_values = 2,
+                                                      .hydration_page_limit = 1,
+                                                      .max_hydration_pages = 1,
+                                                  }};
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_hydrate(now))),
+                     exceptions::backpressure_rejected);
+   auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_flush());
+   status = store.persistence_state();
+   BOOST_TEST(!status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+}
+
 BOOST_AUTO_TEST_CASE(dht_record_store_requires_local_provider_reconfirmation_after_restart) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto persistence = dht::record_store::make_memory_persistence();
@@ -489,7 +611,12 @@ BOOST_AUTO_TEST_CASE(dht_record_store_requires_local_provider_reconfirmation_aft
       // Simulate process loss: no graceful close/withdrawal owns this transition.
    }
 
-   auto reopened = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   auto reopened = dht::record_store{test_profile(), dht::record_store::options{
+                                                         .persistence = persistence,
+                                                         .max_providers = 1,
+                                                         .max_local_providers = 1,
+                                                         .hydration_page_limit = 1,
+                                                     }};
    forge::asio::blocking::run(runtime, reopened.async_hydrate(now));
    const auto providers = reopened.find_providers(key, 20, now);
    BOOST_REQUIRE_EQUAL(providers.size(), 1U);
@@ -503,6 +630,54 @@ BOOST_AUTO_TEST_CASE(dht_record_store_requires_local_provider_reconfirmation_aft
                                            }));
    BOOST_REQUIRE_EQUAL(durable.providers.size(), 1U);
    BOOST_TEST(durable.providers.front().provider.to_string() == remote.to_string());
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_confirmed_hydration_prune_repairs_sticky_durability) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto store = dht::record_store{test_profile(), dht::record_store::options{.persistence = persistence}};
+   const auto now = std::chrono::system_clock::now();
+   const auto key = test_key('u');
+
+   persistence->make_next_apply_durability_uncertain();
+   BOOST_CHECK_THROW(
+       (forge::asio::blocking::run(runtime, store.async_put(test_value(key, 1, now + std::chrono::minutes{1}), now))),
+       exceptions::durability_uncertain);
+   BOOST_TEST(store.persistence_state().durability_uncertain);
+
+   forge::asio::blocking::run(runtime, store.async_hydrate(now + std::chrono::minutes{2}));
+   const auto status = store.persistence_state();
+   BOOST_TEST(!status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
+   BOOST_TEST(!store.find_value(key, now + std::chrono::minutes{2}));
+}
+
+BOOST_AUTO_TEST_CASE(dht_record_store_confirmed_hydration_prune_repairs_durability_before_capacity_failure) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<forge::test::net::p2p::dht_record_store_persistence>();
+   auto store = dht::record_store{test_profile(), dht::record_store::options{
+                                                      .persistence = persistence,
+                                                      .max_values = 1,
+                                                      .hydration_page_limit = 1,
+                                                  }};
+   const auto now = std::chrono::system_clock::now();
+
+   persistence->make_next_apply_durability_uncertain();
+   BOOST_CHECK_THROW((forge::asio::blocking::run(
+                         runtime, store.async_put(test_value(test_key('u'), 1, now + std::chrono::minutes{1}), now))),
+                     exceptions::durability_uncertain);
+   BOOST_TEST(store.persistence_state().durability_uncertain);
+
+   auto live = dht::record_store::mutation_batch{};
+   live.value_upserts.push_back(test_value(test_key('v'), 2, now + std::chrono::hours{1}));
+   live.value_upserts.push_back(test_value(test_key('w'), 3, now + std::chrono::hours{1}));
+   forge::asio::blocking::run(runtime, persistence->async_apply(std::move(live)));
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(runtime, store.async_hydrate(now + std::chrono::minutes{2}))),
+                     exceptions::backpressure_rejected);
+   const auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(!status.durability_uncertain);
 }
 
 BOOST_AUTO_TEST_CASE(dht_record_store_hydration_reconciles_expired_rows_and_provider_addresses) {

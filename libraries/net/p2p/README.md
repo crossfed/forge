@@ -313,8 +313,12 @@ Production ObjectDB hydration validates one raw row at a time. Each bounded
 page is read through its own operation-scoped snapshot; no unbounded snapshot is
 held across the complete hydration sequence. Per-record limits are checked
 before conversion into operational peer or DHT state, so a malformed durable
-row cannot force an unbounded hydration page into memory. DHT deadlines bound
-the remote wire exchanges. Once a provider or
+row cannot force an unbounded hydration page into memory. Before live-record
+capacity is enforced, DHT hydration removes expired durable rows in bounded
+prune pages. `max_hydration_pages` bounds each startup phase; exhaustion
+returns typed backpressure instead of holding the persistence gate forever, and
+a later hydration attempt continues from the already committed cleanup. DHT
+deadlines bound the remote wire exchanges. Once a provider or
 Rendezvous record has been accepted for durable acknowledgement, its persistence
 step remains owned and awaited by the caller instead of being abandoned after a
 possibly committed transaction.

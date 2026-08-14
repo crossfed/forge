@@ -111,6 +111,7 @@ class record_store {
       std::size_t hydration_page_limit = 256;
       std::size_t prune_page_limit = 256;
       std::size_t max_persistence_waiters = 256;
+      std::size_t max_hydration_pages = 4'096;
    };
 
    explicit record_store(dht::profile profile);

@@ -72,7 +72,8 @@ dht::record_store::impl::impl(dht::profile profile_value, dht::record_store::opt
    validate(profile_);
    if (options_.max_values == 0 || options_.max_providers == 0 || options_.max_local_providers == 0 ||
        options_.max_providers_per_key == 0 || options_.max_total_bytes == 0 || options_.max_record_bytes == 0 ||
-       options_.hydration_page_limit == 0 || options_.prune_page_limit == 0 || options_.max_persistence_waiters == 0) {
+       options_.hydration_page_limit == 0 || options_.prune_page_limit == 0 || options_.max_hydration_pages == 0 ||
+       options_.max_persistence_waiters == 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT record store limits must be positive");
    }
    if (!persistence_) {

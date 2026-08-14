@@ -56,44 +56,151 @@ void dht::record_store::impl::apply_durability_result_locked(const dht::record_s
    }
 }
 
+void dht::record_store::impl::validate_hydration_prune_result(const dht::record_store::prune_result& result) const {
+   const auto empty = result.values.empty() && result.providers.empty() && result.provider_address_updates.empty();
+   if (result.values.size() > options_.prune_page_limit ||
+       result.providers.size() > options_.prune_page_limit - result.values.size() ||
+       result.provider_address_updates.size() >
+           options_.prune_page_limit - result.values.size() - result.providers.size() ||
+       (result.may_have_more && empty)) {
+      FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid hydration prune result");
+   }
+
+   auto value_removals = std::set<value_key>{};
+   for (const auto& key : result.values) {
+      if (key.bytes.empty() || !value_removals.insert(key.bytes).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid hydration value prune key");
+      }
+   }
+
+   auto provider_removals = std::set<provider_map_key>{};
+   for (const auto& key : result.providers) {
+      const auto map_key = provider_map_key{key.key.bytes, key.provider};
+      if (key.key.bytes.empty() || !valid_peer_id(key.provider) || !provider_removals.insert(map_key).second) {
+         FORGE_THROW_EXCEPTION(exceptions::internal,
+                               "DHT persistence returned an invalid hydration provider prune key");
+      }
+   }
+
+   auto address_updates = std::set<provider_map_key>{};
+   for (const auto& value : result.provider_address_updates) {
+      const auto key = provider_map_key{value.key.bytes, value.provider};
+      if (value.key.bytes.empty() || !valid_peer_id(value.provider) || !address_updates.insert(key).second ||
+          provider_removals.contains(key) || !value.endpoints.empty() ||
+          value.addresses_expires_at != std::chrono::system_clock::time_point{}) {
+         FORGE_THROW_EXCEPTION(exceptions::internal,
+                               "DHT persistence returned an invalid hydration provider address update");
+      }
+   }
+}
+
+boost::asio::awaitable<bool>
+dht::record_store::impl::async_prune_persistence_for_hydration(std::chrono::system_clock::time_point now) {
+   auto changed = false;
+   for (auto page = std::size_t{}; page < options_.max_hydration_pages; ++page) {
+      auto result = dht::record_store::prune_result{};
+      try {
+         result = co_await persistence_->async_prune_expired(now, options_.prune_page_limit);
+      } catch (...) {
+         auto lock = std::scoped_lock{mutex_};
+         mark_persistence_failure_locked(current_failure_message());
+         throw;
+      }
+
+      try {
+         validate_hydration_prune_result(result);
+      } catch (...) {
+         auto lock = std::scoped_lock{mutex_};
+         reconciliation_required_ = true;
+         mark_durability_uncertain_locked("DHT persistence returned an invalid committed hydration prune result");
+         throw;
+      }
+      if (!result.durability.durability_confirmed) {
+         {
+            auto lock = std::scoped_lock{mutex_};
+            apply_durability_result_locked(result.durability);
+         }
+         throw_durability_uncertain(result.durability);
+      }
+      const auto page_changed =
+          !result.values.empty() || !result.providers.empty() || !result.provider_address_updates.empty();
+      if (page_changed) {
+         auto lock = std::scoped_lock{mutex_};
+         mark_persistence_healthy_locked(true);
+      }
+      changed = changed || page_changed;
+      if (!result.may_have_more) {
+         co_return changed;
+      }
+   }
+   {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_failure_locked("DHT hydration prune page budget exhausted");
+   }
+   FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration prune page budget exhausted");
+}
+
 boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono::system_clock::time_point now) {
    auto admission = admit_operation();
    auto ticket = co_await persistence_gate_.acquire();
    auto hydrated_values = std::vector<dht::record_store::value_record>{};
    auto hydrated_providers = std::vector<dht::record_store::provider_record>{};
+   auto expired_values = std::vector<dht::key>{};
+   auto stale_local_providers = std::vector<dht::record_store::provider_key>{};
+   auto expired_providers = std::vector<dht::record_store::provider_key>{};
 
-   const auto hydrate_kind = [this, &hydrated_values,
-                              &hydrated_providers](dht::record_store::hydration_kind kind,
-                                                   std::size_t maximum) -> boost::asio::awaitable<void> {
+   const auto pruned_persistence = co_await async_prune_persistence_for_hydration(now);
+
+   const auto hydrate_kind = [this, now, &hydrated_values, &hydrated_providers, &expired_values, &stale_local_providers,
+                              &expired_providers](dht::record_store::hydration_kind kind,
+                                                  std::size_t maximum) -> boost::asio::awaitable<void> {
       auto cursor = std::optional<std::vector<std::byte>>{};
-      auto loaded = std::size_t{};
-      while (true) {
-         const auto remaining = maximum - loaded;
-         if (remaining == 0) {
-            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
-         }
-         const auto limit = std::min(remaining, options_.hydration_page_limit);
+      auto retained = std::size_t{};
+      for (auto page_index = std::size_t{}; page_index < options_.max_hydration_pages; ++page_index) {
+         const auto limit = options_.hydration_page_limit;
          auto page = co_await persistence_->async_hydrate(
              dht::record_store::hydration_request{.kind = kind, .cursor = cursor, .limit = limit});
-         const auto page_size = page.values.size() + page.providers.size();
          const auto wrong_kind = (kind != dht::record_store::hydration_kind::values && !page.values.empty()) ||
                                  (kind != dht::record_store::hydration_kind::providers && !page.providers.empty());
-         if (page_size > limit || wrong_kind || (page.cursor && (page.cursor == cursor || page_size == 0))) {
+         const auto oversized = page.values.size() > limit || page.providers.size() > limit - page.values.size();
+         const auto empty = page.values.empty() && page.providers.empty();
+         if (oversized || wrong_kind || (page.cursor && (page.cursor == cursor || empty))) {
             FORGE_THROW_EXCEPTION(exceptions::internal, "DHT persistence returned an invalid hydration page");
          }
-         loaded += page_size;
-         hydrated_values.insert(hydrated_values.end(), std::make_move_iterator(page.values.begin()),
-                                std::make_move_iterator(page.values.end()));
-         hydrated_providers.insert(hydrated_providers.end(), std::make_move_iterator(page.providers.begin()),
-                                   std::make_move_iterator(page.providers.end()));
+
+         for (auto& value : page.values) {
+            if (expired(value.expires_at, now)) {
+               expired_values.push_back(value.record.key_value);
+               continue;
+            }
+            if (retained == maximum) {
+               FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
+            }
+            hydrated_values.push_back(std::move(value));
+            ++retained;
+         }
+         for (auto& value : page.providers) {
+            auto key = dht::record_store::provider_key{.key = value.key, .provider = value.provider};
+            if (value.local_owned) {
+               stale_local_providers.push_back(std::move(key));
+               continue;
+            }
+            if (expired(value.provider_expires_at, now)) {
+               expired_providers.push_back(std::move(key));
+               continue;
+            }
+            if (retained == maximum) {
+               FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
+            }
+            hydrated_providers.push_back(std::move(value));
+            ++retained;
+         }
          if (!page.cursor) {
             co_return;
          }
-         if (loaded == maximum) {
-            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration capacity reached");
-         }
          cursor = std::move(page.cursor);
       }
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT hydration page budget exhausted");
    };
 
    try {
@@ -110,10 +217,7 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
    auto providers_by_key = std::map<value_key, std::set<peer_id>>{};
    auto total_bytes = std::size_t{};
    auto expiry_updates = std::vector<dht::record_store::value_record>{};
-   auto expired_values = std::vector<dht::key>{};
    auto provider_updates = std::vector<dht::record_store::provider_record>{};
-   auto stale_local_providers = std::vector<dht::record_store::provider_key>{};
-   auto expired_providers = std::vector<dht::record_store::provider_key>{};
    for (auto& value : hydrated_values) {
       if (expired(value.expires_at, now)) {
          expired_values.push_back(value.record.key_value);
@@ -201,7 +305,7 @@ boost::asio::awaitable<void> dht::record_store::impl::async_hydrate(std::chrono:
       } else {
          // Hydration reconciles runtime state with committed persistence, but
          // only a mutation or flush can confirm that persistence is durable.
-         mark_persistence_healthy_locked(false);
+         mark_persistence_healthy_locked(pruned_persistence);
       }
    }
    if (cleanup_result && !cleanup_result->durability_confirmed) {
