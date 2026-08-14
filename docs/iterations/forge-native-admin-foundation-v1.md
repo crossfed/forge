@@ -9,6 +9,26 @@ implementation plan, not a shipped API contract.
 The first downstream consumer is the optional Spine Admin product. Public Forge
 types, targets, modules and configuration remain product-neutral.
 
+## Production Status
+
+The architecture is production-targeted, but the components described here are
+not implemented yet. This document is therefore a production design, not a
+claim that Forge currently ships a production-ready browser-authentication
+stack.
+
+The v1 implementation becomes production-ready only after its library,
+live-HTTP, package-relocation and adversarial acceptance suites pass, every
+public failure is a typed Forge exception and a downstream backend proves both
+supported deployment modes:
+
+- self-contained mode, where the native backend serves the installed frontend
+  bundle;
+- reverse-proxy mode, where nginx, Caddy or an ingress serves the same bundle
+  and proxies only the typed backend API.
+
+Static files are not an authorization boundary in either mode. Every protected
+API request is authenticated and authorized by the native backend itself.
+
 ## Goal
 
 Provide reusable browser authentication and HTTP publication mechanics without
@@ -181,19 +201,77 @@ Node.js or become a general web framework.
 
 ### `forge_plugins_http_server`
 
-Extend the local-only server API with a constrained asset publication operation:
+Extend the local-only server API with a constrained asset mount operation:
 
 ```cpp
-publish_assets(asset_publication value);
+struct asset_mount {
+   std::string path = "/admin";
+   std::filesystem::path root;
+   std::string index = "index.html";
+   bool spa_fallback = true;
+   std::uint64_t max_file_bytes = 16 * 1024 * 1024;
+};
+
+virtual boost::asio::awaitable<void> mount_assets(asset_mount value) = 0;
 ```
 
-`publish_assets` means mount an already built directory such as
+`mount_assets` means register an already built directory such as
 `share/product/web` at a configured URL prefix before server startup. It is not
 an upload endpoint and does not expose the raw router to product plugins.
 
-The publication record contains only neutral mechanics such as mount path,
-filesystem root, index file, SPA fallback and cache limits. Product names,
-frontend manifests and authorization policy remain downstream-owned.
+The mount record contains only neutral mechanics such as URL prefix, filesystem
+root, index file, SPA fallback and cache limits. Product names, frontend
+manifests and authorization policy remain downstream-owned. The exact public
+record placement is finalized under the `create-plugin` and `create-library`
+rules before implementation; the ownership and behavior above are fixed.
+
+A product plugin composes the asset mount and typed API independently:
+
+```cpp
+auto http = context.apis().get<forge::plugins::http::server::api>(
+   forge::plugins::http::server::api::ref());
+
+co_await http->mount_assets({
+   .path = "/admin",
+   .root = "/usr/share/product-admin/web",
+   .index = "index.html",
+   .spa_fallback = true,
+});
+
+co_await http->publish<owner_admin_api>({
+   .base_path = "/admin-ui/v1",
+});
+```
+
+The two prefixes have deliberately different routing domains:
+
+```text
+GET  /admin/
+     -> /usr/share/product-admin/web/index.html
+
+GET  /admin/assets/app.a81f2.js
+     -> /usr/share/product-admin/web/assets/app.a81f2.js
+
+GET  /admin/nodes/validator-1
+     -> index.html, then the TypeScript router handles the UI route
+
+GET  /admin-ui/v1/nodes
+     -> typed Forge HTTP API
+
+POST /admin-ui/v1/nodes/validator-1/pause
+     -> typed Forge HTTP API
+```
+
+The SPA fallback is restricted to the asset mount. It cannot consume an
+unknown `/admin-ui/v1` API path, and non-GET/HEAD methods never fall back to
+`index.html`.
+
+Asset mounting is optional. If nginx, Caddy or an ingress serves the frontend,
+the product does not call `mount_assets`; it publishes only `/admin-ui/v1`.
+Both paths can still share one browser origin because the reverse proxy serves
+`/admin` locally and forwards `/admin-ui/v1` to the native backend. The backend
+must not trust forwarded scheme, address or identity headers unless the proxy
+source is explicitly configured as trusted.
 
 Middleware responses also gain an append operation or a typed cookie operation
 that preserves repeated `Set-Cookie` fields. HTTP requires one header field per
@@ -214,7 +292,7 @@ although the lower `forge_net_http` response already preserves repeated cookie
 fields.
 
 The plugin continues to reject arbitrary raw-route publication. Typed API
-publication, middleware and constrained asset publication remain the only
+publication, middleware and constrained asset mounting remain the only
 supported contribution surfaces.
 
 ## Explicitly Unchanged Components
@@ -305,6 +383,8 @@ the browser an opaque Secure HttpOnly session cookie.
   explicit loopback development policy.
 - Assets and API share one origin, but asset paths never bypass API middleware
   or expose arbitrary filesystem files.
+- Disabling the embedded asset mount does not weaken API authentication; an
+  external static server receives no downstream service credential.
 - Product rate limits are applied to issue, begin, complete and authentication
   failures before expensive or state-changing work.
 
@@ -317,7 +397,7 @@ the browser an opaque Secure HttpOnly session cookie.
    tests.
 4. Add `forge.net.http.cookie` and repeated `Set-Cookie` preservation.
 5. Add `forge_auth_http` and middleware integration tests.
-6. Add `forge.net.http.assets` and constrained server-plugin publication.
+6. Add `forge.net.http.assets` and constrained server-plugin asset mounting.
 7. Add package components, relocation consumers, READMEs and donor
    traceability.
 8. Integrate the released components into a downstream native admin backend.
@@ -353,7 +433,9 @@ Assets:
 - missing files and SPA fallback;
 - traversal, percent-encoding, symlink escape and directory-listing rejection;
 - MIME allow-list and response-size limits;
-- production package relocation with an installed frontend bundle.
+- production package relocation with an installed frontend bundle;
+- equivalent self-contained and reverse-proxy deployment behavior;
+- disabled asset mounting leaves no fallback or filesystem route registered.
 
 Integration:
 
