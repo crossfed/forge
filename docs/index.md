@@ -54,6 +54,7 @@ Documents below explain cross-library architecture decisions.
 | [security/authenticated-state-production-gate.md](security/authenticated-state-production-gate.md) | Mandatory independent review gate before production activation of authenticated state roots. |
 | [iterations/forge-db-mdbx-v1.md](iterations/forge-db-mdbx-v1.md) | Production design for a libmdbx DB Core backend, including thread affinity, snapshot cloning, durability, geometry and parity requirements. |
 | [iterations/forge-contract-sdk-toolchain-v1.md](iterations/forge-contract-sdk-toolchain-v1.md) | Accepted baseline for the wasm32 contract SDK, vanilla Clang toolchain, legacy EOSIO compatibility and modern C++23 contract surface. |
+| [iterations/forge-vm-wasm-backend-family-v1.md](iterations/forge-vm-wasm-backend-family-v1.md) | Accepted clean-breaking target/module/namespace split between the current EOS VM interpret lane and the future EOS VM OC optimizing backend. |
 | [donors/forge-contract-dual-target-graph-v1.md](donors/forge-contract-dual-target-graph-v1.md) | Bazel, Cargo, CDT and CMake donor boundaries for immutable dual-target contract-library descriptors. |
 | [iterations/forge-chain-remote-state-v1.md](iterations/forge-chain-remote-state-v1.md) | Accepted direction for transport-neutral typed contract-state reads and chain transaction submission over Forge API. |
 | [donors/forge-chain-remote-state-v1.md](donors/forge-chain-remote-state-v1.md) | Spring/CDT donor boundaries for guest tables, remote state reads and transaction submission. |
