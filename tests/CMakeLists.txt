@@ -392,6 +392,7 @@ if(FORGE_HAS_MDBX)
       db_mdbx/mdbx_crash_tests.cpp
       db_mdbx/mdbx_tests.cpp
       db_mdbx/mdbx_layers_tests.cpp
+      auth/auth_mdbx_integration_tests.cpp
    )
    add_executable(
       forge_db_mdbx_crash_helper
@@ -410,6 +411,7 @@ if(FORGE_HAS_MDBX)
       forge_db_object
       forge_db_blob
       forge_db_revision
+      forge_auth_pairing
       Boost::included_unit_test_framework
    )
    add_test(NAME test_forge_db_mdbx COMMAND test_forge_db_mdbx WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
