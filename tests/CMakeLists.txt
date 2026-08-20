@@ -779,6 +779,7 @@ add_executable(
    test_forge_tls
    unit/main.cpp
    tls/tls_tests.cpp
+   tls/http_server_tests.cpp
 )
 target_link_libraries(test_forge_tls forge Boost::included_unit_test_framework OpenSSL::Crypto)
 add_test(NAME test_forge_tls COMMAND test_forge_tls WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

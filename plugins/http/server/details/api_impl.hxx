@@ -7,9 +7,9 @@ class plugin::api_impl final : public api {
    explicit api_impl(std::shared_ptr<plugin::impl> impl);
 
    [[nodiscard]] const forge::api::core::registry& registry() const override;
-   boost::asio::awaitable<void> publish(std::unique_ptr<binding_spec> binding,
-                                        publish_options options) override;
+   boost::asio::awaitable<void> publish(std::unique_ptr<binding_spec> binding, publish_options options) override;
    boost::asio::awaitable<void> use(middleware_descriptor descriptor) override;
+   boost::asio::awaitable<void> reload_tls() override;
 
  private:
    std::shared_ptr<plugin::impl> impl_;

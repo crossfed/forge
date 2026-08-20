@@ -52,6 +52,16 @@ explicitly keeps OpenSSL's system-default protocol range to preserve its prior
 compatibility behavior. SNI and hostname verification remain separate: the
 client configures both for each HTTPS connection.
 
+`forge::net::http::server` can instead receive a shared
+`forge::net::tls::context_provider`. Listener mode is fixed when the server
+starts: a TLS listener completes a TLS 1.3 server handshake before parsing any
+HTTP bytes, has a positive handshake timeout and a bounded pending-handshake
+count, and never falls back to plaintext. One provider snapshot is acquired for
+each accepted TLS connection and remains alive through HTTP and WebSocket
+upgrade lifetimes; `context_provider::replace()` affects only later accepts.
+Server mTLS uses `peer_verification::require_peer_certificate` with configured
+trust anchors. The library takes PEM material, never plugin Secret IDs.
+
 Boost.Beast remains the runtime donor and backend for parser/serializer/socket
 mechanics, but public HTTP APIs use `forge::net::http::request` and
 `forge::net::http::response` wrappers rather than Beast message aliases.

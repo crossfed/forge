@@ -29,4 +29,7 @@ target_link_libraries(
       forge_crypto_digest
       forge_exceptions
       Boost::asio
+   PRIVATE
+      forge_net_tls
+      forge_plugins_crypto_secrets
 )

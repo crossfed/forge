@@ -24,6 +24,9 @@ module;
 #include <boost/beast/ssl.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
+#include <openssl/crypto.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -64,7 +67,45 @@ struct x509_deleter {
    }
 };
 
+struct bio_deleter {
+   void operator()(BIO* value) const noexcept {
+      BIO_free(value);
+   }
+};
+
 using x509_ptr = std::unique_ptr<X509, x509_deleter>;
+using bio_ptr = std::unique_ptr<BIO, bio_deleter>;
+
+void erase_tls_text(std::string& value) noexcept {
+   if (!value.empty()) {
+      OPENSSL_cleanse(value.data(), value.size());
+      value.clear();
+   }
+}
+
+void erase_context_options(context_options& options) noexcept {
+   erase_tls_text(options.certificate_chain_pem);
+   erase_tls_text(options.private_key_pem);
+   for (auto& authority : options.trust_anchors_pem) {
+      erase_tls_text(authority);
+   }
+   options.trust_anchors_pem.clear();
+}
+
+class context_options_eraser {
+ public:
+   explicit context_options_eraser(context_options& options) : options_(options) {}
+
+   ~context_options_eraser() {
+      erase_context_options(options_);
+   }
+
+   context_options_eraser(const context_options_eraser&) = delete;
+   context_options_eraser& operator=(const context_options_eraser&) = delete;
+
+ private:
+   context_options& options_;
+};
 
 void validate_role(endpoint_role value) {
    switch (value) {
@@ -204,15 +245,57 @@ void load_identity(asio::ssl::context& context, const context_options& options) 
    }
 }
 
+[[nodiscard]] bool contains_only_whitespace(std::string_view value) {
+   return std::all_of(value.begin(), value.end(), [](unsigned char character) { return std::isspace(character) != 0; });
+}
+
+[[nodiscard]] std::vector<x509_ptr> parse_trust_anchor_bundle(std::string_view authority) {
+   auto source = bio_ptr{BIO_new_mem_buf(authority.data(), static_cast<int>(authority.size()))};
+   if (!source) {
+      FORGE_THROW_EXCEPTION(exceptions::context_creation_failed, "failed to allocate TLS trust-anchor parser");
+   }
+
+   auto certificates = std::vector<x509_ptr>{};
+   for (;;) {
+      const auto offset = BIO_tell(source.get());
+      ERR_clear_error();
+      auto certificate = x509_ptr{PEM_read_bio_X509(source.get(), nullptr, nullptr, nullptr)};
+      if (certificate) {
+         certificates.push_back(std::move(certificate));
+         continue;
+      }
+      if (offset < 0 || !contains_only_whitespace(authority.substr(static_cast<std::size_t>(offset)))) {
+         FORGE_THROW_EXCEPTION(exceptions::trust_anchors_invalid, "TLS trust-anchor bundle contains malformed PEM");
+      }
+      ERR_clear_error();
+      break;
+   }
+   if (certificates.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_anchors_invalid, "TLS trust-anchor bundle contains no certificates");
+   }
+   return certificates;
+}
+
 void load_trust_anchors(asio::ssl::context& context, const context_options& options) {
+   auto* store = SSL_CTX_get_cert_store(context.native_handle());
+   if (store == nullptr) {
+      FORGE_THROW_EXCEPTION(exceptions::context_creation_failed, "TLS context has no certificate trust store");
+   }
+
+   const auto advertise_client_authorities =
+       options.role == endpoint_role::server && options.verification == peer_verification::require_peer_certificate;
    for (const auto& authority : options.trust_anchors_pem) {
       if (authority.empty()) {
          FORGE_THROW_EXCEPTION(exceptions::trust_anchors_invalid, "TLS trust anchor must not be empty");
       }
-      try {
-         context.add_certificate_authority(asio::buffer(authority.data(), authority.size()));
-      } catch (const boost::system::system_error& error) {
-         throw_trust_anchors_invalid("failed to load TLS trust anchor", error.code().message());
+      for (const auto& certificate : parse_trust_anchor_bundle(authority)) {
+         if (X509_STORE_add_cert(store, certificate.get()) != 1) {
+            throw_trust_anchors_invalid("failed to load TLS trust anchor", "OpenSSL rejected the certificate");
+         }
+         if (advertise_client_authorities && SSL_CTX_add_client_CA(context.native_handle(), certificate.get()) != 1) {
+            FORGE_THROW_EXCEPTION(exceptions::context_creation_failed,
+                                  "failed to advertise TLS client certificate authority");
+         }
       }
    }
 
@@ -497,6 +580,7 @@ std::string selected_alpn(SSL* native_handle) {
 }
 
 context_snapshot_ptr make_context(context_options options) {
+   auto erase_options = context_options_eraser{options};
    validate_options(options);
    auto alpn_wire = encode_alpn(options.alpn_protocols);
 
@@ -525,14 +609,19 @@ context_snapshot_ptr make_context(context_options options) {
    }
 }
 
-context_provider::context_provider(context_options initial) : current_(make_context(std::move(initial))) {}
+context_provider::context_provider(context_options initial) {
+   auto erase_initial = context_options_eraser{initial};
+   current_ = make_context(std::move(initial));
+}
 
 context_snapshot_ptr context_provider::snapshot() const noexcept {
    return std::atomic_load_explicit(&current_, std::memory_order_acquire);
 }
 
 void context_provider::replace(context_options replacement) {
-   std::atomic_store_explicit(&current_, make_context(std::move(replacement)), std::memory_order_release);
+   auto erase_replacement = context_options_eraser{replacement};
+   auto next = make_context(std::move(replacement));
+   std::atomic_store_explicit(&current_, std::move(next), std::memory_order_release);
 }
 
 } // namespace forge::net::tls

@@ -198,7 +198,10 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
    for required_token in (
       "SSL_CTX_set_min_proto_version",
       "SSL_CTX_check_private_key",
-      "add_certificate_authority",
+      "X509_STORE_add_cert",
+      "SSL_CTX_add_client_CA",
+      "parse_trust_anchor_bundle",
+      "OPENSSL_cleanse",
       "SSL_CTX_set_alpn_select_cb",
       "client_alpn_wire",
       "require_peer_certificate",
@@ -231,6 +234,7 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
    expected_dependencies = {
       "libraries/net/stcp/CMakeLists.txt": "forge_net_tls",
       "libraries/net/http/CMakeLists.txt": "forge_net_tls",
+      "libraries/net/websocket/CMakeLists.txt": "forge_net_tls",
    }
    for relative, dependency in expected_dependencies.items():
       if dependency not in (root / relative).read_text(errors="ignore"):
@@ -238,6 +242,102 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
 
    if "forge_crypto_pki" not in (tls_root / "CMakeLists.txt").read_text(errors="ignore"):
       errors.append("libraries/net/tls/CMakeLists.txt: TLS peer extraction must link forge_crypto_pki")
+
+   http_server_source = (root / "libraries/net/http/server.cpp").read_text(errors="ignore")
+   for token in (
+      "template <typename Stream>",
+      "server_session_base",
+      "tls_context_provider->snapshot()",
+      "async_handshake(asio::ssl::stream_base::server",
+      "max_pending_tls_handshakes",
+      "reserve_tls_handshake",
+      "release_tls_handshake",
+      "cancel_pending_tls_handshakes",
+      "wait_until_tls_handshakes_complete",
+      "stream_.async_read_some",
+      "tls_snapshot_",
+      "disarm_stream_expiry",
+      "close_after_response",
+      "async_shutdown(asio::redirect_error",
+   ):
+      if token not in http_server_source:
+         errors.append(f"libraries/net/http/server.cpp: TLS server invariant is missing ({token})")
+   if "stream_.socket().async_read_some" in http_server_source:
+      errors.append("libraries/net/http/server.cpp: disconnect monitor must read the outer HTTP/TLS stream")
+
+   http_server_module = (root / "libraries/net/http/include/forge/net/http/server.cppm").read_text(errors="ignore")
+   for token in ("forge.net.tls.context", "tls_context_provider", "handshake_timeout", "max_pending_tls_handshakes"):
+      if token not in http_server_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/server.cppm: TLS server option is missing ({token})")
+
+   websocket_module = (root / "libraries/net/websocket/include/forge/net/websocket/connection.cppm").read_text(errors="ignore")
+   websocket_source = (root / "libraries/net/websocket/connection.cpp").read_text(errors="ignore")
+   for path, source, token in (
+      ("libraries/net/websocket/include/forge/net/websocket/connection.cppm", websocket_module,
+       "context_snapshot_ptr tls_context_snapshot"),
+      ("libraries/net/websocket/connection.cpp", websocket_source, "tls_context_snapshot"),
+   ):
+      if token not in source:
+         errors.append(f"{path}: TLS WebSocket handoff must retain the accepted context snapshot")
+
+   plugin_types = (root / "plugins/http/server/include/forge/plugins/http/server/types.cppm").read_text(errors="ignore")
+   plugin_config = (root / "plugins/http/server/config.cpp").read_text(errors="ignore")
+   plugin_source = (root / "plugins/http/server/plugin.cpp").read_text(errors="ignore")
+   plugin_impl = (root / "plugins/http/server/plugin_impl.cpp").read_text(errors="ignore")
+   plugin_api = (root / "plugins/http/server/include/forge/plugins/http/server/api.cppm").read_text(errors="ignore")
+   plugin_impl_header = (root / "plugins/http/server/details/plugin_impl.hxx").read_text(errors="ignore")
+   for path, source, tokens in (
+      ("plugins/http/server/include/forge/plugins/http/server/types.cppm", plugin_types,
+       ("tls.mode", "tls.certificate-chain-secret", "tls.private-key-secret", "tls.client-ca-secret",
+        "tls.handshake-timeout-ms", "tls.max-pending-handshakes")),
+      ("plugins/http/server/config.cpp", plugin_config,
+       ("address.is_loopback()", 'value.bind_address == "localhost"', "validate_tls_config")),
+      ("plugins/http/server/plugin.cpp", plugin_source,
+       ("settings.tls_mode_value != tls_mode::disabled", "make_tls_context_provider", "lifecycle_generation")),
+      ("plugins/http/server/plugin_impl.cpp", plugin_impl,
+       ("http.server.tls.certificate-chain", "http.server.tls.private-key", "http.server.tls.client-ca",
+        "provider->replace(std::move(replacement))", "lifecycle_generation != reload_generation",
+        "tls_secret_material", "clear_tls_context_options", "secure_erase")),
+      ("plugins/http/server/details/plugin_impl.hxx", plugin_impl_header,
+       ("std::shared_ptr<forge::plugins::crypto::secrets::api>", "lifecycle_generation")),
+      ("plugins/http/server/include/forge/plugins/http/server/api.cppm", plugin_api,
+       ("reload_tls", 'FORGE_API_CONTRACT("forge.plugins.http.server", 2, 0)')),
+   ):
+      for token in tokens:
+         if token not in source:
+            errors.append(f"{path}: HTTP Server plugin TLS invariant is missing ({token})")
+
+   plugin_cmake = (root / "plugins/http/server/CMakeLists.txt").read_text(errors="ignore")
+   if "forge_plugins_crypto_secrets" not in plugin_cmake:
+      errors.append("plugins/http/server/CMakeLists.txt: TLS-enabled HTTP Server plugin must link Crypto Secrets")
+   if "load_tls_context_options" in plugin_impl or "co_return forge::net::tls::context_options" in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: TLS secret material must not escape in context_options")
+
+   tls_http_tests = (root / "tests/tls/http_server_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_accepts_tls_1_3_before_parsing_http",
+      "http_server_mutual_tls_verifies_client_chain",
+      "http_server_tls_has_no_plaintext_fallback_and_bounds_pending_handshakes",
+      "http_server_tls_rotation_keeps_established_http_sessions_usable",
+      "http_server_shutdown_cancels_pending_tls_handshakes_without_waiting_for_close_notify",
+      "http_server_tls_normal_close_sends_close_notify",
+      "http_server_tls_reciprocates_client_close_notify_while_keep_alive_idle",
+      "http_server_tls_reciprocates_client_close_notify_before_first_request",
+      "http_server_tls_websocket_handoff_retains_the_connection_snapshot",
+      "http_server_tls_disconnect_cancels_streaming_body_owner",
+      "http_server_mutual_tls_loads_every_certificate_from_trust_anchor_bundle",
+      "tls_context_rejects_malformed_trailing_trust_anchor_bundle",
+   ):
+      if token not in tls_http_tests:
+         errors.append(f"tests/tls/http_server_tests.cpp: missing HTTP TLS regression ({token})")
+
+   plugin_tests = (root / "tests/plugins/plugins_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_plugin_tls_reload_preserves_live_context_and_cannot_publish_after_shutdown",
+      "http_server_plugin_tls_reload_rejects_malformed_material_and_keeps_live_context",
+   ):
+      if token not in plugin_tests:
+         errors.append(f"tests/plugins/plugins_tests.cpp: missing TLS reload regression ({token})")
 
    http_source = (root / "libraries/net/http/connection.cpp").read_text(errors="ignore")
    for token in (
@@ -334,6 +434,11 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
          errors.append(f"cmake/ForgeConfig.cmake.in: forge_net_tls package registration is incomplete ({token})")
    if 'elseif("${component}" STREQUAL "net_tls")\n         _forge_add_component(exceptions)\n         _forge_add_component(crypto_pki)' not in package_config:
       errors.append("cmake/ForgeConfig.cmake.in: net_tls package component must resolve crypto_pki")
+   if 'elseif("${component}" STREQUAL "net_websocket")\n         _forge_add_component(exceptions)\n         _forge_add_component(asio)\n         _forge_add_component(net_tls)' not in package_config:
+      errors.append("cmake/ForgeConfig.cmake.in: net_websocket package component must resolve net_tls")
+   if 'elseif("${component}" STREQUAL "plugins_http_server")' not in package_config or \
+      '_forge_add_component(plugins_crypto_secrets)' not in package_config.partition('elseif("${component}" STREQUAL "plugins_http_server")')[2].partition('elseif("${component}" STREQUAL "plugins_log_otlp")')[0]:
+      errors.append("cmake/ForgeConfig.cmake.in: plugins_http_server package component must resolve Crypto Secrets")
 
 
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:

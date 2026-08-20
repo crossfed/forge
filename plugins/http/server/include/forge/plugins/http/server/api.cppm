@@ -28,6 +28,7 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
    virtual ~api() = default;
 
    virtual boost::asio::awaitable<void> use(middleware_descriptor descriptor) = 0;
+   virtual boost::asio::awaitable<void> reload_tls() = 0;
 
    template <typename Interface> boost::asio::awaitable<void> publish(publish_options options = {}) {
       co_await publish(std::make_unique<typed_binding_spec<Interface>>(), std::move(options));
@@ -50,10 +51,9 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
    };
 
    [[nodiscard]] virtual const forge::api::core::registry& registry() const = 0;
-   virtual boost::asio::awaitable<void> publish(std::unique_ptr<binding_spec> binding,
-                                                publish_options options) = 0;
+   virtual boost::asio::awaitable<void> publish(std::unique_ptr<binding_spec> binding, publish_options options) = 0;
 };
 
 } // namespace forge::plugins::http::server
 
-FORGE_EXPORT_API(::forge::plugins::http::server::api, FORGE_API_CONTRACT("forge.plugins.http.server", 1, 0))
+FORGE_EXPORT_API(::forge::plugins::http::server::api, FORGE_API_CONTRACT("forge.plugins.http.server", 2, 0))

@@ -14,6 +14,8 @@ module;
 
 export module forge.net.websocket.connection;
 
+import forge.net.tls.context;
+
 export namespace forge::net::websocket {
 
 struct connection_metrics {
@@ -35,8 +37,7 @@ class connection final : public std::enable_shared_from_this<connection> {
  public:
    using ptr = std::shared_ptr<connection>;
    using message_handler = std::function<boost::asio::awaitable<void>(connection&, std::string)>;
-   using received_message_handler =
-      std::function<boost::asio::awaitable<void>(connection&, received_message)>;
+   using received_message_handler = std::function<boost::asio::awaitable<void>(connection&, received_message)>;
    using close_handler = std::function<void(connection&)>;
 
    ~connection();
@@ -56,6 +57,8 @@ class connection final : public std::enable_shared_from_this<connection> {
 
    static ptr create(boost::beast::tcp_stream stream);
    static ptr create(boost::beast::ssl_stream<boost::beast::tcp_stream> stream);
+   static ptr create(boost::beast::ssl_stream<boost::beast::tcp_stream> stream,
+                     forge::net::tls::context_snapshot_ptr tls_context_snapshot);
    boost::asio::awaitable<void> accept(const boost::beast::http::request<boost::beast::http::string_body>& request);
    boost::asio::awaitable<void> handshake(std::string host, std::string target);
    void start_read_loop();
@@ -65,6 +68,8 @@ class connection final : public std::enable_shared_from_this<connection> {
 
    explicit connection(boost::beast::tcp_stream stream);
    explicit connection(boost::beast::ssl_stream<boost::beast::tcp_stream> stream);
+   connection(boost::beast::ssl_stream<boost::beast::tcp_stream> stream,
+              forge::net::tls::context_snapshot_ptr tls_context_snapshot);
 
    boost::asio::awaitable<void> send_message(std::string message, bool binary);
 

@@ -8,6 +8,13 @@
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+#include <boost/asio/ssl/context.hpp>
+#include <boost/asio/ssl/stream_base.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/core/tcp_stream.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/describe.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
@@ -1627,6 +1634,162 @@ class scripted_resolver_application final : public forge::app::application_shell
    std::shared_ptr<scripted_resolver_state> state_;
 };
 
+struct http_tls_secret_state {
+   forge::tests::p2p::identity_fixture identity = forge::tests::p2p::make_identity_fixture("http-tls-plugin-suite");
+   mutable std::mutex mutex;
+   std::condition_variable changed;
+   std::vector<std::string> purposes;
+   bool reject_reads = false;
+   bool block_reads = false;
+   bool read_blocked = false;
+   std::optional<std::string> certificate_override;
+   std::optional<std::string> private_key_override;
+   std::optional<std::string> client_ca_override;
+   std::shared_ptr<boost::asio::steady_timer> blocked_read;
+};
+
+class http_tls_secrets_api final : public crypto_secrets::api {
+ public:
+   explicit http_tls_secrets_api(std::shared_ptr<http_tls_secret_state> state) : state_(std::move(state)) {}
+
+   boost::asio::awaitable<crypto_secrets::snapshot> status(crypto_secrets::query) override {
+      co_return crypto_secrets::snapshot{.configured_secrets = 3};
+   }
+
+   boost::asio::awaitable<crypto_secrets::get_result> get_bytes(crypto_secrets::get_request request) override {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto material = std::string{};
+      auto wait_for_release = false;
+      auto release_gate = std::shared_ptr<boost::asio::steady_timer>{};
+      {
+         const auto lock = std::scoped_lock{state_->mutex};
+         if (state_->reject_reads) {
+            throw std::runtime_error{"configured HTTP TLS secret read rejected"};
+         }
+         if (request.secret_id == "http/test-certificate") {
+            material = state_->certificate_override.value_or(state_->identity.certificate_pem);
+         } else if (request.secret_id == "http/test-private-key") {
+            material = state_->private_key_override.value_or(state_->identity.private_key_pem);
+         } else if (request.secret_id == "http/test-client-ca") {
+            material = state_->client_ca_override.value_or(state_->identity.certificate_pem);
+         } else {
+            throw std::runtime_error{"unknown HTTP TLS test secret"};
+         }
+         state_->purposes.push_back(request.purpose);
+         if (state_->block_reads) {
+            release_gate = std::make_shared<boost::asio::steady_timer>(executor);
+            release_gate->expires_at((std::chrono::steady_clock::time_point::max)());
+            state_->blocked_read = release_gate;
+            state_->read_blocked = true;
+            wait_for_release = true;
+         }
+      }
+      state_->changed.notify_all();
+      if (wait_for_release) {
+         auto error = boost::system::error_code{};
+         co_await release_gate->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      }
+      auto bytes = decltype(crypto_secrets::get_result{}.bytes){};
+      bytes.reserve(material.size());
+      for (const auto value : material) {
+         bytes.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(value)));
+      }
+      co_return crypto_secrets::get_result{.secret_id = std::move(request.secret_id), .bytes = std::move(bytes)};
+   }
+
+   boost::asio::awaitable<crypto_secrets::derive_result> derive_hkdf_sha256(crypto_secrets::derive_request) override {
+      throw std::logic_error{"HTTP TLS test secrets do not implement derivation"};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_encrypt_result>
+   encrypt_aes_gcm(crypto_secrets::aead_encrypt_request) override {
+      throw std::logic_error{"HTTP TLS test secrets do not implement encryption"};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_decrypt_result>
+   decrypt_aes_gcm(crypto_secrets::aead_decrypt_request) override {
+      throw std::logic_error{"HTTP TLS test secrets do not implement decryption"};
+   }
+
+ private:
+   std::shared_ptr<http_tls_secret_state> state_;
+};
+
+class http_tls_secrets_plugin final : public forge::app::plugin {
+ public:
+   explicit http_tls_secrets_plugin(std::shared_ptr<http_tls_secret_state> state) : state_(std::move(state)) {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return {.value = "forge.plugins.crypto.secrets"};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "test";
+   }
+
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
+      provider.install<crypto_secrets::api>(std::make_shared<http_tls_secrets_api>(state_));
+      co_return;
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::shared_ptr<http_tls_secret_state> state_;
+};
+
+class http_tls_server_application final : public forge::app::application_shell {
+ public:
+   explicit http_tls_server_application(std::shared_ptr<http_tls_secret_state> state) : state_(std::move(state)) {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      registry.register_plugin(forge::app::plugin_descriptor{
+          .id = {.value = "forge.plugins.crypto.secrets"},
+          .factory = [state = state_] { return std::make_unique<http_tls_secrets_plugin>(state); },
+      });
+      registry.register_plugin(http_server::descriptor());
+   }
+
+ private:
+   std::shared_ptr<http_tls_secret_state> state_;
+};
+
+[[nodiscard]] bool plugin_tls_request_succeeds(std::uint16_t port) {
+   try {
+      namespace asio = boost::asio;
+      namespace beast = boost::beast;
+      namespace beast_http = boost::beast::http;
+      auto io = asio::io_context{};
+      auto context = asio::ssl::context{asio::ssl::context::tls_client};
+      context.set_verify_mode(asio::ssl::verify_none);
+      auto stream = beast::ssl_stream<beast::tcp_stream>{beast::tcp_stream{io}, context};
+      beast::get_lowest_layer(stream).expires_after(std::chrono::seconds{2});
+      beast::get_lowest_layer(stream).connect({asio::ip::make_address("127.0.0.1"), port});
+      stream.handshake(asio::ssl::stream_base::client);
+
+      auto request = beast_http::request<beast_http::empty_body>{beast_http::verb::get, "/", 11};
+      request.set(beast_http::field::host, "127.0.0.1");
+      beast_http::write(stream, request);
+      auto buffer = beast::flat_buffer{};
+      auto response = beast_http::response<beast_http::string_body>{};
+      beast_http::read(stream, buffer, response);
+      return response.result() == beast_http::status::not_found;
+   } catch (...) {
+      return false;
+   }
+}
+
 class http_server_application final : public forge::app::application_shell {
  public:
    http_server_application(std::shared_ptr<http_publish_state> state, bool middleware = false)
@@ -1872,6 +2035,14 @@ BOOST_AUTO_TEST_CASE(http_server_config_is_described_from_schema) {
    BOOST_TEST(require_field(*descriptor, "max-header-bytes").has_default);
    BOOST_TEST(require_field(*descriptor, "read-timeout-ms").has_default);
    BOOST_TEST(require_field(*descriptor, "idle-timeout-ms").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.mode").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.certificate-chain-secret").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.private-key-secret").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.client-ca-secret").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.handshake-timeout-ms").has_default);
+   BOOST_TEST(require_field(*descriptor, "tls.max-pending-handshakes").has_default);
+   BOOST_TEST(http_server::api::ref().major == 2U);
+   BOOST_TEST(plugin.version() == "2.0.0");
 }
 
 BOOST_AUTO_TEST_CASE(http_server_rejects_invalid_schema_config) {
@@ -1901,6 +2072,177 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_invalid_api_base_path_during_con
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, relative.configure(forge::config::core::component_view{
                                                              relative_document, "plugins.http.server"})),
                      http_server::exceptions::invalid_config);
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_plaintext_non_loopback_and_incomplete_tls_config) {
+   auto runtime = forge::asio::runtime{};
+
+   auto plaintext = http_server::plugin{};
+   auto plaintext_document = forge::config::core::document{};
+   plaintext_document.set("plugins.http.server.bind-address", std::string{"0.0.0.0"});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plaintext.configure(forge::config::core::component_view{
+                                                             plaintext_document, "plugins.http.server"})),
+                     http_server::exceptions::invalid_config);
+
+   auto server_tls = http_server::plugin{};
+   auto server_tls_document = forge::config::core::document{};
+   server_tls_document.set("plugins.http.server.tls.mode", std::string{"server"});
+   server_tls_document.set("plugins.http.server.tls.certificate-chain-secret", std::string{"certificate"});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, server_tls.configure(forge::config::core::component_view{
+                                                             server_tls_document, "plugins.http.server"})),
+                     http_server::exceptions::invalid_config);
+
+   auto mutual_tls = http_server::plugin{};
+   auto mutual_tls_document = forge::config::core::document{};
+   mutual_tls_document.set("plugins.http.server.tls.mode", std::string{"mutual"});
+   mutual_tls_document.set("plugins.http.server.tls.certificate-chain-secret", std::string{"certificate"});
+   mutual_tls_document.set("plugins.http.server.tls.private-key-secret", std::string{"private-key"});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, mutual_tls.configure(forge::config::core::component_view{
+                                                             mutual_tls_document, "plugins.http.server"})),
+                     http_server::exceptions::invalid_config);
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_tls_requires_secrets_api_only_when_tls_is_enabled) {
+   auto state = std::make_shared<http_publish_state>();
+   auto app = http_server_application{state};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.tls.mode", std::string{"server"});
+   config.set("plugins.http.server.tls.certificate-chain-secret", std::string{"http/test-certificate"});
+   config.set("plugins.http.server.tls.private-key-secret", std::string{"http/test-private-key"});
+
+   app.configure(config);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), app.startup()), http_server::exceptions::startup_failed);
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_tls_reload_uses_distinct_secret_purposes_and_preserves_active_context) {
+   auto state = std::make_shared<http_tls_secret_state>();
+   auto app = http_tls_server_application{state};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", std::uint64_t{0});
+   config.set("plugins.http.server.tls.mode", std::string{"mutual"});
+   config.set("plugins.http.server.tls.certificate-chain-secret", std::string{"http/test-certificate"});
+   config.set("plugins.http.server.tls.private-key-secret", std::string{"http/test-private-key"});
+   config.set("plugins.http.server.tls.client-ca-secret", std::string{"http/test-client-ca"});
+
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   const auto api = app.apis().get<http_server::api>(http_server::api::ref());
+   forge::asio::blocking::run(app.runtime(), api->reload_tls());
+
+   auto purposes = std::vector<std::string>{};
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      purposes = state->purposes;
+   }
+   BOOST_REQUIRE_EQUAL(purposes.size(), 6U);
+   BOOST_TEST(purposes[0] == "http.server.tls.certificate-chain");
+   BOOST_TEST(purposes[1] == "http.server.tls.private-key");
+   BOOST_TEST(purposes[2] == "http.server.tls.client-ca");
+   BOOST_TEST(purposes[3] == "http.server.tls.certificate-chain");
+   BOOST_TEST(purposes[4] == "http.server.tls.private-key");
+   BOOST_TEST(purposes[5] == "http.server.tls.client-ca");
+
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->reject_reads = true;
+   }
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), api->reload_tls()),
+                     http_server::exceptions::tls_reload_failed);
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->reject_reads = false;
+   }
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), api->reload_tls()));
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_tls_reload_preserves_live_context_and_cannot_publish_after_shutdown) {
+   auto state = std::make_shared<http_tls_secret_state>();
+   auto app = http_tls_server_application{state};
+   const auto port = reserve_loopback_port();
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", static_cast<std::uint64_t>(port));
+   config.set("plugins.http.server.tls.mode", std::string{"server"});
+   config.set("plugins.http.server.tls.certificate-chain-secret", std::string{"http/test-certificate"});
+   config.set("plugins.http.server.tls.private-key-secret", std::string{"http/test-private-key"});
+
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   const auto api = app.apis().get<http_server::api>(http_server::api::ref());
+   BOOST_REQUIRE(plugin_tls_request_succeeds(port));
+
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->reject_reads = true;
+   }
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), api->reload_tls()),
+                     http_server::exceptions::tls_reload_failed);
+   BOOST_CHECK(plugin_tls_request_succeeds(port));
+
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->reject_reads = false;
+      state->block_reads = true;
+      state->read_blocked = false;
+      state->blocked_read.reset();
+   }
+   auto reload = boost::asio::co_spawn(app.runtime().context(), api->reload_tls(), boost::asio::use_future);
+   {
+      auto lock = std::unique_lock{state->mutex};
+      BOOST_REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2}, [&] { return state->read_blocked; }));
+   }
+
+   auto shutdown = boost::asio::co_spawn(app.runtime().context(), app.shutdown(), boost::asio::use_future);
+   BOOST_REQUIRE(shutdown.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+
+   auto blocked_read = std::shared_ptr<boost::asio::steady_timer>{};
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->block_reads = false;
+      blocked_read = std::move(state->blocked_read);
+   }
+   if (blocked_read) {
+      blocked_read->cancel();
+   }
+   BOOST_CHECK_THROW(reload.get(), http_server::exceptions::tls_reload_failed);
+   BOOST_CHECK_NO_THROW(shutdown.get());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_tls_reload_rejects_malformed_material_and_keeps_live_context) {
+   auto state = std::make_shared<http_tls_secret_state>();
+   auto app = http_tls_server_application{state};
+   const auto port = reserve_loopback_port();
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", static_cast<std::uint64_t>(port));
+   config.set("plugins.http.server.tls.mode", std::string{"server"});
+   config.set("plugins.http.server.tls.certificate-chain-secret", std::string{"http/test-certificate"});
+   config.set("plugins.http.server.tls.private-key-secret", std::string{"http/test-private-key"});
+
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   const auto api = app.apis().get<http_server::api>(http_server::api::ref());
+   BOOST_REQUIRE(plugin_tls_request_succeeds(port));
+
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->certificate_override = "not a PEM certificate";
+   }
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), api->reload_tls()),
+                     http_server::exceptions::tls_reload_failed);
+   BOOST_CHECK(plugin_tls_request_succeeds(port));
+
+   const auto other_identity = forge::tests::p2p::make_identity_fixture("http-tls-plugin-mismatched-key");
+   {
+      const auto lock = std::scoped_lock{state->mutex};
+      state->certificate_override.reset();
+      state->private_key_override = other_identity.private_key_pem;
+   }
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), api->reload_tls()),
+                     http_server::exceptions::tls_reload_failed);
+   BOOST_CHECK(plugin_tls_request_succeeds(port));
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
 }
 
 BOOST_AUTO_TEST_CASE(http_server_plugin_publishes_typed_api_under_configured_base_path) {
