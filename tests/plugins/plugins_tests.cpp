@@ -97,6 +97,7 @@ import forge.net.http.body;
 import forge.net.http.client;
 import forge.net.http.connection;
 import forge.net.http.exceptions;
+import forge.net.http.assets;
 import forge.net.http.file;
 import forge.api.http.mapping;
 import forge.net.http.middleware;
@@ -178,8 +179,12 @@ template <typename T>
 concept accepts_raw_http_middleware =
     requires(T& api, raw_http_middleware descriptor) { api.use(std::move(descriptor)); };
 
+template <typename T>
+concept accepts_asset_mount = requires(T& api, raw_http::asset_mount mount) { api.mount_assets(std::move(mount)); };
+
 static_assert(!accepts_raw_http_binding<forge::plugins::http::server::api>);
 static_assert(!accepts_raw_http_middleware<forge::plugins::http::server::api>);
+static_assert(accepts_asset_mount<forge::plugins::http::server::api>);
 
 [[nodiscard]] bool has_internal_forge_header(const forge::net::http::response& value) {
    for (const auto& header : value.headers()) {
@@ -590,8 +595,14 @@ struct http_publish_state {
    bool replace_stream_after_next = false;
    bool empty_replace_stream_after_next = false;
    bool set_stream_content_type_after_next = false;
+   bool append_cookies_after_next = false;
    std::atomic<unsigned> stream_calls = 0;
    std::atomic<unsigned> stream_chunks = 0;
+};
+
+struct http_asset_publish_state {
+   std::filesystem::path root;
+   std::string mount_path = "/admin";
 };
 
 class http_stream_api_impl final : public http_stream_api {
@@ -658,6 +669,35 @@ class http_cache_publisher_plugin final : public forge::app::plugin {
 
  private:
    std::shared_ptr<http_publish_state> state_;
+};
+
+class http_asset_publisher_plugin final : public forge::app::plugin {
+ public:
+   explicit http_asset_publisher_plugin(std::shared_ptr<http_asset_publish_state> state) : state_{std::move(state)} {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = "http-asset-publisher"};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "1";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
+      auto http = context.apis().get<http_server::api>(http_server::api::ref());
+      co_await http->mount_assets(raw_http::asset_mount{.path = state_->mount_path, .root = state_->root});
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::shared_ptr<http_asset_publish_state> state_;
 };
 
 class http_stream_publisher_plugin final : public forge::app::plugin {
@@ -767,6 +807,10 @@ class http_middleware_plugin final : public forge::app::plugin {
              }
              if (state->set_stream_content_type_after_next) {
                 response.set_content_type("application/x-ndjson");
+             }
+             if (state->append_cookies_after_next) {
+                response.append_header("Set-Cookie", "session=alpha; Path=/api; HttpOnly");
+                response.append_header("Set-Cookie", "csrf=beta; Path=/api; Secure");
              }
              response.set_header("Server", "forge-test");
              co_return response;
@@ -1822,6 +1866,37 @@ class http_server_application final : public forge::app::application_shell {
    bool middleware_ = false;
 };
 
+class http_assets_server_application final : public forge::app::application_shell {
+ public:
+   http_assets_server_application(std::shared_ptr<http_publish_state> publish,
+                                  std::shared_ptr<http_asset_publish_state> assets)
+       : publish_{std::move(publish)}, assets_{std::move(assets)} {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      registry.register_plugin(http_server::descriptor());
+      registry.register_plugin(forge::app::plugin_descriptor{
+          .id = forge::app::plugin_id{.value = "http-cache-publisher"},
+          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.http.server"}},
+          .factory = [state = publish_] { return std::make_unique<http_cache_publisher_plugin>(state); },
+      });
+      registry.register_plugin(forge::app::plugin_descriptor{
+          .id = forge::app::plugin_id{.value = "http-asset-publisher"},
+          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.http.server"}},
+          .factory = [state = assets_] { return std::make_unique<http_asset_publisher_plugin>(state); },
+      });
+   }
+
+   boost::asio::awaitable<void> on_provide(forge::app::application_context& context) override {
+      context.apis().install<http_cache_api>(http_cache_api::describe(), std::make_shared<http_cache_api_impl>());
+      co_return;
+   }
+
+ private:
+   std::shared_ptr<http_publish_state> publish_;
+   std::shared_ptr<http_asset_publish_state> assets_;
+};
+
 class http_stream_server_application final : public forge::app::application_shell {
  public:
    explicit http_stream_server_application(std::shared_ptr<http_publish_state> state) : state_{std::move(state)} {}
@@ -2264,6 +2339,83 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_publishes_typed_api_under_configured_bas
    BOOST_TEST(chunk.bytes == "alpha:7:9");
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_preserves_repeated_set_cookie_from_middleware) {
+   const auto port = reserve_loopback_port();
+   auto state = std::make_shared<http_publish_state>();
+   state->append_cookies_after_next = true;
+   auto app = http_server_application{state, true};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", std::uint64_t{port});
+   config.set("plugins.http.server.api-base-path", std::string{"/api"});
+
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto client = forge::net::http::client{app.runtime(),
+                                          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(port))};
+   const auto response =
+       forge::asio::blocking::run(app.runtime(), client.async_get("/api/cache/chunks/cookie?offset=0&limit=1"));
+   auto cookies = std::vector<std::string>{};
+   for (const auto& header : response.headers()) {
+      if (forge::net::http::header_name_equal(header.name, "Set-Cookie")) {
+         cookies.push_back(header.text);
+      }
+   }
+   BOOST_TEST(cookies ==
+                  (std::vector<std::string>{"session=alpha; Path=/api; HttpOnly", "csrf=beta; Path=/api; Secure"}),
+              boost::test_tools::per_element());
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_mounts_assets_without_shadowing_a_narrow_api_prefix) {
+   auto files = temp_directory{};
+   files.write("index.html", "asset-console");
+   const auto port = reserve_loopback_port();
+   auto publish = std::make_shared<http_publish_state>();
+   auto assets = std::make_shared<http_asset_publish_state>();
+   assets->root = files.path();
+   auto app = http_assets_server_application{publish, assets};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", std::uint64_t{port});
+   config.set("plugins.http.server.api-base-path", std::string{"/admin-ui/v1"});
+
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto client = forge::net::http::client{app.runtime(),
+                                          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(port))};
+   const auto asset = forge::asio::blocking::run(app.runtime(), client.async_get("/admin/dashboard"));
+   BOOST_TEST(static_cast<unsigned>(asset.result()) == static_cast<unsigned>(forge::net::http::status::ok));
+   BOOST_TEST(asset.body() == "asset-console");
+   const auto api_miss = forge::asio::blocking::run(app.runtime(), client.async_get("/admin-ui/v1/missing"));
+   BOOST_TEST(static_cast<unsigned>(api_miss.result()) == static_cast<unsigned>(forge::net::http::status::not_found));
+
+   auto api_client = forge::net::http::client{
+       app.runtime(), forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(port) + "/admin-ui/v1")};
+   auto cache = forge::asio::blocking::run(app.runtime(), forge::api::http::remote<http_cache_api>(api_client));
+   const auto chunk = forge::asio::blocking::run(
+       app.runtime(), cache->read(http_read_request{.ref = "asset", .offset = 1, .limit = 2}));
+   BOOST_TEST(chunk.bytes == "asset:1:2");
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_root_api_prefix_overlapping_asset_mount_before_listener_start) {
+   auto files = temp_directory{};
+   files.write("index.html", "asset-console");
+   auto publish = std::make_shared<http_publish_state>();
+   auto assets = std::make_shared<http_asset_publish_state>();
+   assets->root = files.path();
+   auto app = http_assets_server_application{publish, assets};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", std::uint64_t{reserve_loopback_port()});
+   config.set("plugins.http.server.api-base-path", std::string{"/"});
+
+   app.configure(config);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), app.startup()), forge::net::http::exceptions::conflict);
 }
 
 BOOST_AUTO_TEST_CASE(http_server_plugin_uses_publish_base_path_override) {

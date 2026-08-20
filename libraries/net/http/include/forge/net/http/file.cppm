@@ -3,6 +3,8 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,6 +30,8 @@ struct file_options {
    symlink_policy symlinks = symlink_policy::reject;
    bool etag = true;
    bool last_modified = true;
+   std::uint64_t max_file_bytes = std::numeric_limits<std::uint64_t>::max();
+   std::string cache_control;
 };
 
 struct file_response {
@@ -91,10 +95,13 @@ class static_file_root {
    [[nodiscard]] const std::filesystem::path& root() const noexcept;
    [[nodiscard]] boost::asio::awaitable<stream_response> serve(stream_request& request_value,
                                                                std::string_view relative_path) const;
+   [[nodiscard]] boost::asio::awaitable<stream_response>
+   serve(stream_request& request_value, std::string_view relative_path, file_options options) const;
 
  private:
    std::filesystem::path root_;
    file_options options_;
+   std::shared_ptr<int> root_descriptor_;
 };
 
 } // namespace forge::net::http

@@ -11,6 +11,7 @@ module forge.plugins.http.server.plugin;
 import forge.api.core.registry;
 import forge.asio.runtime;
 import forge.api.http.binding;
+import forge.net.http.assets;
 import forge.net.http.server;
 import forge.net.tls.context;
 import forge.plugins.http.server.api;
@@ -40,6 +41,11 @@ boost::asio::awaitable<void> plugin::api_impl::publish(std::unique_ptr<binding_s
 
 boost::asio::awaitable<void> plugin::api_impl::use(middleware_descriptor descriptor) {
    impl_->add(std::move(descriptor));
+   co_return;
+}
+
+boost::asio::awaitable<void> plugin::api_impl::mount_assets(forge::net::http::asset_mount value) {
+   impl_->add(std::move(value));
    co_return;
 }
 

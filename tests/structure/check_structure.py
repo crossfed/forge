@@ -441,6 +441,141 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
       errors.append("cmake/ForgeConfig.cmake.in: plugins_http_server package component must resolve Crypto Secrets")
 
 
+def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
+   required = (
+      "libraries/net/http/cookie.cpp",
+      "libraries/net/http/assets.cpp",
+      "libraries/net/http/include/forge/net/http/cookie.cppm",
+      "libraries/net/http/include/forge/net/http/assets.cppm",
+   )
+   for relative in required:
+      if not (root / relative).exists():
+         errors.append(f"{relative}: HTTP cookie/assets ownership file is required")
+
+   http_cmake = (root / "libraries/net/http/CMakeLists.txt").read_text(errors="ignore")
+   for token in ("cookie.cpp", "assets.cpp", "forge_target_modules_at(forge_net_http net/http)"):
+      if token not in http_cmake:
+         errors.append(f"libraries/net/http/CMakeLists.txt: HTTP cookie/assets target registration is incomplete ({token})")
+
+   cookie_module = (root / "libraries/net/http/include/forge/net/http/cookie.cppm").read_text(errors="ignore")
+   cookie_source = (root / "libraries/net/http/cookie.cpp").read_text(errors="ignore")
+   for token in (
+      "export module forge.net.http.cookie",
+      "parse_cookie_header",
+      "format_cookie_header",
+      "parse_set_cookie_header",
+      "format_set_cookie",
+      "append_set_cookie",
+      "same_site",
+   ):
+      if token not in cookie_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/cookie.cppm: cookie API is incomplete ({token})")
+   for token in ("reject_controls", "validate_domain", "label_ends_hyphen", "SameSite=None requires Secure",
+                 "cookie SameSite value is invalid"):
+      if token not in cookie_source:
+         errors.append(f"libraries/net/http/cookie.cpp: strict cookie validation is incomplete ({token})")
+
+   types_module = (root / "libraries/net/http/include/forge/net/http/types.cppm").read_text(errors="ignore")
+   types_source = (root / "libraries/net/http/types.cpp").read_text(errors="ignore")
+   if "set_cookie" in types_module or "response::set_cookie" in types_source:
+      errors.append("forge_net_http: raw response::set_cookie must not bypass forge.net.http.cookie")
+
+   asset_module = (root / "libraries/net/http/include/forge/net/http/assets.cppm").read_text(errors="ignore")
+   asset_source = (root / "libraries/net/http/assets.cpp").read_text(errors="ignore")
+   for token in ("export module forge.net.http.assets", "asset_mount", "asset_bundle", "max_file_bytes", "max_path_bytes"):
+      if token not in asset_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/assets.cppm: asset API is incomplete ({token})")
+   for token in (
+      "percent_escaped",
+      "character == '\\\\'",
+      "percent_escaped && character == '/'",
+      ".symlinks = symlink_policy::reject",
+      "static_file_root",
+      "spa_fallback",
+      "public, max-age=31536000, immutable",
+   ):
+      if token not in asset_source:
+         errors.append(f"libraries/net/http/assets.cpp: asset safety/cache invariant is missing ({token})")
+
+   file_module = (root / "libraries/net/http/include/forge/net/http/file.cppm").read_text(errors="ignore")
+   file_source = (root / "libraries/net/http/file.cpp").read_text(errors="ignore")
+   for token in ("symlink_policy", "symlinks = symlink_policy::reject"):
+      if token not in file_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/file.cppm: public symlink policy is missing ({token})")
+   for token in ("openat(", "O_NOFOLLOW", "O_NONBLOCK", "fstat(", "pread(", "open_relative_file",
+                 "open_followed_relative_file", "resolved.lexically_relative(root)", "if_none_match_matches",
+                 "if_range_matches"):
+      if token not in file_source:
+         errors.append(f"libraries/net/http/file.cpp: descriptor-relative static file invariant is missing ({token})")
+   if "open_file(resolved" in file_source:
+      errors.append("libraries/net/http/file.cpp: followed static files must reopen through the stable root descriptor")
+   if "if_range" not in types_module or 'return "If-Range"' not in types_source:
+      errors.append("forge_net_http: If-Range field mapping is missing")
+
+   router_module = (root / "libraries/net/http/include/forge/net/http/router.cppm").read_text(errors="ignore")
+   router_source = (root / "libraries/net/http/router.cpp").read_text(errors="ignore")
+   for token in ("mount_assets", "reserve_path_prefix", "asset_mounts_", "reserved_path_prefixes_"):
+      if token not in router_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/router.cppm: asset router boundary is incomplete ({token})")
+   for token in (
+      "asset_mounts_overlap",
+      "reserved API path prefix",
+      "reserved HTTP path prefix overlaps an asset mount",
+      "path_exists(routes_",
+   ):
+      if token not in router_source:
+         errors.append(f"libraries/net/http/router.cpp: asset/API priority invariant is missing ({token})")
+   router_preflight = (root / "libraries/net/http/router_server_access.cpp").read_text(errors="ignore")
+   for token in ("mount.serves", "mount.contains", "status::method_not_allowed"):
+      if token not in router_preflight:
+         errors.append(f"libraries/net/http/router_server_access.cpp: asset preflight handling is incomplete ({token})")
+
+   plugin_api = (root / "plugins/http/server/include/forge/plugins/http/server/api.cppm").read_text(errors="ignore")
+   plugin_source = (root / "plugins/http/server/plugin.cpp").read_text(errors="ignore")
+   plugin_impl = (root / "plugins/http/server/plugin_impl.cpp").read_text(errors="ignore")
+   for token in ("mount_assets", "forge.net.http.assets"):
+      if token not in plugin_api:
+         errors.append(f"plugins/http/server/include/forge/plugins/http/server/api.cppm: typed asset mount is missing ({token})")
+   if "result.insert" not in plugin_source or '"Set-Cookie"' not in plugin_source:
+      errors.append("plugins/http/server/plugin.cpp: repeated Set-Cookie projection must use insert")
+   if "HTTP asset mounts must not overlap" not in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: plugin asset overlap validation is missing")
+
+   package_http = (root / "tests/package_net_http_component/main.cpp").read_text(errors="ignore")
+   package_plugin = (root / "tests/package_plugins_http_server/main.cpp").read_text(errors="ignore")
+   for token in ("import forge.net.http.cookie;", "import forge.net.http.assets;"):
+      if token not in package_http:
+         errors.append(f"tests/package_net_http_component/main.cpp: direct package import is missing ({token})")
+   if "import forge.net.http.assets;" not in package_plugin:
+      errors.append("tests/package_plugins_http_server/main.cpp: plugin package consumer must import asset mount directly")
+
+   http_tests = (root / "tests/http_websocket/network_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_cookie_rejects_malformed_and_injectable_headers",
+      "foo-.example",
+      "/admin/%2fsecret",
+      "/admin/%2Fsecret",
+      "/admin/%5csecret",
+      "http_asset_mount_serves_streaming_get_head_ranges_and_cache_policy",
+      "http_static_file_root_honors_conditional_and_if_range_semantics",
+      "http_static_file_options_preserve_legacy_aggregate_and_gate_conditionals",
+      "http_static_file_root_and_file_response_follow_contained_symlinks_when_explicitly_enabled",
+      "http_static_file_root_keeps_root_descriptor_across_root_name_swap",
+      "http_static_file_root_keeps_opened_descriptor_across_name_swap",
+      "http_static_file_root_rejects_fifo_without_blocking",
+   ):
+      if token not in http_tests:
+         errors.append(f"tests/http_websocket/network_tests.cpp: cookie/assets regression is missing ({token})")
+   plugin_tests = (root / "tests/plugins/plugins_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_plugin_preserves_repeated_set_cookie_from_middleware",
+      "http_server_plugin_mounts_assets_without_shadowing_a_narrow_api_prefix",
+      "http_server_plugin_rejects_root_api_prefix_overlapping_asset_mount_before_listener_start",
+   ):
+      if token not in plugin_tests:
+         errors.append(f"tests/plugins/plugins_tests.cpp: plugin cookie/assets regression is missing ({token})")
+
+
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
    text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
    in_macro = False
@@ -1518,6 +1653,7 @@ def main() -> int:
    check_layout(root, errors)
    check_aggregates(root, errors)
    check_tls_context_ownership(root, errors)
+   check_http_cookie_asset_boundaries(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)

@@ -47,6 +47,7 @@ Secrets API without exposing PEM material to application plugins.
 - Accepts typed `FORGE_HTTP_API` publications through `publish<Interface>()`.
 - Accepts plugin-owned middleware descriptors through
   `forge::plugins::http::server::middleware_descriptor`.
+- Accepts bounded browser asset mounts through `api::mount_assets(asset_mount)`.
 - Provides a reusable Bearer authentication middleware that compares SHA-256
   token hashes in constant time and never stores the clear token in its options.
 - Reloads a TLS server identity through `api::reload_tls()` after complete new
@@ -181,6 +182,25 @@ The application plugin only contributes the typed API and middleware. The HTTP
 server plugin applies the configured server lifecycle and mounts the route
 mapping under the configured base path.
 
+An application plugin can also contribute a bounded browser asset mount without
+receiving the raw router. Asset mounts serve only GET/HEAD through the native
+file/range stream path, and cannot overlap a typed API base path. Use disjoint
+prefixes such as `/admin-ui/v1` for APIs and `/admin` for browser files.
+
+```cpp
+import forge.net.http.assets;
+
+auto http = context.apis().get<forge::plugins::http::server::api>(
+   {.id = {"forge.plugins.http.server"}, .major = 2});
+co_await http->mount_assets(forge::net::http::asset_mount{
+   .path = "/admin",
+   .root = configured_admin_ui_directory,
+   .index = "index.html",
+   .spa_fallback = true,
+   .max_file_bytes = 16 * 1024 * 1024,
+});
+```
+
 ```cpp
 class object_http_plugin final : public forge::app::plugin {
  public:
@@ -253,6 +273,8 @@ registry.register_plugin(forge::plugins::http::server::descriptor());
 - Adding product-specific route helpers to this plugin instead of using typed
   `FORGE_HTTP_API` mappings.
 - Treating `api-base-path` as a security boundary. It is only route mounting.
+- Mounting assets under a typed API prefix. This is rejected before the listener
+  starts instead of silently making either surface unreachable.
 - Reimplementing HTTP server lifecycle in each application plugin instead of
   sharing this plugin.
 

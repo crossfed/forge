@@ -21,6 +21,7 @@ import forge.asio.runtime;
 import forge.api.http.binding;
 import forge.crypto.core.types;
 import forge.crypto.core.secret_bytes;
+import forge.net.http.assets;
 import forge.net.http.server;
 import forge.net.tls.context;
 import forge.net.tls.options;
@@ -143,12 +144,27 @@ void plugin::impl::add(middleware_descriptor value) {
    middleware.push_back(std::move(value));
 }
 
+void plugin::impl::add(forge::net::http::asset_mount value) {
+   auto bundle = forge::net::http::asset_bundle{std::move(value)};
+   auto lock = std::scoped_lock{mutex};
+   if (publication_closed) {
+      FORGE_THROW_EXCEPTION(exceptions::publication_closed, "HTTP server publication is closed");
+   }
+   for (const auto& existing : asset_mounts) {
+      if (existing.contains(bundle.path()) || bundle.contains(existing.path())) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "HTTP asset mounts must not overlap");
+      }
+   }
+   asset_mounts.push_back(std::move(bundle));
+}
+
 startup_snapshot plugin::impl::close_publication() {
    auto lock = std::scoped_lock{mutex};
    publication_closed = true;
    return startup_snapshot{
        .bindings = std::move(bindings),
        .middleware = std::move(middleware),
+       .asset_mounts = std::move(asset_mounts),
    };
 }
 
@@ -216,6 +232,7 @@ void plugin::impl::reset_runtime() noexcept {
    stopping = true;
    bindings.clear();
    middleware.clear();
+   asset_mounts.clear();
 }
 
 } // namespace forge::plugins::http::server

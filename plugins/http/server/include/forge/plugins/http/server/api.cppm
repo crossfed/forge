@@ -18,6 +18,7 @@ import forge.api.core.registry;
 import forge.api.core.dispatcher;
 import forge.api.core.binding;
 import forge.api.http.binding;
+import forge.net.http.assets;
 import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.types;
 
@@ -28,6 +29,7 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
    virtual ~api() = default;
 
    virtual boost::asio::awaitable<void> use(middleware_descriptor descriptor) = 0;
+   virtual boost::asio::awaitable<void> mount_assets(forge::net::http::asset_mount value) = 0;
    virtual boost::asio::awaitable<void> reload_tls() = 0;
 
    template <typename Interface> boost::asio::awaitable<void> publish(publish_options options = {}) {

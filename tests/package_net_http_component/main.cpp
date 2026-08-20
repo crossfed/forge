@@ -1,5 +1,9 @@
+import forge.net.http.assets;
+import forge.net.http.cookie;
 import forge.net.http.types;
 
 int main() {
-   return forge::net::http::status::ok == forge::net::http::status::ok ? 0 : 1;
+   const auto formatted = forge::net::http::format_set_cookie({.name = "session", .value = "value"});
+   const auto mount = forge::net::http::asset_mount{.path = "/admin"};
+   return formatted == "session=value" && mount.path == "/admin" ? 0 : 1;
 }

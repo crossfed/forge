@@ -1,6 +1,7 @@
 add_library(
    forge_net_http STATIC
    types.cpp
+   cookie.cpp
    base_url.cpp
    target.cpp
    range.cpp
@@ -14,6 +15,7 @@ add_library(
    router_server_access.cpp
    stream_server_access.cpp
    file.cpp
+   assets.cpp
    server.cpp
 )
 forge_target_modules_at(forge_net_http net/http)

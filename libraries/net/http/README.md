@@ -1,8 +1,8 @@
 # forge_net_http
 
 `forge_net_http` is the HTTP substrate: URL parsing, FORGE-owned request/response
-messages, streaming body primitives, routing, middleware, server and
-client/connection primitives. It uses Boost.Beast/URL internally but keeps
+messages, cookie handling, bounded static assets, streaming body primitives,
+routing, middleware, server and client/connection primitives. It uses Boost.Beast/URL internally but keeps
 FORGE-owned public message, route and lifecycle semantics.
 
 Application-level server lifecycle can be owned directly with `forge::net::http::server`
@@ -32,6 +32,10 @@ still owns HTTP mechanics; the plugin owns app lifecycle/config composition.
   stream route types.
 - `forge.net.http.file`, `forge.net.http.range` — file responses, static roots and byte
   range parsing.
+- `forge.net.http.cookie` — strict `Cookie` and `Set-Cookie` parsing, formatting and
+  repeated response header emission.
+- `forge.net.http.assets` — bounded GET/HEAD asset mounts over hardened static-file
+  streaming, MIME allow-listing and SPA fallback.
 - `forge.net.http.negotiation` — generic media type and `Accept` header helpers for
   libraries that choose their own codecs above `forge_net_http`.
 - `forge.net.http.upload` — upload reader, spill-to-disk spool and multipart form-data
@@ -99,6 +103,7 @@ auto query = parsed.query_params.front();
 
 import forge.net.http.router;
 import forge.net.http.types;
+import forge.net.http.cookie;
 
 auto router = forge::net::http::router{};
 router.get("/healthz", [](forge::net::http::route_context& ctx)
@@ -125,7 +130,8 @@ boost::asio::awaitable<chunk>
 cache_impl::read(read_request request) {
    auto trace = request.request().header("X-Trace").value_or("");
    request.response().set("Cache-Control", "public, max-age=60");
-   request.response().set_cookie("trace", trace);
+   forge::net::http::append_set_cookie(
+      request.response(), forge::net::http::set_cookie{.name = "trace", .value = std::string{trace}});
    co_return load_chunk(request.ref);
 }
 ```
@@ -237,9 +243,12 @@ before using any uploaded name in a filesystem path.
 
 ### Serve Static Files And Ranges
 
-`static_file_root` serves files through the stream response path, with root path
-normalization, traversal rejection, configurable symlink policy, `HEAD`, byte
-ranges and conditional metadata headers.
+`static_file_root` serves files through the stream response path with
+descriptor-relative opens, opened-file `fstat`, traversal rejection, `HEAD`,
+byte ranges and conditional metadata headers. `file_options::symlinks` defaults
+to `symlink_policy::reject`; `follow` is an explicit legacy/general file-serving
+mode, remains contained under a `static_file_root`, and must not be used for
+untrusted browser assets.
 
 ```cpp
 import forge.net.http.file;
@@ -250,7 +259,7 @@ auto files = std::make_shared<forge::net::http::static_file_root>(
    "/srv/public",
    forge::net::http::file_options{
       .content_type = "application/octet-stream",
-      .symlinks = forge::net::http::symlink_policy::reject,
+      .max_file_bytes = 64 * 1024 * 1024,
    });
 
 router.get_stream("/files/:name", [files](forge::net::http::stream_request& req)
@@ -267,6 +276,33 @@ router.head_stream("/files/:name", [files](forge::net::http::stream_request& req
 This is a file-serving foundation, not a storage product. Object metadata,
 authorization, placement and compatibility-specific error shapes belong above
 `forge_net_http`.
+
+### Mount Browser Assets
+
+`asset_bundle` is the browser-facing owner above `static_file_root`. It only
+serves `GET` and `HEAD`, rejects raw or percent-decoded traversal, separators,
+NUL and control bytes, permits a small MIME set, and preserves file streaming,
+ranges and ETags. Fingerprinted names receive immutable caching while
+`index.html` stays `no-cache`. It always uses `symlink_policy::reject`. SPA
+fallback applies only to extensionless asset paths after a static miss.
+
+```cpp
+import forge.net.http.assets;
+import forge.net.http.router;
+
+auto router = forge::net::http::router{};
+router.mount_assets(forge::net::http::asset_mount{
+   .path = "/admin",
+   .root = "/srv/admin-ui",
+   .index = "index.html",
+   .spa_fallback = true,
+   .max_file_bytes = 16 * 1024 * 1024,
+});
+```
+
+Asset mounts cannot overlap each other or a reserved typed API prefix. A normal
+route always wins over an asset request, and a reserved API miss remains a 404
+rather than falling through to the SPA.
 
 ### Mount API Bindings
 

@@ -21,6 +21,7 @@ import forge.asio.runtime;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.api.http.binding;
+import forge.net.http.assets;
 import forge.net.http.middleware;
 import forge.net.http.route_context;
 import forge.net.http.router;
@@ -129,7 +130,11 @@ namespace http = forge::net::http;
           http::header_name_equal(header.name, "Transfer-Encoding")) {
          continue;
       }
-      result.set(std::string_view{header.name}, std::string_view{header.value});
+      if (http::header_name_equal(header.name, "Set-Cookie")) {
+         result.insert(std::string_view{header.name}, std::string_view{header.value});
+      } else {
+         result.set(std::string_view{header.name}, std::string_view{header.value});
+      }
    }
    if (!result.body().empty()) {
       forge::net::http::clear_stream_pass_through(result);
@@ -243,7 +248,12 @@ boost::asio::awaitable<void> plugin::startup() {
       router.use(to_http_middleware(std::move(middleware)));
    }
    for (auto& binding : snapshot.bindings) {
-      binding.binding.mount(router, resolve_base_path(settings, binding.options.base_path));
+      const auto base_path = resolve_base_path(settings, binding.options.base_path);
+      router.reserve_path_prefix(base_path);
+      binding.binding.mount(router, base_path);
+   }
+   for (auto& mount : snapshot.asset_mounts) {
+      router.mount_assets(std::move(mount));
    }
    auto server_config = to_server_config(settings);
    auto tls_context_provider = std::shared_ptr<forge::net::tls::context_provider>{};
