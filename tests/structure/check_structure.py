@@ -576,6 +576,165 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
          errors.append(f"tests/plugins/plugins_tests.cpp: plugin cookie/assets regression is missing ({token})")
 
 
+def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "pairing"
+   required = (
+      family / "CMakeLists.txt",
+      leaf / "CMakeLists.txt",
+      leaf / "pairing.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "pairing" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "pairing" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "pairing" / "pairing.cppm",
+      root / "tests" / "auth" / "pairing_tests.cpp",
+      root / "tests" / "package_auth_pairing_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_pairing_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_pairing ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(pairing)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register pairing leaf")
+   if re.search(r"add_library\s*\(\s*forge_auth\s", family_cmake):
+      errors.append("libraries/auth/CMakeLists.txt: empty auth family root must not define forge_auth aggregate")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_pairing STATIC pairing.cpp)",
+      "forge_target_modules_at(forge_auth_pairing auth/pairing)",
+      "forge_codec_base64",
+      "forge_crypto_core",
+      "forge_crypto_digest",
+      "forge_exceptions",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/pairing/CMakeLists.txt: pairing target is missing {token}")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "pairing" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.exceptions",
+      "token_invalid",
+      "replayed",
+      "capacity_exceeded",
+      "generation_exhausted",
+      "credential_id_invalid",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/exceptions.cppm: pairing exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "pairing" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.types",
+      "token_digest",
+      "bootstrap_record",
+      "pending_request",
+      "credential_id",
+      "approval_options",
+      "credential",
+      "trusted, non-decreasing wall-clock",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/types.cppm: pairing record is missing {token}")
+   bootstrap_record_match = re.search(r"struct bootstrap_record \{(.*?)\n\};", types_module, re.DOTALL)
+   if bootstrap_record_match is not None and "secret_string" in bootstrap_record_match.group(1):
+      errors.append("libraries/auth/pairing/include/forge/auth/pairing/types.cppm: persisted bootstrap record must not contain a clear token")
+
+   pairing_module = (leaf / "include" / "forge" / "auth" / "pairing" / "pairing.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.pairing",
+      "begin_bootstrap",
+      "consume_bootstrap",
+      "supersede_pending",
+      "approve_pending",
+      "approval_options",
+      "rotate_credential_downscope",
+      "revoke_credential",
+   ):
+      if token not in pairing_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/pairing.cppm: pairing transition is missing {token}")
+
+   pairing_source = (leaf / "pairing.cpp").read_text(errors="ignore")
+   for token in (
+      "random_bytes(bootstrap_token_bytes)",
+      "padding::omit",
+      "padding_policy::forbid",
+      "constant_time_equal",
+      "byte_view(token.view())",
+      "bootstrap creation",
+      "pending request creation",
+      "out-of-range resolution time",
+      "invalid revocation time",
+      "bootstrap.consumed = true",
+      "require_credential_id",
+      "scope_baseline",
+      "credential rotation cannot escalate scopes",
+   ):
+      if token not in pairing_source:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pairing security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.net", "forge.plugins", "objectdb", "mdbx"):
+      if forbidden in pairing_source or forbidden in pairing_module or forbidden in types_module:
+         errors.append(f"libraries/auth/pairing: product integration dependency is forbidden ({forbidden})")
+
+   consume_source = pairing_source.partition("pending_request consume_bootstrap")[2].partition(
+      "pending_request supersede_pending")[0]
+   supersede_source = pairing_source.partition("pending_request supersede_pending")[2].partition(
+      "credential approve_pending")[0]
+   if ("auto result = pending_request" not in consume_source or
+       consume_source.find("auto result = pending_request") > consume_source.find("bootstrap.consumed = true") or
+       "return result;" not in consume_source):
+      errors.append("libraries/auth/pairing/pairing.cpp: consume must construct its result before consuming bootstrap")
+   if ("auto result = pending_request" not in supersede_source or
+       supersede_source.find("auto result = pending_request") > supersede_source.find("pending.state = pending_state::superseded") or
+       "return result;" not in supersede_source):
+      errors.append("libraries/auth/pairing/pairing.cpp: supersede must construct its result before mutating pending")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_subdirectory(libraries/auth)",
+      "forge_auth_pairing",
+      "auth_pairing",
+      "libraries/auth/pairing/include/forge",
+   ):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_pairing registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/pairing](libraries/auth/pairing/README.md)" not in root_readme or "`forge_auth_pairing`" not in root_readme:
+      errors.append("README.md: forge_auth_pairing library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   for token in (
+      "auth_pairing",
+      'elseif("${component}" STREQUAL "auth_pairing")',
+      "_forge_add_component(codec_base64)",
+      "_forge_add_component(crypto_core)",
+      "_forge_add_component(crypto_digest)",
+   ):
+      if token not in package_config:
+         errors.append(f"cmake/ForgeConfig.cmake.in: auth_pairing package registration is incomplete ({token})")
+
+   pairing_tests = (root / "tests" / "auth" / "pairing_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "bootstrap_uses_random_base64url_secret_and_persists_only_a_digest",
+      "bootstrap_rejects_noncanonical_trailing_pad_bits_without_consuming_the_record",
+      "bootstrap_consumption_is_one_time_bounded_and_does_not_report_clear_tokens",
+      "persisted_transition_clocks_reject_backdating_without_mutation",
+      "malformed_persisted_terminal_timestamps_are_rejected_without_mutation",
+      "pending_transitions_canonicalize_scopes_and_require_explicit_supersession",
+      "approval_rotation_and_revocation_are_terminal_and_cannot_escalate_scopes",
+   ):
+      if token not in pairing_tests:
+         errors.append(f"tests/auth/pairing_tests.cpp: pairing regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_pairing_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.pairing.exceptions;", "import forge.auth.pairing.pairing;", "consume_bootstrap"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_pairing_component/main.cpp: direct pairing package import is missing ({token})")
+
+
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
    text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
    in_macro = False
@@ -1654,6 +1813,7 @@ def main() -> int:
    check_aggregates(root, errors)
    check_tls_context_ownership(root, errors)
    check_http_cookie_asset_boundaries(root, errors)
+   check_auth_pairing_boundaries(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)

@@ -605,6 +605,10 @@ add_executable(test_forge_crypto_core unit/main.cpp crypto/test_core.cpp)
 target_link_libraries(test_forge_crypto_core forge_crypto_core Boost::included_unit_test_framework)
 add_test(NAME test_forge_crypto_core COMMAND test_forge_crypto_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_auth_pairing unit/main.cpp auth/pairing_tests.cpp)
+target_link_libraries(test_forge_auth_pairing forge_auth_pairing Boost::included_unit_test_framework)
+add_test(NAME test_forge_auth_pairing COMMAND test_forge_auth_pairing WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
 target_link_libraries(
    test_forge_crypto_signer
@@ -1460,6 +1464,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_crypto_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_auth_pairing_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_pairing_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-pairing-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_pairing_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2352,6 +2367,17 @@ add_test(
       --test-command forge_package_crypto_core_component
 )
 set_tests_properties(test_forge_package_crypto_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_auth_pairing_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_pairing_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-pairing-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_pairing_component
+)
+set_tests_properties(test_forge_package_auth_pairing_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_crypto_digest_component
    COMMAND ${CMAKE_CTEST_COMMAND}

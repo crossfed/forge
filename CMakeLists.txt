@@ -648,6 +648,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       add_subdirectory(libraries/db/mdbx)
    endif()
    add_subdirectory(libraries/net)
+   add_subdirectory(libraries/auth)
    add_subdirectory(libraries/cli)
    add_subdirectory(libraries/app)
    add_subdirectory(plugins)
@@ -676,6 +677,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_multiformats
       forge_net_tls
       forge_net_http
+      forge_auth_pairing
       forge_api_http
       forge_net_websocket
       forge_net_transport
@@ -808,6 +810,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_tls
       net_stcp
       net_yamux
+      auth_pairing
       app
       net_http
       api_http
@@ -956,6 +959,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/yamux/include/forge
       libraries/net/quic/include/forge
       libraries/net/stcp/include/forge
+      libraries/auth/pairing/include/forge
       libraries/net/p2p/include/forge
       libraries/cli/include/forge
       libraries/app/include/forge

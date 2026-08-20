@@ -183,6 +183,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config_core`. |
+| [auth/pairing](libraries/auth/pairing/README.md) | `forge_auth_pairing` | Product-neutral bootstrap, pairing and credential state transitions. | `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`. |
 | [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, strict cookies, hardened streamed assets, router, middleware, client/server with optional fixed-mode TLS listener. | `forge_net_tls`, `forge_net_websocket`, Boost.Beast/URL/Asio. |
 | [net/tls](libraries/net/tls/README.md) | `forge_net_tls` | Immutable TLS context snapshots, trust loading and peer verification. | `forge_exceptions`, `forge_crypto_pki`, Boost.Asio SSL, Boost.Beast, OpenSSL. |
 | [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | `forge_net_tls`, Boost.Beast/Asio, OpenSSL. |
