@@ -889,6 +889,8 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
    for token in (
       "export module forge.auth.session.session",
       "issue_session",
+      "validate_issuance",
+      "identify_session_token",
       "validate_session",
       "verify_csrf_secret",
       "renew_idle",
@@ -898,7 +900,7 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
    ):
       if token not in session_module:
          errors.append(f"libraries/auth/session/include/forge/auth/session/session.cppm: session transition is missing {token}")
-   issue_declaration = session_module.partition("issue_session")[2].partition("validate_session")[0]
+   issue_declaration = session_module.partition("issue_session")[2].partition("identify_session_token")[0]
    rotate_declaration = session_module.partition("rotate_session")[2].partition("logout_session")[0]
    if "secret_string" in issue_declaration or "secret_string" in rotate_declaration:
       errors.append("libraries/auth/session/include/forge/auth/session/session.cppm: issue/rotate must not accept caller-selected secrets")
@@ -908,7 +910,14 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
       "random_bytes(secret_bytes)",
       "padding::omit",
       "padding_policy::forbid",
+      "identify_secret",
+      "validate_issuance",
+      "identify_session_token",
       "constant_time_equal",
+      "require_session_record(issuance.record)",
+      "issuance.record.state != session_state::active",
+      "verify_secret(issuance.session_token, issuance.record.session_digest, false)",
+      "verify_secret(issuance.csrf_secret, issuance.record.csrf_digest, true)",
       "credential_generation",
       "credential_revoked",
       "canonical_idle_expiry",
@@ -971,6 +980,7 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
    session_tests = (root / "tests" / "auth" / "session_tests.cpp").read_text(errors="ignore")
    for token in (
       "issue_generates_independent_digest_only_canonical_secrets",
+      "issuance_validation_rejects_mixed_and_tampered_secret_pairs",
       "validation_rejects_bounded_malformed_and_noncanonical_secrets",
       "validation_returns_principal_and_enforces_credential_binding",
       "absolute_idle_and_renewal_boundaries_preserve_secret_digests",
@@ -983,7 +993,8 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
          errors.append(f"tests/auth/session_tests.cpp: session regression is missing ({token})")
 
    package_consumer = (root / "tests" / "package_auth_session_component" / "main.cpp").read_text(errors="ignore")
-   for token in ("import forge.auth.session.exceptions;", "import forge.auth.session.session;", "verify_csrf_secret"):
+   for token in ("import forge.auth.session.exceptions;", "import forge.auth.session.session;", "validate_issuance",
+                 "verify_csrf_secret"):
       if token not in package_consumer:
          errors.append(f"tests/package_auth_session_component/main.cpp: direct session package import is missing ({token})")
 
@@ -991,6 +1002,151 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
    for token in ("test_forge_auth_session", "package_auth_session_component", "forge_auth_session"):
       if token not in tests_cmake:
          errors.append(f"tests/CMakeLists.txt: auth_session test registration is incomplete ({token})")
+
+
+def check_auth_http_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "http"
+   required = (
+      leaf / "CMakeLists.txt",
+      leaf / "policy.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "http" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "http" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "http" / "policy.cppm",
+      root / "tests" / "auth" / "http_auth_tests.cpp",
+      root / "tests" / "package_auth_http_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_http_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_http ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(http)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register http leaf")
+   if re.search(r"add_library\s*\(\s*forge_auth\s", family_cmake):
+      errors.append("libraries/auth/CMakeLists.txt: empty auth family root must not define forge_auth aggregate")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_http STATIC policy.cpp)",
+      "forge_target_modules_at(forge_auth_http auth/http)",
+      "forge_exceptions",
+      "forge_crypto_core",
+      "forge_auth_session",
+      "forge_net_http",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/http/CMakeLists.txt: HTTP auth target is missing {token}")
+   if "forge_auth_pairing" in leaf_cmake or "forge_plugins" in leaf_cmake:
+      errors.append("libraries/auth/http/CMakeLists.txt: HTTP auth must not bypass its session and HTTP leaf boundaries")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "http" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.exceptions",
+      "malformed_evidence",
+      "duplicate_evidence",
+      "origin_mismatch",
+      "csrf_mismatch",
+      "scope_denied",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/exceptions.cppm: HTTP auth exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "http" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.types",
+      "cookie_policy",
+      "origin_policy",
+      "browser_request_evidence",
+      "session_evidence",
+      "authorization_options",
+      "security_header_options",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/types.cppm: HTTP auth value is missing {token}")
+
+   policy_module = (leaf / "include" / "forge" / "auth" / "http" / "policy.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.policy",
+      "make_origin_policy",
+      "extract_session_evidence",
+      "authorize",
+      "append_pre_session_cookie",
+      "append_approved_session_cookies",
+      "append_rotated_session_cookies",
+      "append_logout_cookies",
+      "apply_security_headers",
+   ):
+      if token not in policy_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/policy.cppm: HTTP auth policy is missing {token}")
+
+   policy_source = (leaf / "policy.cpp").read_text(errors="ignore")
+   for token in (
+      "parse_cookie_header",
+      "append_set_cookie",
+      "identify_session_token",
+      "validate_session",
+      "verify_csrf_secret",
+      "constant_time_equal",
+      "take_cookie_value",
+      "std::move(found->value)",
+      "secure_erase(found->value)",
+      "validate_issuance(issuance)",
+      "auto staged = response",
+      "response = std::move(staged)",
+      "boost::urls::parse_uri",
+      "canonical.normalize",
+      "remove_port",
+      "__Host-",
+      "same_site::strict",
+      "Content-Security-Policy",
+      "frame-ancestors 'none'",
+   ):
+      if token not in policy_source:
+         errors.append(f"libraries/auth/http/policy.cpp: HTTP auth security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.plugins", "objectdb", "mdbx", "router", "rate_limit", "audit"):
+      if forbidden in policy_source or forbidden in policy_module or forbidden in types_module:
+         errors.append(f"libraries/auth/http: product or transport ownership is forbidden ({forbidden})")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("forge_auth_http", "auth_http", "libraries/auth/http/include/forge"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_http registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/http](libraries/auth/http/README.md)" not in root_readme or "`forge_auth_http`" not in root_readme:
+      errors.append("README.md: forge_auth_http library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   if ('elseif("${component}" STREQUAL "auth_http")\n         _forge_add_component(exceptions)\n         _forge_add_component(crypto_core)\n         _forge_add_component(auth_session)\n         _forge_add_component(net_http)' not in package_config or
+       "auth_http" not in package_config):
+      errors.append("cmake/ForgeConfig.cmake.in: auth_http package registration is incomplete")
+
+   http_tests = (root / "tests" / "auth" / "http_auth_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "authorization_enforces_safe_and_mutating_origin_matrix",
+      "extraction_rejects_missing_duplicate_and_malformed_browser_evidence",
+      "origin_policy_requires_canonical_browser_origins",
+      "authorization_propagates_session_binding_and_rejects_csrf_or_scope_escalation",
+      "cookie_policy_preserves_repeated_set_cookie_and_clears_browser_state",
+      "cookie_issuance_validates_session_integrity_before_atomic_response_update",
+      "security_headers_are_strict_without_global_asset_no_store",
+   ):
+      if token not in http_tests:
+         errors.append(f"tests/auth/http_auth_tests.cpp: HTTP auth regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_http_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.http.exceptions;", "import forge.auth.http.policy;", "make_session_cookie",
+                 "identify_session_token", "validate_issuance"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_http_component/main.cpp: direct HTTP auth package import is missing ({token})")
+
+   tests_cmake = (root / "tests" / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("test_forge_auth_http", "package_auth_http_component", "forge_auth_http"):
+      if token not in tests_cmake:
+         errors.append(f"tests/CMakeLists.txt: auth_http test registration is incomplete ({token})")
 
 
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
@@ -2073,6 +2229,7 @@ def main() -> int:
    check_http_cookie_asset_boundaries(root, errors)
    check_auth_pairing_boundaries(root, errors)
    check_auth_session_boundaries(root, errors)
+   check_auth_http_boundaries(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)

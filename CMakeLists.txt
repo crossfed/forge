@@ -296,6 +296,9 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/quic/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/stcp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/p2p/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/pairing/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/session/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/app/include"
 )
 
@@ -679,6 +682,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_http
       forge_auth_pairing
       forge_auth_session
+      forge_auth_http
       forge_api_http
       forge_net_websocket
       forge_net_transport
@@ -813,6 +817,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_yamux
       auth_pairing
       auth_session
+      auth_http
       app
       net_http
       api_http
@@ -963,6 +968,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/stcp/include/forge
       libraries/auth/pairing/include/forge
       libraries/auth/session/include/forge
+      libraries/auth/http/include/forge
       libraries/net/p2p/include/forge
       libraries/cli/include/forge
       libraries/app/include/forge

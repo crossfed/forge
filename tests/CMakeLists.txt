@@ -613,6 +613,10 @@ add_executable(test_forge_auth_session unit/main.cpp auth/session_tests.cpp)
 target_link_libraries(test_forge_auth_session forge_auth_session Boost::included_unit_test_framework)
 add_test(NAME test_forge_auth_session COMMAND test_forge_auth_session WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_auth_http unit/main.cpp auth/http_auth_tests.cpp)
+target_link_libraries(test_forge_auth_http forge_auth_http Boost::included_unit_test_framework)
+add_test(NAME test_forge_auth_http COMMAND test_forge_auth_http WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
 target_link_libraries(
    test_forge_crypto_signer
@@ -1490,6 +1494,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_auth_session_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_auth_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_http_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2404,6 +2419,17 @@ add_test(
       --test-command forge_package_auth_session_component
 )
 set_tests_properties(test_forge_package_auth_session_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_auth_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_http_component
+)
+set_tests_properties(test_forge_package_auth_http_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_crypto_digest_component
    COMMAND ${CMAKE_CTEST_COMMAND}

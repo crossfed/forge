@@ -209,8 +209,19 @@ void require_matching_credential(const session_record& record, const forge::auth
    FORGE_THROW_EXCEPTION(exceptions::token_invalid, "session token is invalid");
 }
 
+[[nodiscard]] forge::crypto::digest::sha256 identify_secret(const forge::crypto::core::secret_string& presented,
+                                                            bool csrf);
+
 void verify_secret(const forge::crypto::core::secret_string& presented, const forge::crypto::digest::sha256& expected,
                    bool csrf) {
+   const auto actual = identify_secret(presented, csrf);
+   if (!forge::crypto::core::constant_time_equal(expected.to_uint8_span(), actual.to_uint8_span())) {
+      throw_invalid_secret(csrf);
+   }
+}
+
+[[nodiscard]] forge::crypto::digest::sha256 identify_secret(const forge::crypto::core::secret_string& presented,
+                                                            bool csrf) {
    if (presented.size() != secret_characters) {
       throw_invalid_secret(csrf);
    }
@@ -229,10 +240,7 @@ void verify_secret(const forge::crypto::core::secret_string& presented, const fo
    if (!forge::crypto::core::constant_time_equal(byte_view(presented.view()), byte_view(canonical.view()))) {
       throw_invalid_secret(csrf);
    }
-   const auto actual = forge::crypto::digest::sha256::hash(decoded.span());
-   if (!forge::crypto::core::constant_time_equal(expected.to_uint8_span(), actual.to_uint8_span())) {
-      throw_invalid_secret(csrf);
-   }
+   return forge::crypto::digest::sha256::hash(decoded.span());
 }
 
 } // namespace
@@ -274,10 +282,26 @@ session_issuance issue_session(const forge::auth::pairing::credential& credentia
    };
 }
 
+void validate_issuance(const session_issuance& issuance) {
+   require_session_record(issuance.record);
+   if (issuance.record.state != session_state::active) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state, "session issuance record must be active");
+   }
+   verify_secret(issuance.session_token, issuance.record.session_digest, false);
+   verify_secret(issuance.csrf_secret, issuance.record.csrf_digest, true);
+}
+
+forge::crypto::digest::sha256 identify_session_token(const forge::crypto::core::secret_string& session_token) {
+   return identify_secret(session_token, false);
+}
+
 principal validate_session(const session_record& record, const forge::crypto::core::secret_string& session_token,
                            const forge::auth::pairing::credential& credential, time_point now) {
    require_active_session(record, now);
-   verify_secret(session_token, record.session_digest, false);
+   const auto actual = identify_session_token(session_token);
+   if (!forge::crypto::core::constant_time_equal(record.session_digest.to_uint8_span(), actual.to_uint8_span())) {
+      FORGE_THROW_EXCEPTION(exceptions::token_invalid, "session token is invalid");
+   }
    require_matching_credential(record, credential, now);
    return {
        .credential_id = record.credential_id,

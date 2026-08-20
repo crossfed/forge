@@ -19,6 +19,7 @@ int main() {
    auto issuance = session::issue_session(
        credential,
        {.now = now, .absolute_expires_at = now + std::chrono::minutes{1}, .idle_timeout = std::chrono::seconds{30}});
+   session::validate_issuance(issuance);
    const auto principal =
        session::validate_session(issuance.record, issuance.session_token, credential, now + std::chrono::seconds{1});
    session::verify_csrf_secret(issuance.record, issuance.csrf_secret, now + std::chrono::seconds{1});

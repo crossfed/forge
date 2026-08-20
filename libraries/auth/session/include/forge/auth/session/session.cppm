@@ -9,6 +9,10 @@ export namespace forge::auth::session {
 
 [[nodiscard]] session_issuance issue_session(const forge::auth::pairing::credential& credential,
                                              session_options options);
+void validate_issuance(const session_issuance& issuance);
+
+[[nodiscard]] forge::crypto::digest::sha256
+identify_session_token(const forge::crypto::core::secret_string& session_token);
 
 [[nodiscard]] principal validate_session(const session_record& record,
                                          const forge::crypto::core::secret_string& session_token,

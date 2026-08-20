@@ -66,6 +66,7 @@ BOOST_AUTO_TEST_CASE(issue_generates_independent_digest_only_canonical_secrets) 
    static_assert(!exposes_csrf_secret<session::session_record>);
    static_assert(std::is_same_v<decltype(&session::issue_session),
                                 session::session_issuance (*)(const pairing::credential&, session::session_options)>);
+   static_assert(std::is_same_v<decltype(&session::validate_issuance), void (*)(const session::session_issuance&)>);
    static_assert(std::is_same_v<decltype(&session::rotate_session),
                                 session::session_issuance (*)(session::session_record&, const pairing::credential&,
                                                               session::session_options)>);
@@ -88,6 +89,33 @@ BOOST_AUTO_TEST_CASE(issue_generates_independent_digest_only_canonical_secrets) 
    BOOST_TEST(first.record.identity == "owner-a");
    BOOST_TEST(first.record.scopes == pairing::scope_set({"session.read", "session.write"}),
               boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(issuance_validation_rejects_mixed_and_tampered_secret_pairs) {
+   const auto owner = credential();
+   const auto first = session::issue_session(owner, options_at());
+   const auto second = session::issue_session(owner, options_at());
+   session::validate_issuance(first);
+
+   auto mixed_session = first;
+   mixed_session.session_token = second.session_token;
+   require_exception<session::exceptions::token_invalid>([&] { session::validate_issuance(mixed_session); });
+
+   auto mixed_csrf = first;
+   mixed_csrf.csrf_secret = second.csrf_secret;
+   require_exception<session::exceptions::csrf_invalid>([&] { session::validate_issuance(mixed_csrf); });
+
+   auto malformed_record = first;
+   malformed_record.record.csrf_digest = malformed_record.record.session_digest;
+   require_exception<session::exceptions::invalid_state>([&] { session::validate_issuance(malformed_record); });
+
+   auto revoked = first;
+   session::logout_session(revoked.record, test_now + std::chrono::seconds{1});
+   require_exception<session::exceptions::invalid_state>([&] { session::validate_issuance(revoked); });
+
+   auto rotated = first;
+   static_cast<void>(session::rotate_session(rotated.record, owner, options_at(test_now + std::chrono::seconds{1})));
+   require_exception<session::exceptions::invalid_state>([&] { session::validate_issuance(rotated); });
 }
 
 BOOST_AUTO_TEST_CASE(validation_rejects_bounded_malformed_and_noncanonical_secrets) {
