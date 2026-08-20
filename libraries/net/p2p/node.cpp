@@ -382,10 +382,18 @@ boost::asio::awaitable<void> async_stop_owned(auto self) {
 }
 
 boost::asio::awaitable<void> async_stop_after_topology_join(auto self) {
-   self->request_lifecycle_stop();
-   co_await self->async_join_topology_manager();
-   stop_owned(self);
-   co_await async_stop_owned(std::move(self));
+   // Shutdown owns resource teardown once requested; caller cancellation cannot leave it half-complete.
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   const auto executor = co_await boost::asio::this_coro::executor;
+   co_await boost::asio::co_spawn(
+       executor,
+       [self = std::move(self)]() mutable -> boost::asio::awaitable<void> {
+          self->request_lifecycle_stop();
+          co_await self->async_join_topology_manager();
+          stop_owned(self);
+          co_await async_stop_owned(std::move(self));
+       },
+       boost::asio::bind_cancellation_slot(boost::asio::cancellation_slot{}, boost::asio::use_awaitable));
 }
 
 } // namespace

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "toolchains": {
     "go": {
       "version": "1.26.3",
@@ -14,7 +14,9 @@
       "cargo_net_offline": true
     },
     "forge_fixture": {
-      "compiler_identity": "embedded_build_info"
+      "compiler_id": "Clang",
+      "compiler_version": "22.1.8",
+      "build_profile": "default"
     }
   },
   "fixture_files": {
@@ -27,13 +29,17 @@
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
-    "check_fixture_lock.py": "b94202154b062502fd75b89d8ad740ee679e2e6370008821fa83a00eef585c1c",
-    "forge_interop_fixture.cpp": "bb629e18e79399f8bb1119709ddb04296c3fdd79e406311b089e7e562ebfee7c",
-    "provenance.py": "123d08f62ab7e6edc871cfaafbe582050d161e6148a04e937325376448bc7b4e",
-    "runner.py": "c6d5b47bfc5a30349444c86e82baac2ed5527b10afabca1b8a7fc4dea64c9160"
+    "../CMakeLists.txt": "57432300de838877b78451947dc5bde1c3e54b7e24c242dfde75fbbf916c9ba9",
+    "check_fixture_lock.py": "9f9c64c3851f1478ea7b98eca9fe82c501cfe9b1f9ee1b0430211d520ec44253",
+    "forge_interop_fixture.cpp": "50507309d67be8ffca0142b0418a05e5f21c7e8fd53b2fd7a2b41237a13817b2",
+    "provenance.py": "b52c97e6a817022eddbee267959c5bf722502bdaf19ba73b535ff92e41348745",
+    "runner.py": "f8abc75905d740fc2646d476c351c109b1643dd3358e8d886f06b1111d508f77"
   },
   "evidence_sources": {
     "donor_cases.json": "ef65728b81ff107e03769ca8b6a24a06c803ee0520e602a74666a34d36b8f86f"
+  },
+  "regression_sources": {
+    "test_provenance.py": "27d50a9d0f319433ed9aa9e503cc5a3a5243ab573d862cd5aa71711256e068cd"
   },
   "dependency_graphs": {
     "go": {

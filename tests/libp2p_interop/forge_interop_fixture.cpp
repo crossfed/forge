@@ -1445,14 +1445,15 @@ int topology_mode(const std::map<std::string, std::string>& args) {
 int build_info_mode() {
    const auto exact_identity = std::string{"git:"} + FORGE_INTEROP_BUILD_FORGE_HEAD +
                                ";worktree-sha256:" + FORGE_INTEROP_BUILD_WORKTREE_SHA256;
-   std::cout << "{\"schema_version\":1,\"forge\":{\"head\":\""
+   std::cout << "{\"schema_version\":2,\"forge\":{\"head\":\""
              << json_escape(FORGE_INTEROP_BUILD_FORGE_HEAD) << "\",\"worktree_sha256\":\""
              << json_escape(FORGE_INTEROP_BUILD_WORKTREE_SHA256) << "\",\"dirty\":"
              << (FORGE_INTEROP_BUILD_WORKTREE_DIRTY != 0 ? "true" : "false") << ",\"exact_identity\":\""
              << json_escape(exact_identity) << "\"},\"compiler\":{\"path\":\""
              << json_escape(FORGE_INTEROP_BUILD_COMPILER_PATH) << "\",\"id\":\""
              << json_escape(FORGE_INTEROP_BUILD_COMPILER_ID) << "\",\"version\":\""
-             << json_escape(FORGE_INTEROP_BUILD_COMPILER_VERSION) << "\"}}\n";
+             << json_escape(FORGE_INTEROP_BUILD_COMPILER_VERSION) << "\"},\"build_profile\":\""
+             << json_escape(FORGE_INTEROP_BUILD_PROFILE) << "\"}\n";
    return 0;
 }
 

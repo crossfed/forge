@@ -23,18 +23,42 @@ EXPECTED_TOOLCHAINS = {
         "cargo_net_offline": True,
     },
     "forge_fixture": {
-        "compiler_identity": "embedded_build_info",
+        "compiler_id": "Clang",
+        "compiler_version": "22.1.8",
+        "build_profile": "default",
     },
 }
+
+EXPECTED_FIXTURE_FILES = {
+    "go_fixture/go.mod",
+    "go_fixture/go.sum",
+    "go_fixture/main.go",
+    "rust_fixture/Cargo.lock",
+    "rust_fixture/Cargo.toml",
+    "rust_fixture/main.rs",
+    "rust_fixture/rust-toolchain.toml",
+}
+EXPECTED_RUNTIME_ARTIFACT_SOURCES = {
+    "../CMakeLists.txt",
+    "check_fixture_lock.py",
+    "forge_interop_fixture.cpp",
+    "provenance.py",
+    "runner.py",
+}
+EXPECTED_EVIDENCE_SOURCES = {"donor_cases.json"}
+EXPECTED_REGRESSION_SOURCES = {"test_provenance.py"}
 
 
 def git_value(path: Path, revision: str) -> str:
     return subprocess.check_output(["git", "-C", str(path), "rev-parse", revision], text=True).strip()
 
 
-def check_hashes(root: Path, label: str, values: object, errors: list[str]) -> None:
+def check_hashes(root: Path, label: str, values: object, expected_paths: set[str], errors: list[str]) -> None:
     if not isinstance(values, dict):
         errors.append(f"fixture lock {label} must be an object")
+        return
+    if set(values) != expected_paths:
+        errors.append(f"fixture lock {label} sources do not match the supported exact baseline")
         return
     for relative, expected in values.items():
         if not isinstance(relative, str) or not isinstance(expected, str):
@@ -66,11 +90,24 @@ def main() -> int:
         print(f"ERROR: fixture lock: {error}", file=sys.stderr)
         return 1
     errors: list[str] = []
-    if lock.get("schema_version") != 1:
-        errors.append("fixture lock schema_version must be 1")
-    check_hashes(source_dir, "fixture_files", lock.get("fixture_files"), errors)
-    check_hashes(source_dir, "runtime_artifact_sources", lock.get("runtime_artifact_sources"), errors)
-    check_hashes(source_dir, "evidence_sources", lock.get("evidence_sources"), errors)
+    if lock.get("schema_version") != 2:
+        errors.append("fixture lock schema_version must be 2")
+    check_hashes(source_dir, "fixture_files", lock.get("fixture_files"), EXPECTED_FIXTURE_FILES, errors)
+    check_hashes(
+        source_dir,
+        "runtime_artifact_sources",
+        lock.get("runtime_artifact_sources"),
+        EXPECTED_RUNTIME_ARTIFACT_SOURCES,
+        errors,
+    )
+    check_hashes(source_dir, "evidence_sources", lock.get("evidence_sources"), EXPECTED_EVIDENCE_SOURCES, errors)
+    check_hashes(
+        source_dir,
+        "regression_sources",
+        lock.get("regression_sources"),
+        EXPECTED_REGRESSION_SOURCES,
+        errors,
+    )
     check_toolchains(lock.get("toolchains"), errors)
 
     graphs = lock.get("dependency_graphs")

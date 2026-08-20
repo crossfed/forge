@@ -139,11 +139,28 @@ def fixture_build_info(binary: Path) -> tuple[dict, dict]:
     return value, {"command": command}
 
 
-def require_fixture_provenance(binary: Path, expected: WorktreeIdentity) -> tuple[dict, dict]:
+def forge_fixture_requirements(fixture_lock: dict) -> dict:
+    if fixture_lock.get("schema_version") != 2:
+        raise RuntimeError("fixture lock schema_version must be 2")
+    toolchains = fixture_lock.get("toolchains")
+    if not isinstance(toolchains, dict):
+        raise RuntimeError("fixture lock has no toolchain requirements")
+    requirements = toolchains.get("forge_fixture")
+    expected_fields = {"compiler_id", "compiler_version", "build_profile"}
+    if not isinstance(requirements, dict) or set(requirements) != expected_fields:
+        raise RuntimeError("fixture lock Forge fixture requirements are malformed")
+    if not all(isinstance(value, str) and value for value in requirements.values()):
+        raise RuntimeError("fixture lock Forge fixture requirements are malformed")
+    return requirements
+
+
+def require_fixture_provenance(binary: Path, expected: WorktreeIdentity, fixture_lock: dict) -> tuple[dict, dict]:
+    requirements = forge_fixture_requirements(fixture_lock)
     build_info, command = fixture_build_info(binary)
     forge = build_info.get("forge")
     compiler = build_info.get("compiler")
-    if not isinstance(forge, dict) or not isinstance(compiler, dict):
+    build_profile = build_info.get("build_profile")
+    if build_info.get("schema_version") != 2 or not isinstance(forge, dict) or not isinstance(compiler, dict):
         raise RuntimeError(f"Forge interop fixture build-info is incomplete: {build_info}")
     if forge.get("head") != expected.head or forge.get("worktree_sha256") != expected.fingerprint:
         raise RuntimeError(
@@ -154,11 +171,26 @@ def require_fixture_provenance(binary: Path, expected: WorktreeIdentity) -> tupl
         raise RuntimeError(f"Forge interop fixture exact identity is malformed: {forge}")
     if not isinstance(forge.get("dirty"), bool):
         raise RuntimeError(f"Forge interop fixture dirty state is malformed: {forge}")
+    if forge["dirty"] != expected.dirty:
+        raise RuntimeError(
+            "Forge interop fixture dirty state does not match the current worktree: "
+            f"embedded={forge['dirty']}, current={expected.dirty}"
+        )
     for field in ("path", "id", "version"):
         if not isinstance(compiler.get(field), str) or not compiler[field]:
             raise RuntimeError(f"Forge interop fixture compiler identity is incomplete: {compiler}")
     if not Path(compiler["path"]).is_absolute():
         raise RuntimeError(f"Forge interop fixture compiler path is not absolute: {compiler}")
+    if compiler["id"] != requirements["compiler_id"] or compiler["version"] != requirements["compiler_version"]:
+        raise RuntimeError(
+            "Forge interop fixture compiler does not match the locked baseline: "
+            f"embedded={compiler}, required={requirements}"
+        )
+    if build_profile != requirements["build_profile"]:
+        raise RuntimeError(
+            "Forge interop fixture build profile does not match the locked baseline: "
+            f"embedded={build_profile!r}, required={requirements['build_profile']!r}"
+        )
     return build_info, command
 
 
@@ -1016,8 +1048,9 @@ def main() -> int:
         }
         start_identity = worktree_identity(forge_root)
         provenance["forge_worktree"]["start"] = start_identity.as_json()
+        fixture_lock = load_fixture_lock(source_dir)
         forge_fixture = Path(args.forge_fixture).resolve()
-        build_info, build_info_command = require_fixture_provenance(forge_fixture, start_identity)
+        build_info, build_info_command = require_fixture_provenance(forge_fixture, start_identity, fixture_lock)
         provenance["fixture_build_info"] = build_info
         provenance["commands"].append({"kind": "forge_build_info", **build_info_command})
         provenance["binaries"]["forge"] = {
@@ -1041,7 +1074,6 @@ def main() -> int:
             ]
             provenance["commands"].append({"kind": "fixture_lock_check", "command": fixture_check_command})
             run(fixture_check_command)
-            fixture_lock = load_fixture_lock(source_dir)
             tools, go_environment, rust_environment = require_toolchain(fixture_lock, source_dir)
             provenance["tools"].update(tools)
             fixture_deps = export_fixture_deps(

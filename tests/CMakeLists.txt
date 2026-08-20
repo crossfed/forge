@@ -935,6 +935,14 @@ set(FORGE_INTEROP_PROVENANCE ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/provenan
 set(FORGE_INTEROP_BUILD_INFO_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)
 set(FORGE_INTEROP_BUILD_INFO_HEADER ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.hxx)
 set(FORGE_INTEROP_BUILD_INFO_STAMP ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.json)
+get_property(_forge_interop_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_forge_interop_multi_config)
+   set(FORGE_INTEROP_BUILD_PROFILE "$<CONFIG>")
+elseif(CMAKE_BUILD_TYPE)
+   set(FORGE_INTEROP_BUILD_PROFILE "${CMAKE_BUILD_TYPE}")
+else()
+   set(FORGE_INTEROP_BUILD_PROFILE "default")
+endif()
 add_custom_target(
    forge_interop_fixture_build_info
    COMMAND ${CMAKE_COMMAND} -E make_directory ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}
@@ -947,6 +955,7 @@ add_custom_target(
       --compiler-path ${CMAKE_CXX_COMPILER}
       --compiler-id ${CMAKE_CXX_COMPILER_ID}
       --compiler-version ${CMAKE_CXX_COMPILER_VERSION}
+      --build-profile ${FORGE_INTEROP_BUILD_PROFILE}
    BYPRODUCTS ${FORGE_INTEROP_BUILD_INFO_HEADER} ${FORGE_INTEROP_BUILD_INFO_STAMP}
    DEPENDS ${FORGE_INTEROP_PROVENANCE}
    VERBATIM
@@ -1005,6 +1014,11 @@ add_test(
       --build-dir ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop
       --forge-root ${CMAKE_SOURCE_DIR}
       --donors-root ${FORGE_LIBP2P_DONORS_ROOT}
+)
+
+add_test(
+   NAME test_forge_libp2p_worktree_fingerprint
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/test_provenance.py
 )
 
 add_test(

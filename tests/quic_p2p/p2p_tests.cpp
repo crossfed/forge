@@ -93,6 +93,7 @@ import forge.net.p2p.hole_punch;
 import forge.net.p2p.identify;
 import forge.net.p2p.identity;
 import forge.net.p2p.ipns;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.message;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
@@ -112,6 +113,7 @@ import forge.net.quic.libp2p;
 import forge.net.quic.transport;
 import forge.net.stcp.connection;
 import forge.net.transport.endpoint;
+import forge.net.transport.exceptions;
 import forge.net.transport.frame;
 import forge.net.transport.stream;
 import forge.net.tcp.connection;
@@ -1458,6 +1460,18 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
       if (fail_close) {
          throw std::runtime_error{"injected peer close failure"};
       }
+      if (block_close) {
+         auto timer = std::make_shared<boost::asio::steady_timer>(co_await boost::asio::this_coro::executor);
+         timer->expires_at(std::chrono::steady_clock::time_point::max());
+         {
+            auto lock = std::scoped_lock{block_mutex};
+            close_timer = timer;
+            close_blocked = true;
+         }
+         block_changed.notify_all();
+         auto error = boost::system::error_code{};
+         co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      }
       if (!retain_delegate_on_close) {
          co_await delegate->async_close();
       }
@@ -1476,6 +1490,11 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
    [[nodiscard]] bool wait_until_prune_blocked() {
       auto lock = std::unique_lock{block_mutex};
       return block_changed.wait_for(lock, std::chrono::seconds{2}, [&] { return prune_blocked; });
+   }
+
+   [[nodiscard]] bool wait_until_close_blocked() {
+      auto lock = std::unique_lock{block_mutex};
+      return block_changed.wait_for(lock, std::chrono::seconds{2}, [&] { return close_blocked; });
    }
 
    [[nodiscard]] bool wait_until_rendezvous_removal(std::size_t count = 1) {
@@ -1522,6 +1541,19 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
       }
    }
 
+   void release_close() {
+      auto timer = std::shared_ptr<boost::asio::steady_timer>{};
+      {
+         auto lock = std::scoped_lock{block_mutex};
+         timer = close_timer;
+         close_blocked = false;
+         close_timer.reset();
+      }
+      if (timer) {
+         boost::asio::post(timer->get_executor(), [timer] { timer->cancel(); });
+      }
+   }
+
    std::shared_ptr<peer_store::persistence> delegate = peer_store::make_memory_persistence();
    std::vector<peer_store::hydration_request> hydration_requests;
    std::vector<std::size_t> prune_limits;
@@ -1544,16 +1576,19 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
    bool block_rendezvous_apply_only = false;
    bool block_hydrate = false;
    bool block_prune = false;
+   bool block_close = false;
    bool retain_delegate_on_close = false;
    std::mutex block_mutex;
    std::condition_variable block_changed;
    std::shared_ptr<boost::asio::steady_timer> apply_timer;
    std::shared_ptr<boost::asio::steady_timer> hydrate_timer;
    std::shared_ptr<boost::asio::steady_timer> prune_timer;
+   std::shared_ptr<boost::asio::steady_timer> close_timer;
    bool apply_blocked = false;
    bool hydrate_blocked = false;
    bool hydrate_blocked_once = false;
    bool prune_blocked = false;
+   bool close_blocked = false;
    std::size_t rendezvous_removal_count_ = 0;
 };
 
@@ -3698,22 +3733,38 @@ BOOST_AUTO_TEST_CASE(p2p_stream_delegates_chunk_read_write_and_preserves_framed_
    BOOST_REQUIRE_EQUAL(backend->chunk_reads, 2U);
 }
 
-BOOST_AUTO_TEST_CASE(p2p_stream_with_buffer_preserves_prefetched_framed_chunks) {
+BOOST_AUTO_TEST_CASE(p2p_stream_with_buffer_uses_transport_bounds_and_preserves_coalesced_frames) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto backend = std::make_shared<queued_transport_stream>(79);
    auto first = std::vector<std::uint8_t>{'p', 'r', 'e'};
    auto second = std::vector<std::uint8_t>{'b', 'u', 'f'};
-   auto buffered = forge::net::transport::encode_frame(first);
-   auto encoded_second = forge::net::transport::encode_frame(second);
+   const auto options = forge::net::transport::frame_options{.max_size = 3, .max_buffered_size = 14};
+   auto buffered = forge::net::transport::encode_frame(first, options);
+   auto encoded_second = forge::net::transport::encode_frame(second, options);
    buffered.insert(buffered.end(), encoded_second.begin(), encoded_second.end());
+   BOOST_REQUIRE_EQUAL(buffered.size(), options.max_buffered_size);
 
    auto value = forge::net::p2p::detail::stream_access::with_buffer(
        forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(backend)}, std::move(buffered));
 
-   auto first_read = forge::asio::blocking::run(runtime, value.async_read_frame_chunk());
+   auto first_read = forge::asio::blocking::run(runtime, value.async_read_frame_chunk(options));
    BOOST_TEST(first_read.to_vector() == first, boost::test_tools::per_element());
-   const auto second_read = forge::asio::blocking::run(runtime, value.async_read_frame());
+   const auto second_read = forge::asio::blocking::run(runtime, value.async_read_frame(options));
    BOOST_TEST(second_read == second, boost::test_tools::per_element());
+   BOOST_TEST(backend->chunk_reads == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_stream_rejects_oversized_prefetched_frame_with_transport_limit) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto backend = std::make_shared<queued_transport_stream>(80);
+   const auto options = forge::net::transport::frame_options{.max_size = 3, .max_buffered_size = 7};
+   auto oversized = forge::net::transport::encode_frame(std::vector<std::uint8_t>{'l', 'a', 'r', 'g'});
+   BOOST_REQUIRE(oversized.size() > options.max_buffered_size);
+   auto value = forge::net::p2p::detail::stream_access::with_buffer(
+       forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(backend)}, std::move(oversized));
+
+   BOOST_CHECK_THROW((void)forge::asio::blocking::run(runtime, value.async_read_frame(options)),
+                     forge::net::transport::exceptions::frame_too_large);
    BOOST_TEST(backend->chunk_reads == 0U);
 }
 
@@ -12993,6 +13044,45 @@ BOOST_AUTO_TEST_CASE(p2p_async_stop_owns_node_impl_before_first_resume) {
    }
 
    forge::asio::blocking::run(runtime, std::move(*pending));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_async_stop_completes_teardown_after_inherited_cancellation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto persistence = std::make_shared<tracking_peer_store_persistence>();
+   persistence->block_close = true;
+   auto server = node{runtime, options_for(peer(219))};
+   auto client_options = options_for(peer(220));
+   client_options.peer_state.persistence = persistence;
+   auto client = node{runtime, std::move(client_options)};
+   const auto server_endpoint = listen(server, runtime);
+   static_cast<void>(forge::asio::blocking::run(
+       runtime, client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()})));
+   BOOST_REQUIRE(client.diagnostics().metrics.active_sessions == 1U);
+
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto stopped = boost::asio::co_spawn(
+       runtime.context(), client.async_stop(),
+       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   BOOST_REQUIRE(persistence->wait_until_close_blocked());
+
+   cancellation.emit(boost::asio::cancellation_type::terminal);
+   BOOST_CHECK(stopped.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   const auto stopping = client.diagnostics();
+   BOOST_TEST(stopping.sessions.empty());
+   BOOST_TEST(stopping.metrics.active_sessions == 0U);
+   BOOST_TEST(static_cast<int>(client.lifecycle_state().phase) == static_cast<int>(lifecycle_phase::stopping));
+   BOOST_TEST(persistence->close_attempts == 1U);
+
+   persistence->release_close();
+   BOOST_REQUIRE(stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   stopped.get();
+
+   const auto stopped_snapshot = client.diagnostics();
+   BOOST_TEST(stopped_snapshot.persistence.closed);
+   BOOST_TEST(client.metrics().stopped);
+   BOOST_TEST(static_cast<int>(client.lifecycle_state().phase) == static_cast<int>(lifecycle_phase::stopped));
+   BOOST_TEST(persistence->close_attempts == 1U);
+   forge::asio::blocking::run(runtime, server.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_dht_routing_refresh_task_retains_node_impl_until_stop_is_observed) {

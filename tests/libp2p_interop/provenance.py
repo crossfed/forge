@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-WORKTREE_FINGERPRINT_FORMAT = b"forge-libp2p-interop-worktree-v1\0"
+WORKTREE_FINGERPRINT_FORMAT = b"forge-libp2p-interop-worktree-v2\0"
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,14 @@ class WorktreeIdentity:
             "dirty": self.dirty,
             "exact_identity": f"git:{self.head};worktree-sha256:{self.fingerprint}",
         }
+
+
+@dataclass(frozen=True)
+class IndexEntry:
+    mode: bytes
+    object_id: bytes
+    stage: bytes
+    relative: bytes
 
 
 def sha256_file(path: Path) -> str:
@@ -56,50 +64,156 @@ def git_output(root: Path, *args: str) -> bytes:
         raise RuntimeError(f"Git command failed for {root}: {error}") from error
 
 
-def worktree_identity(root: Path) -> WorktreeIdentity:
+def safe_worktree_path(root: Path, relative: bytes) -> Path:
+    decoded = os.fsdecode(relative)
+    candidate = Path(decoded)
+    if not relative or relative.startswith(b"/") or candidate.is_absolute() or ".." in candidate.parts:
+        raise RuntimeError(f"Git returned an unsafe worktree path: {relative!r}")
+    path = root / candidate
+    try:
+        path.parent.resolve().relative_to(root)
+    except (RuntimeError, ValueError) as error:
+        raise RuntimeError(f"Git path escapes the worktree through a symlink: {relative!r}") from error
+    return path
+
+
+def git_index_entries(root: Path) -> list[IndexEntry]:
+    output = git_output(root, "ls-files", "--stage", "-z")
+    entries = []
+    for value in output.split(b"\0"):
+        if not value:
+            continue
+        try:
+            metadata, relative = value.split(b"\t", 1)
+            mode, object_id, stage = metadata.split(b" ", 2)
+        except ValueError as error:
+            raise RuntimeError(f"Git returned an invalid index entry: {value!r}") from error
+        safe_worktree_path(root, relative)
+        entries.append(IndexEntry(mode=mode, object_id=object_id, stage=stage, relative=relative))
+    return sorted(entries, key=lambda value: (value.relative, value.stage, value.mode, value.object_id))
+
+
+def git_untracked_paths(root: Path) -> list[bytes]:
+    output = git_output(root, "ls-files", "--others", "--exclude-standard", "-z")
+    paths = {value for value in output.split(b"\0") if value}
+    for relative in paths:
+        safe_worktree_path(root, relative)
+    return sorted(paths)
+
+
+def append_bytes(digest: "hashlib._Hash", value: bytes) -> None:
+    digest.update(struct.pack(">Q", len(value)))
+    digest.update(value)
+
+
+def path_is_within_submodule(relative: bytes, submodules: set[bytes]) -> bool:
+    return any(relative == submodule or relative.startswith(submodule + b"/") for submodule in submodules)
+
+
+def append_worktree_path(digest: "hashlib._Hash", root: Path, relative: bytes) -> None:
+    path = safe_worktree_path(root, relative)
+    digest.update(b"path\0")
+    append_bytes(digest, relative)
+    try:
+        metadata = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        digest.update(b"missing\0")
+        return
+    if stat.S_ISLNK(metadata.st_mode):
+        target = os.fsencode(os.readlink(path))
+        digest.update(b"symlink\0")
+        append_bytes(digest, target)
+        return
+    if stat.S_ISREG(metadata.st_mode):
+        digest.update(b"executable-bits\0")
+        digest.update(struct.pack(">I", metadata.st_mode & 0o111))
+        digest.update(b"content\0")
+        digest.update(struct.pack(">Q", metadata.st_size))
+        read = 0
+        with path.open("rb") as value:
+            while chunk := value.read(1024 * 1024):
+                digest.update(chunk)
+                read += len(chunk)
+        if read != metadata.st_size:
+            raise RuntimeError(f"worktree file changed while fingerprinting: {path}")
+        return
+    digest.update(b"other\0")
+    digest.update(struct.pack(">I", stat.S_IFMT(metadata.st_mode)))
+
+
+def append_submodule(digest: "hashlib._Hash", root: Path, relative: bytes, object_id: bytes,
+                     ancestors: frozenset[Path]) -> bool:
+    path = safe_worktree_path(root, relative)
+    digest.update(b"gitlink\0")
+    append_bytes(digest, relative)
+    digest.update(b"index-oid\0")
+    append_bytes(digest, object_id)
+    try:
+        metadata = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        digest.update(b"missing\0")
+        return True
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        digest.update(b"invalid\0")
+        digest.update(struct.pack(">I", stat.S_IFMT(metadata.st_mode)))
+        return True
+    try:
+        checked_out_root = Path(git_output(path, "rev-parse", "--show-toplevel").decode("utf-8").strip()).resolve()
+    except RuntimeError:
+        digest.update(b"uninitialized\0")
+        return True
+    resolved = path.resolve()
+    if checked_out_root != resolved:
+        raise RuntimeError(f"Git submodule root escapes its indexed path: {path}")
+    if resolved in ancestors:
+        raise RuntimeError(f"Git submodule recursion cycle: {resolved}")
+    identity = worktree_identity(resolved, ancestors)
+    digest.update(b"initialized\0")
+    digest.update(b"head\0")
+    append_bytes(digest, identity.head.encode("ascii"))
+    digest.update(b"fingerprint\0")
+    append_bytes(digest, identity.fingerprint.encode("ascii"))
+    digest.update(b"dirty\0")
+    digest.update(b"1" if identity.dirty else b"0")
+    return identity.dirty or identity.head.encode("ascii") != object_id
+
+
+def worktree_identity(root: Path, ancestors: frozenset[Path] = frozenset()) -> WorktreeIdentity:
     root = root.resolve()
+    if root in ancestors:
+        raise RuntimeError(f"Git worktree recursion cycle: {root}")
+    ancestors = ancestors | {root}
     head = git_output(root, "rev-parse", "HEAD").decode("ascii").strip()
-    entries = git_output(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-    paths = sorted({value for value in entries.split(b"\0") if value})
+    entries = git_index_entries(root)
+    gitlinks = {value.relative for value in entries if value.mode == b"160000"}
+    tracked_paths = {value.relative for value in entries if value.relative not in gitlinks}
+    paths = tracked_paths | {value for value in git_untracked_paths(root) if not path_is_within_submodule(value, gitlinks)}
 
     digest = hashlib.sha256()
     digest.update(WORKTREE_FINGERPRINT_FORMAT)
     digest.update(b"head\0")
     digest.update(head.encode("ascii"))
     digest.update(b"\0")
-    for relative in paths:
-        if relative.startswith(b"/") or b".." in relative.split(b"/"):
-            raise RuntimeError(f"Git returned an unsafe worktree path: {relative!r}")
-        path = root / os.fsdecode(relative)
-        digest.update(b"path\0")
-        digest.update(struct.pack(">Q", len(relative)))
-        digest.update(relative)
-        try:
-            metadata = path.lstat()
-        except FileNotFoundError:
-            digest.update(b"missing\0")
-            continue
-        if stat.S_ISLNK(metadata.st_mode):
-            target = os.fsencode(os.readlink(path))
-            digest.update(b"symlink\0")
-            digest.update(struct.pack(">Q", len(target)))
-            digest.update(target)
-            continue
-        if stat.S_ISREG(metadata.st_mode):
-            digest.update(b"content\0")
-            digest.update(struct.pack(">Q", metadata.st_size))
-            read = 0
-            with path.open("rb") as value:
-                while chunk := value.read(1024 * 1024):
-                    digest.update(chunk)
-                    read += len(chunk)
-            if read != metadata.st_size:
-                raise RuntimeError(f"worktree file changed while fingerprinting: {path}")
-            continue
-        digest.update(b"other\0")
-        digest.update(struct.pack(">I", stat.S_IFMT(metadata.st_mode)))
+    for entry in entries:
+        digest.update(b"index-entry\0")
+        append_bytes(digest, entry.relative)
+        append_bytes(digest, entry.mode)
+        append_bytes(digest, entry.object_id)
+        append_bytes(digest, entry.stage)
+    for relative in sorted(paths):
+        append_worktree_path(digest, root, relative)
 
-    dirty = bool(git_output(root, "status", "--porcelain=v1", "-z"))
+    submodule_dirty = False
+    for relative in sorted(gitlinks):
+        stage_zero = next((entry for entry in entries if entry.relative == relative and entry.stage == b"0"), None)
+        if stage_zero is None:
+            digest.update(b"gitlink-unmerged\0")
+            append_bytes(digest, relative)
+            submodule_dirty = True
+            continue
+        submodule_dirty = append_submodule(digest, root, relative, stage_zero.object_id, ancestors) or submodule_dirty
+
+    dirty = bool(git_output(root, "status", "--porcelain=v1", "-z")) or submodule_dirty
     return WorktreeIdentity(head=head, fingerprint=digest.hexdigest(), dirty=dirty)
 
 
@@ -117,8 +231,10 @@ def cxx_string(value: str) -> str:
 
 
 def emit_build_info(root: Path, output_header: Path, output_stamp: Path, compiler_path: str,
-                    compiler_id: str, compiler_version: str) -> None:
+                    compiler_id: str, compiler_version: str, build_profile: str) -> None:
     identity = worktree_identity(root)
+    if not build_profile:
+        raise RuntimeError("Forge interop build profile is empty")
     compiler = {
         "path": str(Path(compiler_path).resolve()),
         "id": compiler_id,
@@ -133,12 +249,14 @@ def emit_build_info(root: Path, output_header: Path, output_stamp: Path, compile
         f"#define FORGE_INTEROP_BUILD_COMPILER_PATH {cxx_string(compiler['path'])}\n"
         f"#define FORGE_INTEROP_BUILD_COMPILER_ID {cxx_string(compiler['id'])}\n"
         f"#define FORGE_INTEROP_BUILD_COMPILER_VERSION {cxx_string(compiler['version'])}\n"
+        f"#define FORGE_INTEROP_BUILD_PROFILE {cxx_string(build_profile)}\n"
     )
     stamp = json.dumps(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "forge": identity.as_json(),
             "compiler": compiler,
+            "build_profile": build_profile,
         },
         indent=2,
         sort_keys=True,
@@ -159,6 +277,7 @@ def main() -> int:
     build_info.add_argument("--compiler-path", required=True)
     build_info.add_argument("--compiler-id", required=True)
     build_info.add_argument("--compiler-version", required=True)
+    build_info.add_argument("--build-profile", required=True)
     args = parser.parse_args()
 
     if args.command == "fingerprint":
@@ -171,6 +290,7 @@ def main() -> int:
         args.compiler_path,
         args.compiler_id,
         args.compiler_version,
+        args.build_profile,
     )
     return 0
 
