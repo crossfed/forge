@@ -301,24 +301,25 @@
 #define FORGE_VM_WASM_INTERPRET_FIX_OPCODE_NAME_1(name) name##t
 #define FORGE_VM_WASM_INTERPRET_FIX_OPCODE_NAME(iskeyword, garbage) FORGE_VM_WASM_INTERPRET_FIX_OPCODE_NAME_##iskeyword
 
-#define FORGE_VM_WASM_INTERPRET_OPCODE_T(name)                                                                                   \
-   FORGE_VM_WASM_INTERPRET_APPLY(                                                                                                \
-       FORGE_VM_WASM_INTERPRET_FIX_OPCODE_NAME,                                                                                  \
-       (FORGE_VM_WASM_INTERPRET_CAT(FORGE_VM_WASM_INTERPRET_OPCODE_NAME_TEST_,                                                             \
-                          FORGE_VM_WASM_INTERPRET_EXPAND(FORGE_VM_WASM_INTERPRET_OPCODE_NAME_TEST FORGE_VM_WASM_INTERPRET_OPCODE_NAME_##name()))))(  \
-       name)
+#define FORGE_VM_WASM_INTERPRET_OPCODE_T(name)                                                                         \
+   FORGE_VM_WASM_INTERPRET_APPLY(                                                                                      \
+       FORGE_VM_WASM_INTERPRET_FIX_OPCODE_NAME,                                                                        \
+       (FORGE_VM_WASM_INTERPRET_CAT(                                                                                   \
+           FORGE_VM_WASM_INTERPRET_OPCODE_NAME_TEST_,                                                                  \
+           FORGE_VM_WASM_INTERPRET_EXPAND(                                                                             \
+               FORGE_VM_WASM_INTERPRET_OPCODE_NAME_TEST FORGE_VM_WASM_INTERPRET_OPCODE_NAME_##name()))))(name)
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_EXIT_TYPE(name, code)                                                                     \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_EXIT_TYPE(name, code)                                                           \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       uint32_t pc;                                                                                                     \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_CONTROL_FLOW_TYPES(name, code)                                                            \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() {}                                                                                \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t data) : data(data) {}                                                      \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t d, uint32_t pc, uint16_t i, uint16_t oi)                                   \
+#define FORGE_VM_WASM_INTERPRET_CREATE_CONTROL_FLOW_TYPES(name, code)                                                  \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() {}                                                                      \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t data) : data(data) {}                                            \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t d, uint32_t pc, uint16_t i, uint16_t oi)                         \
           : data(d), pc(pc), index(i), op_index(oi) {}                                                                 \
       uint32_t data = 0;                                                                                               \
       uint32_t pc = 0;                                                                                                 \
@@ -327,8 +328,8 @@
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_BR_TABLE_TYPE(name, code)                                                                 \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_BR_TABLE_TYPE(name, code)                                                       \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       struct elem_t {                                                                                                  \
          uint32_t pc;                                                                                                  \
          uint32_t stack_pop;                                                                                           \
@@ -339,45 +340,45 @@
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_TYPES(name, code)                                                                         \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_TYPES(name, code)                                                               \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_CALL_TYPES(name, code)                                                                    \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_CALL_TYPES(name, code)                                                          \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       uint32_t index;                                                                                                  \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_CALL_IMM_TYPES(name, code)                                                                \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_CALL_IMM_TYPES(name, code)                                                      \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       uint32_t index;                                                                                                  \
       uint16_t locals;                                                                                                 \
       uint16_t return_type;                                                                                            \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_VARIABLE_ACCESS_TYPES(name, code)                                                         \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_VARIABLE_ACCESS_TYPES(name, code)                                               \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       uint32_t index;                                                                                                  \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_MEMORY_TYPES(name, code)                                                                  \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
+#define FORGE_VM_WASM_INTERPRET_CREATE_MEMORY_TYPES(name, code)                                                        \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
       uint32_t flags_align;                                                                                            \
       uint32_t offset;                                                                                                 \
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_I32_CONSTANT_TYPE(name, code)                                                             \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                                        \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t n) {                                                              \
+#define FORGE_VM_WASM_INTERPRET_CREATE_I32_CONSTANT_TYPE(name, code)                                                   \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                              \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t n) {                                                    \
          data.ui = n;                                                                                                  \
       }                                                                                                                \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(int32_t n) {                                                               \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(int32_t n) {                                                     \
          data.i = n;                                                                                                   \
       }                                                                                                                \
       union {                                                                                                          \
@@ -387,13 +388,13 @@
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_I64_CONSTANT_TYPE(name, code)                                                             \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                                        \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint64_t n) {                                                              \
+#define FORGE_VM_WASM_INTERPRET_CREATE_I64_CONSTANT_TYPE(name, code)                                                   \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                              \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint64_t n) {                                                    \
          data.ui = n;                                                                                                  \
       }                                                                                                                \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(int64_t n) {                                                               \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(int64_t n) {                                                     \
          data.i = n;                                                                                                   \
       }                                                                                                                \
       union {                                                                                                          \
@@ -403,13 +404,13 @@
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_F32_CONSTANT_TYPE(name, code)                                                             \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                                        \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t n) {                                                              \
+#define FORGE_VM_WASM_INTERPRET_CREATE_F32_CONSTANT_TYPE(name, code)                                                   \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                              \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint32_t n) {                                                    \
          data.ui = n;                                                                                                  \
       }                                                                                                                \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(float n) {                                                                 \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(float n) {                                                       \
          data.f = n;                                                                                                   \
       }                                                                                                                \
       union {                                                                                                          \
@@ -419,13 +420,13 @@
       static constexpr uint8_t opcode = code;                                                                          \
    };
 
-#define FORGE_VM_WASM_INTERPRET_CREATE_F64_CONSTANT_TYPE(name, code)                                                             \
-   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                               \
-      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                                        \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint64_t n) {                                                              \
+#define FORGE_VM_WASM_INTERPRET_CREATE_F64_CONSTANT_TYPE(name, code)                                                   \
+   struct FORGE_VM_WASM_INTERPRET_OPCODE_T(name) {                                                                     \
+      FORGE_VM_WASM_INTERPRET_OPCODE_T(name)() = default;                                                              \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(uint64_t n) {                                                    \
          data.ui = n;                                                                                                  \
       }                                                                                                                \
-      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(double n) {                                                                \
+      explicit FORGE_VM_WASM_INTERPRET_OPCODE_T(name)(double n) {                                                      \
          data.f = n;                                                                                                   \
       }                                                                                                                \
       union {                                                                                                          \
@@ -436,4 +437,5 @@
    };
 
 #define FORGE_VM_WASM_INTERPRET_IDENTITY(name, code) forge::vm::wasm::interpret::FORGE_VM_WASM_INTERPRET_OPCODE_T(name),
-#define FORGE_VM_WASM_INTERPRET_IDENTITY_END(name, code) forge::vm::wasm::interpret::FORGE_VM_WASM_INTERPRET_OPCODE_T(name)
+#define FORGE_VM_WASM_INTERPRET_IDENTITY_END(name, code)                                                               \
+   forge::vm::wasm::interpret::FORGE_VM_WASM_INTERPRET_OPCODE_T(name)

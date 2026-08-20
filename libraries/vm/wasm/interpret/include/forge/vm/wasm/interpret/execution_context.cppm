@@ -63,7 +63,8 @@ template <typename HostFunctions> struct type_converter {
    using type = typename HostFunctions::type_converter_t;
 };
 template <> struct type_converter<std::nullptr_t> {
-   using type = forge::vm::wasm::interpret::type_converter<std::nullptr_t, forge::vm::wasm::interpret::execution_interface>;
+   using type =
+       forge::vm::wasm::interpret::type_converter<std::nullptr_t, forge::vm::wasm::interpret::execution_interface>;
 };
 
 template <typename HF> using type_converter_t = typename type_converter<HF>::type;
@@ -405,9 +406,9 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
       try {
          if (func_index < imported_functions) {
             std::reverse(args_raw + 0, args_raw + sizeof...(Args));
-            ::forge::vm::wasm::interpret::invoke_with_signal_handler([&]() { result = call_host_function(args_raw, func_index); },
-                                                          &handle_signal, _mod->allocator,
-                                                          base_type::get_wasm_allocator());
+            ::forge::vm::wasm::interpret::invoke_with_signal_handler(
+                [&]() { result = call_host_function(args_raw, func_index); }, &handle_signal, _mod->allocator,
+                base_type::get_wasm_allocator());
          } else {
             detail::check<exceptions::interpreter>(_remaining_call_depth > 0, "stack overflow");
             std::size_t maximum_stack_usage =
@@ -924,8 +925,8 @@ template <typename Host> class execution_context : public execution_context_base
          _state.pc = _mod->get_function_pc(func_index);
          setup_locals(func_index);
          ::forge::vm::wasm::interpret::invoke_with_signal_handler([&]() { execute(std::forward<Visitor>(visitor)); },
-                                                       &handle_signal, _mod->allocator,
-                                                       base_type::get_wasm_allocator());
+                                                                  &handle_signal, _mod->allocator,
+                                                                  base_type::get_wasm_allocator());
       }
 
       if (_mod->get_function_type(func_index).return_count && !_state.exiting) {
@@ -992,7 +993,8 @@ template <typename Host> class execution_context : public execution_context_base
 #define CREATE_TABLE_ENTRY(NAME, CODE) &&ev_label_##NAME,
 #define CREATE_LABEL(NAME, CODE)                                                                                       \
    ev_label_##NAME                                                                                                     \
-       : std::forward<Visitor>(visitor)(ev_variant->template get<forge::vm::wasm::interpret::FORGE_VM_WASM_INTERPRET_OPCODE_T(NAME)>());    \
+       : std::forward<Visitor>(visitor)(                                                                               \
+             ev_variant->template get<forge::vm::wasm::interpret::FORGE_VM_WASM_INTERPRET_OPCODE_T(NAME)>());          \
    ev_variant = _state.pc;                                                                                             \
    goto* dispatch_table[ev_variant->index()];
 #define CREATE_EXIT_LABEL(NAME, CODE) ev_label_##NAME : return;
@@ -1000,10 +1002,12 @@ template <typename Host> class execution_context : public execution_context_base
 
    template <typename Visitor> void execute(Visitor&& visitor) {
       static void* dispatch_table[] = {
-          FORGE_VM_WASM_INTERPRET_CONTROL_FLOW_OPS(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_BR_TABLE_OP(CREATE_TABLE_ENTRY)
-              FORGE_VM_WASM_INTERPRET_RETURN_OP(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_CALL_OPS(CREATE_TABLE_ENTRY)
-                  FORGE_VM_WASM_INTERPRET_CALL_IMM_OPS(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_PARAMETRIC_OPS(CREATE_TABLE_ENTRY)
-                      FORGE_VM_WASM_INTERPRET_VARIABLE_ACCESS_OPS(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_MEMORY_OPS(CREATE_TABLE_ENTRY)
+          FORGE_VM_WASM_INTERPRET_CONTROL_FLOW_OPS(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_BR_TABLE_OP(
+              CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_RETURN_OP(CREATE_TABLE_ENTRY)
+              FORGE_VM_WASM_INTERPRET_CALL_OPS(CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_CALL_IMM_OPS(
+                  CREATE_TABLE_ENTRY) FORGE_VM_WASM_INTERPRET_PARAMETRIC_OPS(CREATE_TABLE_ENTRY)
+                  FORGE_VM_WASM_INTERPRET_VARIABLE_ACCESS_OPS(CREATE_TABLE_ENTRY)
+                      FORGE_VM_WASM_INTERPRET_MEMORY_OPS(CREATE_TABLE_ENTRY)
                           FORGE_VM_WASM_INTERPRET_I32_CONSTANT_OPS(CREATE_TABLE_ENTRY)
                               FORGE_VM_WASM_INTERPRET_I64_CONSTANT_OPS(CREATE_TABLE_ENTRY)
                                   FORGE_VM_WASM_INTERPRET_F32_CONSTANT_OPS(CREATE_TABLE_ENTRY)

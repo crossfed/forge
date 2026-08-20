@@ -28,10 +28,10 @@ struct linear_memory {
 
 int main() {
    using host_functions = forge::vm::wasm::interpret::registered_host_functions<host>;
-   using engine =
-       forge::vm::wasm::interpret::backend<host_functions, forge::vm::wasm::interpret::interpreter, forge::vm::wasm::interpret::compatibility_options>;
-   using validator =
-       forge::vm::wasm::interpret::backend<std::nullptr_t, forge::vm::wasm::interpret::null_backend, forge::vm::wasm::interpret::compatibility_options>;
+   using engine = forge::vm::wasm::interpret::backend<host_functions, forge::vm::wasm::interpret::interpreter,
+                                                      forge::vm::wasm::interpret::compatibility_options>;
+   using validator = forge::vm::wasm::interpret::backend<std::nullptr_t, forge::vm::wasm::interpret::null_backend,
+                                                         forge::vm::wasm::interpret::compatibility_options>;
 
    host_functions::add<&host::ping>("env", "ping");
    host_functions::add<&host::write_log>("env", "write_log");

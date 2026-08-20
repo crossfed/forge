@@ -10,7 +10,7 @@ from pathlib import Path
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
 LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
-SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "tests")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -26,7 +26,7 @@ VM_WASM_INTERPRET_EXPORT = re.compile(r"\bFORGE_VM_WASM_INTERPRET_EXPORT\b")
 UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
 LEGACY_VM_WASM_SOURCE_IDENTITIES = (
    (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
-   (re.compile(r"\bvm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"(?<![/A-Za-z0-9_])vm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
    (re.compile(r"\bForge::vm_wasm_softfloat_internal\b"), "legacy SoftFloat export identity"),
    (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
    (re.compile(r"forge\.vm\.wasm(?!\.interpret(?:\b|:))"), "legacy VM module identity"),
@@ -35,7 +35,7 @@ LEGACY_VM_WASM_SOURCE_IDENTITIES = (
 )
 LEGACY_VM_WASM_CMAKE_IDENTITIES = (
    (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
-   (re.compile(r"\bvm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"(?<![/A-Za-z0-9_])vm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
    (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
    (re.compile(r"libraries/vm/wasm/include"), "legacy VM include root"),
    (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
@@ -251,8 +251,12 @@ def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: li
             if expression.search(line):
                errors.append(f"{relative}:{line_number}: {description} is forbidden")
 
-   cmake_paths = [root / "CMakeLists.txt", root / "cmake" / "ForgeConfig.cmake.in"]
-   for base in (root / "libraries", root / "guest", root / "plugins"):
+   cmake_paths = [
+      root / "CMakeLists.txt",
+      root / "cmake" / "ForgeConfig.cmake.in",
+      root / ".github" / "workflows" / "vm-wasm.yml",
+   ]
+   for base in (root / "libraries", root / "guest", root / "plugins", root / "tests"):
       if base.exists():
          cmake_paths.extend(base.rglob("CMakeLists.txt"))
 
@@ -261,6 +265,8 @@ def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: li
          continue
       relative = path.relative_to(root)
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         if relative == Path("tests/CMakeLists.txt") and line.strip() == "add_subdirectory(vm_wasm)":
+            continue
          for expression, description in LEGACY_VM_WASM_CMAKE_IDENTITIES:
             if expression.search(line):
                errors.append(f"{relative}:{line_number}: {description} is forbidden")

@@ -5,6 +5,7 @@ foreach(
    IN ITEMS
       FORGE_PACKAGE_TEST_INSTALL_PREFIX
       FORGE_PACKAGE_TEST_INSTALL_LIBDIR
+      FORGE_PACKAGE_TEST_INCLUDEDIR
       FORGE_PACKAGE_TEST_RELOCATED_PREFIX
       FORGE_PACKAGE_TEST_SOURCE_DIR
       FORGE_PACKAGE_TEST_BINARY_DIR
@@ -20,6 +21,21 @@ endforeach()
 
 file(REMOVE_RECURSE "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
 file(COPY "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}/" DESTINATION "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
+
+set(
+   installed_vm_wasm_root
+   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/${FORGE_PACKAGE_TEST_INCLUDEDIR}/forge/vm/wasm"
+)
+if(NOT IS_DIRECTORY "${installed_vm_wasm_root}/interpret")
+   message(FATAL_ERROR "Installed VM interpreter headers are missing: ${installed_vm_wasm_root}/interpret")
+endif()
+file(GLOB installed_vm_wasm_entries LIST_DIRECTORIES TRUE "${installed_vm_wasm_root}/*")
+foreach(entry IN LISTS installed_vm_wasm_entries)
+   get_filename_component(entry_name "${entry}" NAME)
+   if(NOT entry_name STREQUAL "interpret" OR NOT IS_DIRECTORY "${entry}")
+      message(FATAL_ERROR "Installed package exposes legacy VM public path: ${entry}")
+   endif()
+endforeach()
 
 set(
    forbidden_details

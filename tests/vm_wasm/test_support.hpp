@@ -2,18 +2,22 @@
 
 #define FORGE_VM_WASM_INTERPRET_JOIN_IMPL(lhs, rhs) lhs##rhs
 #define FORGE_VM_WASM_INTERPRET_JOIN(lhs, rhs) FORGE_VM_WASM_INTERPRET_JOIN_IMPL(lhs, rhs)
-#define FORGE_VM_WASM_INTERPRET_TEST_NAME(line) FORGE_VM_WASM_INTERPRET_JOIN(FORGE_VM_WASM_INTERPRET_JOIN(FORGE_VM_WASM_INTERPRET_TEST_FILE, _line_), line)
+#define FORGE_VM_WASM_INTERPRET_TEST_NAME(line)                                                                        \
+   FORGE_VM_WASM_INTERPRET_JOIN(FORGE_VM_WASM_INTERPRET_JOIN(FORGE_VM_WASM_INTERPRET_TEST_FILE, _line_), line)
 
 #define TEST_CASE(name, tags) BOOST_AUTO_TEST_CASE(FORGE_VM_WASM_INTERPRET_TEST_NAME(__LINE__))
 
-#if defined(FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND) && FORGE_VM_WASM_INTERPRET_HAS_JIT && !defined(FORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY)
-using forge_vm_wasm_interpret_backend_types = boost::mpl::list<forge::vm::wasm::interpret::interpreter, forge::vm::wasm::interpret::jit>;
+#if defined(FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND) && FORGE_VM_WASM_INTERPRET_HAS_JIT &&                           \
+    !defined(FORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY)
+using forge_vm_wasm_interpret_backend_types =
+    boost::mpl::list<forge::vm::wasm::interpret::interpreter, forge::vm::wasm::interpret::jit>;
 #elif defined(FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND)
 using forge_vm_wasm_interpret_backend_types = boost::mpl::list<forge::vm::wasm::interpret::interpreter>;
 #endif
 
 #define BACKEND_TEST_CASE(name, tags)                                                                                  \
-   BOOST_AUTO_TEST_CASE_TEMPLATE(FORGE_VM_WASM_INTERPRET_TEST_NAME(__LINE__), TestType, forge_vm_wasm_interpret_backend_types)
+   BOOST_AUTO_TEST_CASE_TEMPLATE(FORGE_VM_WASM_INTERPRET_TEST_NAME(__LINE__), TestType,                                \
+                                 forge_vm_wasm_interpret_backend_types)
 
 struct type_converter32 {
    union {

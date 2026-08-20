@@ -15,14 +15,14 @@ import forge.vm.wasm.interpret.watchdog;
 import :interpret_visitor;
 
 #define DBG_VISIT(name, code)                                                                                          \
-   void operator()(const FORGE_VM_WASM_INTERPRET_OPCODE_T(name) & op) {                                                          \
+   void operator()(const FORGE_VM_WASM_INTERPRET_OPCODE_T(name) & op) {                                                \
       std::cout << "Found " << #name << " at " << get_context().get_pc() << "\n";                                      \
       interpret_visitor<ExecutionCTX>::operator()(op);                                                                 \
       get_context().print_stack();                                                                                     \
    }
 
 #define DBG2_VISIT(name, code)                                                                                         \
-   void operator()(const FORGE_VM_WASM_INTERPRET_OPCODE_T(name) & op) {                                                          \
+   void operator()(const FORGE_VM_WASM_INTERPRET_OPCODE_T(name) & op) {                                                \
       std::cout << "Found " << #name << "\n";                                                                          \
    }
 

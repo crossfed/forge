@@ -151,7 +151,8 @@ template <typename F> constexpr bool is_member_function(F&&) {
 
 template <auto FN> inline constexpr static bool is_function_v = is_function(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN));
 
-template <auto FN> inline constexpr static bool is_member_function_v = is_member_function(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN));
+template <auto FN>
+inline constexpr static bool is_member_function_v = is_member_function(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN));
 
 template <typename F> constexpr bool is_class(F&&) {
    return std::is_class_v<F>;
@@ -180,11 +181,13 @@ using decayed_flatten_parameters_t = decltype(decayed_flatten_parameters(FORGE_V
 template <std::size_t N, typename F>
 constexpr auto parameter_at(F&& fn) -> std::tuple_element_t<N, decltype(flatten_parameters(std::declval<F>()))>;
 
-template <std::size_t N, auto FN> using parameter_at_t = decltype(parameter_at<N>(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN)));
+template <std::size_t N, auto FN>
+using parameter_at_t = decltype(parameter_at<N>(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN)));
 
 template <std::size_t N, typename F> constexpr auto parameters_from(F&& fn) -> detail::parameters_from_impl_t<N, F>;
 
-template <std::size_t N, auto FN> using parameters_from_t = decltype(parameters_from<N>(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN)));
+template <std::size_t N, auto FN>
+using parameters_from_t = decltype(parameters_from<N>(FORGE_VM_WASM_INTERPRET_AUTO_PARAM(FN)));
 
 template <typename F> inline constexpr static std::size_t arity(F&& fn) {
    return std::tuple_size_v<decltype(flatten_parameters(fn))>;
