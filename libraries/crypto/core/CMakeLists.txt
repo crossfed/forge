@@ -1,5 +1,6 @@
 add_library(
    forge_crypto_core STATIC
+   constant_time.cpp
    random.cpp
    secret_bytes.cpp
    secret_string.cpp
