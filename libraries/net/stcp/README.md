@@ -1,9 +1,9 @@
 # forge_net_stcp
 
-`forge_net_stcp` is the reusable TCP+TLS mechanics layer over `forge_net_tcp` and
-`forge_net_transport`. It produces secure byte streams and deliberately does not own
-P2P identity, higher-level protocol negotiation, API dispatch or multiaddr
-parsing.
+`forge_net_stcp` is the reusable TCP+TLS mechanics layer over `forge_net_tcp`,
+`forge_net_tls` and `forge_net_transport`. It produces secure byte streams and
+deliberately does not own P2P identity, higher-level protocol negotiation, API
+dispatch or multiaddr parsing.
 
 ## When To Use
 
@@ -32,11 +32,11 @@ parsing.
 ## Dependencies
 
 - `forge_net_tcp`
+- `forge_net_tls`
 - `forge_net_transport`
 - `forge_crypto_pki`
 - `forge_exceptions`
 - Boost.Asio SSL
-- OpenSSL
 
 ## Examples
 
@@ -75,11 +75,13 @@ auto stream = std::move(tls).into_transport_stream();
 
 ## Boundaries
 
-- Depends on `forge_net_tcp`, `forge_net_transport`, `forge_crypto_pki`, `forge_exceptions`,
-  Boost.Asio SSL and OpenSSL.
+- Depends on `forge_net_tcp`, `forge_net_tls`, `forge_net_transport`,
+  `forge_exceptions` and Boost.Asio SSL.
 - Throws typed `forge::net::stcp::exceptions::*`.
-- Owns TLS mechanics: certificate/key loading, trust anchors, fingerprint
-  checks, optional verifier callbacks, mTLS and ALPN.
+- Adapts the existing STCP options and typed error boundary to canonical
+  `forge_net_tls` SNI, ALPN, certificate and peer-validation mechanics. The
+  STCP certificate and SNI names are exact aliases retained for P2P source
+  compatibility; TLS owns their implementation.
 - Does not own P2P identity, security protocol selection, higher-level negotiation,
   Yamux, API frame dispatch or multiaddr mapping.
 
@@ -90,6 +92,12 @@ auto stream = std::move(tls).into_transport_stream();
   values or verifier diagnostics with raw secrets.
 - Treat disabled verification and test certificates as local-test-only
   behavior.
+- `require_peer_certificate` is a clean-break strict mTLS mode: it requires a
+  configured CA bundle and verifies every client chain against it even when
+  `security.verify_peer` is false.
+- For compatibility with existing STCP server behavior, `security.verify_peer`
+  also requires a client certificate and verifies its chain against the
+  configured trust anchors.
 - Do not assume TLS gives message boundaries. Use transport framing when needed.
 
 ## Tests

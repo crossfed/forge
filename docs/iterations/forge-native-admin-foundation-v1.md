@@ -11,10 +11,11 @@ types, targets, modules and configuration remain product-neutral.
 
 ## Production Status
 
-The architecture is production-targeted, but the components described here are
-not implemented yet. This document is therefore a production design, not a
-claim that Forge currently ships a production-ready browser-authentication
-stack.
+The architecture is production-targeted. `forge_net_tls` now provides the
+shared TLS context and rotation substrate, but the remaining HTTP server,
+browser-authentication and asset components are not implemented yet. This
+document is therefore not a claim that Forge currently ships a
+production-ready browser-authentication stack.
 
 The v1 implementation becomes production-ready only after its library,
 live-HTTP, package-relocation and adversarial acceptance suites pass, every

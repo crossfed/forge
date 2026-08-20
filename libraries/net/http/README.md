@@ -42,8 +42,15 @@ still owns HTTP mechanics; the plugin owns app lifecycle/config composition.
 
 Target: `forge_net_http`.
 
-Dependencies: `forge_asio`, `forge_net_websocket`, `forge_codec_json`, `forge_schema`,
-Boost.Asio, Boost.Beast, Boost.URL, OpenSSL.
+Dependencies: `forge_asio`, `forge_net_tls`, `forge_net_websocket`, `forge_codec_json`,
+`forge_schema`, Boost.Asio, Boost.Beast and Boost.URL.
+
+HTTPS client connections acquire their OpenSSL context from `forge_net_tls`; the
+client keeps that immutable snapshot for the lifetime of its TLS connection.
+The TLS leaf defaults to TLS 1.3 only, while this established HTTPS client
+explicitly keeps OpenSSL's system-default protocol range to preserve its prior
+compatibility behavior. SNI and hostname verification remain separate: the
+client configures both for each HTTPS connection.
 
 Boost.Beast remains the runtime donor and backend for parser/serializer/socket
 mechanics, but public HTTP APIs use `forge::net::http::request` and

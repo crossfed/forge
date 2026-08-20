@@ -27,9 +27,9 @@ target_link_libraries(
       forge_asio
       forge_codec_json
       forge_schema
+      forge_net_tls
       forge_net_websocket
       Boost::asio
       Boost::beast
       Boost::url
-      OpenSSL::SSL
 )

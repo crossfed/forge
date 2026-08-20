@@ -181,6 +181,161 @@ def check_pairing(root: Path, errors: list[str]) -> None:
          )
 
 
+def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
+   tls_root = root / "libraries" / "net" / "tls"
+   required = (
+      tls_root / "CMakeLists.txt",
+      tls_root / "context.cpp",
+      tls_root / "include" / "forge" / "net" / "tls" / "options.cppm",
+      tls_root / "include" / "forge" / "net" / "tls" / "context.cppm",
+      tls_root / "include" / "forge" / "net" / "tls" / "exceptions.cppm",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_net_tls ownership file is required")
+
+   context_source = (tls_root / "context.cpp").read_text(errors="ignore")
+   for required_token in (
+      "SSL_CTX_set_min_proto_version",
+      "SSL_CTX_check_private_key",
+      "add_certificate_authority",
+      "SSL_CTX_set_alpn_select_cb",
+      "client_alpn_wire",
+      "require_peer_certificate",
+      "SSL_set_tlsext_host_name",
+      "SSL_get1_peer_certificate",
+      "X509_check_host",
+      "validate_peer",
+      "context_provider::replace",
+   ):
+      if required_token not in context_source:
+         errors.append(f"libraries/net/tls/context.cpp: missing TLS context invariant {required_token}")
+
+   duplicated_context_setup = (
+      "asio::ssl::context::tls_client",
+      "asio::ssl::context::tls_server",
+      ".use_certificate_chain(",
+      ".use_private_key(",
+      ".add_certificate_authority(",
+      ".set_default_verify_paths(",
+      "SSL_CTX_set_min_proto_version(",
+      "SSL_CTX_set_max_proto_version(",
+      "SSL_CTX_set_alpn_select_cb(",
+   )
+   for relative in ("libraries/net/stcp/connection.cpp", "libraries/net/http/connection.cpp"):
+      source = (root / relative).read_text(errors="ignore")
+      for token in duplicated_context_setup:
+         if token in source:
+            errors.append(f"{relative}: TLS context setup belongs to forge_net_tls ({token})")
+
+   expected_dependencies = {
+      "libraries/net/stcp/CMakeLists.txt": "forge_net_tls",
+      "libraries/net/http/CMakeLists.txt": "forge_net_tls",
+   }
+   for relative, dependency in expected_dependencies.items():
+      if dependency not in (root / relative).read_text(errors="ignore"):
+         errors.append(f"{relative}: TLS consumer must link {dependency}")
+
+   if "forge_crypto_pki" not in (tls_root / "CMakeLists.txt").read_text(errors="ignore"):
+      errors.append("libraries/net/tls/CMakeLists.txt: TLS peer extraction must link forge_crypto_pki")
+
+   http_source = (root / "libraries/net/http/connection.cpp").read_text(errors="ignore")
+   for token in (
+      "tls::context_provider",
+      "tls_context_provider.snapshot()",
+      "tls::protocol_policy::system_default",
+      "tls::make_beast_stream",
+      "tls::configure_client_stream",
+      "tls::validate_peer",
+   ):
+      if token not in http_source:
+         errors.append(f"libraries/net/http/connection.cpp: HTTPS TLS integration is incomplete ({token})")
+
+   stcp_interface = (root / "libraries/net/stcp/include/forge/net/stcp/connection.cppm").read_text(errors="ignore")
+   if "export import forge.net.tls.context" in stcp_interface:
+      errors.append("libraries/net/stcp/include/forge/net/stcp/connection.cppm: TLS is not an STCP public module")
+
+   stcp_source = (root / "libraries/net/stcp/connection.cpp").read_text(errors="ignore")
+   for token in (
+      "tls::make_asio_stream",
+      "tls::configure_client_stream",
+      "tls::validate_peer",
+      "tls::extract_peer_certificate_chain",
+      "tls::selected_alpn",
+   ):
+      if token not in stcp_source:
+         errors.append(f"libraries/net/stcp/connection.cpp: TLS delegation is incomplete ({token})")
+
+   for relative in ("libraries/net/stcp/connection.cpp", "libraries/net/http/connection.cpp"):
+      source = (root / relative).read_text(errors="ignore")
+      for token in (
+         "native_context(",
+         "SSL_set_tlsext_host_name",
+         "SSL_set_alpn_protos",
+         "SSL_get0_alpn_selected",
+         "SSL_get1_peer_certificate",
+         "SSL_get_peer_cert_chain",
+         "SSL_get_verify_result",
+         "X509_check_host",
+         "X509_check_ip_asc",
+         "host_name_verification",
+      ):
+         if token in source:
+            errors.append(f"{relative}: TLS session mechanics belong to forge_net_tls ({token})")
+
+   package_components = {
+      "tests/package_net_tls_component/CMakeLists.txt": "net_tls",
+      "tests/package_net_stcp_component/CMakeLists.txt": "net_stcp",
+      "tests/package_net_http_component/CMakeLists.txt": "net_http",
+   }
+   for relative, component in package_components.items():
+      source = (root / relative).read_text(errors="ignore")
+      if f"COMPONENTS {component}" not in source:
+         errors.append(f"{relative}: relocated package consumer must request {component}")
+
+   if "tls::context_provider" not in http_source or "tls_context_provider.snapshot()" not in http_source:
+      errors.append("libraries/net/http/connection.cpp: HTTPS client must acquire forge_net_tls snapshots")
+
+   tls_context_module = (tls_root / "include" / "forge" / "net" / "tls" / "context.cppm").read_text(errors="ignore")
+   tls_context_source = (tls_root / "context.cpp").read_text(errors="ignore")
+   for token in (
+      "make_asio_stream",
+      "make_beast_stream",
+      "context_for_stream",
+      "context_snapshot_ptr snapshot",
+   ):
+      if token not in tls_context_module:
+         errors.append(f"libraries/net/tls/include/forge/net/tls/context.cppm: immutable stream factory is incomplete ({token})")
+   if "SSL_new(" in tls_context_source or "new_native_stream_handle" in tls_context_module:
+      errors.append("forge_net_tls: TLS stream factory must not transfer raw SSL handle ownership")
+   if "make_stream" in tls_context_module:
+      errors.append("forge_net_tls: TLS stream factory must not accept arbitrary stream types")
+   private_context_snapshot = tls_context_module.partition("private:")[2]
+   if "context_for_stream" not in private_context_snapshot:
+      errors.append("libraries/net/tls/include/forge/net/tls/context.cppm: TLS context access must remain private")
+
+   tls_tests = (root / "tests" / "tls" / "tls_tests.cpp").read_text(errors="ignore")
+   for token in ("stream_factory_creates_distinct_connection_ssl_handles", "make_asio_stream"):
+      if token not in tls_tests:
+         errors.append(f"tests/tls/tls_tests.cpp: TLS stream immutability regression coverage is incomplete ({token})")
+
+   tls_package_main = (root / "tests" / "package_net_tls_component" / "main.cpp").read_text(errors="ignore")
+   if "import forge.net.tls.exceptions;" not in tls_package_main:
+      errors.append("tests/package_net_tls_component/main.cpp: net_tls package consumer must import TLS exceptions directly")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("libraries/net/tls/include", "forge_net_tls", "net_tls"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_net_tls package registration is incomplete ({token})")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   for token in ("net_tls", '_forge_add_component(net_tls)', '"net_tls" IN_LIST _FORGE_COMPONENTS'):
+      if token not in package_config:
+         errors.append(f"cmake/ForgeConfig.cmake.in: forge_net_tls package registration is incomplete ({token})")
+   if 'elseif("${component}" STREQUAL "net_tls")\n         _forge_add_component(exceptions)\n         _forge_add_component(crypto_pki)' not in package_config:
+      errors.append("cmake/ForgeConfig.cmake.in: net_tls package component must resolve crypto_pki")
+
+
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
    text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
    in_macro = False
@@ -1257,6 +1412,7 @@ def main() -> int:
 
    check_layout(root, errors)
    check_aggregates(root, errors)
+   check_tls_context_ownership(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)

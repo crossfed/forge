@@ -26,7 +26,6 @@ module;
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
-#include <boost/asio/ssl/host_name_verification.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -43,6 +42,7 @@ import forge.asio.runtime;
 import forge.asio.exceptions;
 import forge.net.http.body;
 import forge.net.http.exceptions;
+import forge.net.tls.context;
 
 namespace forge::net::http {
 namespace {
@@ -54,6 +54,12 @@ using tcp = asio::ip::tcp;
 using asio::awaitable;
 using asio::use_awaitable;
 using transport_deadline = std::chrono::steady_clock::time_point;
+
+[[nodiscard]] tls::context_options make_https_client_context_options() {
+   auto options = tls::context_options{};
+   options.protocols = tls::protocol_policy::system_default;
+   return options;
+}
 
 transport_deadline make_deadline(std::chrono::milliseconds timeout) noexcept {
    const auto now = std::chrono::steady_clock::now();
@@ -176,14 +182,14 @@ response make_header_response(const beast_http::response_parser<beast_http::buff
 }
 
 template <typename Stream>
-class beast_response_body_source final
-    : public body_reader::source,
-      public std::enable_shared_from_this<beast_response_body_source<Stream>> {
+class beast_response_body_source final : public body_reader::source,
+                                         public std::enable_shared_from_this<beast_response_body_source<Stream>> {
  public:
    beast_response_body_source(Stream stream, beast::flat_buffer buffer,
                               std::shared_ptr<beast_http::response_parser<beast_http::buffer_body>> parser,
-                              transport_deadline deadline)
-       : stream_(std::move(stream)), buffer_(std::move(buffer)), parser_(std::move(parser)), deadline_(deadline) {}
+                              transport_deadline deadline, tls::context_snapshot_ptr tls_context_snapshot = {})
+       : stream_(std::move(stream)), buffer_(std::move(buffer)), parser_(std::move(parser)), deadline_(deadline),
+         tls_context_snapshot_(std::move(tls_context_snapshot)) {}
 
    ~beast_response_body_source() override {
       auto ignored = boost::system::error_code{};
@@ -214,8 +220,7 @@ class beast_response_body_source final
          }
          if (read_error) {
             if (cancelled_.load(std::memory_order_acquire)) {
-               throw forge::asio::exceptions::canceled{
-                  "HTTP response body read was canceled"};
+               throw forge::asio::exceptions::canceled{"HTTP response body read was canceled"};
             }
             if (cancellation_error(read_error)) {
                if (deadline_expired(deadline_)) {
@@ -255,14 +260,13 @@ class beast_response_body_source final
    void cancel() noexcept override {
       cancelled_.store(true, std::memory_order_release);
       try {
-         asio::dispatch(stream_.get_executor(),
-                        [self = this->shared_from_this()] {
-                           auto ignored = boost::system::error_code{};
-                           auto& socket = beast::get_lowest_layer(self->stream_).socket();
-                           socket.cancel(ignored);
-                           socket.set_option(asio::socket_base::linger{true, 0}, ignored);
-                           socket.close(ignored);
-                        });
+         asio::dispatch(stream_.get_executor(), [self = this->shared_from_this()] {
+            auto ignored = boost::system::error_code{};
+            auto& socket = beast::get_lowest_layer(self->stream_).socket();
+            socket.cancel(ignored);
+            socket.set_option(asio::socket_base::linger{true, 0}, ignored);
+            socket.close(ignored);
+         });
       } catch (...) {
          // Cancellation is a best-effort no-throw operation.
       }
@@ -273,6 +277,7 @@ class beast_response_body_source final
    beast::flat_buffer buffer_;
    std::shared_ptr<beast_http::response_parser<beast_http::buffer_body>> parser_;
    transport_deadline deadline_;
+   tls::context_snapshot_ptr tls_context_snapshot_;
    std::uint64_t bytes_read_ = 0;
    std::atomic_bool cancelled_ = false;
 };
@@ -430,10 +435,7 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 
    explicit impl(forge::asio::runtime& runtime_value, base_url endpoint_value)
        : runtime(runtime_value), endpoint(std::move(endpoint_value)), strand(asio::make_strand(runtime.context())),
-         ssl_context(asio::ssl::context::tls_client) {
-      ssl_context.set_default_verify_paths();
-      ssl_context.set_verify_mode(asio::ssl::verify_peer);
-   }
+         tls_context_provider(make_https_client_context_options()) {}
 
    awaitable<tcp::resolver::results_type> resolve(transport_deadline deadline) {
       require_deadline(deadline);
@@ -465,6 +467,15 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       plain_connected = true;
    }
 
+   void configure_tls_client_stream(beast::ssl_stream<beast::tcp_stream>& stream,
+                                    const tls::context_snapshot& snapshot) const {
+      tls::configure_client_stream(stream.native_handle(), snapshot, {.endpoint_host = endpoint.host});
+   }
+
+   void validate_tls_peer(beast::ssl_stream<beast::tcp_stream>& stream, const tls::context_snapshot& snapshot) const {
+      tls::validate_peer(stream.native_handle(), snapshot, {.expected_host = endpoint.host});
+   }
+
    awaitable<void> ensure_tls_connected(transport_deadline deadline) {
       if (tls_stream && tls_connected) {
          co_return;
@@ -472,16 +483,20 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 
       auto results = co_await resolve(deadline);
 
-      auto stream = beast::ssl_stream<beast::tcp_stream>{strand, ssl_context};
-      if (!SSL_set_tlsext_host_name(stream.native_handle(), endpoint.host.c_str())) {
-         throw exceptions::internal{"failed to configure TLS host name"};
-      }
-      stream.set_verify_callback(asio::ssl::host_name_verification(endpoint.host));
+      auto context_snapshot = tls_context_provider.snapshot();
+      auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
+      configure_tls_client_stream(*stream, *context_snapshot);
 
-      co_await beast::get_lowest_layer(stream).async_connect(results, use_awaitable);
+      co_await beast::get_lowest_layer(*stream).async_connect(results, use_awaitable);
       require_deadline(deadline);
-      co_await stream.async_handshake(asio::ssl::stream_base::client, use_awaitable);
-      tls_stream = std::make_unique<beast::ssl_stream<beast::tcp_stream>>(std::move(stream));
+      try {
+         co_await stream->async_handshake(asio::ssl::stream_base::client, use_awaitable);
+      } catch (const boost::system::system_error&) {
+         tls::classify_handshake_failure(stream->native_handle(), *context_snapshot);
+         throw;
+      }
+      validate_tls_peer(*stream, *context_snapshot);
+      tls_stream = std::move(stream);
       if (tls_connected_once) {
          record_reconnect();
       }
@@ -568,26 +583,30 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    awaitable<response> do_tls_streaming_request(forge::net::http::request request_value, body_reader body,
                                                 transport_deadline deadline) {
       auto results = co_await resolve(deadline);
-      auto stream = beast::ssl_stream<beast::tcp_stream>{strand, ssl_context};
-      if (!SSL_set_tlsext_host_name(stream.native_handle(), endpoint.host.c_str())) {
-         throw exceptions::internal{"failed to configure TLS host name"};
-      }
-      stream.set_verify_callback(asio::ssl::host_name_verification(endpoint.host));
+      auto context_snapshot = tls_context_provider.snapshot();
+      auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
+      configure_tls_client_stream(*stream, *context_snapshot);
 
-      expire_at(stream, deadline);
-      co_await beast::get_lowest_layer(stream).async_connect(results, use_awaitable);
+      expire_at(*stream, deadline);
+      co_await beast::get_lowest_layer(*stream).async_connect(results, use_awaitable);
       require_deadline(deadline);
-      expire_at(stream, deadline);
-      co_await stream.async_handshake(asio::ssl::stream_base::client, use_awaitable);
+      expire_at(*stream, deadline);
+      try {
+         co_await stream->async_handshake(asio::ssl::stream_base::client, use_awaitable);
+      } catch (const boost::system::system_error&) {
+         tls::classify_handshake_failure(stream->native_handle(), *context_snapshot);
+         throw;
+      }
+      validate_tls_peer(*stream, *context_snapshot);
 
       ensure_host_header(request_value, endpoint);
-      co_await write_streaming_request(stream, request_value, body, deadline);
+      co_await write_streaming_request(*stream, request_value, body, deadline);
 
       auto stream_buffer = beast::flat_buffer{};
       auto beast_response = beast_http::response<beast_http::string_body>{};
       require_deadline(deadline);
-      expire_at(stream, deadline);
-      co_await beast_http::async_read(stream, stream_buffer, beast_response, use_awaitable);
+      expire_at(*stream, deadline);
+      co_await beast_http::async_read(*stream, stream_buffer, beast_response, use_awaitable);
       auto response_value = to_http_response(beast_response);
       record_status(response_value);
       co_return response_value;
@@ -628,26 +647,30 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    awaitable<response_stream> do_tls_stream_request(forge::net::http::request request_value,
                                                     std::optional<body_reader> body, transport_deadline deadline) {
       auto results = co_await resolve(deadline);
-      auto stream = beast::ssl_stream<beast::tcp_stream>{strand, ssl_context};
-      if (!SSL_set_tlsext_host_name(stream.native_handle(), endpoint.host.c_str())) {
-         throw exceptions::internal{"failed to configure TLS host name"};
-      }
-      stream.set_verify_callback(asio::ssl::host_name_verification(endpoint.host));
+      auto context_snapshot = tls_context_provider.snapshot();
+      auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
+      configure_tls_client_stream(*stream, *context_snapshot);
 
-      expire_at(stream, deadline);
-      co_await beast::get_lowest_layer(stream).async_connect(results, use_awaitable);
+      expire_at(*stream, deadline);
+      co_await beast::get_lowest_layer(*stream).async_connect(results, use_awaitable);
       require_deadline(deadline);
-      expire_at(stream, deadline);
-      co_await stream.async_handshake(asio::ssl::stream_base::client, use_awaitable);
+      expire_at(*stream, deadline);
+      try {
+         co_await stream->async_handshake(asio::ssl::stream_base::client, use_awaitable);
+      } catch (const boost::system::system_error&) {
+         tls::classify_handshake_failure(stream->native_handle(), *context_snapshot);
+         throw;
+      }
+      validate_tls_peer(*stream, *context_snapshot);
 
       ensure_host_header(request_value, endpoint);
       if (body.has_value()) {
-         co_await write_streaming_request(stream, request_value, *body, deadline);
+         co_await write_streaming_request(*stream, request_value, *body, deadline);
       } else {
          auto beast_request = to_beast_request(request_value);
          require_deadline(deadline);
-         expire_at(stream, deadline);
-         co_await beast_http::async_write(stream, beast_request, use_awaitable);
+         expire_at(*stream, deadline);
+         co_await beast_http::async_write(*stream, beast_request, use_awaitable);
       }
 
       auto stream_buffer = beast::flat_buffer{};
@@ -656,12 +679,12 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
          parser->skip(true);
       }
       require_deadline(deadline);
-      expire_at(stream, deadline);
-      co_await beast_http::async_read_header(stream, stream_buffer, *parser, use_awaitable);
+      expire_at(*stream, deadline);
+      co_await beast_http::async_read_header(*stream, stream_buffer, *parser, use_awaitable);
       auto head = make_header_response(*parser);
       record_status(head);
       auto source = std::make_shared<beast_response_body_source<beast::ssl_stream<beast::tcp_stream>>>(
-          std::move(stream), std::move(stream_buffer), std::move(parser), deadline);
+          std::move(*stream), std::move(stream_buffer), std::move(parser), deadline, std::move(context_snapshot));
       co_return response_stream{.head = std::move(head), .body = body_reader{std::move(source)}};
    }
 
@@ -1083,9 +1106,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    base_url endpoint;
    asio::strand<asio::io_context::executor_type> strand;
    beast::flat_buffer buffer;
-   asio::ssl::context ssl_context;
+   tls::context_provider tls_context_provider;
    std::unique_ptr<beast::tcp_stream> plain_stream;
-   std::unique_ptr<beast::ssl_stream<beast::tcp_stream>> tls_stream;
+   std::shared_ptr<beast::ssl_stream<beast::tcp_stream>> tls_stream;
    bool plain_connected = false;
    bool tls_connected = false;
    bool plain_connected_once = false;

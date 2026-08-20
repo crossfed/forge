@@ -18,6 +18,7 @@ export module forge.net.stcp.connection;
 export import forge.net.stcp.exceptions;
 export import forge.net.stcp.options;
 export import forge.net.tcp.connection;
+import forge.net.tls.context;
 export import forge.net.transport.connector;
 
 export namespace forge::net::stcp {
@@ -52,22 +53,21 @@ class connection {
    friend boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options);
    friend boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
                                                                   std::chrono::milliseconds timeout);
-   friend boost::asio::awaitable<connection> async_upgrade_client(
-       tcp::connection source, client_options options, std::optional<std::chrono::milliseconds> timeout,
-       std::stop_token stop);
+   friend boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, client_options options,
+                                                                  std::optional<std::chrono::milliseconds> timeout,
+                                                                  std::stop_token stop);
    friend boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options);
    friend boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
                                                                   std::chrono::milliseconds timeout);
-   friend boost::asio::awaitable<connection> async_upgrade_server(
-       tcp::connection source, server_options options, std::optional<std::chrono::milliseconds> timeout,
-       std::stop_token stop);
+   friend boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
+                                                                  std::optional<std::chrono::milliseconds> timeout,
+                                                                  std::stop_token stop);
 
    using native_stream = boost::asio::ssl::stream<boost::asio::ip::tcp::socket>;
    struct native_token {};
    struct impl;
 
-   connection(native_token, std::shared_ptr<native_stream> stream,
-              std::shared_ptr<boost::asio::ssl::context> context,
+   connection(native_token, std::shared_ptr<native_stream> stream, tls::context_snapshot_ptr context,
               std::size_t read_chunk_size);
 
    std::shared_ptr<impl> impl_;

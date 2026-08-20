@@ -776,6 +776,14 @@ target_link_libraries(test_forge_stcp forge Boost::included_unit_test_framework 
 add_test(NAME test_forge_stcp COMMAND test_forge_stcp WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_tls
+   unit/main.cpp
+   tls/tls_tests.cpp
+)
+target_link_libraries(test_forge_tls forge Boost::included_unit_test_framework OpenSSL::Crypto)
+add_test(NAME test_forge_tls COMMAND test_forge_tls WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
    test_forge_yamux
    unit/main.cpp
    yamux/yamux_tests.cpp
@@ -1273,6 +1281,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_net_tcp_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_tls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tls_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tls_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2154,6 +2173,17 @@ add_test(
       --test-command forge_package_net_tcp_component
 )
 set_tests_properties(test_forge_package_net_tcp_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_tls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tls_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tls_component
+)
+set_tests_properties(test_forge_package_net_tls_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_net_stcp_component
    COMMAND ${CMAKE_CTEST_COMMAND}

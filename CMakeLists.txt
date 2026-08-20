@@ -291,6 +291,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/websocket/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/transport/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/tcp/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/tls/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/yamux/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/quic/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/stcp/include"
@@ -673,6 +674,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_log
       forge_otlp
       forge_multiformats
+      forge_net_tls
       forge_net_http
       forge_api_http
       forge_net_websocket
@@ -803,6 +805,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       multiformats
       net_transport
       net_tcp
+      net_tls
       net_stcp
       net_yamux
       app
@@ -949,6 +952,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/websocket/include/forge
       libraries/net/transport/include/forge
       libraries/net/tcp/include/forge
+      libraries/net/tls/include/forge
       libraries/net/yamux/include/forge
       libraries/net/quic/include/forge
       libraries/net/stcp/include/forge

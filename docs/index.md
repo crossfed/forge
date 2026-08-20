@@ -120,6 +120,7 @@ Each library guide must be useful without reading source first:
 - [asio](../libraries/asio/README.md)
 - [app](../libraries/app/README.md)
 - [net/http](../libraries/net/http/README.md)
+- [net/tls](../libraries/net/tls/README.md)
 - [net/websocket](../libraries/net/websocket/README.md)
 - [net/transport](../libraries/net/transport/README.md)
 - [net/tcp](../libraries/net/tcp/README.md)
