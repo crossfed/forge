@@ -66,6 +66,7 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.net.p2p.topology;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.exceptions;
@@ -564,8 +565,11 @@ void node::impl::launch_relay_discovery_maintenance() {
           const auto wakeup = self->lifecycle_wakeup;
           auto observed = wakeup->epoch();
           while (true) {
+             if (self->lifecycle.stop_requested()) {
+                co_return;
+             }
              observed = co_await wakeup->async_wait_until(
-                 observed, std::chrono::steady_clock::now() + self->options.limits.discovery.refresh_interval);
+                 observed, std::chrono::steady_clock::now() + self->options.limits.topology.refresh_interval);
              {
                 auto lock = std::scoped_lock{self->mutex};
                 if (self->stopped) {
@@ -574,7 +578,7 @@ void node::impl::launch_relay_discovery_maintenance() {
              }
              try {
                 (void)co_await self->refresh_relay_candidates(std::nullopt,
-                                                              self->options.limits.discovery.query_timeout);
+                                                              self->options.limits.topology.query_timeout);
              } catch (const forge::exceptions::base&) {
                 auto lock = std::scoped_lock{self->mutex};
                 ++self->metrics_value.relay_discovery_failures;

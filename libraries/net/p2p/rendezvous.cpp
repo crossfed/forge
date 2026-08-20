@@ -78,8 +78,8 @@ void validate_namespace(std::string_view value, const rendezvous::options& opts)
    if (opts.require_signed_peer_record && value.signed_peer_record.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "rendezvous registration requires signed peer record");
    }
-   if (value.ttl.count() > 0 && (value.ttl < opts.min_ttl || value.ttl > opts.max_ttl)) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "rendezvous registration TTL outside allowed range");
+   if (value.ttl < std::chrono::seconds::zero()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "rendezvous registration TTL must not be negative");
    }
    auto out = std::vector<std::uint8_t>{};
    if (!value.namespace_name.empty()) {

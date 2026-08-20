@@ -182,7 +182,6 @@ class peer_store {
    void upsert(record value);
    [[nodiscard]] record apply_identify(const peer_id& peer, identify_update update);
    [[nodiscard]] std::optional<record> apply_discovery(const peer_id& peer, discovery_update update);
-   void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
    void upsert_relay_reservation(relay_record value);
    [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
    [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,
@@ -213,6 +212,8 @@ class peer_store {
    [[nodiscard]] std::optional<public_key> find_public_key(const peer_id& peer) const;
    [[nodiscard]] std::vector<record> snapshot(std::size_t limit) const;
    [[nodiscard]] std::vector<record> candidates(std::uint64_t capability, std::size_t limit) const;
+   [[nodiscard]] std::vector<record> scored_candidates(std::size_t limit) const;
+   [[nodiscard]] std::vector<record> scored_candidates(discovery::source source, std::size_t limit) const;
    [[nodiscard]] std::vector<rendezvous::registration>
    discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence, std::size_t limit) const;
    [[nodiscard]] persistence_status persistence_state() const;

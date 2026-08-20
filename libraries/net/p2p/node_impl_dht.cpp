@@ -305,15 +305,17 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
                                                   .endpoints = local_endpoints_for_control(),
                                                   .connection = dht::connection_type::connected},
                                         profile.limits.replication, response_profile);
-               } else if (const auto record = store.find(requested)) {
-                  auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
-                  for (const auto& item : record->endpoints) {
-                     auto endpoint = item.endpoint;
-                     endpoint.peer = requested;
-                     exact.endpoints.push_back(std::move(endpoint));
+               } else if (requested != session->info.remote_peer) {
+                  if (const auto record = store.find(requested)) {
+                     auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
+                     for (const auto& item : record->endpoints) {
+                        auto endpoint = item.endpoint;
+                        endpoint.peer = requested;
+                        exact.endpoints.push_back(std::move(endpoint));
+                     }
+                     append_unique_bounded(response, response.closer_peers, std::move(exact),
+                                           profile.limits.replication, response_profile);
                   }
-                  append_unique_bounded(response, response.closer_peers, std::move(exact), profile.limits.replication,
-                                        response_profile);
                }
             } catch (const forge::exceptions::base&) {
                // Arbitrary keys use ordinary XOR-distance routing.

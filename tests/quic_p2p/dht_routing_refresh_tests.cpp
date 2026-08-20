@@ -11,8 +11,17 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
+
+#include <boost/system/error_code.hpp>
 
 module forge.net.p2p.node;
 
@@ -154,6 +163,52 @@ BOOST_AUTO_TEST_CASE(dht_routing_refresh_fake_time_proves_retry_backoff_and_canc
 
    refresh.request_stop();
    BOOST_REQUIRE(running.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   running.get();
+}
+
+BOOST_AUTO_TEST_CASE(dht_routing_refresh_stop_cancels_and_joins_an_active_query) {
+   namespace asio = boost::asio;
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   const auto local = refresh_peer(16);
+   auto routing = dht::routing_table{local};
+   routing.upsert(dht::peer{.id = refresh_peer(17)}, dht::routing_admission::verified_server);
+
+   auto clock = fake_refresh_clock{};
+   auto entered = std::make_shared<forge::asio::notification>();
+   auto canceled = std::make_shared<forge::asio::notification>();
+   auto refresh = detail::dht_routing_refresh{
+       local,
+       {detail::dht_routing_refresh::profile{
+           .protocol = builtins::kad_dht,
+           .routing = &routing,
+           .interval = std::chrono::minutes{10},
+           .query_timeout = std::chrono::minutes{1},
+       }},
+       [entered, canceled](protocol_id, dht::key, std::chrono::milliseconds) -> asio::awaitable<bool> {
+          const auto executor = co_await asio::this_coro::executor;
+          const auto cancellation = co_await asio::this_coro::cancellation_state;
+          auto wait = asio::steady_timer{executor};
+          wait.expires_at(asio::steady_timer::time_point::max());
+          entered->notify();
+          auto error = boost::system::error_code{};
+          co_await wait.async_wait(asio::bind_cancellation_slot(
+              cancellation.slot(), asio::redirect_error(asio::use_awaitable, error)));
+          BOOST_TEST(error == asio::error::operation_aborted);
+          canceled->notify();
+          co_return false;
+       },
+       clock.source(),
+   };
+
+   const auto entered_epoch = entered->epoch();
+   auto running = asio::co_spawn(runtime.context(), refresh.async_run(), asio::use_future);
+   static_cast<void>(asio::co_spawn(runtime.context(), entered->async_wait(entered_epoch), asio::use_future).get());
+
+   const auto canceled_epoch = canceled->epoch();
+   refresh.request_stop();
+   // The notification originates only after the child receives the manager-owned cancellation signal.
+   static_cast<void>(asio::co_spawn(runtime.context(), canceled->async_wait(canceled_epoch), asio::use_future).get());
    running.get();
 }
 

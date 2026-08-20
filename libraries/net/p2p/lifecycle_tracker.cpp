@@ -108,6 +108,10 @@ lifecycle_phase lifecycle_tracker::phase() const noexcept {
    return state_->phase;
 }
 
+bool lifecycle_tracker::stop_requested() const noexcept {
+   return state_->stop_latch->load(std::memory_order_acquire);
+}
+
 lifecycle_tracker::operation lifecycle_tracker::track() noexcept {
    try {
       const auto context = std::make_shared<state::operation_context>(state_->executor);

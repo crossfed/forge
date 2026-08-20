@@ -5,13 +5,17 @@ module;
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +48,8 @@ import forge.net.transport.session;
 
 #include "details/direct_transport.hxx"
 #include "details/cancellation_latch.hxx"
+#include "details/quic_client_token_cache.hxx"
+#include "details/quic_client_options.hxx"
 
 namespace forge::net::p2p::direct {
 namespace {
@@ -175,7 +181,8 @@ class quic_profile final {
  public:
    quic_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
                 resource_manager resources_value)
-       : runtime_(runtime_value), options_(options_value), resources_(std::move(resources_value)) {}
+       : runtime_(runtime_value), options_(options_value), resources_(std::move(resources_value)),
+         client_tokens_(std::make_shared<detail::quic_client_token_cache>(options_value.peer_state.max_peers)) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_quic();
@@ -251,6 +258,7 @@ class quic_profile final {
    }
 
    void stop() {
+      client_tokens_->close();
       auto listeners = stop_listeners();
       for (const auto& listener : listeners) {
          try {
@@ -293,8 +301,12 @@ class quic_profile final {
       cancel_current->arm([connector] { connector->cancel(); });
       try {
          const auto expected_peer = expected_peer_for(endpoint, options);
-         auto quic = co_await connector->async_connect(quic_endpoint_for(endpoint),
-                                                       client_options(expected_peer, options.timeout));
+         auto quic = co_await connector->async_connect(
+             quic_endpoint_for(endpoint),
+             detail::make_quic_client_options(endpoint, expected_peer, options.timeout,
+                                              quic_limits(options_.transport_limits), options_.certificate_pem,
+                                              options_.private_key_pem, options_.allow_insecure_test_mode,
+                                              client_tokens_));
          const auto remote = verified_peer_id_for(quic, expected_peer, options_.allow_insecure_test_mode);
          auto local_endpoint = p2p_endpoint_for(quic.local_endpoint());
          auto remote_endpoint = p2p_endpoint_for(quic.remote_endpoint());
@@ -408,46 +420,11 @@ class quic_profile final {
       }
    }
 
-   [[nodiscard]] forge::net::quic::security_options
-   peer_verifier(std::optional<peer_id> expected = std::nullopt) const {
-      if (options_.allow_insecure_test_mode) {
-         auto security = forge::net::quic::security_options{.verify_peer = true};
-         security.verifier = [](const forge::net::quic::peer_certificate&) { return true; };
-         return security;
-      }
-      auto security = forge::net::quic::security_options{.verify_peer = true};
-      security.verifier = [expected = std::move(expected)](const forge::net::quic::peer_certificate& certificate) {
-         try {
-            const auto remote = make_peer_id_from_certificate_der(certificate.der);
-            if (expected) {
-               return remote == *expected;
-            }
-            return valid_peer_id(remote);
-         } catch (const forge::exceptions::base&) {
-            return false;
-         }
-      };
-      return security;
-   }
-
-   [[nodiscard]] forge::net::quic::client_options client_options(std::optional<peer_id> expected,
-                                                                 std::chrono::milliseconds timeout) const {
-      return forge::net::quic::client_options{
-          .alpn = "libp2p",
-          .connect_timeout = timeout,
-          .handshake_timeout = timeout,
-          .limits = quic_limits(options_.transport_limits),
-          .security = peer_verifier(std::move(expected)),
-          .certificate_pem = options_.certificate_pem,
-          .private_key_pem = options_.private_key_pem,
-      };
-   }
-
    [[nodiscard]] forge::net::quic::server_options server_options() const {
       return forge::net::quic::server_options{
           .alpn = "libp2p",
           .limits = quic_limits(options_.transport_limits),
-          .security = peer_verifier(),
+          .security = detail::make_quic_peer_verifier({}, options_.allow_insecure_test_mode),
           .certificate_pem = options_.certificate_pem,
           .private_key_pem = options_.private_key_pem,
           .inbound_admission = [resources = resources_]() mutable -> std::shared_ptr<void> {
@@ -469,6 +446,7 @@ class quic_profile final {
    std::mutex active_mutex_;
    std::vector<std::weak_ptr<cancellation_latch>> active_;
    bool stopped_ = false;
+   std::shared_ptr<detail::quic_client_token_cache> client_tokens_;
 };
 
 } // namespace

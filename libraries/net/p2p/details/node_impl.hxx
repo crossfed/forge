@@ -13,13 +13,17 @@
 #include "operation_deadline.hxx"
 #include "path_selector.hxx"
 #include "peer_exchange_codec.hxx"
+#include "peer_exchange_scheduler.hxx"
 #include "pubsub_backoff.hxx"
 #include "pubsub_outbound_budget.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
 #include "session_teardown.hxx"
+#include "topology_manager.hxx"
 
 namespace forge::net::p2p {
+
+class cancellation_latch;
 
 namespace detail {
 
@@ -72,6 +76,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::uint64_t identify_push_attempted_generation = 0;
       std::uint64_t identify_push_delivered_generation = 0;
       bool identify_push_supported = false;
+      std::vector<protocol_id> remote_protocols;
       std::atomic_bool closed = false;
    };
 
@@ -171,8 +176,20 @@ struct node::impl : std::enable_shared_from_this<impl> {
       bool maintenance_started = false;
    };
 
-   struct discovery_state {
-      std::map<std::pair<peer_id, std::string>, std::vector<std::uint8_t>> rendezvous_cookies;
+   struct peer_exchange_batch {
+      mutable std::mutex mutex;
+      std::shared_ptr<detail::lifecycle_wakeup> completed;
+      std::vector<std::function<void()>> cancel_workers;
+      std::size_t remaining_workers = 0;
+      bool launches_complete = false;
+      bool completion_notified = false;
+      bool stop_requested = false;
+   };
+
+   struct peer_exchange_operation {
+      mutable std::mutex mutex;
+      std::function<void()> cancel;
+      bool stop_requested = false;
    };
 
    impl(forge::asio::runtime& runtime_value, node::options options_value);
@@ -195,6 +212,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    std::map<protocol_id, std::unique_ptr<detail::dht_profile_state>> dht_profiles;
    std::shared_ptr<detail::dht_routing_refresh> routing_refresh;
    std::shared_ptr<detail::dht_provider_registry> provider_registry;
+   std::shared_ptr<detail::topology_manager> topology_manager_value;
    mutable connection_manager connections{connection_policy_for(options.limits)};
    std::map<protocol_id, node::protocol_handler> handlers;
    std::map<std::uint64_t, std::shared_ptr<session_state>> sessions;
@@ -205,18 +223,24 @@ struct node::impl : std::enable_shared_from_this<impl> {
    std::uint64_t next_reservation_id = 1;
    std::uint64_t next_session_id = 1;
    std::uint64_t next_protocol_open_deadline_id = 1;
+   std::uint64_t next_peer_exchange_operation_id = 1;
    pubsub_state pubsub_value;
+   detail::peer_exchange_scheduler peer_exchange_value;
+   std::map<std::uint64_t, std::shared_ptr<peer_exchange_operation>> peer_exchange_operations;
    relay_discovery_state relay_discovery_value;
-   discovery_state discovery_value;
    mutable identify_push_state identify_push_value;
    node::metrics_snapshot metrics_value;
    std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
+   bool peer_exchange_admission_closed = false;
    bool peer_state_hydrated = false;
 
    void initialize_lifecycle();
    void initialize_dht_routing_refresh();
    void initialize_dht_provider_registry();
+   void initialize_topology_manager();
+   void start_topology_manager();
+   boost::asio::awaitable<void> async_join_topology_manager();
    [[nodiscard]] bool launch_tracked(std::function<boost::asio::awaitable<void>()> operation) noexcept;
    void request_lifecycle_stop() noexcept;
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
@@ -278,6 +302,37 @@ struct node::impl : std::enable_shared_from_this<impl> {
    boost::asio::awaitable<void> remember_session(std::shared_ptr<session_state> session,
                                                  connection_manager::direction direction);
 
+   void refresh_connection_scores();
+   [[nodiscard]] connection_manager::snapshot topology_sessions() const;
+   [[nodiscard]] connection_manager::peer_prune_plan
+   topology_peer_prune_plan(std::size_t target_peers, std::size_t max_victims,
+                            std::chrono::steady_clock::time_point now);
+   boost::asio::awaitable<void> async_close_topology_sessions(std::vector<std::uint64_t> session_ids);
+   boost::asio::awaitable<bool> async_dial_topology_candidate(discovery::result candidate,
+                                                              std::shared_ptr<cancellation_latch> cancellation);
+   boost::asio::awaitable<std::vector<discovery::result>>
+   async_collect_topology_discovery(std::shared_ptr<cancellation_latch> cancellation);
+   [[nodiscard]] detail::topology_manager::callbacks::rendezvous_local_record topology_rendezvous_local_record() const;
+   boost::asio::awaitable<detail::topology_manager::callbacks::rendezvous_register_result>
+   async_register_topology_rendezvous(std::size_t point_index, std::string namespace_name,
+                                      std::vector<std::uint8_t> signed_peer_record,
+                                      std::shared_ptr<cancellation_latch> cancellation);
+   boost::asio::awaitable<detail::topology_manager::callbacks::rendezvous_discover_result>
+   async_discover_topology_rendezvous(std::size_t point_index, std::string namespace_name, std::size_t limit,
+                                      std::vector<std::uint8_t> cookie,
+                                      std::shared_ptr<cancellation_latch> cancellation);
+   boost::asio::awaitable<void> async_unregister_topology_rendezvous(std::size_t point_index,
+                                                                     std::string namespace_name);
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   ensure_topology_rendezvous_session(std::size_t point_index, bool allow_dial,
+                                      std::shared_ptr<cancellation_latch> cancellation = {});
+   boost::asio::awaitable<rendezvous::message>
+   exchange_topology_rendezvous(const std::shared_ptr<session_state>& session, rendezvous::message request,
+                                std::string_view operation, std::shared_ptr<cancellation_latch> cancellation);
+   boost::asio::awaitable<std::vector<discovery::result>>
+   async_collect_topology_peer_exchange(std::shared_ptr<cancellation_latch> cancellation,
+                                        std::size_t max_parallel_queries);
+
    void launch_pruned_session_teardown(const std::shared_ptr<session_state>& session) noexcept;
 
    void forget_session(const peer_id& peer);
@@ -297,6 +352,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    [[nodiscard]] std::vector<protocol_id> supported_protocols_locked() const;
 
    [[nodiscard]] std::vector<protocol_id> supported_protocols() const;
+
+   boost::asio::awaitable<rendezvous::message> exchange_rendezvous(const peer_id& peer, rendezvous::message request,
+                                                                   std::string_view operation);
 
    void remember_autonat_v2_nonce(const peer_id& peer, std::uint64_t nonce);
 
@@ -363,6 +421,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    [[nodiscard]] detail::dht_profile_state& dht_profile(const protocol_id& protocol);
    [[nodiscard]] const detail::dht_profile_state& dht_profile(const protocol_id& protocol) const;
+   boost::asio::awaitable<dht::query_result> async_find_dht_peer(protocol_id protocol, peer_id peer,
+                                                                 dht::query_options options);
    boost::asio::awaitable<bool> async_refresh_dht_routing(protocol_id protocol, dht::key target,
                                                           std::chrono::milliseconds timeout);
    void notify_dht_routing_refresh() noexcept;
@@ -475,6 +535,10 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                                            std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<void> request_peer_exchange(const peer_id& peer);
+   void launch_peer_exchange();
+   boost::asio::awaitable<void> await_peer_exchange_claim(detail::peer_exchange_scheduler::claim& claim);
+   boost::asio::awaitable<void> run_peer_exchange(detail::peer_exchange_scheduler::claim& claim);
+   [[nodiscard]] std::vector<detail::peer_exchange_scheduler::session> peer_exchange_sessions_locked() const;
 
    void launch_accept_loop(forge::net::p2p::endpoint local_endpoint);
 
@@ -541,7 +605,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                                   const std::shared_ptr<session_state>& session,
                                                                   std::chrono::milliseconds timeout);
 
-   boost::asio::awaitable<void> handle_peer_exchange(forge::net::p2p::stream stream, std::uint64_t request_id);
+   boost::asio::awaitable<void> handle_peer_exchange(forge::net::p2p::stream stream, std::uint64_t request_id,
+                                                     std::uint64_t remote_receive_limit);
 
    void launch_relay_pumps(peer_id owner, forge::net::p2p::stream left, forge::net::p2p::stream right,
                            relay_admission admission);

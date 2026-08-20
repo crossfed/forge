@@ -3,15 +3,27 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/experimental/concurrent_channel.hpp>
 #include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
+#include <boost/system/error_code.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <utility>
 #include <vector>
@@ -26,6 +38,7 @@ import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 
 #include "details/dht_routing_refresh.hxx"
+#include "details/cancellation_latch.hxx"
 #include "details/lifecycle_wakeup.hxx"
 
 namespace forge::net::p2p::detail {
@@ -106,12 +119,17 @@ void dht_routing_refresh::notify_verified_server() noexcept {
 }
 
 void dht_routing_refresh::request_stop() noexcept {
+   auto cancellation = std::shared_ptr<cancellation_latch>{};
    {
       const auto lock = std::scoped_lock{mutex_};
       if (stopped_) {
          return;
       }
       stopped_ = true;
+      cancellation = active_query_cancellation_;
+   }
+   if (cancellation) {
+      cancellation->request_stop();
    }
    changed_->notify();
 }
@@ -182,6 +200,56 @@ void dht_routing_refresh::publish_status(profile_state& state, bool in_flight) {
    state.in_flight = in_flight;
 }
 
+boost::asio::awaitable<bool> dht_routing_refresh::async_query(protocol_id protocol, dht::key target,
+                                                               std::chrono::milliseconds timeout) {
+   namespace asio = boost::asio;
+   using completion_channel =
+       asio::experimental::concurrent_channel<void(boost::system::error_code, std::pair<std::exception_ptr, bool>)>;
+
+   auto cancellation = std::make_shared<cancellation_latch>();
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      if (stopped_) {
+         co_return false;
+      }
+      active_query_cancellation_ = cancellation;
+   }
+
+   const auto clear_cancellation = [this, &cancellation] {
+      const auto lock = std::scoped_lock{mutex_};
+      if (active_query_cancellation_ == cancellation) {
+         active_query_cancellation_.reset();
+      }
+   };
+   const auto executor = co_await asio::this_coro::executor;
+   auto signal = std::make_shared<asio::cancellation_signal>();
+   auto completion = std::make_shared<completion_channel>(executor, 1);
+   try {
+      asio::co_spawn(
+          executor, query_(std::move(protocol), std::move(target), timeout),
+          asio::bind_cancellation_slot(
+              signal->slot(), [completion](std::exception_ptr failure, bool value) {
+                 auto result = std::pair<std::exception_ptr, bool>{std::move(failure), value};
+                 static_cast<void>(completion->try_send(boost::system::error_code{}, std::move(result)));
+              }));
+   } catch (...) {
+      static_cast<void>(cancellation->finish());
+      clear_cancellation();
+      throw;
+   }
+
+   // Arm after co_spawn attaches the signal so a concurrent stop cannot lose cancellation.
+   cancellation->arm([signal] { signal->emit(asio::cancellation_type::terminal); });
+   co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+   const auto completed = co_await completion->async_receive(asio::use_awaitable);
+   static_cast<void>(cancellation->finish());
+   clear_cancellation();
+   if (completed.first) {
+      std::rethrow_exception(completed.first);
+   }
+   co_return completed.second;
+}
+
 boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_state& state) {
    publish_status(state, true);
    try {
@@ -195,7 +263,7 @@ boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_
          auto startup_lookup_pending = true;
          try {
             startup_lookup_pending =
-                !co_await query_(state.config.protocol, make_dht_key(local_), state.config.query_timeout);
+                !co_await async_query(state.config.protocol, make_dht_key(local_), state.config.query_timeout);
             failed = startup_lookup_pending;
          } catch (...) {
             failed = true;
@@ -218,7 +286,7 @@ boost::asio::awaitable<void> dht_routing_refresh::async_refresh_profile(profile_
          }
          try {
             const auto target = refresh_target(state, bucket.common_prefix_length);
-            if (co_await query_(state.config.protocol, target, state.config.query_timeout)) {
+            if (co_await async_query(state.config.protocol, target, state.config.query_timeout)) {
                static_cast<void>(state.config.routing->mark_refreshed(bucket, time_.now()));
             } else {
                failed = true;

@@ -1,10 +1,7 @@
 module;
 
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <string>
 #include <vector>
 
 export module forge.net.p2p.discovery;
@@ -22,17 +19,7 @@ struct discovery {
       identify = 1,
       dht = 2,
       rendezvous = 3,
-   };
-
-   struct policy {
-      bool enabled = true;
-      bool dht_enabled = true;
-      bool rendezvous_enabled = true;
-      std::chrono::milliseconds query_timeout{10'000};
-      std::chrono::milliseconds refresh_interval{600'000};
-      std::size_t max_parallel_queries = 10;
-      std::size_t max_results = 20;
-      std::vector<std::string> rendezvous_namespaces{"forge.discovery"};
+      peer_exchange = 4,
    };
 
    struct result {

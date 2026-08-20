@@ -147,6 +147,35 @@ void validate_query_options(const dht::query_options& options) {
    }
 }
 
+[[nodiscard]] host_addresses::learning_context routed_discovery_context(const auto& self, const peer_id& candidate) {
+   auto remote_endpoint = std::optional<endpoint>{};
+   auto direct_endpoint = std::optional<endpoint>{};
+   {
+      const auto lock = std::scoped_lock{self->mutex};
+      for (const auto& entry : self->sessions) {
+         const auto& session = entry.second;
+         if (session->closed || session->info.remote_peer != candidate) {
+            continue;
+         }
+         if (session->remote_endpoint) {
+            remote_endpoint = session->remote_endpoint;
+            break;
+         }
+         if (!direct_endpoint && session->direct_endpoint) {
+            direct_endpoint = session->direct_endpoint;
+         }
+      }
+   }
+   auto provenance_endpoint = remote_endpoint ? std::move(remote_endpoint) : std::move(direct_endpoint);
+   if (!provenance_endpoint) {
+      return third_party_discovery_context();
+   }
+   return host_addresses::learning_context{
+       .source = host_addresses::source_kind::routed,
+       .remote_endpoint = std::move(provenance_endpoint),
+   };
+}
+
 boost::asio::awaitable<dht_query::result> run_lookup(const auto& self, const protocol_id& protocol, dht::key target,
                                                      std::optional<peer_id> target_peer, dht::message_type type,
                                                      dht::query_options query_options, auto response_complete) {
@@ -173,7 +202,7 @@ boost::asio::awaitable<dht_query::result> run_lookup(const auto& self, const pro
           auto& current = self->dht_profile(protocol);
           current.routing.upsert(candidate, dht::routing_admission::verified_server);
           self->notify_dht_routing_refresh();
-          const auto context = third_party_discovery_context();
+          const auto context = routed_discovery_context(self, candidate.id);
           for (auto& closer : response.closer_peers) {
              closer = sanitize_discovered_peer(std::move(closer), context);
              if (has_usable_endpoint(closer)) {
@@ -585,9 +614,14 @@ boost::asio::awaitable<dht::value_get_result> async_get_value_owned(auto self, p
 
 } // namespace
 
+boost::asio::awaitable<dht::query_result>
+node::impl::async_find_dht_peer(protocol_id protocol, peer_id peer, dht::query_options options) {
+   co_return co_await async_find_peer_owned(shared_from_this(), std::move(protocol), std::move(peer), options);
+}
+
 boost::asio::awaitable<dht::query_result> node::async_find_peer(protocol_id protocol, peer_id peer,
                                                                 dht::query_options options) {
-   return async_find_peer_owned(impl_, std::move(protocol), std::move(peer), options);
+   return impl_->async_find_dht_peer(std::move(protocol), std::move(peer), options);
 }
 
 boost::asio::awaitable<provider_registration> node::async_provide(protocol_id protocol, dht::key key,

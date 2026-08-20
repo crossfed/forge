@@ -66,6 +66,7 @@ class lifecycle_tracker {
    [[nodiscard]] bool begin_start() noexcept;
    void set_phase(lifecycle_phase value) noexcept;
    [[nodiscard]] lifecycle_phase phase() const noexcept;
+   [[nodiscard]] bool stop_requested() const noexcept;
    [[nodiscard]] operation track() noexcept;
    void request_stop() noexcept;
    boost::asio::awaitable<void> wait() const;

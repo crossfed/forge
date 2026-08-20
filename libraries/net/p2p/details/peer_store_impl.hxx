@@ -32,7 +32,6 @@ struct peer_store::impl {
    [[nodiscard]] peer_store::record apply_identify(const peer_id& peer, peer_store::identify_update update);
    [[nodiscard]] std::optional<peer_store::record> apply_discovery(const peer_id& peer,
                                                                    peer_store::discovery_update update);
-   void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
    void upsert_relay_reservation(peer_store::relay_record value);
    [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
    [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,
@@ -74,6 +73,8 @@ struct peer_store::impl {
    [[nodiscard]] std::optional<public_key> find_public_key(const peer_id& peer) const;
    [[nodiscard]] std::vector<peer_store::record> snapshot(std::size_t limit) const;
    [[nodiscard]] std::vector<peer_store::record> candidates(std::uint64_t capability, std::size_t limit) const;
+   [[nodiscard]] std::vector<peer_store::record> scored_candidates(std::size_t limit) const;
+   [[nodiscard]] std::vector<peer_store::record> scored_candidates(discovery::source source, std::size_t limit) const;
    [[nodiscard]] std::vector<rendezvous::registration>
    discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence, std::size_t limit) const;
    [[nodiscard]] peer_store::persistence_status persistence_state() const;
@@ -125,6 +126,7 @@ struct peer_store::impl {
    std::set<score_key> score_index_;
    std::set<peer_expiry_key> peer_expiry_index_;
    std::map<std::uint64_t, std::set<score_key>> candidates_by_capability_;
+   std::map<discovery::source, std::set<score_key>> candidates_by_source_;
    std::map<rendezvous_map_key, rendezvous::registration> rendezvous_;
    std::map<peer_id, std::size_t> rendezvous_per_peer_;
    std::map<rendezvous_sequence_key, rendezvous_map_key> rendezvous_by_sequence_;

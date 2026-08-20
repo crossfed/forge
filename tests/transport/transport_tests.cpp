@@ -464,6 +464,60 @@ BOOST_AUTO_TEST_CASE(transport_stream_reads_framed_chunks_and_preserves_trailing
    BOOST_CHECK_EQUAL(model->reads_started, 0U);
 }
 
+BOOST_AUTO_TEST_CASE(transport_stream_rejects_oversized_headers_before_reading_a_body) {
+   auto runtime = forge::asio::runtime{};
+   auto model = std::make_shared<fake_stream>(48);
+   model->reads.push_back({0x00, 0x00, 0x00, 0x11});
+   model->reads.push_back(text_bytes("unread body"));
+   auto value = make_stream(model);
+
+   BOOST_CHECK_THROW(static_cast<void>(forge::asio::blocking::run(
+                         runtime, value.async_read_frame(forge::net::transport::frame_options{.max_size = 16}))),
+                     forge::net::transport::exceptions::frame_too_large);
+   BOOST_CHECK_EQUAL(model->chunk_reads_started, 1U);
+   BOOST_REQUIRE_EQUAL(model->reads.size(), 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_bounds_retained_coalesced_input_without_dropping_valid_frames) {
+   auto runtime = forge::asio::runtime{};
+   auto model = std::make_shared<fake_stream>(49);
+   const auto options = forge::net::transport::frame_options{.max_size = 3};
+   auto combined = forge::net::transport::encode_frame(text_bytes("one"), options);
+   const auto second = forge::net::transport::encode_frame(text_bytes("two"), options);
+   combined.insert(combined.end(), second.begin(), second.end());
+   BOOST_REQUIRE_EQUAL(combined.size(), forge::net::transport::frame_buffer_limit(options));
+   model->reads.push_back(std::move(combined));
+   auto value = make_stream(model);
+
+   const auto first = forge::asio::blocking::run(runtime, value.async_read_frame(options));
+   const auto next = forge::asio::blocking::run(runtime, value.async_read_frame(options));
+   const auto expected_first = text_bytes("one");
+   const auto expected_next = text_bytes("two");
+
+   BOOST_CHECK_EQUAL_COLLECTIONS(first.begin(), first.end(), expected_first.begin(), expected_first.end());
+   BOOST_CHECK_EQUAL_COLLECTIONS(next.begin(), next.end(), expected_next.begin(), expected_next.end());
+   BOOST_CHECK_EQUAL(model->chunk_reads_started, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_rejects_oversized_backend_chunks_without_retaining_them) {
+   auto runtime = forge::asio::runtime{};
+   auto model = std::make_shared<fake_stream>(50);
+   const auto options = forge::net::transport::frame_options{.max_size = 16, .max_buffered_size = 40};
+   auto oversized = forge::net::transport::encode_frame(text_bytes("one"), options);
+   oversized.resize(options.max_buffered_size + 1, 0);
+   model->reads.push_back(std::move(oversized));
+   model->reads.push_back(forge::net::transport::encode_frame(text_bytes("next"), options));
+   auto value = make_stream(model);
+
+   BOOST_CHECK_THROW(static_cast<void>(forge::asio::blocking::run(runtime, value.async_read_frame(options))),
+                     forge::net::transport::exceptions::frame_too_large);
+   const auto next = forge::asio::blocking::run(runtime, value.async_read_frame(options));
+   const auto expected = text_bytes("next");
+
+   BOOST_CHECK_EQUAL_COLLECTIONS(next.begin(), next.end(), expected.begin(), expected.end());
+   BOOST_CHECK_EQUAL(model->chunk_reads_started, 2U);
+}
+
 BOOST_AUTO_TEST_CASE(transport_stream_write_owns_caller_buffer_across_await) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>(43);

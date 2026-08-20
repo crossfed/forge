@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "toolchains": {
+    "go": {
+      "version": "1.26.3",
+      "gotoolchain": "local",
+      "goproxy": "off",
+      "gosumdb": "off"
+    },
+    "rust": {
+      "rustc_version": "1.95.0",
+      "cargo_version": "1.95.0",
+      "cargo_frozen": true,
+      "cargo_net_offline": true
+    },
+    "forge_fixture": {
+      "compiler_identity": "embedded_build_info"
+    }
+  },
+  "fixture_files": {
+    "go_fixture/go.mod": "d932393c652c4fcab045bc9e35d70bb8ee6700610b63f5ed9c4d2b3b8e1e6be2",
+    "go_fixture/go.sum": "4c5c4bab5b838e9027b83777413feb9c2540f2d0c076c86214a549cfad47902a",
+    "go_fixture/main.go": "6cd1f837a1eb213dc9d2f7ba27906f5523a6b1da3dd835b1ccb4d637c261d1f4",
+    "rust_fixture/Cargo.lock": "14b5e00e49ffa65cc10ff42c2ec0ad49d7d3654846f749ca12d8e80090a6d781",
+    "rust_fixture/Cargo.toml": "a4992715e8f7eaa9576f9f8b9a877b52bb847eb0af0ec70e9078c8113b85d71e",
+    "rust_fixture/main.rs": "6098355430d8dcc379991ca2b76364f28a1ef15ecd872f7a88c002c2d15ef1fc",
+    "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
+  },
+  "runtime_artifact_sources": {
+    "check_fixture_lock.py": "b94202154b062502fd75b89d8ad740ee679e2e6370008821fa83a00eef585c1c",
+    "forge_interop_fixture.cpp": "bb629e18e79399f8bb1119709ddb04296c3fdd79e406311b089e7e562ebfee7c",
+    "provenance.py": "123d08f62ab7e6edc871cfaafbe582050d161e6148a04e937325376448bc7b4e",
+    "runner.py": "c6d5b47bfc5a30349444c86e82baac2ed5527b10afabca1b8a7fc4dea64c9160"
+  },
+  "evidence_sources": {
+    "donor_cases.json": "ef65728b81ff107e03769ca8b6a24a06c803ee0520e602a74666a34d36b8f86f"
+  },
+  "dependency_graphs": {
+    "go": {
+      "files": [
+        "go_fixture/go.mod",
+        "go_fixture/go.sum"
+      ],
+      "sha256": "accdbbe1df355dfef3de3af53b6efec7f614d235bee0dc1821608bd93de239eb"
+    },
+    "rust": {
+      "files": [
+        "rust_fixture/Cargo.toml",
+        "rust_fixture/Cargo.lock"
+      ],
+      "sha256": "dfd58cfa79f1abb7fae7ac173ec8527a9e1301e638770ccadde133fedc158409"
+    }
+  },
+  "donors": [
+    {
+      "name": "go-libp2p",
+      "directory": "go-libp2p",
+      "commit": "9cfe2cc00be5b20a0be737f002c99f81b92255c5",
+      "tree": "99542e2a8bf2fa6c70ae37fc6593527f82f181d1"
+    },
+    {
+      "name": "rust-libp2p",
+      "directory": "rust-libp2p",
+      "commit": "22fb4c784fc55ad8b15d05fdc9f98d663107d4cb",
+      "tree": "f403e12b239f2f1141ce528d5c5af50c88632ef3"
+    },
+    {
+      "name": "go-kad",
+      "directory": "go-libp2p-kad-dht",
+      "commit": "d40b14b5b2cc713f78173f411b8eec4c1827552f",
+      "tree": "e74f90b95677188c27124580971cc7089c7d8ab8"
+    },
+    {
+      "name": "go-pubsub",
+      "directory": "go-libp2p-pubsub",
+      "commit": "0ed6f6fdad7eb820486892336bed3081f8fa7f25",
+      "tree": "489ba3d2702fe061119f0a22b8e212f5e63a671c"
+    },
+    {
+      "name": "libp2p-specs",
+      "directory": "libp2p-specs",
+      "commit": "6b6203ee6f62938ce67efdb33498173f475851c0",
+      "tree": "7edbed48545fceb21e91d62039c12890e08bb0b4"
+    }
+  ]
+}

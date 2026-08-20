@@ -46,10 +46,6 @@ std::optional<peer_store::record> peer_store::apply_discovery(const peer_id& pee
    return impl_->apply_discovery(peer, std::move(update));
 }
 
-void peer_store::apply_peer_exchange(const peer_id& peer, capability_set capabilities) {
-   impl_->apply_peer_exchange(peer, capabilities);
-}
-
 void peer_store::upsert_relay_reservation(relay_record value) {
    impl_->upsert_relay_reservation(std::move(value));
 }
@@ -139,6 +135,14 @@ std::vector<peer_store::record> peer_store::snapshot(std::size_t limit) const {
 
 std::vector<peer_store::record> peer_store::candidates(std::uint64_t capability, std::size_t limit) const {
    return impl_->candidates(capability, limit);
+}
+
+std::vector<peer_store::record> peer_store::scored_candidates(std::size_t limit) const {
+   return impl_->scored_candidates(limit);
+}
+
+std::vector<peer_store::record> peer_store::scored_candidates(discovery::source source, std::size_t limit) const {
+   return impl_->scored_candidates(source, limit);
 }
 
 std::vector<rendezvous::registration> peer_store::discover_rendezvous(std::string_view namespace_name,

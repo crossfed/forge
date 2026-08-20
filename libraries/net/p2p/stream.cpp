@@ -79,7 +79,7 @@ boost::asio::awaitable<void> stream::async_write(std::span<const std::uint8_t> b
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid P2P stream");
    }
-   co_await impl_->transport.async_write(bytes);
+   return impl_->transport.async_write(forge::net::transport::chunk{bytes});
 }
 
 boost::asio::awaitable<void> stream::async_write(forge::net::transport::chunk bytes) {
@@ -111,7 +111,7 @@ boost::asio::awaitable<void> stream::async_write_frame(std::span<const std::uint
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid P2P stream");
    }
-   co_await impl_->transport.async_write_frame(bytes);
+   return impl_->transport.async_write_frame(forge::net::transport::chunk{bytes});
 }
 
 boost::asio::awaitable<void> stream::async_write_frame(forge::net::transport::chunk bytes) {
@@ -122,19 +122,29 @@ boost::asio::awaitable<void> stream::async_write_frame(forge::net::transport::ch
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>> stream::async_read_frame() {
-   auto value = co_await async_read_frame_chunk();
+   co_return co_await async_read_frame(forge::net::transport::frame_options{});
+}
+
+boost::asio::awaitable<std::vector<std::uint8_t>> stream::async_read_frame(forge::net::transport::frame_options options) {
+   auto value = co_await async_read_frame_chunk(options);
    co_return std::move(value).into_vector();
 }
 
 boost::asio::awaitable<forge::net::transport::chunk> stream::async_read_frame_chunk() {
+   co_return co_await async_read_frame_chunk(forge::net::transport::frame_options{});
+}
+
+boost::asio::awaitable<forge::net::transport::chunk>
+stream::async_read_frame_chunk(forge::net::transport::frame_options options) {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid P2P stream");
    }
    if (impl_->buffer.empty()) {
-      co_return co_await impl_->transport.async_read_frame_chunk();
+      co_return co_await impl_->transport.async_read_frame_chunk(options);
    }
    while (true) {
-      const auto decoded = forge::net::transport::decode_frame_view(available_bytes(impl_->buffer, impl_->consumed));
+      const auto decoded =
+          forge::net::transport::decode_frame_view(available_bytes(impl_->buffer, impl_->consumed), options);
       if (decoded.status == forge::net::transport::frame_decode_status::complete) {
          const auto payload_size = decoded.payload.size();
          const auto payload_offset = static_cast<std::size_t>(decoded.payload.data() - impl_->buffer.data());

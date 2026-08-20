@@ -145,6 +145,13 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
    auto rejection_reason = std::string{};
    auto pruned_ids = std::vector<std::uint64_t>{};
    auto pruned_sessions = std::vector<std::shared_ptr<session_state>>{};
+   refresh_connection_scores();
+   const auto network_score = [&] {
+      if (const auto record = store.find(session->info.remote_peer)) {
+         return record->score;
+      }
+      return 0.0;
+   }();
    pruned_ids.reserve(options.limits.max_sessions);
    pruned_sessions.reserve(options.limits.max_sessions);
    try {
@@ -166,6 +173,7 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
                     .direction = direction,
                     .opened_at = now,
                     .last_used_at = now,
+                    .network_score = network_score,
                 },
                 now);
             for (const auto id : admission.pruned) {
@@ -681,7 +689,7 @@ boost::asio::awaitable<void> node::impl::handle_incoming_stream(std::shared_ptr<
          if (request.kind != peer_exchange_message::type::peer_exchange_request) {
             FORGE_THROW_EXCEPTION(exceptions::protocol_error, "P2P peer exchange expected request");
          }
-         co_await handle_peer_exchange(std::move(admitted.stream), request.request_id);
+         co_await handle_peer_exchange(std::move(admitted.stream), request.request_id, request.max_frame_size);
       } else if (admitted.protocol == builtins::autonat_v2_dial_request) {
          co_await handle_autonat_v2_dial_request(session, std::move(admitted.stream));
       } else if (admitted.protocol == builtins::autonat_v2_dial_back) {

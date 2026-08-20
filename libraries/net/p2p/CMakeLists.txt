@@ -41,6 +41,11 @@ add_library(
    reachability.cpp
    relay.cpp
    hole_punch.cpp
+   topology.cpp
+   topology_manager.cpp
+   topology_manager_discovery.cpp
+   topology_manager_sessions.cpp
+   details/topology_manager.hxx
    connection_manager.cpp
    details/connection_manager.hxx
    resource_manager.cpp
@@ -63,6 +68,10 @@ add_library(
    host_addresses.cpp
    details/host_addresses.hxx
    direct_transport_quic.cpp
+   quic_client_options.cpp
+   details/quic_client_options.hxx
+   quic_client_token_cache.cpp
+   details/quic_client_token_cache.hxx
    direct_transport_tcp.cpp
    libp2p_tls.cpp
    details/libp2p_tls.hxx
@@ -86,6 +95,7 @@ add_library(
    node_impl_dht_maintenance.cpp
    node_impl_identify.cpp
    node_impl_lifecycle.cpp
+   node_impl_topology.cpp
    details/node_impl.hxx
    bootstrap_service.cpp
    details/bootstrap_service.hxx
@@ -109,6 +119,8 @@ add_library(
    details/path_selector.hxx
    peer_exchange_codec.cpp
    details/peer_exchange_codec.hxx
+   peer_exchange_scheduler.cpp
+   details/peer_exchange_scheduler.hxx
    peer_exchange_learning.cpp
    details/peer_exchange_learning.hxx
    pubsub_outbound_budget.cpp
