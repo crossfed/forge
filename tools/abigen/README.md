@@ -1,7 +1,7 @@
 # abigen
 
 `abigen` generates a chain ABI and dispatcher from annotated contract sources.
-It is a thin process entry point over `forge_contract_abi`.
+It is a thin process entry point over `forge_tooling_abi`.
 
 ```bash
 abigen --contract hello --abi hello.abi --dispatch hello.dispatcher.cpp \
@@ -22,7 +22,7 @@ the remaining sources; normal contract builds should use
 `forge_add_contract(... DISPATCH_SOURCE ...)`, which manages this mapping.
 
 Exit code `0` means both artifacts were generated; `1` reports a diagnostic
-from the owning library. See `libraries/contract/abi/README.md` for the API.
+from the owning library. See `libraries/tooling/abi/README.md` for the API.
 
 Inputs are one or more annotated C++ sources, contract name, wasm32 sysroot,
 attribute plugin and optional Ricardian files. Outputs are the canonical `.abi`,

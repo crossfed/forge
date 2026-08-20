@@ -87,9 +87,9 @@ plugins, telemetry and compatibility layers должны быть пригодн
   CLI11-backed nested commands with Forge-owned public types;
   Boost.Program_options remains limited to config argv ingestion.
 - [Contract Tooling Family v1](iterations/forge-contract-tooling-family-v1.md):
-  move host ABI generation, attributes, validation, manifests and contract
-  testing from `forge.contract.*` to leaf libraries under `forge.tooling.*`;
-  the guest Contract API and Contract SDK identity remain unchanged.
+  host ABI generation, attributes, validation, manifests and contract testing
+  live in leaf libraries under `forge.tooling.*`; the guest Contract API and
+  Contract SDK identity remain unchanged.
 - [VM WASM Backend Family v1](iterations/forge-vm-wasm-backend-family-v1.md):
   accepted clean-breaking split of the current EOS VM lane into
   `forge.vm.wasm.interpret`, reserving sibling `forge.vm.wasm.optimizing` for

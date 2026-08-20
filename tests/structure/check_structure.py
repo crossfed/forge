@@ -10,7 +10,7 @@ from pathlib import Path
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
 LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
-SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests", "tests")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests", "tests", "tools")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -31,6 +31,7 @@ LEGACY_VM_WASM_SOURCE_IDENTITIES = (
    (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
    (re.compile(r"forge\.vm\.wasm(?!\.interpret(?:\b|:))"), "legacy VM module identity"),
    (re.compile(r"forge::vm::wasm(?!::interpret(?:\b|::))"), "legacy VM namespace identity"),
+   (re.compile(r"forge/vm/wasm/(?!interpret/)"), "legacy VM public include identity"),
    (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
 )
 LEGACY_VM_WASM_CMAKE_IDENTITIES = (
@@ -39,6 +40,20 @@ LEGACY_VM_WASM_CMAKE_IDENTITIES = (
    (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
    (re.compile(r"libraries/vm/wasm/include"), "legacy VM include root"),
    (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
+)
+LEGACY_CONTRACT_TOOLING_SOURCE_IDENTITIES = (
+   (re.compile(r"\bforge_contract_(?:abi|attributes|validation|manifest|testing)\b"), "legacy Contract Tooling target identity"),
+   (re.compile(r"forge\.contract\.(?:abi|attributes|validation|manifest|testing)(?:\b|:)"), "legacy Contract Tooling module identity"),
+   (re.compile(r"forge::contract::(?:abi|attributes|validation|manifest|testing)(?:\b|::)"), "legacy Contract Tooling namespace identity"),
+   (re.compile(r"forge/contract/(?:abi|attributes|validation|manifest|testing)(?:\b|/)"), "legacy Contract Tooling include identity"),
+)
+LEGACY_CONTRACT_TOOLING_CMAKE_IDENTITIES = (
+   (re.compile(r"\bforge_contract_(?:abi|attributes|validation|manifest|testing)(?:\b|_)"), "legacy Contract Tooling target identity"),
+   (re.compile(r"\bForge::forge_contract_(?:abi|attributes|validation|manifest|testing)\b"), "legacy Contract Tooling export identity"),
+   (re.compile(r"libraries/contract/(?:abi|attributes|validation|manifest|testing)(?:\b|/)"), "legacy Contract Tooling library path"),
+   (re.compile(r"tests/package_contract_(?:abi|attributes|validation|manifest|testing)_component"), "legacy Contract Tooling package test path"),
+   (re.compile(r"\bFORGE_ENABLE_CONTRACT_TOOLING\b"), "legacy Contract Tooling option"),
+   (re.compile(r"\bForge_BUILT_WITH_CONTRACT_TOOLING\b"), "legacy Contract Tooling package variable"),
 )
 
 
@@ -228,7 +243,8 @@ def check_vm_wasm_interpret_boundaries(root: Path, errors: list[str]) -> None:
 
    for path in sorted(include.glob("*.cppm")):
       relative = path.relative_to(root)
-      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
          included = INCLUDE.match(line)
          if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
             errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
@@ -244,7 +260,9 @@ def check_vm_wasm_interpret_boundaries(root: Path, errors: list[str]) -> None:
 
 
 def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: list[str]) -> None:
-   for path in files:
+   identity_files = set(files)
+   identity_files.update(source_files(root, ("libraries/tooling", "tools")))
+   for path in sorted(identity_files):
       relative = path.relative_to(root)
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
          for expression, description in LEGACY_VM_WASM_SOURCE_IDENTITIES:
@@ -264,12 +282,112 @@ def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: li
       if not path.is_file():
          continue
       relative = path.relative_to(root)
-      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
          if relative == Path("tests/CMakeLists.txt") and line.strip() == "add_subdirectory(vm_wasm)":
             continue
          for expression, description in LEGACY_VM_WASM_CMAKE_IDENTITIES:
             if expression.search(line):
                errors.append(f"{relative}:{line_number}: {description} is forbidden")
+
+
+def check_contract_tooling_boundaries(root: Path, files: list[Path], errors: list[str]) -> None:
+   family = root / "libraries" / "tooling"
+   expected_family_entries = {"CMakeLists.txt", "README.md", "abi", "attributes", "validation", "manifest", "testing"}
+   if not family.is_dir():
+      errors.append("libraries/tooling: Contract Tooling family root is missing")
+      return
+
+   unexpected_family_entries = {path.name for path in family.iterdir()} - expected_family_entries
+   if unexpected_family_entries:
+      errors.append(
+         "libraries/tooling: empty tooling family root contains: "
+         f"{', '.join(sorted(unexpected_family_entries))}"
+      )
+
+   for leaf in ("abi", "attributes", "validation", "manifest", "testing"):
+      component = family / leaf
+      if not component.is_dir():
+         errors.append(f"{component.relative_to(root)}: Contract Tooling leaf is missing")
+         continue
+      legacy_include = component / "include" / "forge" / "contract" / leaf
+      if legacy_include.exists():
+         errors.append(f"{legacy_include.relative_to(root)}: legacy Contract Tooling include path is forbidden")
+      legacy_component = root / "libraries" / "contract" / leaf
+      if legacy_component.exists():
+         errors.append(f"{legacy_component.relative_to(root)}: legacy Contract Tooling leaf is forbidden")
+
+   family_cmake = family / "CMakeLists.txt"
+   if family_cmake.is_file():
+      source = family_cmake.read_text(errors="ignore")
+      if re.search(r"\badd_library\s*\(", source):
+         errors.append("libraries/tooling/CMakeLists.txt: tooling family root must not define an aggregate target")
+
+   tests_cmake = root / "tests" / "CMakeLists.txt"
+   if tests_cmake.is_file():
+      source = tests_cmake.read_text(errors="ignore")
+      expected_test_paths = (
+         "tooling/contract_tests.cpp",
+         "package_tooling_abi_component",
+         "package_tooling_attributes_component",
+         "package_tooling_validation_component",
+         "package_tooling_manifest_component",
+      )
+      for relative in expected_test_paths:
+         if relative not in source:
+            errors.append(f"tests/CMakeLists.txt: Contract Tooling test path is missing: {relative}")
+         if not (root / "tests" / relative).exists():
+            errors.append(f"tests/{relative}: Contract Tooling test path does not exist")
+      for stale_path in ("contract/contract_tests.cpp", "contract_testing/", "package_contract_"):
+         if stale_path in source:
+            errors.append(f"tests/CMakeLists.txt: stale Contract Tooling test path is forbidden: {stale_path}")
+
+   for path in files:
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         for expression, description in LEGACY_CONTRACT_TOOLING_SOURCE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+         if re.search(r"\bnamespace\s+forge::tooling\s*\{", line):
+            errors.append(f"{relative}:{line_number}: tooling is a grouping namespace; use a leaf namespace")
+         if re.search(r"\bexport\s+module\s+forge\.tooling\s*;", line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate module is forbidden")
+         if re.search(r"\bnamespace\s+\w+\s*=\s*forge::contract::(?:abi|attributes|validation|manifest|testing)", line):
+            errors.append(f"{relative}:{line_number}: legacy Contract Tooling namespace alias is forbidden")
+
+   cmake_paths = [root / "CMakeLists.txt", root / "cmake" / "ForgeConfig.cmake.in"]
+   workflows = root / ".github" / "workflows"
+   if workflows.is_dir():
+      cmake_paths.extend(workflows.glob("*.yml"))
+   for base in (root / "libraries", root / "guest", root / "plugins", root / "tests", root / "tools"):
+      if base.exists():
+         cmake_paths.extend(base.rglob("CMakeLists.txt"))
+
+   for path in sorted(set(cmake_paths)):
+      if not path.is_file():
+         continue
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         for expression, description in LEGACY_CONTRACT_TOOLING_CMAKE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+         if re.search(r"\badd_library\s*\(\s*forge_tooling\b", line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate target is forbidden")
+         if re.search(r"\badd_library\s*\(\s*forge_(?:contract_(?:abi|attributes|validation|manifest|testing)|tooling)\s+ALIAS\b", line):
+            errors.append(f"{relative}:{line_number}: Contract Tooling aliases are forbidden")
+         if re.search(r'"\$\{component\}"\s+STREQUAL\s+"tooling"', line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate package component is forbidden")
+      for component in ("contract_abi", "contract_attributes", "contract_validation", "contract_manifest", "contract_testing"):
+         if re.search(
+            rf"\bfind_package\s*\(\s*Forge\b(?:(?!\)).)*\b{component}\b",
+            source,
+            flags=re.IGNORECASE | re.DOTALL,
+         ):
+            errors.append(f"{relative}: legacy Contract Tooling package component {component} is forbidden")
+         if re.search(rf'"\$\{{component\}}"\s+STREQUAL\s+"{component}"', source):
+            errors.append(f"{relative}: legacy Contract Tooling package component {component} is forbidden")
 
 
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
@@ -430,7 +548,7 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          '      - "libraries/schema/**"',
          '      - "libraries/variant/**"',
          '      - "libraries/vm/wasm/**"',
-         '      - "libraries/contract/**"',
+         '      - "libraries/tooling/**"',
          '      - "guest/**"',
          '      - "tools/**"',
          '      - "vendor/**"',
@@ -722,10 +840,10 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    for component in (
-      "contract_abi",
-      "contract_attributes",
-      "contract_validation",
-      "contract_manifest",
+      "tooling_abi",
+      "tooling_attributes",
+      "tooling_validation",
+      "tooling_manifest",
    ):
       if developer_profile.count(component) != 2:
          errors.append(
@@ -746,7 +864,7 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
    if "::forge::contract::dispatch(" not in source:
       errors.append(f"{path.relative_to(root)}: EOSIO dispatcher must delegate to forge.contract.dispatcher")
 
-   generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
+   generator = root / "libraries" / "tooling" / "abi" / "generator.cpp"
    generated_source = generator.read_text(errors="ignore")
    for forbidden in ('output << "   switch (action)',):
       if forbidden in generated_source:
@@ -1143,6 +1261,7 @@ def main() -> int:
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)
    check_vm_wasm_interpret_identities(root, files, errors)
+   check_contract_tooling_boundaries(root, files, errors)
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
    check_bls_value_ownership(root, files, errors)

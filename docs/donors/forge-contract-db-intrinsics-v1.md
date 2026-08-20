@@ -47,7 +47,7 @@ manifest.
 
 ## Executable Test Oracle
 
-`Forge::forge_contract_testing` provides an installed executable oracle over
+`Forge::forge_tooling_testing` provides an installed executable oracle over
 `forge.db.object`. It is intentionally narrower than a blockchain host:
 
 - one ObjectDB transaction spans one WASM invocation;

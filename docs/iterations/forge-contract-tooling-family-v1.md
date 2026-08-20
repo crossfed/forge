@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted direction. Implementation is a clean pre-stable source and package
-break and is deferred to the corresponding Forge cleanup block.
+Implemented clean pre-stable source and package break. The host leaf libraries
+now live under the empty `libraries/tooling` family root.
 
 ## Problem
 

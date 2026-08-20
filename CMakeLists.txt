@@ -23,7 +23,7 @@ option(FORGE_ENABLE_TUI "Build FORGE Notcurses-backed terminal UI library when n
 option(FORGE_ENABLE_LIBP2P_INTEROP "Run live go-libp2p/rust-libp2p interoperability tests" OFF)
 option(FORGE_ENABLE_ROCKSDB "Build RocksDB-backed optional FORGE features when RocksDB is available" ON)
 option(FORGE_ENABLE_MDBX "Build the vendored MDBX-backed FORGE database driver" ON)
-option(FORGE_ENABLE_CONTRACT_TOOLING "Build optional Forge Contract host libraries" OFF)
+option(FORGE_ENABLE_TOOLING "Build optional Forge Contract Tooling host libraries" OFF)
 
 set(FORGE_BUILD_PROFILE "full" CACHE STRING "Forge build profile")
 set_property(CACHE FORGE_BUILD_PROFILE PROPERTY STRINGS full contract-sdk-host)
@@ -34,7 +34,7 @@ endif()
 set(FORGE_CONTRACT_SDK_HOST_PROFILE OFF)
 if(FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
    set(FORGE_CONTRACT_SDK_HOST_PROFILE ON)
-   set(FORGE_ENABLE_CONTRACT_TOOLING ON CACHE BOOL "Build optional Forge Contract host libraries" FORCE)
+   set(FORGE_ENABLE_TOOLING ON CACHE BOOL "Build optional Forge Contract Tooling host libraries" FORCE)
    set(FORGE_ENABLE_ROCKSDB OFF CACHE BOOL "Build RocksDB-backed optional FORGE features" FORCE)
    set(FORGE_ENABLE_MDBX OFF CACHE BOOL "Build the vendored MDBX-backed Forge database driver" FORCE)
    set(FORGE_ENABLE_TUI OFF CACHE BOOL "Build Forge terminal UI library" FORCE)
@@ -298,15 +298,15 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/app/include"
 )
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    find_package(Clang 22.1 CONFIG REQUIRED)
    list(APPEND
       FORGE_SOURCE_INCLUDE_DIRS
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/abi/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/manifest/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/testing/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tooling/abi/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tooling/attributes/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tooling/validation/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tooling/manifest/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tooling/testing/include"
    )
 endif()
 
@@ -697,8 +697,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    )
 endif()
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
-   add_subdirectory(libraries/contract)
+if(FORGE_ENABLE_TOOLING)
+   add_subdirectory(libraries/tooling)
 endif()
 
 if(TARGET forge_rocksdb)
@@ -717,14 +717,14 @@ if(TARGET forge_tui)
    list(APPEND FORGE_LEAF_TARGETS forge_tui)
 endif()
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    list(
       APPEND FORGE_LEAF_TARGETS
-      forge_contract_abi
-      forge_contract_attributes
-      forge_contract_validation
-      forge_contract_manifest
-      forge_contract_testing
+      forge_tooling_abi
+      forge_tooling_attributes
+      forge_tooling_validation
+      forge_tooling_manifest
+      forge_tooling_testing
    )
 endif()
 
@@ -839,14 +839,14 @@ endif()
 if(TARGET forge_tui)
    list(APPEND FORGE_BUILT_COMPONENTS tui)
 endif()
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    list(
       APPEND FORGE_BUILT_COMPONENTS
-      contract_abi
-      contract_attributes
-      contract_validation
-      contract_manifest
-      contract_testing
+      tooling_abi
+      tooling_attributes
+      tooling_validation
+      tooling_manifest
+      tooling_testing
    )
 endif()
 
@@ -971,13 +971,13 @@ install(
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    install(
-      DIRECTORY libraries/contract/abi/include/forge
-                libraries/contract/attributes/include/forge
-                libraries/contract/validation/include/forge
-                libraries/contract/manifest/include/forge
-                libraries/contract/testing/include/forge
+      DIRECTORY libraries/tooling/abi/include/forge
+                libraries/tooling/attributes/include/forge
+                libraries/tooling/validation/include/forge
+                libraries/tooling/manifest/include/forge
+                libraries/tooling/testing/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()
@@ -1097,43 +1097,44 @@ install(
    EXCLUDE_FROM_ALL
 )
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
-   get_property(_forge_contract_testing_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-   string(REPLACE ";" "\\;" _forge_contract_testing_configuration_types "${CMAKE_CONFIGURATION_TYPES}")
-   set(_forge_contract_testing_package_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-package")
-   set(_forge_contract_testing_relocated_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-relocated")
-   set(_forge_contract_testing_consumer_build "${CMAKE_BINARY_DIR}/forge-contract-testing-consumer")
+if(FORGE_ENABLE_TOOLING)
+   get_property(_forge_tooling_testing_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+   string(REPLACE ";" "\\;" _forge_tooling_testing_configuration_types "${CMAKE_CONFIGURATION_TYPES}")
+   set(_forge_tooling_testing_package_prefix "${CMAKE_BINARY_DIR}/forge-tooling-testing-package")
+   set(_forge_tooling_testing_relocated_prefix "${CMAKE_BINARY_DIR}/forge-tooling-testing-relocated")
+   set(_forge_tooling_testing_consumer_build "${CMAKE_BINARY_DIR}/forge-tooling-testing-consumer")
    set(
-      _forge_contract_testing_package_test
+      _forge_tooling_testing_package_test
       "${CMAKE_COMMAND}"
-      "-DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${_forge_contract_testing_package_prefix}"
+      "-DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${_forge_tooling_testing_package_prefix}"
       "-DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
-      "-DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${_forge_contract_testing_relocated_prefix}"
-      "-DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/package_contract_testing_component"
-      "-DFORGE_PACKAGE_TEST_BINARY_DIR=${_forge_contract_testing_consumer_build}"
+      "-DFORGE_PACKAGE_TEST_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
+      "-DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${_forge_tooling_testing_relocated_prefix}"
+      "-DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/package_tooling_testing_component"
+      "-DFORGE_PACKAGE_TEST_BINARY_DIR=${_forge_tooling_testing_consumer_build}"
       "-DFORGE_PACKAGE_TEST_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}"
       "-DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
       "-DFORGE_PACKAGE_TEST_CONFIG=$<CONFIG>"
-      "-DFORGE_PACKAGE_TEST_MULTI_CONFIG=${_forge_contract_testing_multi_config}"
-      "-DFORGE_PACKAGE_TEST_CONFIGURATION_TYPES=${_forge_contract_testing_configuration_types}"
+      "-DFORGE_PACKAGE_TEST_MULTI_CONFIG=${_forge_tooling_testing_multi_config}"
+      "-DFORGE_PACKAGE_TEST_CONFIGURATION_TYPES=${_forge_tooling_testing_configuration_types}"
       "-DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       "-DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_contract_testing_component/verify_relocation.cmake"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_tooling_testing_component/verify_relocation.cmake"
    )
    add_custom_target(
-      test_forge_package_contract_testing_component
-      COMMAND ${_forge_contract_testing_package_test}
+      test_forge_package_tooling_testing_component
+      COMMAND ${_forge_tooling_testing_package_test}
       DEPENDS forge
       VERBATIM
    )
    if(BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       add_test(
-         NAME test_forge_package_contract_testing_component
-         COMMAND ${_forge_contract_testing_package_test}
+         NAME test_forge_package_tooling_testing_component
+         COMMAND ${_forge_tooling_testing_package_test}
       )
-      set_tests_properties(test_forge_package_contract_testing_component PROPERTIES RUN_SERIAL TRUE)
+      set_tests_properties(test_forge_package_tooling_testing_component PROPERTIES RUN_SERIAL TRUE)
    endif()
 endif()
 install(

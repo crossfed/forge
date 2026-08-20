@@ -6,7 +6,7 @@ Status: accepted design baseline; the complete SDK foundation is implemented on
 ## Implementation Snapshot
 
 The first vertical is split by ownership: wasm32 code and SDK assembly live in
-`guest/`, reusable host services live in `libraries/contract`, and thin command
+`guest/`, reusable host services live in `libraries/tooling`, and thin command
 entry points live in `tools/`. It currently delivers:
 
 - release and developer toolchain profiles;
@@ -134,7 +134,7 @@ forge/
 ```
 
 The normal host build never enters `guest/` or `tools/`. Optional host contract
-libraries are built only with `FORGE_ENABLE_CONTRACT_TOOLING=ON`. The guest
+libraries are built only with `FORGE_ENABLE_TOOLING=ON`. The guest
 build is a separate CMake project driven by the WASM toolchain. Dual-target
 libraries remain under `libraries/`; the guest project compiles the same
 sources for `wasm32`.
@@ -233,7 +233,7 @@ versions.
 Interface version 1 currently contains seven lifecycle/action-data functions
 and all 60 Spring/CDT database functions. The distributed DB portion is a
 declarative ABI, not a storage implementation. The optional installed
-`Forge::forge_contract_testing` component validates that ABI against
+`Forge::forge_tooling_testing` component validates that ABI against
 `forge.db.object`; its exact donor surface and runtime scenario mapping are
 recorded in
 `docs/donors/forge-contract-db-intrinsics-v1.md`.

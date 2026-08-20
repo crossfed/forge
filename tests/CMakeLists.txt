@@ -341,21 +341,21 @@ target_link_libraries(
 )
 add_test(NAME test_forge_chain_savanna COMMAND test_forge_chain_savanna WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    add_executable(
-      test_forge_contract
+      test_forge_tooling
       unit/main.cpp
-      contract/contract_tests.cpp
+      tooling/contract_tests.cpp
    )
    target_link_libraries(
-      test_forge_contract
-      forge_contract_abi
-      forge_contract_attributes
-      forge_contract_validation
-      forge_contract_manifest
+      test_forge_tooling
+      forge_tooling_abi
+      forge_tooling_attributes
+      forge_tooling_validation
+      forge_tooling_manifest
       Boost::included_unit_test_framework
    )
-   add_test(NAME test_forge_contract COMMAND test_forge_contract WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+   add_test(NAME test_forge_tooling COMMAND test_forge_tooling WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
 add_executable(
@@ -2545,58 +2545,58 @@ add_test(
       --test-command forge_package_chain_savanna_component
 )
 set_tests_properties(test_forge_package_chain_savanna_component PROPERTIES DEPENDS test_forge_package_install)
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    add_test(
-      NAME test_forge_package_contract_abi_component
+      NAME test_forge_package_tooling_abi_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_abi_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-abi-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_abi_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-abi-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options
             ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
             -DClang_DIR=${Clang_DIR}
             -DLLVM_DIR=${LLVM_DIR}
-         --test-command forge_package_contract_abi_component
+         --test-command forge_package_tooling_abi_component
    )
-   set_tests_properties(test_forge_package_contract_abi_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_abi_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_attributes_component
+      NAME test_forge_package_tooling_attributes_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_attributes_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-attributes-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_attributes_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-attributes-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options
             ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
             -DClang_DIR=${Clang_DIR}
             -DLLVM_DIR=${LLVM_DIR}
             -DCMAKE_DISABLE_FIND_PACKAGE_Boost=TRUE
-         --test-command forge_package_contract_attributes_component
+         --test-command forge_package_tooling_attributes_component
    )
-   set_tests_properties(test_forge_package_contract_attributes_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_attributes_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_validation_component
+      NAME test_forge_package_tooling_validation_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_validation_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-validation-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_validation_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-validation-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_contract_validation_component
+         --test-command forge_package_tooling_validation_component
    )
-   set_tests_properties(test_forge_package_contract_validation_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_validation_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_manifest_component
+      NAME test_forge_package_tooling_manifest_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_manifest_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-manifest-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_manifest_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-manifest-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_contract_manifest_component
+         --test-command forge_package_tooling_manifest_component
    )
-   set_tests_properties(test_forge_package_contract_manifest_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_manifest_component PROPERTIES DEPENDS test_forge_package_install)
 endif()
 add_test(
    NAME test_forge_package_vm_wasm_interpret_component

@@ -19,7 +19,7 @@ endif()
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol contract_testing crypto_digest exceptions raw vm_wasm_interpret
+   COMPONENTS chain_protocol tooling_testing crypto_digest exceptions raw vm_wasm_interpret
 )
 find_package(Boost REQUIRED)
 
@@ -28,7 +28,7 @@ target_link_libraries(
    forge_contract_corpus_tests
    PRIVATE
       Forge::forge_chain_protocol
-      Forge::forge_contract_testing
+      Forge::forge_tooling_testing
       Forge::forge_crypto_digest
       Forge::forge_exceptions
       Forge::forge_raw

@@ -326,10 +326,10 @@ else()
             chain_protocol
             codec_json
             vm_wasm_interpret
-            contract_abi
-            contract_attributes
-            contract_validation
-            contract_manifest
+            tooling_abi
+            tooling_attributes
+            tooling_validation
+            tooling_manifest
          PATHS "${FORGE_CONTRACT_FORGE_DIR}"
          NO_DEFAULT_PATH
       )
@@ -340,10 +340,10 @@ else()
             chain_protocol
             codec_json
             vm_wasm_interpret
-            contract_abi
-            contract_attributes
-            contract_validation
-            contract_manifest
+            tooling_abi
+            tooling_attributes
+            tooling_validation
+            tooling_manifest
       )
    endif()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tools" "${CMAKE_CURRENT_BINARY_DIR}/tools")

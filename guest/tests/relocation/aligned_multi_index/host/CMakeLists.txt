@@ -12,7 +12,7 @@ endif()
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol contract_testing
+   COMPONENTS chain_protocol tooling_testing
 )
 
 add_executable(aligned_multi_index_vm_tests vm_tests.cpp)
@@ -24,5 +24,5 @@ target_link_libraries(
    aligned_multi_index_vm_tests
    PRIVATE
       Forge::forge_chain_protocol
-      Forge::forge_contract_testing
+      Forge::forge_tooling_testing
 )

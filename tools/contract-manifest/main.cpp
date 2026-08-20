@@ -1,5 +1,5 @@
-import forge.contract.manifest.command;
+import forge.tooling.manifest.command;
 
 int main(int argc, const char** argv) {
-   return forge::contract::manifest::command::run(argc, argv);
+   return forge::tooling::manifest::command::run(argc, argv);
 }

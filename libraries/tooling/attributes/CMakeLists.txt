@@ -1,0 +1,9 @@
+add_library(forge_tooling_attributes STATIC registry.cpp)
+forge_target_modules_at(forge_tooling_attributes tooling/attributes)
+
+set_target_properties(forge_tooling_attributes PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_include_directories(forge_tooling_attributes PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_include_directories(forge_tooling_attributes SYSTEM PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
+target_compile_definitions(forge_tooling_attributes PRIVATE ${LLVM_DEFINITIONS})
+target_link_libraries(forge_tooling_attributes PRIVATE clang-cpp LLVM)

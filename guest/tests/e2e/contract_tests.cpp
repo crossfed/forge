@@ -23,7 +23,7 @@
 
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.values;
-import forge.contract.testing.host;
+import forge.tooling.testing.host;
 import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.object.index;
@@ -235,7 +235,7 @@ void run_allocator_action(std::string_view action) {
    apply(code, host, "allocatortst", action);
 }
 
-forge::contract::testing::invocation_result invoke_database(forge::contract::testing::host& host,
+forge::tooling::testing::invocation_result invoke_database(forge::tooling::testing::host& host,
                                                             const wasm::wasm_code& code, std::string_view receiver,
                                                             std::uint32_t scenario) {
    const auto account = protocol::make_name(receiver).value;
@@ -243,14 +243,14 @@ forge::contract::testing::invocation_result invoke_database(forge::contract::tes
                       forge::raw::pack(scenario));
 }
 
-std::uint64_t invoke_oracle(forge::contract::testing::host& host, const wasm::wasm_code& code, std::uint32_t scenario) {
+std::uint64_t invoke_oracle(forge::tooling::testing::host& host, const wasm::wasm_code& code, std::uint32_t scenario) {
    const auto account = protocol::make_name("oracle").value;
    const auto result = host.invoke({code.data(), code.size()}, account, account, protocol::make_name("run").value,
                                    forge::raw::pack(scenario));
    return forge::raw::unpack_exact<std::uint64_t>(result.return_value);
 }
 
-void invoke_recovery(forge::contract::testing::host& host, const wasm::wasm_code& code) {
+void invoke_recovery(forge::tooling::testing::host& host, const wasm::wasm_code& code) {
    const auto payload = std::array<std::uint8_t, 4>{'T', 'e', 's', 't'};
    const auto digest = forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{payload});
    const auto key = forge::crypto::asymmetric::private_key::generate();
@@ -267,15 +267,15 @@ constexpr auto database_scope = std::uint64_t{1};
 
 } // namespace
 
-static_assert(forge::db::object::object_model<forge::contract::testing::table_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::key_value_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::index64_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::index128_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::index256_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::index_double_index>);
-static_assert(forge::db::object::object_model<forge::contract::testing::index_long_double_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::table_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::key_value_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::index64_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::index128_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::index256_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::index_double_index>);
+static_assert(forge::db::object::object_model<forge::tooling::testing::index_long_double_index>);
 static_assert(
-    std::is_same_v<decltype(forge::contract::testing::index128::secondary), forge::chain::protocol::fixed_key<16>>);
+    std::is_same_v<decltype(forge::tooling::testing::index128::secondary), forge::chain::protocol::fixed_key<16>>);
 
 BOOST_AUTO_TEST_CASE(host_and_guest_share_action_argument_bytes) {
    register_intrinsics();
@@ -542,7 +542,7 @@ BOOST_AUTO_TEST_CASE(executable_database_fixture_imports_and_calls_the_full_spri
 
 BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    const auto account = protocol::make_name("dbhost").value;
 
    BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 0));
@@ -602,7 +602,7 @@ BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state)
 
 BOOST_AUTO_TEST_CASE(database_host_preserves_spring_zero_length_action_read_semantics) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
 
    BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 21));
 }
@@ -617,7 +617,7 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
 
    const auto exercise = [](const wasm::wasm_code& core, const wasm::wasm_code& errors, const wasm::wasm_code& extended,
                             std::string_view account_name) {
-      auto host = forge::contract::testing::host{};
+      auto host = forge::tooling::testing::host{};
       const auto account = protocol::make_name(account_name).value;
       const auto table_name = protocol::make_name("records").value;
       const auto secondary_name = [table_name](std::uint64_t number) {
@@ -630,13 +630,13 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
          BOOST_TEST(result.return_value == expected, boost::test_tools::per_element());
       };
       const auto donor_error = [](std::string_view expected) {
-         return [expected](const forge::contract::testing::exceptions::assertion_failure& error) {
+         return [expected](const forge::tooling::testing::exceptions::assertion_failure& error) {
             return error.message() == expected;
          };
       };
       const auto invoke_failure = [&](const wasm::wasm_code& code, std::uint32_t scenario, std::string_view message) {
          BOOST_CHECK_EXCEPTION(invoke_database(host, code, account_name, scenario),
-                               forge::contract::testing::exceptions::assertion_failure, donor_error(message));
+                               forge::tooling::testing::exceptions::assertion_failure, donor_error(message));
       };
 
       invoke_success(core, 0);
@@ -750,10 +750,10 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
 
 BOOST_AUTO_TEST_CASE(database_host_rolls_back_assertions_and_commits_exit) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    const auto account = protocol::make_name("dbhost").value;
 
-   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 2), forge::contract::testing::exceptions::assertion_failure);
+   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 2), forge::tooling::testing::exceptions::assertion_failure);
    BOOST_TEST(!host.find_table(account, database_scope, 8).has_value());
 
    const auto result = invoke_database(host, code, "dbhost", 3);
@@ -772,40 +772,40 @@ BOOST_AUTO_TEST_CASE(database_host_rejects_invalid_operations_without_partial_st
        std::pair{14U, 16U}, std::pair{15U, 17U}, std::pair{16U, 18U}, std::pair{19U, 21U},
    };
    for (const auto [scenario, table_name] : cases) {
-      auto host = forge::contract::testing::host{};
+      auto host = forge::tooling::testing::host{};
       BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", scenario), std::exception);
       if (table_name != 0U) {
          BOOST_TEST(!host.find_table(account, database_scope, table_name).has_value());
       }
    }
 
-   auto duplicate_host = forge::contract::testing::host{};
+   auto duplicate_host = forge::tooling::testing::host{};
    BOOST_CHECK_THROW(invoke_database(duplicate_host, code, "dbhost", 5),
-                     forge::contract::testing::exceptions::database_error);
+                     forge::tooling::testing::exceptions::database_error);
    BOOST_TEST(!duplicate_host.find_table(account, database_scope, 11).has_value());
 
-   auto misaligned_host = forge::contract::testing::host{};
+   auto misaligned_host = forge::tooling::testing::host{};
    BOOST_CHECK_NO_THROW(invoke_database(misaligned_host, code, "dbhost", 11));
    const auto misaligned = misaligned_host.find_index256(account, database_scope, 15, 1);
    BOOST_REQUIRE(misaligned.has_value());
    BOOST_TEST(static_cast<bool>(misaligned->secondary.get_array()[0] == static_cast<unsigned __int128>(42)));
 
-   auto overflow_host = forge::contract::testing::host{};
+   auto overflow_host = forge::tooling::testing::host{};
    BOOST_CHECK_EXCEPTION(invoke_database(overflow_host, code, "dbhost", 20),
-                         forge::contract::testing::exceptions::assertion_failure,
-                         [](const forge::contract::testing::exceptions::assertion_failure& error) {
+                         forge::tooling::testing::exceptions::assertion_failure,
+                         [](const forge::tooling::testing::exceptions::assertion_failure& error) {
                             return error.message() == "raw signed varint overflows int32";
                          });
 }
 
 BOOST_AUTO_TEST_CASE(database_host_rejects_foreign_iterators_and_resets_iterator_cache) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    const auto account = protocol::make_name("dbhost").value;
 
    invoke_database(host, code, "dbhost", 0);
-   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 6), forge::contract::testing::exceptions::invalid_iterator);
-   BOOST_CHECK_THROW(invoke_database(host, code, "foreign", 7), forge::contract::testing::exceptions::database_error);
+   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 6), forge::tooling::testing::exceptions::invalid_iterator);
+   BOOST_CHECK_THROW(invoke_database(host, code, "foreign", 7), forge::tooling::testing::exceptions::database_error);
 
    const auto row = host.find_primary(account, database_scope, 2, 30);
    BOOST_REQUIRE(row.has_value());
@@ -820,7 +820,7 @@ BOOST_AUTO_TEST_CASE(contract_oracle_executes_all_non_database_intrinsic_familie
    const auto callee = protocol::make_name("callee").value;
    const auto active = protocol::make_name("active").value;
 
-   auto configured = forge::contract::testing::oracle_state{};
+   auto configured = forge::tooling::testing::oracle_state{};
    configured.accounts.insert(alice);
    configured.authorized_accounts.insert(oracle);
    configured.authorized_permissions.insert({alice, active});
@@ -838,7 +838,7 @@ BOOST_AUTO_TEST_CASE(contract_oracle_executes_all_non_database_intrinsic_familie
    configured.expiration = 56U;
    configured.context_free_data = {{5, 6, 7}};
 
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    host.configure(configured);
    host.register_contract(callee, {code.begin(), code.end()});
 
@@ -869,12 +869,12 @@ BOOST_AUTO_TEST_CASE(contract_oracle_enforces_synchronous_call_access_mode) {
    const auto callee = protocol::make_name("callee").value;
    const auto table = protocol::make_name("callrows").value;
 
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    host.register_contract(callee, {code.begin(), code.end()});
 
    BOOST_TEST(invoke_oracle(host, code, 12U) == 13U);
    BOOST_CHECK_EXCEPTION(
-       invoke_oracle(host, code, 13U), forge::contract::testing::exceptions::database_error,
+       invoke_oracle(host, code, 13U), forge::tooling::testing::exceptions::database_error,
        [](const auto& error) { return error.message() == "this API is not allowed in read only action/call"; });
    BOOST_TEST(!host.find_table(callee, callee, table).has_value());
 
@@ -884,16 +884,16 @@ BOOST_AUTO_TEST_CASE(contract_oracle_enforces_synchronous_call_access_mode) {
 
 BOOST_AUTO_TEST_CASE(contract_oracle_uses_the_same_strict_codec_implementations) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
 
    BOOST_TEST(invoke_oracle(host, code, 15U) == 16U);
-   BOOST_CHECK_EXCEPTION(invoke_oracle(host, code, 16U), forge::contract::testing::exceptions::assertion_failure,
+   BOOST_CHECK_EXCEPTION(invoke_oracle(host, code, 16U), forge::tooling::testing::exceptions::assertion_failure,
                          [](const auto& error) { return error.message() == "base64 trailing bits are non-canonical"; });
 }
 
 BOOST_AUTO_TEST_CASE(contract_recovers_legacy_public_key) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_RECOVERY_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    invoke_recovery(host, code);
 }
 
@@ -902,17 +902,17 @@ BOOST_AUTO_TEST_CASE(contract_oracle_rolls_back_all_observable_side_effects) {
    const auto oracle = protocol::make_name("oracle").value;
    const auto alice = protocol::make_name("alice").value;
 
-   auto configured = forge::contract::testing::oracle_state{};
+   auto configured = forge::tooling::testing::oracle_state{};
    configured.accounts.insert(alice);
    configured.privileged_accounts.insert(oracle);
 
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    host.configure(configured);
    const auto before_state = host.state();
    const auto before_database = host.snapshot();
 
    BOOST_CHECK_EXCEPTION(
-       invoke_oracle(host, code, 10U), forge::contract::testing::exceptions::assertion_failure, [](const auto& error) {
+       invoke_oracle(host, code, 10U), forge::tooling::testing::exceptions::assertion_failure, [](const auto& error) {
           return std::string_view{error.what()}.find("oracle rollback requested") != std::string_view::npos;
        });
    BOOST_CHECK(host.state() == before_state);
@@ -921,7 +921,7 @@ BOOST_AUTO_TEST_CASE(contract_oracle_rolls_back_all_observable_side_effects) {
 
 BOOST_AUTO_TEST_CASE(contract_oracle_rejects_out_of_bounds_wasm_memory) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
 
    BOOST_CHECK_THROW(invoke_oracle(host, code, 11U), std::exception);
 }
@@ -935,8 +935,8 @@ BOOST_AUTO_TEST_CASE(contract_testing_host_bounds_direct_and_nested_execution) {
    const auto table = protocol::make_name("looprows").value;
 
    for (const auto action : {"direct", "nested"}) {
-      auto host = forge::contract::testing::host{
-          forge::contract::testing::execution_limits{.timeout = 50ms},
+      auto host = forge::tooling::testing::host{
+          forge::tooling::testing::execution_limits{.timeout = 50ms},
       };
       host.register_contract(callee, {code.begin(), code.end()});
       host.invoke({code.data(), code.size()}, account, account, protocol::make_name("warmup").value);
@@ -944,7 +944,7 @@ BOOST_AUTO_TEST_CASE(contract_testing_host_bounds_direct_and_nested_execution) {
       const auto started = std::chrono::steady_clock::now();
 
       BOOST_CHECK_THROW(host.invoke({code.data(), code.size()}, account, account, protocol::make_name(action).value),
-                        forge::contract::testing::exceptions::execution_timeout);
+                        forge::tooling::testing::exceptions::execution_timeout);
       const auto elapsed =
           std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
       BOOST_TEST(elapsed < 2'000);
