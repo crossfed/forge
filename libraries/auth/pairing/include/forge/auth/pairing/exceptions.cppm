@@ -23,6 +23,7 @@ enum class code : std::uint16_t {
    identity_invalid = 8,
    generation_exhausted = 9,
    credential_id_invalid = 10,
+   token_collision = 11,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.auth.pairing")
@@ -37,6 +38,7 @@ using scope_invalid = forge::exceptions::coded_exception<code, code::scope_inval
 using identity_invalid = forge::exceptions::coded_exception<code, code::identity_invalid>;
 using generation_exhausted = forge::exceptions::coded_exception<code, code::generation_exhausted>;
 using credential_id_invalid = forge::exceptions::coded_exception<code, code::credential_id_invalid>;
+using token_collision = forge::exceptions::coded_exception<code, code::token_collision>;
 
 [[nodiscard]] inline std::optional<code> code_of(const forge::exceptions::base& value) noexcept {
    const auto& actual = value.code();
@@ -64,6 +66,8 @@ using credential_id_invalid = forge::exceptions::coded_exception<code, code::cre
       return code::generation_exhausted;
    case static_cast<int>(code::credential_id_invalid):
       return code::credential_id_invalid;
+   case static_cast<int>(code::token_collision):
+      return code::token_collision;
    default:
       return std::nullopt;
    }

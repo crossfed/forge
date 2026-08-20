@@ -56,6 +56,13 @@ struct credential_id {
    bool operator==(const credential_id&) const = default;
 };
 
+struct credential_binding {
+   credential_id id;
+   std::uint64_t generation = 0;
+
+   bool operator==(const credential_binding&) const = default;
+};
+
 struct consume_options {
    time_point now{};
    time_point request_expires_at{};
@@ -74,12 +81,20 @@ struct pending_request {
    std::string identity;
    scope_set requested_scopes;
    scope_set scope_baseline;
+   token_digest pre_session_digest;
    time_point created_at{};
    time_point expires_at{};
    pending_state state = pending_state::pending;
    std::optional<time_point> resolved_at;
+   std::optional<credential_binding> approved_credential;
+   bool pre_session_consumed = false;
 
    bool operator==(const pending_request&) const = default;
+};
+
+struct pending_issuance {
+   pending_request record;
+   forge::crypto::core::secret_string pre_session_token;
 };
 
 enum class credential_state {

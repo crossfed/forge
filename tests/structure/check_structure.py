@@ -621,6 +621,7 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "capacity_exceeded",
       "generation_exhausted",
       "credential_id_invalid",
+      "token_collision",
    ):
       if token not in exceptions_module:
          errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/exceptions.cppm: pairing exception is missing {token}")
@@ -631,6 +632,11 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "token_digest",
       "bootstrap_record",
       "pending_request",
+      "pending_issuance",
+      "pre_session_digest",
+      "pre_session_consumed",
+      "credential_binding",
+      "approved_credential",
       "credential_id",
       "approval_options",
       "credential",
@@ -641,6 +647,9 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
    bootstrap_record_match = re.search(r"struct bootstrap_record \{(.*?)\n\};", types_module, re.DOTALL)
    if bootstrap_record_match is not None and "secret_string" in bootstrap_record_match.group(1):
       errors.append("libraries/auth/pairing/include/forge/auth/pairing/types.cppm: persisted bootstrap record must not contain a clear token")
+   pending_record_match = re.search(r"struct pending_request \{(.*?)\n\};", types_module, re.DOTALL)
+   if pending_record_match is not None and "secret_string" in pending_record_match.group(1):
+      errors.append("libraries/auth/pairing/include/forge/auth/pairing/types.cppm: persisted pending record must not contain a clear pre-session token")
 
    pairing_module = (leaf / "include" / "forge" / "auth" / "pairing" / "pairing.cppm").read_text(errors="ignore")
    for token in (
@@ -648,6 +657,10 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "begin_bootstrap",
       "consume_bootstrap",
       "supersede_pending",
+      "identify_pre_session",
+      "validate_pre_session",
+      "consume_approved_pre_session",
+      "credential_binding",
       "approve_pending",
       "approval_options",
       "rotate_credential_downscope",
@@ -668,6 +681,13 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "out-of-range resolution time",
       "invalid revocation time",
       "bootstrap.consumed = true",
+      "pre_session_digest",
+      "pre_session_consumed",
+      "issue_distinct_token",
+      "identify_pre_session",
+      "consume_approved_pre_session",
+      "approved_credential",
+      "require_pre_session_lifecycle",
       "require_credential_id",
       "scope_baseline",
       "credential rotation cannot escalate scopes",
@@ -678,18 +698,77 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       if forbidden in pairing_source or forbidden in pairing_module or forbidden in types_module:
          errors.append(f"libraries/auth/pairing: product integration dependency is forbidden ({forbidden})")
 
-   consume_source = pairing_source.partition("pending_request consume_bootstrap")[2].partition(
-      "pending_request supersede_pending")[0]
-   supersede_source = pairing_source.partition("pending_request supersede_pending")[2].partition(
-      "credential approve_pending")[0]
-   if ("auto result = pending_request" not in consume_source or
-       consume_source.find("auto result = pending_request") > consume_source.find("bootstrap.consumed = true") or
+   consume_source = pairing_source.partition("pending_issuance consume_bootstrap")[2].partition(
+      "pending_issuance supersede_pending")[0]
+   supersede_source = pairing_source.partition("pending_issuance supersede_pending")[2].partition(
+      "token_digest identify_pre_session")[0]
+   if ("auto result = pending_issuance" not in consume_source or
+       consume_source.find("auto result = pending_issuance") > consume_source.find("bootstrap.consumed = true") or
        "return result;" not in consume_source):
-      errors.append("libraries/auth/pairing/pairing.cpp: consume must construct its result before consuming bootstrap")
-   if ("auto result = pending_request" not in supersede_source or
-       supersede_source.find("auto result = pending_request") > supersede_source.find("pending.state = pending_state::superseded") or
+      errors.append("libraries/auth/pairing/pairing.cpp: consume must construct its pre-session issuance before consuming bootstrap")
+   if ("auto result = pending_issuance" not in supersede_source or
+       supersede_source.find("auto result = pending_issuance") > supersede_source.find("pending.state = pending_state::superseded") or
        "return result;" not in supersede_source):
-      errors.append("libraries/auth/pairing/pairing.cpp: supersede must construct its result before mutating pending")
+      errors.append("libraries/auth/pairing/pairing.cpp: supersede must construct its pre-session issuance before mutating pending")
+   approved_consume_source = pairing_source.partition("credential_binding consume_approved_pre_session")[2].partition(
+      "credential approve_pending")[0]
+   if ("require_pending_record" not in approved_consume_source or
+       "verify_token(pending.pre_session_digest, pre_session_token)" not in approved_consume_source or
+       "require_pre_session_lifecycle" not in approved_consume_source or
+       "pending.state != pending_state::approved" not in approved_consume_source or
+       "auto result = *pending.approved_credential;" not in approved_consume_source or
+       approved_consume_source.find("auto result = *pending.approved_credential;") >
+       approved_consume_source.find("pending.pre_session_consumed = true") or
+       approved_consume_source.find("pending.pre_session_consumed = true") <
+       approved_consume_source.find("pending.state != pending_state::approved")):
+      errors.append("libraries/auth/pairing/pairing.cpp: approved pre-session exchange must validate before consuming")
+
+   pre_session_validation = pairing_source.partition("void validate_pre_session")[2].partition(
+      "credential_binding consume_approved_pre_session")[0]
+   if ("require_pending_record" not in pre_session_validation or
+       "verify_token(pending.pre_session_digest, pre_session_token)" not in pre_session_validation or
+       "require_pre_session_lifecycle" not in pre_session_validation or
+       pre_session_validation.find("require_pending_record") >
+       pre_session_validation.find("verify_token(pending.pre_session_digest, pre_session_token)") or
+       pre_session_validation.find("verify_token(pending.pre_session_digest, pre_session_token)") >
+       pre_session_validation.find("require_pre_session_lifecycle")):
+      errors.append("libraries/auth/pairing/pairing.cpp: pre-session validation must verify the token before lifecycle")
+
+   approval_source = pairing_source.partition("credential approve_pending")[2].partition("void reject_pending")[0]
+   if ("pending.approved_credential.emplace" not in approval_source or
+       "auto approved_pending = pending;" not in approval_source or
+       "pending = std::move(approved_pending);" not in approval_source or
+       "pending.state = pending_state::approved" not in approval_source or
+       approval_source.find("pending.approved_credential.emplace") >
+       approval_source.find("pending.state = pending_state::approved") or
+       approval_source.find("auto approved_pending = pending;") >
+       approval_source.find("pending = std::move(approved_pending);")):
+      errors.append("libraries/auth/pairing/pairing.cpp: approval must bind the credential before publishing approved state")
+
+   record_validation = pairing_source.partition("void require_pending_record")[2].partition(
+      "void require_pending_time")[0]
+   for token in (
+      "pending.approved_credential.has_value()",
+      "!pending.approved_credential.has_value()",
+      "pending.approved_credential->generation != 1",
+   ):
+      if token not in record_validation:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pending binding invariant is missing ({token})")
+
+   pre_session_lifecycle = pairing_source.partition("void require_pre_session_lifecycle")[2].partition(
+      "void require_credential_record")[0]
+   for token in (
+      "now < pending.created_at",
+      "pending.pre_session_consumed",
+      "now >= pending.expires_at",
+   ):
+      if token not in pre_session_lifecycle:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pre-session lifecycle invariant is missing ({token})")
+   if (pre_session_lifecycle.find("now < pending.created_at") >
+       pre_session_lifecycle.find("pending.pre_session_consumed") or
+       pre_session_lifecycle.find("pending.pre_session_consumed") >
+       pre_session_lifecycle.find("now >= pending.expires_at")):
+      errors.append("libraries/auth/pairing/pairing.cpp: pre-session lifecycle must check time before replay and expiry")
 
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    for token in (
@@ -721,6 +800,9 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "bootstrap_uses_random_base64url_secret_and_persists_only_a_digest",
       "bootstrap_rejects_noncanonical_trailing_pad_bits_without_consuming_the_record",
       "bootstrap_consumption_is_one_time_bounded_and_does_not_report_clear_tokens",
+      "pre_session_is_canonical_digest_only_and_strictly_identifiable",
+      "pre_session_validation_and_supersession_rotate_the_secret",
+      "approved_pre_session_exchanges_once_and_rejected_or_expired_requests_cannot_exchange",
       "persisted_transition_clocks_reject_backdating_without_mutation",
       "malformed_persisted_terminal_timestamps_are_rejected_without_mutation",
       "pending_transitions_canonicalize_scopes_and_require_explicit_supersession",
@@ -730,7 +812,8 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
          errors.append(f"tests/auth/pairing_tests.cpp: pairing regression is missing ({token})")
 
    package_consumer = (root / "tests" / "package_auth_pairing_component" / "main.cpp").read_text(errors="ignore")
-   for token in ("import forge.auth.pairing.exceptions;", "import forge.auth.pairing.pairing;", "consume_bootstrap"):
+   for token in ("import forge.auth.pairing.exceptions;", "import forge.auth.pairing.pairing;", "consume_bootstrap",
+                 "identify_pre_session", "consume_approved_pre_session", "credential_binding"):
       if token not in package_consumer:
          errors.append(f"tests/package_auth_pairing_component/main.cpp: direct pairing package import is missing ({token})")
 
