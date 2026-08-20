@@ -15,11 +15,11 @@ module forge.contract.manifest.generator;
 import forge.codec.json;
 import forge.crypto.digest.sha256;
 import forge.variant.value;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 namespace {
 
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
    auto input = std::ifstream{path, std::ios::binary | std::ios::ate};

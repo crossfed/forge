@@ -87,7 +87,7 @@ Intrinsic interface v1 and raw action/result bytes are compatibility contracts;
 the C++23 API is experimental until the first SDK release. Modern void and
 non-void actions, malformed input, return values, checks, package relocation,
 all five secondary-key families, iterator boundaries, payer behavior,
-autoincrement, singleton operations and execution in `forge.vm.wasm` are tested
+autoincrement, singleton operations and execution in `forge.vm.wasm.interpret` are tested
 end to end. The unchanged CDT database C fixture and an independent
 Spring-derived signature manifest prove all 60 database imports through the
 generated headers and VM parser. The full donor manifest separately verifies

@@ -245,7 +245,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/transaction/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/interpret/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/mdbx/include"
@@ -436,9 +436,9 @@ add_subdirectory(vendor/bls12-381 EXCLUDE_FROM_ALL)
 add_subdirectory(vendor/softfloat EXCLUDE_FROM_ALL)
 set_target_properties(
    softfloat PROPERTIES
-   EXPORT_NAME vm_wasm_softfloat_internal
+   EXPORT_NAME vm_wasm_interpret_softfloat_internal
    INTERFACE_INCLUDE_DIRECTORIES
-      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/include>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/8086-SSE>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/build/Linux-x86_64-GCC>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/softfloat>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/include>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/8086-SSE>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/build/Linux-x86_64-GCC>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm_interpret/softfloat>"
 )
 set_property(
    TARGET bls12-381 PROPERTY INTERFACE_INCLUDE_DIRECTORIES
@@ -602,7 +602,7 @@ set(
    forge_chain_quorum
    forge_chain_fork
    forge_chain_savanna
-   forge_vm_wasm
+   forge_vm_wasm_interpret
    forge_db_ids
    forge_db_core
    forge_db_object
@@ -758,7 +758,7 @@ set(
    chain_quorum
    chain_fork
    chain_savanna
-   vm_wasm
+   vm_wasm_interpret
    db_core
    db_object
    config_core
@@ -903,7 +903,7 @@ set(
    libraries/chain/core/include/forge
    libraries/chain/protocol/include/forge
    libraries/chain/transaction/include/forge
-   libraries/vm/wasm/include/forge
+   libraries/vm/wasm/interpret/include/forge
    libraries/db/core/include/forge
    libraries/db/object/include/forge
    libraries/codec/base32/include/forge
@@ -1032,7 +1032,7 @@ install(
 
 install(
    DIRECTORY vendor/softfloat/source/include/
-   DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/softfloat
+   DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm_interpret/softfloat
    COMPONENT dev
    EXCLUDE_FROM_ALL
 )
@@ -1044,7 +1044,7 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/AUTHORS"
       "${CMAKE_CURRENT_SOURCE_DIR}/PROVENANCE.md"
       "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES"
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/LICENSE.eos-vm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/interpret/LICENSE.eos-vm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge"
    COMPONENT dev
    EXCLUDE_FROM_ALL

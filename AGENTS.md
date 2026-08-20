@@ -199,9 +199,9 @@ class service_node {
 
 ## VM Library Boundary
 
-- `forge::vm` is an empty family root; public symbols live in VM leaf
-  libraries such as `forge::vm::wasm`.
-- `forge::vm::wasm` owns neutral WebAssembly parsing, validation, execution,
+- `forge::vm` and its WASM child are empty family roots; public symbols live
+  in VM leaves such as `forge::vm::wasm::interpret`.
+- `forge::vm::wasm::interpret` owns neutral WebAssembly parsing, validation, execution,
   host-function mechanics, guarded memory, deterministic floating point,
   watchdog behavior and supported execution backends.
 - VM libraries must not contain blockchain controller behavior, state access,

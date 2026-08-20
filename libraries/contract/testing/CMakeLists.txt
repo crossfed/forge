@@ -57,7 +57,7 @@ target_link_libraries(
       forge_db_core
       forge_db_ids
       forge_raw
-      forge_vm_wasm
+      forge_vm_wasm_interpret
       softfloat
 )
 
@@ -73,7 +73,7 @@ if(BUILD_TESTING OR FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_contract_testing_tests
       PRIVATE
          forge_contract_testing
-         forge_vm_wasm
+         forge_vm_wasm_interpret
          Boost::headers
    )
 

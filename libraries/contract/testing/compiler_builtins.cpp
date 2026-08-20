@@ -13,7 +13,7 @@ module forge.contract.testing.host;
 
 import forge.contract.testing.exceptions;
 import forge.contract.testing.schema;
-import forge.vm.wasm.host_function;
+import forge.vm.wasm.interpret.host_function;
 
 #include "details/compiler_builtins.hxx"
 

@@ -11,5 +11,5 @@ target_link_libraries(
    PUBLIC
       forge_codec_json
       forge_crypto_digest
-      forge_vm_wasm
+      forge_vm_wasm_interpret
 )

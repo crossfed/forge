@@ -50,7 +50,7 @@ knowledge of Spring tables, secondary keys or iterators.
 ## Floating And 256-bit Keys
 
 Double and long-double keys use the SoftFloat implementation already shipped
-inside `forge.vm.wasm`. NaN is rejected before a DB query or mutation, and
+inside `forge.vm.wasm.interpret`. NaN is rejected before a DB query or mutation, and
 signed zero maps to one ObjectDB sort key. `idx256` uses
 `forge::chain::protocol::key256`; its legacy two-word pointer is handled by the
 VM argument proxy so unaligned donor inputs are copied safely.
@@ -66,7 +66,7 @@ own policy, state models and production Forge DB drivers.
 ## Tests
 
 `guest/tests/e2e/contract_tests.cpp` runs real generated wasm32 contracts
-through `forge.vm.wasm`. The database cases cover all 60 DB imports, C++23
+through `forge.vm.wasm.interpret`. The database cases cover all 60 DB imports, C++23
 `multi_index` and `singleton`, traversal, transaction commit/rollback, iterator
 errors, payer and ownership checks, NaN, and unaligned `idx256` input. The full
 oracle contract executes every non-database capability family, verifies

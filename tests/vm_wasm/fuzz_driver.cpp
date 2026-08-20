@@ -5,10 +5,10 @@
 #include <memory>
 #include <new>
 
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
-   using namespace forge::vm::wasm;
+   using namespace forge::vm::wasm::interpret;
 
    auto allocator = wasm_allocator{};
    auto code = wasm_code{};

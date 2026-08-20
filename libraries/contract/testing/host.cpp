@@ -26,7 +26,7 @@ import forge.db.core.driver;
 import forge.db.object.store;
 import forge.db.object.transaction;
 import forge.db.ids.object_id;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 #include "details/host_impl.hxx"
 

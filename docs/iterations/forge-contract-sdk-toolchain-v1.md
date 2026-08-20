@@ -20,7 +20,7 @@ entry points live in `tools/`. It currently delivers:
 - 30 modern Forge modules and all 14 C plus 39 C++ headers from pinned CDT;
 - Clang attribute plugin, ABI generator, structural checker and build manifest;
 - CMake `find_package(ForgeContract)` and `forge_add_contract()`;
-- allocator/runtime tests and execution in `forge.vm.wasm`;
+- allocator/runtime tests and execution in `forge.vm.wasm.interpret`;
 - reproducibility, negative validation, archive and relocation gates.
 
 Production blockchain host bindings and the unchanged legacy contract corpus
@@ -28,7 +28,7 @@ remain later compatibility blocks. The corpus is now an independent proof of a
 complete SDK rather than the mechanism for discovering missing fundamental API.
 
 This document defines only the guest SDK and contract toolchain track.
-`forge.vm.wasm` is already released and is the execution and validation oracle
+`forge.vm.wasm.interpret` is already released and is the execution and validation oracle
 for this work. VM engine development, a Rust SDK and blockchain-owned host
 binding implementations are separate tracks.
 
@@ -51,7 +51,7 @@ design:
 4. Legacy EOSIO and modern Forge contract APIs are two source vocabularies over
    one implementation, one attribute canon, one ABI and one intrinsic surface.
 5. Guest code is compiled only for `wasm32`, never linked into Forge host
-   binaries, and meets the host only at runtime through `forge.vm.wasm`.
+   binaries, and meets the host only at runtime through `forge.vm.wasm.interpret`.
 
 ## Principles
 
@@ -123,7 +123,7 @@ forge/
       contract/                 # forge.contract.* implementation
       eosio/                    # compatibility veneer only
     examples/                   # SDK example contracts
-    tests/                      # Contracts executed through forge.vm.wasm
+    tests/                      # Contracts executed through forge.vm.wasm.interpret
     sysroot/                    # Pinned LLVM-based freestanding sysroot
     cmake/                      # Toolchain and add_contract()
   tools/
@@ -162,7 +162,7 @@ contracts must use `-mcpu=mvp` plus an explicit allowlist of features that
 matches chain validation.
 
 Every produced contract is validated and executed by the released
-`forge.vm.wasm`:
+`forge.vm.wasm.interpret`:
 
 ```text
 compiler feature surface = VM validation surface = chain consensus surface
@@ -355,7 +355,7 @@ objects + optional dispatch.cpp
   `-- pinned wasm-ld ---------------------------------------> contract.wasm
 
 contract.wasm
-  |-- forge.vm.wasm validation and execution
+  |-- forge.vm.wasm.interpret validation and execution
   `-- approved-import manifest check
 ```
 
@@ -407,7 +407,7 @@ implementations and do not alter the engine.
 ### Day-Zero Gate
 
 An empty or hello contract builds through `add_contract()`, validates and
-executes in the released `forge.vm.wasm`.
+executes in the released `forge.vm.wasm.interpret`.
 
 ### Compatibility Corpus Gate
 

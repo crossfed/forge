@@ -1,7 +1,7 @@
 # Forge Contract SDK
 
 Forge Contract SDK is the standalone C++23 toolchain for building smart
-contracts executed by `forge.vm.wasm`. It compiles contracts for freestanding
+contracts executed by `forge.vm.wasm.interpret`. It compiles contracts for freestanding
 `wasm32`, generates Spring-compatible ABI data and a dispatcher, validates the
 finished WebAssembly module, and records the complete build identity in a
 sidecar manifest.
@@ -441,7 +441,7 @@ The declarative registry generates guest declarations and the compatibility
 manifest consumed by `contract-check`. Validation rejects unknown or
 wrongly typed imports, WASI, unsupported WebAssembly features, malformed ABI,
 malformed modules and a missing `apply` export. Structural validation uses
-`forge.vm.wasm`, so the build and node execution surfaces share one parser and
+`forge.vm.wasm.interpret`, so the build and node execution surfaces share one parser and
 validation model.
 
 ## Build Manifest

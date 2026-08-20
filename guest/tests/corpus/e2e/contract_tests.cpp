@@ -20,13 +20,13 @@ import forge.contract.testing.host;
 import forge.crypto.digest.sha256;
 import forge.exceptions;
 import forge.raw.codec;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 namespace {
 
 namespace protocol = forge::chain::protocol;
 namespace testing = forge::contract::testing;
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 const auto source_root = std::filesystem::path{FORGE_CONTRACT_CORPUS_SOURCE_DIR};
 const auto build_root = std::filesystem::path{FORGE_CONTRACT_CORPUS_BUILD_DIR};

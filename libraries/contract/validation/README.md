@@ -15,7 +15,7 @@ forge::contract::validation::validate({
 });
 ```
 
-Validation uses `forge.vm.wasm` and `forge.chain.protocol`; it does not invoke
+Validation uses `forge.vm.wasm.interpret` and `forge.chain.protocol`; it does not invoke
 Clang and the package component does not pull Clang transitively. Unknown or
 wrongly typed imports, WASI, malformed ABI/WASM, a missing `apply` export and an
 `apply` export other than `(i64, i64, i64) -> void` are errors. The command
@@ -23,7 +23,7 @@ adapter maps exceptions to process exit codes.
 
 ## Dependencies
 
-`forge_chain_protocol`, `forge_codec_json` and `forge_vm_wasm` provide ABI
+`forge_chain_protocol`, `forge_codec_json` and `forge_vm_wasm_interpret` provide ABI
 parsing and structural WASM validation. The library does not link or discover
 Clang/LLVM.
 

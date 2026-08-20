@@ -60,7 +60,7 @@ endif()
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol contract_testing crypto_asymmetric crypto_digest raw vm_wasm
+   COMPONENTS chain_protocol contract_testing crypto_asymmetric crypto_digest raw vm_wasm_interpret
 )
 find_package(Boost REQUIRED)
 
@@ -73,7 +73,7 @@ target_link_libraries(
       Forge::forge_crypto_digest
       Forge::forge_contract_testing
       Forge::forge_raw
-      Forge::forge_vm_wasm
+      Forge::forge_vm_wasm_interpret
       Boost::headers
 )
 target_compile_definitions(

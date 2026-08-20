@@ -10,7 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol chain_savanna_values contract_testing crypto_digest raw vm_wasm
+   COMPONENTS chain_protocol chain_savanna_values contract_testing crypto_digest raw vm_wasm_interpret
 )
 if(PRODUCT_FORGE_SOURCE_ROOT)
    include(

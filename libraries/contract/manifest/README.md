@@ -27,7 +27,7 @@ Source verification is a separate future attestation layer. It will require a
 hermetic build and compiler-derived dependencies rather than a second
 declarative CMake graph.
 
-`forge_codec_json`, `forge_crypto_digest` and `forge_vm_wasm` provide
+`forge_codec_json`, `forge_crypto_digest` and `forge_vm_wasm_interpret` provide
 deterministic JSON, SHA-256 and WASM inspection. The library does not require
 Clang and does not validate policy; use `contract_validation` first.
 

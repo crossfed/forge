@@ -1,12 +1,12 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.backend;
-#define FORGE_VM_WASM_TEST_USES_BACKEND
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.backend;
+#define FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE implementation_limits_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE implementation_limits_tests
 
 #include <algorithm>
 #include <vector>
@@ -17,7 +17,7 @@ import forge.vm.wasm.backend;
 
 
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 void host_call() {}
 
@@ -37,8 +37,8 @@ struct dynamic_options {
 
 BACKEND_TEST_CASE( "Test call depth", "[call_depth]") {
    wasm_allocator wa;
-   using rhf_t     = forge::vm::wasm::registered_host_functions<standalone_function_t>;
-   using backend_t = forge::vm::wasm::backend<rhf_t, TestType>;
+   using rhf_t     = forge::vm::wasm::interpret::registered_host_functions<standalone_function_t>;
+   using backend_t = forge::vm::wasm::interpret::backend<rhf_t, TestType>;
 
    rhf_t::add<&host_call>("env", "host.call");
 
@@ -59,8 +59,8 @@ BACKEND_TEST_CASE( "Test call depth", "[call_depth]") {
 
 BACKEND_TEST_CASE( "Test call depth dynamic", "[call_depth]") {
    wasm_allocator wa;
-   using rhf_t     = forge::vm::wasm::registered_host_functions<standalone_function_t>;
-   using backend_t = forge::vm::wasm::backend<rhf_t, TestType, dynamic_options>;
+   using rhf_t     = forge::vm::wasm::interpret::registered_host_functions<standalone_function_t>;
+   using backend_t = forge::vm::wasm::interpret::backend<rhf_t, TestType, dynamic_options>;
    rhf_t::add<&host_call>("env", "host.call");
 
    backend_t bkend(implementation_limits_wasm_code, nullptr, dynamic_options{151});

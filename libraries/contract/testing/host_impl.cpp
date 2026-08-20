@@ -51,7 +51,7 @@ import forge.crypto.digest.sha256;
 import forge.crypto.digest.sha3;
 import forge.crypto.digest.sha512;
 import forge.raw.raw;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 #include "details/memory_driver.hxx"
 #include "details/compiler_builtins.hxx"
@@ -73,7 +73,7 @@ class exit_signal final {
 
 class wasm_allocator_guard final {
  public:
-   explicit wasm_allocator_guard(forge::vm::wasm::wasm_allocator& allocator) : allocator_{allocator} {}
+   explicit wasm_allocator_guard(forge::vm::wasm::interpret::wasm_allocator& allocator) : allocator_{allocator} {}
 
    wasm_allocator_guard(const wasm_allocator_guard&) = delete;
    wasm_allocator_guard& operator=(const wasm_allocator_guard&) = delete;
@@ -83,7 +83,7 @@ class wasm_allocator_guard final {
    }
 
  private:
-   forge::vm::wasm::wasm_allocator& allocator_;
+   forge::vm::wasm::interpret::wasm_allocator& allocator_;
 };
 
 struct packed_code_hash_result {
@@ -415,7 +415,7 @@ invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::ui
                                      std::uint64_t first_receiver, std::uint64_t action,
                                      std::vector<std::uint8_t> data) {
    begin_invocation(receiver, first_receiver, std::move(data));
-   auto bytes = forge::vm::wasm::wasm_code{code.begin(), code.end()};
+   auto bytes = forge::vm::wasm::interpret::wasm_code{code.begin(), code.end()};
    try {
       auto vm = backend{bytes, *this, &allocator_};
       execute(vm, "apply", receiver, first_receiver, action);
@@ -423,7 +423,7 @@ invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::ui
    } catch (const exit_signal& signal) {
       result_.exit_code = signal.code;
       commit_invocation();
-   } catch (const forge::vm::wasm::exceptions::timeout&) {
+   } catch (const forge::vm::wasm::interpret::exceptions::timeout&) {
       rollback_invocation();
       FORGE_THROW_EXCEPTION(exceptions::execution_timeout, "contract execution timed out");
    } catch (...) {
@@ -606,8 +606,8 @@ std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::
       return -1;
    }
 
-   auto code = forge::vm::wasm::wasm_code{target->second.begin(), target->second.end()};
-   auto nested_allocator = forge::vm::wasm::wasm_allocator{};
+   auto code = forge::vm::wasm::interpret::wasm_code{target->second.begin(), target->second.end()};
+   auto nested_allocator = forge::vm::wasm::interpret::wasm_allocator{};
    auto allocator_guard = wasm_allocator_guard{nested_allocator};
    auto vm = backend{code, *this, &nested_allocator};
    if (vm.get_module().get_exported_function("__forge_call") == std::numeric_limits<std::uint32_t>::max()) {
@@ -1126,7 +1126,7 @@ void host::impl::eosio_assert(std::uint32_t test, input<const char, 1> message) 
    }
 }
 
-void host::impl::eosio_assert_message(std::uint32_t test, forge::vm::wasm::span<const char> message) {
+void host::impl::eosio_assert_message(std::uint32_t test, forge::vm::wasm::interpret::span<const char> message) {
    if (test == 0U) {
       const auto size = std::min(message.size(), max_assert_message_size);
       const auto text = std::string{message.data(), size};
@@ -1149,7 +1149,7 @@ std::uint32_t host::impl::action_data_size() const {
    return static_cast<std::uint32_t>(action_data_.size());
 }
 
-std::uint32_t host::impl::read_action_data(forge::vm::wasm::span<char> destination) const {
+std::uint32_t host::impl::read_action_data(forge::vm::wasm::interpret::span<char> destination) const {
    if (destination.empty()) {
       return static_cast<std::uint32_t>(action_data_.size());
    }
@@ -1158,7 +1158,7 @@ std::uint32_t host::impl::read_action_data(forge::vm::wasm::span<char> destinati
    return static_cast<std::uint32_t>(size);
 }
 
-void host::impl::set_action_return_value(forge::vm::wasm::span<const char> value) {
+void host::impl::set_action_return_value(forge::vm::wasm::interpret::span<const char> value) {
    result_.return_value.assign(reinterpret_cast<const std::uint8_t*>(value.data()),
                                reinterpret_cast<const std::uint8_t*>(value.data() + value.size()));
 }
@@ -1256,7 +1256,7 @@ void host::impl::require_writable() const {
 }
 
 std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer,
-                                      std::uint64_t primary, forge::vm::wasm::span<const char> value) {
+                                      std::uint64_t primary, forge::vm::wasm::interpret::span<const char> value) {
    require_writable();
    require_payer(payer);
    const auto owner = run(ensure_table(*transaction_, receiver_, scope, table_name, payer));
@@ -1274,7 +1274,7 @@ std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_n
    return cache(row_kind::primary, created.id.as_object_id(), owner.id);
 }
 
-void host::impl::db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::span<const char> value) {
+void host::impl::db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::interpret::span<const char> value) {
    require_writable();
    auto& entry = require_iterator(iterator, row_kind::primary);
    const auto owner = run(transaction_->get(entry.table_id));
@@ -1537,7 +1537,7 @@ void from_key(float128& output, float128 value) {
    output = value;
 }
 
-uint256 read_uint256(forge::vm::wasm::span<const unsigned __int128> value) {
+uint256 read_uint256(forge::vm::wasm::interpret::span<const unsigned __int128> value) {
    if (value.size() != 2U) {
       fail_database("idx256 data_len must equal two");
    }
@@ -1546,11 +1546,11 @@ uint256 read_uint256(forge::vm::wasm::span<const unsigned __int128> value) {
    return uint256::make_from_word_sequence(words[0], words[1]);
 }
 
-uint256 read_uint256(forge::vm::wasm::span<unsigned __int128> value) {
-   return read_uint256(forge::vm::wasm::span<const unsigned __int128>{value.data(), value.size()});
+uint256 read_uint256(forge::vm::wasm::interpret::span<unsigned __int128> value) {
+   return read_uint256(forge::vm::wasm::interpret::span<const unsigned __int128>{value.data(), value.size()});
 }
 
-void write_uint256(forge::vm::wasm::span<unsigned __int128> output, const uint256& value) {
+void write_uint256(forge::vm::wasm::interpret::span<unsigned __int128> output, const uint256& value) {
    if (output.size() != 2U) {
       fail_database("idx256 data_len must equal two");
    }

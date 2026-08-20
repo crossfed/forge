@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted direction. This document records a required clean-breaking rename of
-the current EOS VM implementation before a second WASM execution backend is
-introduced. Implementation is deferred to a dedicated review block.
+Accepted direction. The clean-breaking interpreter rename is implemented;
+the second WASM execution backend remains deferred to its own review block.
 
 ## Problem
 

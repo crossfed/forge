@@ -28,12 +28,12 @@ import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.object.index;
 import forge.raw.codec;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 namespace {
 
 namespace protocol = forge::chain::protocol;
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 struct intrinsic_signature {
    std::vector<wasm::value_type> parameters;

@@ -113,13 +113,13 @@ The guest API remains independent of `forge.db`.
 
 - The unchanged CDT `capi/db.c` fixture compiles through generated
   `<eosio/db.h>` and retains all 60 imports.
-- `forge.vm.wasm` parses the fixture and verifies exact names, parameter types
+- `forge.vm.wasm.interpret` parses the fixture and verifies exact names, parameter types
   and return types against the independent golden manifest.
 - Compile-time assertions cover representative primary, 128-bit, 256-bit and
   floating signatures in the generated host interface.
 - Existing modern and legacy contracts execute without acquiring unused
   database imports.
-- A generated contract calls all 60 DB functions through `forge.vm.wasm` and
+- A generated contract calls all 60 DB functions through `forge.vm.wasm.interpret` and
   validates committed ObjectDB state independently of the host iterator cache.
 - Rollback, duplicate keys, ownership, payer, wrong-kind/stale iterators,
   `idx256` length and alignment, and floating NaN are executable regressions.

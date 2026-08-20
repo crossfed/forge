@@ -22,8 +22,24 @@ CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^\s*(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
-VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
+VM_WASM_INTERPRET_EXPORT = re.compile(r"\bFORGE_VM_WASM_INTERPRET_EXPORT\b")
 UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
+LEGACY_VM_WASM_SOURCE_IDENTITIES = (
+   (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
+   (re.compile(r"\bvm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"\bForge::vm_wasm_softfloat_internal\b"), "legacy SoftFloat export identity"),
+   (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
+   (re.compile(r"forge\.vm\.wasm(?!\.interpret(?:\b|:))"), "legacy VM module identity"),
+   (re.compile(r"forge::vm::wasm(?!::interpret(?:\b|::))"), "legacy VM namespace identity"),
+   (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
+)
+LEGACY_VM_WASM_CMAKE_IDENTITIES = (
+   (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
+   (re.compile(r"\bvm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
+   (re.compile(r"libraries/vm/wasm/include"), "legacy VM include root"),
+   (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
+)
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -170,16 +186,33 @@ def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
       )
 
 
-def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
-   component = root / "libraries" / "vm" / "wasm"
+def check_vm_wasm_interpret_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "vm" / "wasm"
+   if not family.exists():
+      return
+
+   root_cmake = root / "CMakeLists.txt"
+   stale_include_registration = f"{family.relative_to(root).as_posix()}/include"
+   if root_cmake.is_file() and stale_include_registration in root_cmake.read_text(errors="ignore"):
+      errors.append(f"CMakeLists.txt: stale {stale_include_registration} registration")
+
+   unexpected_family_entries = {path.name for path in family.iterdir()} - {"interpret"}
+   if unexpected_family_entries:
+      errors.append(
+         f"{family.relative_to(root)}: empty vm::wasm family root contains: "
+         f"{', '.join(sorted(unexpected_family_entries))}"
+      )
+
+   component = family / "interpret"
    if not component.exists():
+      errors.append(f"{component.relative_to(root)}: vm_wasm_interpret leaf is missing")
       return
 
    details = component / "details"
    if details.exists():
-      errors.append(f"{details.relative_to(root)}: vm_wasm must not install or compile private source headers")
+      errors.append(f"{details.relative_to(root)}: vm_wasm_interpret must not install or compile private source headers")
 
-   include = component / "include" / "forge" / "vm" / "wasm"
+   include = component / "include" / "forge" / "vm" / "wasm" / "interpret"
    allowed_headers = {"host_function.hpp", "opcode_macros.hpp"}
    headers = {path.name for path in include.glob("*.hpp")}
    unexpected = headers - allowed_headers
@@ -199,15 +232,38 @@ def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
          included = INCLUDE.match(line)
          if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
             errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
-         if included and "forge/vm/wasm/" in included.group(1) and included.group(1) not in {
-            "<forge/vm/wasm/host_function.hpp>",
-            "<forge/vm/wasm/opcode_macros.hpp>",
+         if included and "forge/vm/wasm/interpret/" in included.group(1) and included.group(1) not in {
+            "<forge/vm/wasm/interpret/host_function.hpp>",
+            "<forge/vm/wasm/interpret/opcode_macros.hpp>",
          }:
             errors.append(f"{relative}:{line_number}: VM components must use module imports")
-         if VM_WASM_EXPORT.search(line):
-            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+         if VM_WASM_INTERPRET_EXPORT.search(line):
+            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_INTERPRET_EXPORT is forbidden")
          if UNQUALIFIED_C_MEMORY.search(line):
             errors.append(f"{relative}:{line_number}: VM modules must qualify C memory functions through std")
+
+
+def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: list[str]) -> None:
+   for path in files:
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         for expression, description in LEGACY_VM_WASM_SOURCE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+
+   cmake_paths = [root / "CMakeLists.txt", root / "cmake" / "ForgeConfig.cmake.in"]
+   for base in (root / "libraries", root / "guest", root / "plugins"):
+      if base.exists():
+         cmake_paths.extend(base.rglob("CMakeLists.txt"))
+
+   for path in sorted(set(cmake_paths)):
+      if not path.is_file():
+         continue
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         for expression, description in LEGACY_VM_WASM_CMAKE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
 
 
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
@@ -1079,7 +1135,8 @@ def main() -> int:
    check_aggregates(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
-   check_vm_wasm_boundaries(root, errors)
+   check_vm_wasm_interpret_boundaries(root, errors)
+   check_vm_wasm_interpret_identities(root, files, errors)
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
    check_bls_value_ownership(root, files, errors)

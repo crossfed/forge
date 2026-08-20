@@ -16,11 +16,11 @@ module forge.contract.validation.validator;
 import forge.codec.json;
 import forge.chain.protocol.abi;
 import forge.variant.value;
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 namespace {
 
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 std::string read_text(const std::filesystem::path& path) {
    auto input = std::ifstream{path, std::ios::binary};

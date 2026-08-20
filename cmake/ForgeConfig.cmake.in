@@ -30,7 +30,7 @@ set(
    chain_quorum
    chain_fork
    chain_savanna
-   vm_wasm
+   vm_wasm_interpret
    contract_testing
    contract_abi
    contract_attributes
@@ -171,7 +171,7 @@ macro(_forge_add_component component)
          _forge_add_component(crypto_digest)
          _forge_add_component(raw)
          _forge_add_component(variant)
-      elseif("${component}" STREQUAL "vm_wasm")
+      elseif("${component}" STREQUAL "vm_wasm_interpret")
          _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "contract_testing")
          _forge_add_component(asio)
@@ -187,7 +187,7 @@ macro(_forge_add_component component)
          _forge_add_component(db_object)
          _forge_add_component(exceptions)
          _forge_add_component(raw)
-         _forge_add_component(vm_wasm)
+         _forge_add_component(vm_wasm_interpret)
       elseif("${component}" STREQUAL "contract_abi")
          if(NOT Forge_BUILT_WITH_CONTRACT_TOOLING)
             set(Forge_contract_abi_FOUND FALSE)
@@ -208,7 +208,7 @@ macro(_forge_add_component component)
          else()
             _forge_add_component(chain_protocol)
             _forge_add_component(codec_json)
-            _forge_add_component(vm_wasm)
+            _forge_add_component(vm_wasm_interpret)
          endif()
       elseif("${component}" STREQUAL "contract_manifest")
          if(NOT Forge_BUILT_WITH_CONTRACT_TOOLING)
@@ -217,7 +217,7 @@ macro(_forge_add_component component)
          else()
             _forge_add_component(codec_json)
             _forge_add_component(crypto_digest)
-            _forge_add_component(vm_wasm)
+            _forge_add_component(vm_wasm_interpret)
          endif()
       elseif("${component}" STREQUAL "db_core")
          _forge_add_component(exceptions)
@@ -630,7 +630,7 @@ if(
    OR "chain_fork" IN_LIST _FORGE_COMPONENTS
    OR "chain_savanna" IN_LIST _FORGE_COMPONENTS
    OR "net_transport" IN_LIST _FORGE_COMPONENTS
-   OR "vm_wasm" IN_LIST _FORGE_COMPONENTS
+   OR "vm_wasm_interpret" IN_LIST _FORGE_COMPONENTS
 )
    _forge_require_package(Threads)
 endif()

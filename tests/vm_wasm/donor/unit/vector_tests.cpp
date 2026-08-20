@@ -1,11 +1,11 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.vector;
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.vector;
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE vector_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE vector_tests
 
 #include <algorithm>
 #include <vector>
@@ -15,7 +15,7 @@ import forge.vm.wasm.vector;
 #include <string>
 
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 TEST_CASE( "unmanaged_vector tests", "[unmanaged_vector_tests]") {
    {

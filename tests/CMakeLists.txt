@@ -1,6 +1,6 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(FORGE_VM_WASM_DONOR_ROOT "" CACHE PATH "Pinned EOS VM checkout used to verify the native test port")
+set(FORGE_VM_WASM_INTERPRET_DONOR_ROOT "" CACHE PATH "Pinned EOS VM checkout used to verify the native interpreter test port")
 add_subdirectory(vm_wasm)
 
 set(FORGE_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/structure/check_structure.py)
@@ -1667,19 +1667,19 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_vm_wasm_component
+   test_forge_package_vm_wasm_interpret_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
       -DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-relocated
-      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component
-      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-component
+      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-relocated
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-component
       -DFORGE_PACKAGE_TEST_SOURCE_ROOT=${PROJECT_SOURCE_DIR}
       -DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}
       -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component/verify_relocation.cmake
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component/verify_relocation.cmake
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2598,21 +2598,21 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    set_tests_properties(test_forge_package_contract_manifest_component PROPERTIES DEPENDS test_forge_package_install)
 endif()
 add_test(
-   NAME test_forge_package_vm_wasm_component
+   NAME test_forge_package_vm_wasm_interpret_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
       -DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-relocated
-      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component
-      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-component
+      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-relocated
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-component
       -DFORGE_PACKAGE_TEST_SOURCE_ROOT=${PROJECT_SOURCE_DIR}
       -DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}
       -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component/verify_relocation.cmake
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component/verify_relocation.cmake
 )
-set_tests_properties(test_forge_package_vm_wasm_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_vm_wasm_interpret_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_db_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}

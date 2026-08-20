@@ -10,19 +10,19 @@
 #include <utility>
 #include <vector>
 
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.backend;
-import forge.vm.wasm.debug_info;
-import forge.vm.wasm.execution_interface;
-import forge.vm.wasm.types;
-import forge.vm.wasm.vector;
-import forge.vm.wasm.wasm_stack;
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.backend;
+import forge.vm.wasm.interpret.debug_info;
+import forge.vm.wasm.interpret.execution_interface;
+import forge.vm.wasm.interpret.types;
+import forge.vm.wasm.interpret.vector;
+import forge.vm.wasm.interpret.wasm_stack;
 
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE port_regression_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE port_regression_tests
 
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 static_assert(!std::is_copy_constructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::wasm_allocator>);
@@ -632,7 +632,7 @@ TEST_CASE("empty element segments do not copy null storage", "[parser]") {
    static_cast<void>(instance);
 }
 
-#if FORGE_VM_WASM_HAS_JIT
+#if FORGE_VM_WASM_INTERPRET_HAS_JIT
 TEST_CASE("jit exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect<wasm::jit>();
    verify_public_call_indirect_rejects_empty_slot<wasm::jit>();
@@ -831,7 +831,7 @@ TEST_CASE("sequential if else instructions do not increase control depth", "[par
    check_flat_control_depth<wasm::interpreter>();
 }
 
-#if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+#if FORGE_VM_WASM_INTERPRET_HAS_JIT && !defined(FORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
    using runtime = wasm::backend<std::nullptr_t, wasm::jit>;

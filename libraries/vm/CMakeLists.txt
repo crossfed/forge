@@ -1,1 +1,1 @@
-add_subdirectory(wasm)
+add_subdirectory(wasm/interpret)

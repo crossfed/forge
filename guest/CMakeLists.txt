@@ -325,7 +325,7 @@ else()
          COMPONENTS
             chain_protocol
             codec_json
-            vm_wasm
+            vm_wasm_interpret
             contract_abi
             contract_attributes
             contract_validation
@@ -339,7 +339,7 @@ else()
          COMPONENTS
             chain_protocol
             codec_json
-            vm_wasm
+            vm_wasm_interpret
             contract_abi
             contract_attributes
             contract_validation

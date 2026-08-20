@@ -7,7 +7,7 @@ namespace forge::contract::testing {
 class memory_driver;
 
 struct host::impl : compiler_builtins {
-   using wasm = forge::vm::wasm::interpreter;
+   using wasm = forge::vm::wasm::interpret::interpreter;
 
    struct copy_arguments {
       void* destination;
@@ -27,28 +27,28 @@ struct host::impl : compiler_builtins {
       std::uint32_t size;
    };
 
-   struct type_converter : forge::vm::wasm::type_converter<impl> {
-      using base = forge::vm::wasm::type_converter<impl>;
+   struct type_converter : forge::vm::wasm::interpret::type_converter<impl> {
+      using base = forge::vm::wasm::interpret::type_converter<impl>;
       using base::base;
       using base::from_wasm;
 
-      FORGE_VM_WASM_FROM_WASM(copy_arguments, (forge::vm::wasm::wasm_ptr_t destination,
-                                               forge::vm::wasm::wasm_ptr_t source, forge::vm::wasm::wasm_size_t size)) {
+      FORGE_VM_WASM_INTERPRET_FROM_WASM(copy_arguments, (forge::vm::wasm::interpret::wasm_ptr_t destination,
+                                               forge::vm::wasm::interpret::wasm_ptr_t source, forge::vm::wasm::interpret::wasm_size_t size)) {
          auto* destination_ptr = this->template validate_pointer<char>(destination, size);
          const auto* source_ptr = this->template validate_pointer<const char>(source, size);
          this->template validate_pointer<char>(destination, 1);
          return {destination_ptr, source_ptr, size};
       }
 
-      FORGE_VM_WASM_FROM_WASM(compare_arguments, (forge::vm::wasm::wasm_ptr_t left, forge::vm::wasm::wasm_ptr_t right,
-                                                  forge::vm::wasm::wasm_size_t size)) {
+      FORGE_VM_WASM_INTERPRET_FROM_WASM(compare_arguments, (forge::vm::wasm::interpret::wasm_ptr_t left, forge::vm::wasm::interpret::wasm_ptr_t right,
+                                                  forge::vm::wasm::interpret::wasm_size_t size)) {
          const auto* left_ptr = this->template validate_pointer<const char>(left, size);
          const auto* right_ptr = this->template validate_pointer<const char>(right, size);
          return {left_ptr, right_ptr, size};
       }
 
-      FORGE_VM_WASM_FROM_WASM(fill_arguments, (forge::vm::wasm::wasm_ptr_t destination, std::int32_t value,
-                                               forge::vm::wasm::wasm_size_t size)) {
+      FORGE_VM_WASM_INTERPRET_FROM_WASM(fill_arguments, (forge::vm::wasm::interpret::wasm_ptr_t destination, std::int32_t value,
+                                               forge::vm::wasm::interpret::wasm_size_t size)) {
          auto* destination_ptr = this->template validate_pointer<char>(destination, size);
          this->template validate_pointer<char>(destination, 1);
          return {destination_ptr, value, size};
@@ -56,16 +56,16 @@ struct host::impl : compiler_builtins {
    };
 
    using functions =
-       forge::vm::wasm::registered_host_functions<impl, forge::vm::wasm::execution_interface, type_converter>;
-   using backend = forge::vm::wasm::backend<functions, wasm, forge::vm::wasm::compatibility_options>;
+       forge::vm::wasm::interpret::registered_host_functions<impl, forge::vm::wasm::interpret::execution_interface, type_converter>;
+   using backend = forge::vm::wasm::interpret::backend<functions, wasm, forge::vm::wasm::interpret::compatibility_options>;
    template <typename T, std::size_t Alignment = alignof(T)>
-   using input = forge::vm::wasm::argument_proxy<const T*, Alignment>;
+   using input = forge::vm::wasm::interpret::argument_proxy<const T*, Alignment>;
    template <typename T, std::size_t Alignment = alignof(T)>
-   using output = forge::vm::wasm::argument_proxy<T*, Alignment>;
+   using output = forge::vm::wasm::interpret::argument_proxy<T*, Alignment>;
    template <typename T, std::size_t Alignment = alignof(T)>
-   using input_span = forge::vm::wasm::argument_proxy<forge::vm::wasm::span<const T>, Alignment>;
+   using input_span = forge::vm::wasm::interpret::argument_proxy<forge::vm::wasm::interpret::span<const T>, Alignment>;
    template <typename T, std::size_t Alignment = alignof(T)>
-   using output_span = forge::vm::wasm::argument_proxy<forge::vm::wasm::span<T>, Alignment>;
+   using output_span = forge::vm::wasm::interpret::argument_proxy<forge::vm::wasm::interpret::span<T>, Alignment>;
    using uint128_input = input<unsigned __int128, 16>;
    using uint128_output = output<unsigned __int128, 16>;
    using float128_input = input<float128, 16>;
@@ -194,12 +194,12 @@ struct host::impl : compiler_builtins {
    void* memset(fill_arguments arguments);
 
    void eosio_assert(std::uint32_t test, input<const char, 1> message);
-   void eosio_assert_message(std::uint32_t test, forge::vm::wasm::span<const char> message);
+   void eosio_assert_message(std::uint32_t test, forge::vm::wasm::interpret::span<const char> message);
    void eosio_assert_code(std::uint32_t test, std::uint64_t code);
    [[noreturn]] void eosio_exit(std::int32_t code);
    std::uint32_t action_data_size() const;
-   std::uint32_t read_action_data(forge::vm::wasm::span<char> destination) const;
-   void set_action_return_value(forge::vm::wasm::span<const char> value);
+   std::uint32_t read_action_data(forge::vm::wasm::interpret::span<char> destination) const;
+   void set_action_return_value(forge::vm::wasm::interpret::span<const char> value);
    std::uint64_t current_receiver() const;
    [[nodiscard]] std::uint64_t current_time() const;
    [[nodiscard]] std::uint32_t get_block_num() const;
@@ -218,8 +218,8 @@ struct host::impl : compiler_builtins {
    std::int32_t get_context_free_data(std::uint32_t index, std::span<char> destination) const;
 
    std::int32_t db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer, std::uint64_t primary,
-                             forge::vm::wasm::span<const char> value);
-   void db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::span<const char> value);
+                             forge::vm::wasm::interpret::span<const char> value);
+   void db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::interpret::span<const char> value);
    void db_remove_i64(std::int32_t iterator);
    std::int32_t db_get_i64(std::int32_t iterator, output_span<char, 1> value);
    std::int32_t db_next_i64(std::int32_t iterator, output<std::uint64_t> primary);
@@ -296,7 +296,7 @@ struct host::impl : compiler_builtins {
    [[nodiscard]] std::chrono::steady_clock::duration remaining_execution_time() const;
    template <typename... Args> void execute(backend& vm, std::string_view function, Args&&... args) {
       const auto remaining = remaining_execution_time();
-      vm.timed_run(forge::vm::wasm::watchdog{remaining},
+      vm.timed_run(forge::vm::wasm::interpret::watchdog{remaining},
                    [&] { vm(*this, "env", function, std::forward<Args>(args)...); });
    }
    void register_intrinsics();
@@ -334,7 +334,7 @@ struct host::impl : compiler_builtins {
    std::shared_ptr<memory_driver> driver_;
    std::optional<forge::db::object::store> store_;
    std::optional<forge::db::object::transaction> transaction_;
-   forge::vm::wasm::wasm_allocator allocator_;
+   forge::vm::wasm::interpret::wasm_allocator allocator_;
    oracle_state state_;
    std::optional<oracle_state> state_before_invocation_;
    std::optional<std::chrono::steady_clock::time_point> invocation_deadline_;

@@ -4,7 +4,7 @@ namespace forge::contract::testing {
 
 class compiler_builtins {
  public:
-   template <typename T> using output = forge::vm::wasm::argument_proxy<T*, alignof(T)>;
+   template <typename T> using output = forge::vm::wasm::interpret::argument_proxy<T*, alignof(T)>;
    using int128_output = output<__int128>;
    using uint128_output = output<unsigned __int128>;
    using float128_output = output<float128>;
