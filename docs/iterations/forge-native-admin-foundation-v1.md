@@ -158,8 +158,9 @@ modules:    forge.auth.http.*
 
 Adapts pairing/session decisions to neutral HTTP security mechanics:
 
-- strict Cookie parsing and serialization;
-- `Secure`, `HttpOnly`, `SameSite`, `Path`, expiry and `__Host-` invariants;
+- session and CSRF cookie policy built on `forge.net.http.cookie`;
+- enforcement of `Secure`, `HttpOnly`, `SameSite`, `Path`, expiry and
+  `__Host-` invariants for authentication cookies;
 - exact Origin allow-list checks;
 - CSRF cookie/header verification for state-changing methods;
 - session extraction and response cookie construction;
@@ -167,7 +168,10 @@ Adapts pairing/session decisions to neutral HTTP security mechanics:
 - redacted typed authentication failures;
 - hooks for product-owned rate limiting and audit events.
 
-The library depends on `forge_auth_session` and `forge_net_http`. It does not
+The library depends on `forge_auth_session` and `forge_net_http`. Generic
+Cookie and Set-Cookie parsing and formatting remain owned exclusively by
+`forge.net.http.cookie`; `forge_auth_http` neither duplicates nor wraps a
+second parser. It does not
 depend on `forge_plugins_http_server`: libraries must not import product or
 plugin runtime APIs. A product constructs a server-plugin middleware descriptor
 around these neutral functions.
@@ -176,7 +180,8 @@ around these neutral functions.
 
 ### `forge_net_tls`
 
-Create a focused TLS leaf shared by secure TCP and HTTP server mechanics:
+Create a focused TLS leaf shared by secure TCP, the existing HTTPS client and
+HTTP server mechanics:
 
 ```text
 target:     forge_net_tls
@@ -192,13 +197,15 @@ It owns reusable OpenSSL and Boost.Asio TLS mechanics:
 - certificate/private-key consistency validation;
 - TLS protocol floor and secure context defaults;
 - server and client verification modes;
-- optional client-certificate validation for mTLS;
+- client-certificate validation for mTLS, always including certificate-chain
+  verification against configured trust anchors;
 - SNI and ALPN policy values;
 - peer certificate extraction and typed verification failures;
 - immutable context snapshots suitable for atomic credential rotation.
 
 The existing STCP implementation is the donor for these mechanics. Shared
-context construction is extracted rather than copied. STCP public behavior and
+context construction is extracted rather than copied, and both STCP and the
+existing HTTPS client migrate to the same builder. STCP public behavior and
 P2P contracts do not change as part of the extraction.
 
 `forge_net_tls` does not own HTTP, TCP listening, secret ids, config documents,
@@ -235,6 +242,8 @@ responses. It must provide:
 - canonical path resolution below one configured root;
 - rejection of `..`, encoded traversal, NUL, separator confusion and symlink
   escape;
+- descriptor-relative opening without following symlinks, followed by
+  validation that the already opened object is a regular file;
 - no directory listing;
 - bounded files and headers;
 - MIME selection from an allow-listed table;
@@ -262,7 +271,8 @@ HTTP TLS server requirements:
 - TLS 1.3 by default, with any broader policy explicit;
 - bounded handshake timeout and concurrent pending handshakes;
 - one immutable server identity snapshot per accepted connection;
-- optional mTLS with required trust anchors;
+- optional mTLS with required trust anchors and mandatory client-chain
+  verification;
 - `http/1.1` ALPN only until Forge implements another HTTP protocol;
 - the existing body, header, idle, cancellation and shutdown limits after the
   handshake;
@@ -423,6 +433,11 @@ Pairing and session libraries own records and valid transitions, not a physical
 database. The consuming backend owns persisted models and executes transitions
 inside its transaction boundary.
 
+A test-only ObjectDB/MDBX integration exercises this boundary without turning
+either auth library into a database wrapper. Concurrent consume, approve and
+rotation attempts must yield exactly one successful commit, and the accepted
+transition and its audit record must be committed atomically.
+
 The first Spine Admin implementation uses a separate named MDBX/ObjectDB store,
 for example `admin`, with neither Revision nor BlobDB unless a concrete model
 requires them. It must never reuse the chain `state` or `block` stores.
@@ -540,7 +555,8 @@ HTTP:
 - plaintext request to a TLS listener and TLS request to a plaintext listener;
 - handshake timeout, cancellation, bounded pending handshakes and clean
   shutdown;
-- optional mTLS acceptance and rejection;
+- mTLS acceptance only for a client chain rooted in the configured trust
+  anchors, plus missing, untrusted and malformed client-certificate rejection;
 - certificate context rotation while existing sessions remain valid;
 - no plaintext fallback after TLS startup or handshake failure;
 - strict cookie parse/format round trips;
@@ -554,7 +570,8 @@ Assets:
 
 - GET/HEAD, ETag, not-modified and cache policy;
 - missing files and SPA fallback;
-- traversal, percent-encoding, symlink escape and directory-listing rejection;
+- traversal, percent-encoding, symlink escape, replacement-race and
+  directory-listing rejection;
 - MIME allow-list and response-size limits;
 - production package relocation with an installed frontend bundle;
 - equivalent self-contained and reverse-proxy deployment behavior;
@@ -566,6 +583,8 @@ Integration:
 - equivalent authenticated behavior behind a trusted TLS reverse proxy;
 - first-owner pairing through a private local approval boundary;
 - restart with durable pending/session state;
+- concurrent consume, approve and rotation with one successful ObjectDB/MDBX
+  commit and an atomically persisted audit record;
 - credential rotation/revocation without restarting the HTTP server;
 - downstream typed client remains private to the backend;
 - full local CTest, structure/format gates and `git diff --check`.
