@@ -735,6 +735,181 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
          errors.append(f"tests/package_auth_pairing_component/main.cpp: direct pairing package import is missing ({token})")
 
 
+def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "session"
+   required = (
+      leaf / "CMakeLists.txt",
+      leaf / "session.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "session" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "session" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "session" / "session.cppm",
+      root / "tests" / "auth" / "session_tests.cpp",
+      root / "tests" / "package_auth_session_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_session_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_session ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(session)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register session leaf")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_session STATIC session.cpp)",
+      "forge_target_modules_at(forge_auth_session auth/session)",
+      "forge_auth_pairing",
+      "forge_codec_base64",
+      "forge_crypto_core",
+      "forge_crypto_digest",
+      "forge_exceptions",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/session/CMakeLists.txt: session target is missing {token}")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "session" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.exceptions",
+      "token_invalid",
+      "csrf_invalid",
+      "idle_expired",
+      "credential_mismatch",
+      "credential_revoked",
+      "replayed",
+      "secret_collision",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/exceptions.cppm: session exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "session" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.types",
+      "forge.auth.pairing.types",
+      "trusted, non-decreasing wall-clock",
+      "session_record",
+      "session_issuance",
+      "principal",
+      "credential_generation",
+      "idle_timeout",
+      "session_state",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/types.cppm: session record is missing {token}")
+   session_record_match = re.search(r"struct session_record \{(.*?)\n\};", types_module, re.DOTALL)
+   if session_record_match is not None and "secret_string" in session_record_match.group(1):
+      errors.append("libraries/auth/session/include/forge/auth/session/types.cppm: persisted session record must not contain clear secrets")
+
+   session_module = (leaf / "include" / "forge" / "auth" / "session" / "session.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.session",
+      "issue_session",
+      "validate_session",
+      "verify_csrf_secret",
+      "renew_idle",
+      "rotate_session",
+      "logout_session",
+      "revoke_session",
+   ):
+      if token not in session_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/session.cppm: session transition is missing {token}")
+   issue_declaration = session_module.partition("issue_session")[2].partition("validate_session")[0]
+   rotate_declaration = session_module.partition("rotate_session")[2].partition("logout_session")[0]
+   if "secret_string" in issue_declaration or "secret_string" in rotate_declaration:
+      errors.append("libraries/auth/session/include/forge/auth/session/session.cppm: issue/rotate must not accept caller-selected secrets")
+
+   session_source = (leaf / "session.cpp").read_text(errors="ignore")
+   for token in (
+      "random_bytes(secret_bytes)",
+      "padding::omit",
+      "padding_policy::forbid",
+      "constant_time_equal",
+      "credential_generation",
+      "credential_revoked",
+      "canonical_idle_expiry",
+      "session transition time regressed",
+      "record.state = session_state::rotated",
+      "record.state = session_state::revoked",
+      "record.idle_expires_at != canonical_idle_expiry",
+      "*record.terminal_at < record.last_activity_at",
+      "*record.terminal_at >= record.idle_expires_at",
+      "session and CSRF digests must differ",
+   ):
+      if token not in session_source:
+         errors.append(f"libraries/auth/session/session.cpp: session security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.net", "forge.plugins", "objectdb", "mdbx"):
+      if forbidden in session_source or forbidden in session_module or forbidden in types_module:
+         errors.append(f"libraries/auth/session: product integration dependency is forbidden ({forbidden})")
+
+   rotate_source = session_source.partition("session_issuance rotate_session")[2].partition("void logout_session")[0]
+   if ("auto result = issue_session" not in rotate_source or
+       rotate_source.find("auto result = issue_session") > rotate_source.find("record.state = session_state::rotated") or
+       "return result;" not in rotate_source):
+      errors.append("libraries/auth/session/session.cpp: rotation must construct its result before mutating the old session")
+
+   issue_source = session_source.partition("session_issuance issue_session")[2].partition("principal validate_session")[0]
+   collision_check = "constant_time_equal(session_material.span(), csrf_material.span())"
+   if (collision_check not in issue_source or "const auto session_digest" not in issue_source or
+       issue_source.find(collision_check) > issue_source.find("const auto session_digest") or
+       "exceptions::secret_collision" not in issue_source):
+      errors.append("libraries/auth/session/session.cpp: session and CSRF material must differ before record construction")
+
+   renewal_source = session_source.partition("void renew_idle")[2].partition("session_issuance rotate_session")[0]
+   next_expiry = "const auto next_idle_expires_at =\n       canonical_idle_expiry"
+   if (next_expiry not in renewal_source or "record.last_activity_at = now;" not in renewal_source or
+       "record.idle_expires_at = next_idle_expires_at;" not in renewal_source or
+       renewal_source.find(next_expiry) > renewal_source.find("record.last_activity_at = now;")):
+      errors.append("libraries/auth/session/session.cpp: renewal must compute expiry before mutating activity")
+
+   record_validation = session_source.partition("void require_session_record")[2].partition("void require_active_session")[0]
+   digest_check = "session and CSRF digests must differ"
+   if (digest_check not in record_validation or
+       record_validation.find(digest_check) > record_validation.find("require_credential_id") or
+       "record.idle_expires_at != canonical_idle_expiry" not in record_validation or
+       "require_supported_time(record.created_at, time_input::record)" not in record_validation):
+      errors.append("libraries/auth/session/session.cpp: persisted session validation must reject duplicate digests and non-canonical times")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("forge_auth_session", "auth_session", "libraries/auth/session/include/forge"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_session registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/session](libraries/auth/session/README.md)" not in root_readme or "`forge_auth_session`" not in root_readme:
+      errors.append("README.md: forge_auth_session library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   if ('elseif("${component}" STREQUAL "auth_session")\n         _forge_add_component(auth_pairing)' not in package_config or
+       "auth_session" not in package_config):
+      errors.append("cmake/ForgeConfig.cmake.in: auth_session package registration is incomplete")
+
+   session_tests = (root / "tests" / "auth" / "session_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "issue_generates_independent_digest_only_canonical_secrets",
+      "validation_rejects_bounded_malformed_and_noncanonical_secrets",
+      "validation_returns_principal_and_enforces_credential_binding",
+      "absolute_idle_and_renewal_boundaries_preserve_secret_digests",
+      "backdated_session_transitions_fail_without_mutation",
+      "malformed_persisted_timestamps_are_rejected_without_mutation",
+      "extreme_time_options_are_checked_without_overflow",
+      "rotation_prevents_fixation_and_logout_revoke_are_terminal",
+   ):
+      if token not in session_tests:
+         errors.append(f"tests/auth/session_tests.cpp: session regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_session_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.session.exceptions;", "import forge.auth.session.session;", "verify_csrf_secret"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_session_component/main.cpp: direct session package import is missing ({token})")
+
+   tests_cmake = (root / "tests" / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("test_forge_auth_session", "package_auth_session_component", "forge_auth_session"):
+      if token not in tests_cmake:
+         errors.append(f"tests/CMakeLists.txt: auth_session test registration is incomplete ({token})")
+
+
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
    text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
    in_macro = False
@@ -1814,6 +1989,7 @@ def main() -> int:
    check_tls_context_ownership(root, errors)
    check_http_cookie_asset_boundaries(root, errors)
    check_auth_pairing_boundaries(root, errors)
+   check_auth_session_boundaries(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_interpret_boundaries(root, errors)

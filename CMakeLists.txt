@@ -678,6 +678,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_tls
       forge_net_http
       forge_auth_pairing
+      forge_auth_session
       forge_api_http
       forge_net_websocket
       forge_net_transport
@@ -811,6 +812,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_stcp
       net_yamux
       auth_pairing
+      auth_session
       app
       net_http
       api_http
@@ -960,6 +962,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/quic/include/forge
       libraries/net/stcp/include/forge
       libraries/auth/pairing/include/forge
+      libraries/auth/session/include/forge
       libraries/net/p2p/include/forge
       libraries/cli/include/forge
       libraries/app/include/forge
