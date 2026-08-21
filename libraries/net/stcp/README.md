@@ -92,12 +92,16 @@ auto stream = std::move(tls).into_transport_stream();
   values or verifier diagnostics with raw secrets.
 - Treat disabled verification and test certificates as local-test-only
   behavior.
-- `require_peer_certificate` is a clean-break strict mTLS mode: it requires a
-  configured CA bundle and verifies every client chain against it even when
-  `security.verify_peer` is false.
-- For compatibility with existing STCP server behavior, `security.verify_peer`
-  also requires a client certificate and verifies its chain against the
-  configured trust anchors.
+- On servers, `security.verify_peer = true` is strict mTLS: it requires a client
+  certificate and verifies its chain against configured trust anchors or system
+  default verification paths.
+- `security.require_peer_certificate = true` with `security.verify_peer = false`
+  preserves the legacy application-verification flow: TLS requires a client
+  certificate but does not establish CA trust. Configure
+  `expected_sha256_fingerprint` or `verifier` to make the application identity
+  decision after the handshake; without either, any presented certificate is
+  accepted.
+- With both flags false, STCP does not require or verify a client certificate.
 - Do not assume TLS gives message boundaries. Use transport framing when needed.
 
 ## Tests

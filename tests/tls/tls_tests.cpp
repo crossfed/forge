@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <barrier>
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <future>
@@ -14,6 +15,8 @@
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/system/error_code.hpp>
 #include <openssl/bio.h>
 #include <openssl/asn1.h>
 #include <openssl/evp.h>
@@ -114,6 +117,16 @@ struct identity_material {
    std::string private_key;
 };
 
+struct handshake_outcome {
+   boost::system::error_code server_error;
+   boost::system::error_code client_error;
+   std::exception_ptr server_exception;
+   int requested_client_authority_count = -1;
+   bool saw_client_certificate = false;
+   bool peer_validation_succeeded = false;
+   bool timed_out = false;
+};
+
 [[nodiscard]] identity_material make_identity_material() {
    auto key = make_key();
    auto certificate = make_certificate(key.get());
@@ -128,6 +141,110 @@ struct identity_material {
    options.certificate_chain_pem = identity.certificate;
    options.private_key_pem = identity.private_key;
    return options;
+}
+
+[[nodiscard]] handshake_outcome run_application_verified_handshake(const identity_material& server_identity,
+                                                                   const identity_material* client_identity) {
+   auto tls_options = server_options(server_identity);
+   tls_options.verification = forge::net::tls::peer_verification::require_peer_certificate_for_application_verification;
+   tls_options.trust_anchors_pem = {server_identity.certificate};
+   const auto server_context = forge::net::tls::make_context(std::move(tls_options));
+
+   auto client_options = forge::net::tls::context_options{};
+   client_options.verification = forge::net::tls::peer_verification::none;
+   client_options.use_default_verify_paths = false;
+   if (client_identity != nullptr) {
+      client_options.certificate_chain_pem = client_identity->certificate;
+      client_options.private_key_pem = client_identity->private_key;
+   }
+   const auto client_context = forge::net::tls::make_context(std::move(client_options));
+
+   auto io = asio::io_context{};
+   auto listener = asio::ip::tcp::acceptor{io, {asio::ip::tcp::v4(), 0}};
+   const auto endpoint = listener.local_endpoint();
+   auto server = forge::net::tls::make_asio_stream(server_context, asio::ip::tcp::socket{io});
+   auto client = forge::net::tls::make_asio_stream(client_context, asio::ip::tcp::socket{io});
+   auto timeout = asio::steady_timer{io, std::chrono::seconds{2}};
+   auto outcome = handshake_outcome{};
+   auto server_done = false;
+   auto client_done = false;
+   const auto finish_if_done = [&] {
+      if (server_done && client_done) {
+         timeout.cancel();
+      }
+   };
+   const auto cancel_stream = [](const std::shared_ptr<forge::net::tls::asio_tls_stream>& stream) {
+      auto ignored = boost::system::error_code{};
+      stream->lowest_layer().cancel(ignored);
+      stream->lowest_layer().close(ignored);
+   };
+
+   listener.async_accept(server->lowest_layer(), [&](const boost::system::error_code& error) {
+      if (error) {
+         outcome.server_error = error;
+         server_done = true;
+         finish_if_done();
+         return;
+      }
+      server->async_handshake(asio::ssl::stream_base::server, [&](const boost::system::error_code& handshake_error) {
+         outcome.server_error = handshake_error;
+         if (!handshake_error) {
+            try {
+               const auto certificate = forge::net::tls::extract_peer_certificate(server->native_handle());
+               outcome.saw_client_certificate = certificate.has_value();
+               if (certificate) {
+                  forge::net::tls::validate_peer(server->native_handle(), *server_context,
+                                                 {.expected_sha256_fingerprint = certificate->sha256_fingerprint,
+                                                  .verifier = [](const forge::net::tls::certificate_chain& chain) {
+                                                     return !chain.certificates.empty();
+                                                  }});
+                  outcome.peer_validation_succeeded = true;
+               }
+            } catch (...) {
+               outcome.server_exception = std::current_exception();
+               cancel_stream(server);
+            }
+         }
+         server_done = true;
+         finish_if_done();
+      });
+   });
+
+   client->lowest_layer().async_connect(endpoint, [&](const boost::system::error_code& error) {
+      if (error) {
+         outcome.client_error = error;
+         client_done = true;
+         finish_if_done();
+         return;
+      }
+      client->async_handshake(asio::ssl::stream_base::client, [&](const boost::system::error_code& handshake_error) {
+         outcome.client_error = handshake_error;
+         const auto* authorities = SSL_get_client_CA_list(client->native_handle());
+         outcome.requested_client_authority_count = authorities == nullptr ? 0 : sk_X509_NAME_num(authorities);
+         client_done = true;
+         finish_if_done();
+      });
+   });
+
+   timeout.async_wait([&](const boost::system::error_code& error) {
+      if (error) {
+         return;
+      }
+      outcome.timed_out = true;
+      auto ignored = boost::system::error_code{};
+      listener.cancel(ignored);
+      listener.close(ignored);
+      cancel_stream(server);
+      cancel_stream(client);
+   });
+
+   io.run();
+
+   auto ignored = boost::system::error_code{};
+   listener.close(ignored);
+   server->lowest_layer().close(ignored);
+   client->lowest_layer().close(ignored);
+   return outcome;
 }
 
 } // namespace
@@ -212,6 +329,39 @@ BOOST_AUTO_TEST_CASE(allows_default_verify_paths_for_mutual_tls) {
    options.use_default_verify_paths = true;
 
    BOOST_CHECK_NO_THROW((void)forge::net::tls::make_context(std::move(options)));
+}
+
+BOOST_AUTO_TEST_CASE(application_verified_peer_certificate_is_server_only_and_does_not_require_trust_anchors) {
+   const auto identity = make_identity_material();
+   auto options = server_options(identity);
+   options.verification = forge::net::tls::peer_verification::require_peer_certificate_for_application_verification;
+
+   BOOST_CHECK_NO_THROW((void)forge::net::tls::make_context(options));
+
+   options.role = forge::net::tls::endpoint_role::client;
+   BOOST_CHECK_THROW((void)forge::net::tls::make_context(std::move(options)),
+                     forge::net::tls::exceptions::verification_configuration_invalid);
+}
+
+BOOST_AUTO_TEST_CASE(application_verified_peer_certificate_requires_presence_but_permits_application_identity) {
+   const auto server_identity = make_identity_material();
+   const auto client_identity = make_identity_material();
+
+   const auto with_certificate = run_application_verified_handshake(server_identity, &client_identity);
+   BOOST_CHECK(!with_certificate.timed_out);
+   BOOST_CHECK(!with_certificate.server_error);
+   BOOST_CHECK(!with_certificate.client_error);
+   BOOST_CHECK(!with_certificate.server_exception);
+   BOOST_CHECK_EQUAL(with_certificate.requested_client_authority_count, 0);
+   BOOST_CHECK(with_certificate.saw_client_certificate);
+   BOOST_CHECK(with_certificate.peer_validation_succeeded);
+
+   const auto without_certificate = run_application_verified_handshake(server_identity, nullptr);
+   BOOST_CHECK(!without_certificate.timed_out);
+   BOOST_CHECK(without_certificate.server_error);
+   BOOST_CHECK(!without_certificate.server_exception);
+   BOOST_CHECK(!without_certificate.saw_client_certificate);
+   BOOST_CHECK(!without_certificate.peer_validation_succeeded);
 }
 
 BOOST_AUTO_TEST_CASE(rejects_oversized_pem_and_trust_material_before_openssl) {

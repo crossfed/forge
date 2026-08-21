@@ -121,9 +121,13 @@ void validate_common(std::size_t read_chunk_size) {
    auto out = tls::context_options{};
    out.role = tls::endpoint_role::server;
    out.protocols = options.tls13_only ? tls::protocol_policy::tls13_only : tls::protocol_policy::system_default;
-   out.verification = options.security.verify_peer || options.security.require_peer_certificate
-                          ? tls::peer_verification::require_peer_certificate
-                          : tls::peer_verification::none;
+   if (options.security.verify_peer) {
+      out.verification = tls::peer_verification::require_peer_certificate;
+   } else if (options.security.require_peer_certificate) {
+      out.verification = tls::peer_verification::require_peer_certificate_for_application_verification;
+   } else {
+      out.verification = tls::peer_verification::none;
+   }
    out.certificate_chain_pem = options.certificate_pem;
    out.private_key_pem = options.private_key_pem;
    out.alpn_protocols = options.alpn_protocols;

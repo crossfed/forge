@@ -764,8 +764,7 @@ boost::asio::awaitable<void> stcp_mutual_tls() {
    co_await rejecting_listener.async_close();
 
    const auto untrusted_material = make_tls_material();
-   auto strict_server = server_options(material, false);
-   strict_server.security.require_peer_certificate = true;
+   auto strict_server = server_options(material, true);
    auto untrusted_listener = forge::net::stcp::listener{executor, loopback(0), std::move(strict_server)};
    auto untrusted_accept =
        spawn_result<forge::net::stcp::connection>(executor, untrusted_listener.async_accept_connection());
@@ -779,6 +778,23 @@ boost::asio::awaitable<void> stcp_mutual_tls() {
    }
    BOOST_CHECK_THROW((void)co_await take_result(untrusted_accept), forge::net::stcp::exceptions::handshake_failed);
    co_await untrusted_listener.async_close();
+
+   auto application_server = server_options(material, false);
+   application_server.security.require_peer_certificate = true;
+   auto application_listener = forge::net::stcp::listener{executor, loopback(0), std::move(application_server)};
+   auto application_accept =
+       spawn_result<forge::net::stcp::connection>(executor, application_listener.async_accept_connection());
+   auto application_client_options = client_options(material);
+   application_client_options.certificate_pem = untrusted_material.client.certificate;
+   application_client_options.private_key_pem = untrusted_material.client.private_key;
+   auto application_connector = forge::net::stcp::connector{executor, std::move(application_client_options)};
+   auto application_client =
+       co_await application_connector.async_connect_connection(application_listener.local_endpoint());
+   auto application_connection = co_await take_result(application_accept);
+   BOOST_CHECK(application_connection.peer_certificate().has_value());
+   co_await application_client.async_close();
+   co_await application_connection.async_close();
+   co_await application_listener.async_close();
 }
 
 boost::asio::awaitable<void> stcp_sni_policy() {
@@ -844,6 +860,32 @@ boost::asio::awaitable<void> stcp_verifier_receives_certificate_chain() {
    co_await client.async_close();
    co_await server_connection.async_close();
    co_await listener.async_close();
+
+   auto rejecting_server = server_options(material, false);
+   rejecting_server.security.require_peer_certificate = true;
+   auto rejected = std::make_shared<bool>(false);
+   rejecting_server.security.verifier = [rejected](const forge::net::stcp::certificate_chain&) {
+      *rejected = true;
+      return false;
+   };
+
+   auto rejecting_listener = forge::net::stcp::listener{executor, loopback(0), std::move(rejecting_server)};
+   auto rejecting_accept =
+       spawn_result<forge::net::stcp::connection>(executor, rejecting_listener.async_accept_connection());
+   auto rejecting_connector = forge::net::stcp::connector{executor, client_options(material, true)};
+   auto rejecting_client = std::optional<forge::net::stcp::connection>{};
+   try {
+      rejecting_client.emplace(
+          co_await rejecting_connector.async_connect_connection(rejecting_listener.local_endpoint()));
+   } catch (const forge::exceptions::base& error) {
+      BOOST_CHECK(forge::net::stcp::exceptions::code_of(error).has_value());
+   }
+   BOOST_CHECK_THROW((void)co_await take_result(rejecting_accept), forge::net::stcp::exceptions::verification_failed);
+   BOOST_CHECK(*rejected);
+   if (rejecting_client) {
+      co_await rejecting_client->async_close();
+   }
+   co_await rejecting_listener.async_close();
 }
 
 boost::asio::awaitable<void> stcp_alpn_uses_client_preference() {
@@ -1123,7 +1165,8 @@ BOOST_AUTO_TEST_CASE(stcp_controls_sni_explicitly) {
 
 BOOST_AUTO_TEST_CASE(stcp_verifier_receives_full_certificate_chain) {
    auto runtime = forge::asio::runtime{};
-   forge::asio::blocking::run(runtime, stcp_verifier_receives_certificate_chain());
+   BOOST_CHECK(
+       forge::asio::blocking::run_for(runtime, stcp_verifier_receives_certificate_chain(), std::chrono::seconds{5}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_alpn_selects_client_preferred_supported_protocol) {

@@ -32,6 +32,7 @@ enum class peer_verification : std::uint8_t {
    none,
    verify_peer,
    require_peer_certificate,
+   require_peer_certificate_for_application_verification,
 };
 
 enum class sni_policy : std::uint8_t {

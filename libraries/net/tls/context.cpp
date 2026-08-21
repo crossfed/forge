@@ -130,9 +130,19 @@ void validate_peer_verification(peer_verification value) {
    case peer_verification::none:
    case peer_verification::verify_peer:
    case peer_verification::require_peer_certificate:
+   case peer_verification::require_peer_certificate_for_application_verification:
       return;
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_options, "unknown TLS peer-verification mode");
+}
+
+[[nodiscard]] bool verifies_peer_chain(peer_verification verification) noexcept {
+   return verification == peer_verification::verify_peer || verification == peer_verification::require_peer_certificate;
+}
+
+[[nodiscard]] bool requires_peer_certificate(peer_verification verification) noexcept {
+   return verification == peer_verification::require_peer_certificate ||
+          verification == peer_verification::require_peer_certificate_for_application_verification;
 }
 
 [[nodiscard]] std::vector<unsigned char> encode_alpn(const std::vector<std::string>& protocols) {
@@ -201,17 +211,19 @@ void validate_options(const context_options& options) {
       }
       total_trust_anchor_bytes += authority.size();
    }
-   if (options.verification == peer_verification::require_peer_certificate) {
+   if (requires_peer_certificate(options.verification)) {
       if (options.role != endpoint_role::server) {
          FORGE_THROW_EXCEPTION(exceptions::verification_configuration_invalid,
                                "TLS client cannot require a peer certificate");
       }
+   }
+   if (options.verification == peer_verification::require_peer_certificate) {
       if (options.trust_anchors_pem.empty() && !options.use_default_verify_paths) {
          FORGE_THROW_EXCEPTION(exceptions::verification_configuration_invalid,
                                "mTLS requires trust anchors or default verify paths");
       }
    }
-   if (options.verification != peer_verification::none && options.trust_anchors_pem.empty() &&
+   if (options.verification == peer_verification::verify_peer && options.trust_anchors_pem.empty() &&
        !options.use_default_verify_paths) {
       FORGE_THROW_EXCEPTION(exceptions::verification_configuration_invalid,
                             "TLS peer verification requires trust anchors or default verify paths");
@@ -299,7 +311,7 @@ void load_trust_anchors(asio::ssl::context& context, const context_options& opti
       }
    }
 
-   if (options.verification == peer_verification::none || !options.trust_anchors_pem.empty()) {
+   if (!verifies_peer_chain(options.verification) || !options.trust_anchors_pem.empty()) {
       return;
    }
 
@@ -321,6 +333,10 @@ void configure_verification(asio::ssl::context& context, peer_verification verif
    case peer_verification::require_peer_certificate:
       mode = asio::ssl::verify_peer | asio::ssl::verify_fail_if_no_peer_cert;
       break;
+   case peer_verification::require_peer_certificate_for_application_verification:
+      SSL_CTX_set_verify(context.native_handle(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                         [](int, X509_STORE_CTX*) noexcept { return 1; });
+      return;
    }
    context.set_verify_mode(mode);
 }
@@ -522,9 +538,10 @@ void classify_handshake_failure(SSL* native_handle, const context_snapshot& snap
       return;
    }
 
-   require_trusted_peer(native_handle);
-   if (snapshot.verification() == peer_verification::require_peer_certificate &&
-       !extract_peer_certificate(native_handle)) {
+   if (verifies_peer_chain(snapshot.verification())) {
+      require_trusted_peer(native_handle);
+   }
+   if (requires_peer_certificate(snapshot.verification()) && !extract_peer_certificate(native_handle)) {
       FORGE_THROW_EXCEPTION(exceptions::peer_certificate_missing, "TLS peer did not present a required certificate");
    }
 }
@@ -541,7 +558,7 @@ void validate_peer(SSL* native_handle, const context_snapshot& snapshot, const p
       return;
    }
 
-   if (snapshot.verification() != peer_verification::none) {
+   if (verifies_peer_chain(snapshot.verification())) {
       require_trusted_peer(native_handle);
    }
 
