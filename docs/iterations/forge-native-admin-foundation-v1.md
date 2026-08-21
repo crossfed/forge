@@ -11,16 +11,14 @@ types, targets, modules and configuration remain product-neutral.
 
 ## Production Status
 
-The architecture is production-targeted. `forge_net_tls` now provides the
-shared TLS context and rotation substrate, but the remaining HTTP server,
-browser-authentication and asset components are not implemented yet. This
-document is therefore not a claim that Forge currently ships a
-production-ready browser-authentication stack.
+The production-targeted Forge foundation described here is implemented in this
+branch, including shared TLS context rotation, the HTTP server, browser
+authentication and bounded asset serving. This does not by itself claim that a
+downstream Spine Admin deployment is production-ready.
 
-The v1 implementation becomes production-ready only after its library,
-live-HTTP, package-relocation and adversarial acceptance suites pass, every
-public failure is a typed Forge exception and a downstream backend proves both
-supported deployment modes:
+Downstream production acceptance remains future work. Spine Admin must validate
+its production configuration and frontend bundle in both supported deployment
+modes:
 
 - self-contained mode, where the native backend serves the installed frontend
   bundle and terminates HTTPS itself;
