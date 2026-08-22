@@ -3,11 +3,16 @@ module;
 #include <forge/api/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
 
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -22,11 +27,14 @@ module;
 module forge.plugins.p2p.resolver.plugin;
 
 import forge.api.core.binding;
+import forge.api.core.connection;
 import forge.api.core.descriptor;
 import forge.api.core.error_projection;
 import forge.api.core.registry;
 import forge.api.core.types;
+import forge.api.transport.connection;
 import forge.api.transport.options;
+import forge.asio.notification;
 import forge.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;

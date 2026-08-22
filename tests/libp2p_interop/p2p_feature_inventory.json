@@ -219,7 +219,7 @@
         "forge.plugins.p2p.resolver.types": [ "plugin.resolver" ]
       },
       "header_features": {},
-      "sha256": "f7baa30921160dbe72cc3aecaba269f105b147d72420407e3cdd2254575e8988",
+      "sha256": "844b1486ff01bfd326a46d1b02d6ba3fc4df897aec3f36981aa8721df9eca6b2",
       "feature_ids": [ "plugin.resolver" ]
     },
     "plugin.p2p.pubsub": {

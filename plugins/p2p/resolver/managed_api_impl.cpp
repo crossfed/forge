@@ -2,9 +2,14 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
+#include <cstddef>
+#include <exception>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -19,6 +24,7 @@ import forge.api.core.connection;
 import forge.api.core.descriptor;
 import forge.api.core.types;
 import forge.api.transport.connection;
+import forge.asio.notification;
 import forge.net.p2p.identity;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.managed_api;

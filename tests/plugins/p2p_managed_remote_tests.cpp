@@ -1,7 +1,9 @@
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -11,9 +13,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -23,15 +28,19 @@
 #include "../quic_p2p/libp2p_identity_fixture.hxx"
 
 import forge.api.core.binding;
+import forge.api.core.connection;
 import forge.api.core.exceptions;
 import forge.api.core.registry;
 import forge.api.core.types;
+import forge.api.transport.connection;
 import forge.app.application;
 import forge.app.application_shell;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.asio.blocking;
+import forge.asio.notification;
+import forge.asio.runtime;
 import forge.config.core.document;
 import forge.config.core.value;
 import forge.crypto.digest.sha256;
@@ -48,6 +57,9 @@ import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.managed_api;
 import forge.plugins.p2p.resolver.plugin;
 import forge.plugins.p2p.resolver.types;
+
+#include "details/managed_remote_state.hxx"
+#include "details/managed_remote_invoker.hxx"
 
 namespace {
 
@@ -300,6 +312,115 @@ class test_application final : public forge::app::application_shell {
 } // namespace
 
 FORGE_API(::test_api, FORGE_API_CONTRACT("managed.test", 1, 0), FORGE_API_METHOD(ping))
+
+BOOST_AUTO_TEST_CASE(managed_remote_state_completion_is_atomic_before_waiter_wake) {
+   using state_type = forge::plugins::p2p::resolver::detail::managed_remote_state;
+
+   auto runtime = forge::asio::runtime{};
+   auto state = state_type{2};
+   const auto first = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_REQUIRE(static_cast<int>(first.status) == static_cast<int>(state_type::acquire_status::joined));
+   BOOST_REQUIRE(first.start);
+   BOOST_REQUIRE(first.flight);
+
+   auto generation = std::make_shared<forge::plugins::p2p::resolver::detail::managed_remote_generation>();
+   auto subscribed = std::promise<void>{};
+   auto subscribed_future = subscribed.get_future();
+   auto waiter = boost::asio::co_spawn(
+       first.flight->executor(),
+       [&]() -> boost::asio::awaitable<std::pair<bool, bool>> {
+          const auto executor = co_await boost::asio::this_coro::executor;
+          boost::asio::post(executor, [&subscribed] { subscribed.set_value(); });
+          const auto delivered = co_await first.flight->completed().async_wait(first.observed);
+          const auto snapshot = state.read_completion(first.flight);
+          const auto current = state.acquire_or_join(executor);
+          co_return std::pair{
+              delivered > first.observed && snapshot.done && snapshot.result == generation && !snapshot.error,
+              current.status == state_type::acquire_status::current && current.current == generation,
+          };
+       },
+       boost::asio::use_future);
+   subscribed_future.get();
+   static_cast<void>(state.complete(first.flight, generation, {}, {}));
+
+   const auto observed = waiter.get();
+   BOOST_TEST(observed.first);
+   BOOST_TEST(observed.second);
+   state.leave(first.flight);
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_invoker_launch_failure_completes_waiters) {
+   auto runtime = forge::asio::runtime{};
+   auto invoker = forge::plugins::p2p::resolver::detail::managed_remote_invoker{
+       {},
+       {unavailable_peer(208)},
+       forge::api::core::api_ref{.id = {"managed.test"}, .major = 1, .min_revision = 0},
+       test_api::describe(),
+       forge::plugins::p2p::resolver::managed_remote_options{.max_connect_rounds = 1},
+       1,
+   };
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, invoker.connect_initial()), std::bad_weak_ptr);
+   invoker.request_stop();
+   forge::asio::blocking::run(runtime, invoker.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_state_completed_error_does_not_lose_waiters) {
+   using state_type = forge::plugins::p2p::resolver::detail::managed_remote_state;
+
+   auto runtime = forge::asio::runtime{};
+   auto state = state_type{2};
+   const auto first = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_REQUIRE(first.flight);
+
+   auto failure = std::make_exception_ptr(std::runtime_error{"reconnect failed"});
+   static_cast<void>(state.complete(first.flight, {}, failure, {}));
+
+   const auto late = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_REQUIRE(static_cast<int>(late.status) == static_cast<int>(state_type::acquire_status::draining));
+   BOOST_TEST(!late.start);
+   auto drained = boost::asio::co_spawn(
+       late.flight->executor(), late.flight->cleanup_completed().async_wait(late.observed), boost::asio::use_future);
+
+   state.leave(first.flight);
+   state.finish_watcher(first.flight);
+   BOOST_CHECK(drained.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   state.finish_child(first.flight, {});
+   BOOST_TEST(drained.get() > late.observed);
+   state.leave(late.flight);
+   const auto retry = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_TEST(retry.start);
+   state.leave(retry.flight);
+}
+
+BOOST_AUTO_TEST_CASE(managed_remote_state_stop_rejects_unpublished_generation) {
+   using state_type = forge::plugins::p2p::resolver::detail::managed_remote_state;
+
+   auto runtime = forge::asio::runtime{};
+   auto state = state_type{1};
+   const auto acquired = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_REQUIRE(static_cast<int>(acquired.status) == static_cast<int>(state_type::acquire_status::joined));
+   BOOST_REQUIRE(acquired.flight);
+
+   const auto stopped = state.request_stop();
+   BOOST_REQUIRE(stopped.initiated);
+   BOOST_TEST(stopped.flight == acquired.flight);
+
+   auto generation = std::make_shared<forge::plugins::p2p::resolver::detail::managed_remote_generation>();
+   auto stopped_error = std::make_exception_ptr(std::runtime_error{"managed remote stopped"});
+   const auto completed = state.complete(acquired.flight, generation, {}, stopped_error);
+   BOOST_TEST(completed.canceled == generation);
+
+   const auto snapshot = state.read_completion(acquired.flight);
+   BOOST_REQUIRE(snapshot.done);
+   BOOST_TEST(!snapshot.result);
+   BOOST_REQUIRE(snapshot.error);
+   BOOST_REQUIRE(snapshot.stopped);
+
+   const auto after = state.acquire_or_join(runtime.context().get_executor());
+   BOOST_TEST(static_cast<int>(after.status) == static_cast<int>(state_type::acquire_status::stopped));
+   state.leave(acquired.flight);
+}
 
 BOOST_AUTO_TEST_CASE(managed_remote_is_sticky_and_fails_over_without_replay) {
    auto first_api = std::make_shared<test_api_impl>(1);

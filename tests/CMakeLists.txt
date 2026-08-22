@@ -1072,6 +1072,7 @@ target_link_libraries(
    forge_asio
    Boost::included_unit_test_framework
 )
+target_include_directories(test_forge_p2p_managed_remote PRIVATE ${CMAKE_SOURCE_DIR}/plugins/p2p/resolver)
 add_test(
    NAME test_forge_p2p_managed_remote
    COMMAND test_forge_p2p_managed_remote
