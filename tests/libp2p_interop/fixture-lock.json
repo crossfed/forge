@@ -35,7 +35,7 @@
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
-    "../CMakeLists.txt": "99d9d43dba70abc3c50371d5923be8b07335663bd24f2d8f06eabb77052e404e",
+    "../CMakeLists.txt": "b2eb329a602f2bcb373d2736a2b97965943de099b13c23f2ebcc1d529f27a2a9",
     "check_fixture_lock.py": "1e9f0229bc3fc13e99724cb7e6c8cafae5b257e14a86128dcee670c7fd8dd0c7",
     "forge_interop_fixture.cpp": "34ef754b4b131689a4fc60d7db3c5e747cc60d94a2c52588c96f82a68fd50d0b",
     "provenance.py": "b52c97e6a817022eddbee267959c5bf722502bdaf19ba73b535ff92e41348745",
