@@ -258,12 +258,16 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
       "tls_snapshot_",
       "disarm_stream_expiry",
       "close_after_response",
-      "async_shutdown(asio::redirect_error",
+      "stream.async_shutdown(asio::as_tuple",
+      "cancel_tls_shutdown_at_deadline",
+      "run_tls_shutdown(stream) || cancel_tls_shutdown_at_deadline(stream, deadline)",
    ):
       if token not in http_server_source:
          errors.append(f"libraries/net/http/server.cpp: TLS server invariant is missing ({token})")
    if "stream_.socket().async_read_some" in http_server_source:
       errors.append("libraries/net/http/server.cpp: disconnect monitor must read the outer HTTP/TLS stream")
+   if "async_wait([&stream" in http_server_source:
+      errors.append("libraries/net/http/server.cpp: TLS shutdown deadline must not outlive the stream by reference")
 
    http_server_module = (root / "libraries/net/http/include/forge/net/http/server.cppm").read_text(errors="ignore")
    for token in ("forge.net.tls.context", "tls_context_provider", "handshake_timeout", "max_pending_tls_handshakes"):
@@ -284,6 +288,9 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
    plugin_config = (root / "plugins/http/server/config.cpp").read_text(errors="ignore")
    plugin_source = (root / "plugins/http/server/plugin.cpp").read_text(errors="ignore")
    plugin_impl = (root / "plugins/http/server/plugin_impl.cpp").read_text(errors="ignore")
+   tls_secret_material_header = (
+      root / "plugins/http/server/details/tls_secret_material.hxx").read_text(errors="ignore")
+   tls_secret_material_source = (root / "plugins/http/server/tls_secret_material.cpp").read_text(errors="ignore")
    plugin_api = (root / "plugins/http/server/include/forge/plugins/http/server/api.cppm").read_text(errors="ignore")
    plugin_impl_header = (root / "plugins/http/server/details/plugin_impl.hxx").read_text(errors="ignore")
    for path, source, tokens in (
@@ -297,7 +304,13 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
       ("plugins/http/server/plugin_impl.cpp", plugin_impl,
        ("http.server.tls.certificate-chain", "http.server.tls.private-key", "http.server.tls.client-ca",
         "provider->replace(std::move(replacement))", "lifecycle_generation != reload_generation",
-        "tls_secret_material", "clear_tls_context_options", "secure_erase")),
+        '"details/tls_secret_material.hxx"', "tls_secret_material", "clear_tls_context_options", "secure_erase")),
+      ("plugins/http/server/details/tls_secret_material.hxx", tls_secret_material_header,
+       ("struct tls_secret_material", "~tls_secret_material();",
+        "operator=(tls_secret_material&& other) noexcept;")),
+      ("plugins/http/server/tls_secret_material.cpp", tls_secret_material_source,
+       ("tls_secret_material::~tls_secret_material()", "tls_secret_material::operator=(tls_secret_material&& other)",
+        "secure_erase")),
       ("plugins/http/server/details/plugin_impl.hxx", plugin_impl_header,
        ("std::shared_ptr<forge::plugins::crypto::secrets::api>", "lifecycle_generation")),
       ("plugins/http/server/include/forge/plugins/http/server/api.cppm", plugin_api,
@@ -310,6 +323,10 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
    plugin_cmake = (root / "plugins/http/server/CMakeLists.txt").read_text(errors="ignore")
    if "forge_plugins_crypto_secrets" not in plugin_cmake:
       errors.append("plugins/http/server/CMakeLists.txt: TLS-enabled HTTP Server plugin must link Crypto Secrets")
+   if "tls_secret_material.cpp" not in plugin_cmake:
+      errors.append("plugins/http/server/CMakeLists.txt: private TLS secret material implementation is not compiled")
+   if "struct tls_secret_material" in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: private TLS secret material needs its exact details pair")
    if "load_tls_context_options" in plugin_impl or "co_return forge::net::tls::context_options" in plugin_impl:
       errors.append("plugins/http/server/plugin_impl.cpp: TLS secret material must not escape in context_options")
 
@@ -321,6 +338,7 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
       "http_server_tls_rotation_keeps_established_http_sessions_usable",
       "http_server_shutdown_cancels_pending_tls_handshakes_without_waiting_for_close_notify",
       "http_server_tls_normal_close_sends_close_notify",
+      "http_server_tls_close_joins_deadline_handlers_before_session_release",
       "http_server_tls_reciprocates_client_close_notify_while_keep_alive_idle",
       "http_server_tls_reciprocates_client_close_notify_before_first_request",
       "http_server_tls_websocket_handoff_retains_the_connection_snapshot",

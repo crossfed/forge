@@ -5,6 +5,7 @@ add_library(
    config.cpp
    plugin.cpp
    plugin_impl.cpp
+   tls_secret_material.cpp
 )
 forge_target_modules_at(forge_plugins_http_server plugins/http/server)
 

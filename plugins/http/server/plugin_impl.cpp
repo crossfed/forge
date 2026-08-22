@@ -33,6 +33,7 @@ import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.types;
 
 #include "details/plugin_impl.hxx"
+#include "details/tls_secret_material.hxx"
 
 namespace forge::plugins::http::server {
 namespace {
@@ -49,35 +50,6 @@ constexpr auto tls_client_ca_purpose = std::string_view{"http.server.tls.client-
 void clear_text(std::string& value) noexcept {
    forge::crypto::core::secure_erase(value);
 }
-
-struct tls_secret_material {
-   std::string certificate_chain;
-   std::string private_key;
-   std::string client_ca;
-
-   ~tls_secret_material() {
-      clear_text(certificate_chain);
-      clear_text(private_key);
-      clear_text(client_ca);
-   }
-
-   tls_secret_material() = default;
-   tls_secret_material(const tls_secret_material&) = delete;
-   tls_secret_material& operator=(const tls_secret_material&) = delete;
-   tls_secret_material(tls_secret_material&&) noexcept = default;
-
-   tls_secret_material& operator=(tls_secret_material&& other) noexcept {
-      if (this != &other) {
-         clear_text(certificate_chain);
-         clear_text(private_key);
-         clear_text(client_ca);
-         certificate_chain = std::move(other.certificate_chain);
-         private_key = std::move(other.private_key);
-         client_ca = std::move(other.client_ca);
-      }
-      return *this;
-   }
-};
 
 void clear_tls_context_options(forge::net::tls::context_options& options) noexcept {
    clear_text(options.certificate_chain_pem);

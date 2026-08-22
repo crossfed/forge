@@ -609,6 +609,29 @@ BOOST_AUTO_TEST_CASE(http_server_tls_normal_close_sends_close_notify) {
    server.stop();
 }
 
+BOOST_AUTO_TEST_CASE(http_server_tls_close_joins_deadline_handlers_before_session_release) {
+   const auto identity = make_identity();
+   auto provider = std::make_shared<forge::net::tls::context_provider>(server_options(identity));
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto server = forge::net::http::server{
+       runtime,
+       {.tls_context_provider = provider,
+        .handshake_timeout = std::chrono::seconds{1},
+        .max_pending_tls_handshakes = 8},
+       ready_router(),
+   };
+   server.start();
+
+   for (auto attempt = 0; attempt != 32; ++attempt) {
+      auto connection = tls_http_connection{wait_for_port(server)};
+      const auto close_error = connection.get_then_shutdown();
+      BOOST_CHECK(close_error != asio::ssl::error::stream_truncated);
+      BOOST_CHECK(!close_error || close_error == asio::error::eof);
+   }
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(http_server_tls_reciprocates_client_close_notify_while_keep_alive_idle) {
    const auto identity = make_identity();
    auto provider = std::make_shared<forge::net::tls::context_provider>(server_options(identity));

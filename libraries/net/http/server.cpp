@@ -29,9 +29,11 @@ module;
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/dispatch.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/ssl/stream_base.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/beast/core.hpp>
@@ -196,28 +198,27 @@ template <typename Stream>
 
 constexpr auto tls_close_notify_timeout = std::chrono::seconds{5};
 
+template <typename Stream> awaitable<void> run_tls_shutdown(Stream& stream) {
+   auto [error] = co_await stream.async_shutdown(asio::as_tuple(use_awaitable));
+   static_cast<void>(error);
+}
+
+template <typename Stream>
+awaitable<void> cancel_tls_shutdown_at_deadline(Stream& stream, asio::steady_timer& deadline) {
+   auto [error] = co_await deadline.async_wait(asio::as_tuple(use_awaitable));
+   if (!error) {
+      auto ignored = boost::system::error_code{};
+      stream_socket(stream).cancel(ignored);
+   }
+}
+
 template <typename Stream> awaitable<void> close_after_response(Stream& stream) {
    if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
-      auto deadline = std::make_shared<asio::steady_timer>(stream.get_executor());
-      auto timed_out = std::make_shared<std::atomic_bool>(false);
-      deadline->expires_after(tls_close_notify_timeout);
-      deadline->async_wait([&stream, timed_out](const boost::system::error_code& error) {
-         if (!error) {
-            timed_out->store(true);
-            auto ignored = boost::system::error_code{};
-            stream_socket(stream).cancel(ignored);
-         }
-      });
+      auto deadline = asio::steady_timer{stream.get_executor()};
+      deadline.expires_after(tls_close_notify_timeout);
+      using namespace asio::experimental::awaitable_operators;
+      static_cast<void>(co_await (run_tls_shutdown(stream) || cancel_tls_shutdown_at_deadline(stream, deadline)));
 
-      auto error = boost::system::error_code{};
-      co_await stream.async_shutdown(asio::redirect_error(use_awaitable, error));
-      deadline->cancel();
-      if (timed_out->load()) {
-         auto ignored = boost::system::error_code{};
-         stream_socket(stream).shutdown(tcp::socket::shutdown_both, ignored);
-         stream_socket(stream).close(ignored);
-         co_return;
-      }
       auto ignored = boost::system::error_code{};
       stream_socket(stream).shutdown(tcp::socket::shutdown_both, ignored);
       stream_socket(stream).close(ignored);
