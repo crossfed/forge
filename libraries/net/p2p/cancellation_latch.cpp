@@ -61,6 +61,8 @@ void cancellation_latch::arm(std::function<void()> cancel) {
          invoke();
       }
    } catch (...) {
+      complete_callback();
+      throw;
    }
    complete_callback();
 }
@@ -89,6 +91,8 @@ cancellation_latch::subscription cancellation_latch::subscribe(const std::shared
       try {
          invoke();
       } catch (...) {
+         parent->complete_callback();
+         throw;
       }
       parent->complete_callback();
       return {};
@@ -122,6 +126,9 @@ void cancellation_latch::request_stop() noexcept {
       try {
          callback();
       } catch (...) {
+         // request_stop() is a no-throw cross-thread boundary. Production
+         // callbacks publish sticky operation cancellation; containment here
+         // preserves callback accounting for defensive/custom callbacks.
       }
       complete_callback();
    };
@@ -133,6 +140,11 @@ void cancellation_latch::request_stop() noexcept {
          invoke(std::move(observer->cancel));
       }
    }
+}
+
+bool cancellation_latch::stop_requested() const noexcept {
+   const auto lock = std::scoped_lock{mutex_};
+   return state_ == state::stop_requested || state_ == state::stopped;
 }
 
 void cancellation_latch::clear() noexcept {

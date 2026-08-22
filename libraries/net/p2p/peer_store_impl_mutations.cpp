@@ -348,6 +348,10 @@ std::optional<peer_store::record> peer_store::impl::apply_discovery(const peer_i
    return result;
 }
 
+void peer_store::impl::apply_peer_exchange(const peer_id& peer, capability_set capabilities) {
+   static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) { value.capabilities.bits |= capabilities.bits; }));
+}
+
 void peer_store::impl::upsert_relay_reservation(peer_store::relay_record value) {
    const auto peer = value.relay;
    static_cast<void>(mutate_peer(peer, [&](peer_store::record& record) {

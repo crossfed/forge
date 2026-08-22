@@ -1,14 +1,20 @@
 #include <boost/test/unit_test.hpp>
 
+#include <atomic>
+#include <barrier>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 
 import forge.asio.blocking;
 import forge.asio.runtime;
@@ -82,6 +88,12 @@ class fake_stream final : public forge::net::transport::detail::stream_concept {
    }
 
    boost::asio::awaitable<void> async_close() override {
+      if (close_entered) {
+         close_entered->arrive_and_wait();
+      }
+      if (close_release) {
+         close_release->arrive_and_wait();
+      }
       open = false;
       ++close_count;
       co_return;
@@ -90,6 +102,9 @@ class fake_stream final : public forge::net::transport::detail::stream_concept {
    void cancel() override {
       open = false;
       ++cancel_count;
+      if (throw_on_cancel) {
+         throw std::runtime_error{"injected legacy cancel failure"};
+      }
    }
 
    std::deque<bytes> reads;
@@ -101,7 +116,10 @@ class fake_stream final : public forge::net::transport::detail::stream_concept {
    std::uint64_t chunk_write_count = 0;
    std::uint64_t close_count = 0;
    std::uint64_t cancel_count = 0;
+   bool throw_on_cancel = false;
    bool open = true;
+   std::barrier<>* close_entered = nullptr;
+   std::barrier<>* close_release = nullptr;
 
  private:
    std::int64_t id_ = 0;
@@ -556,6 +574,85 @@ BOOST_AUTO_TEST_CASE(transport_stream_cancel_delegates_to_backend) {
 
    BOOST_TEST(!value.valid());
    BOOST_CHECK_EQUAL(model->cancel_count, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_request_cancel_contains_throwing_legacy_backend) {
+   auto model = std::make_shared<fake_stream>(46);
+   model->throw_on_cancel = true;
+   auto value = make_stream(model);
+
+   BOOST_CHECK_NO_THROW(value.request_cancel());
+   BOOST_TEST(!value.valid());
+   BOOST_CHECK_EQUAL(model->cancel_count, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_foreign_request_cancel_interrupts_incomplete_close_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto close_entered = std::barrier{2};
+   auto close_release = std::barrier{2};
+   auto model = std::make_shared<fake_stream>(47);
+   model->close_entered = &close_entered;
+   model->close_release = &close_release;
+   auto cancel_requests = std::atomic_size_t{};
+   auto value = forge::net::transport::detail::stream_access::make_cancelable(
+       model, [&cancel_requests]() noexcept { cancel_requests.fetch_add(1, std::memory_order_relaxed); });
+
+   auto closed = boost::asio::co_spawn(runtime.context(), value.async_close(), boost::asio::use_future);
+   close_entered.arrive_and_wait();
+   auto requester = std::thread{[&value] { value.request_cancel(); }};
+   requester.join();
+
+   BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 1U);
+   close_release.arrive_and_wait();
+   BOOST_CHECK_NO_THROW(closed.get());
+   value.request_cancel();
+   BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(model->close_count == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_graceful_close_is_not_reset_by_facade_destruction) {
+   auto runtime = forge::asio::runtime{};
+   auto model = std::make_shared<fake_stream>(49);
+   auto cancel_requests = std::atomic_size_t{};
+   {
+      auto value = forge::net::transport::detail::stream_access::make_cancelable(
+          model, [&cancel_requests]() noexcept { cancel_requests.fetch_add(1, std::memory_order_relaxed); });
+      forge::asio::blocking::run(runtime, value.async_close());
+   }
+
+   BOOST_TEST(model->close_count == 1U);
+   BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_concurrent_request_cancel_invokes_immutable_callback_once) {
+   constexpr auto requester_count = std::size_t{4};
+   auto runtime = forge::asio::runtime{};
+   auto model = std::make_shared<fake_stream>(48);
+   auto cancel_requests = std::atomic_size_t{};
+   auto value = forge::net::transport::detail::stream_access::make_cancelable(
+       model, [model, &cancel_requests]() noexcept {
+          cancel_requests.fetch_add(1, std::memory_order_relaxed);
+          model->cancel();
+       });
+   auto start = std::barrier{static_cast<std::ptrdiff_t>(requester_count + 1)};
+   auto requesters = std::vector<std::thread>{};
+   requesters.reserve(requester_count);
+   for (auto index = std::size_t{}; index < requester_count; ++index) {
+      requesters.emplace_back([&] {
+         start.arrive_and_wait();
+         value.request_cancel();
+      });
+   }
+   start.arrive_and_wait();
+   for (auto& requester : requesters) {
+      requester.join();
+   }
+
+   BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(model->cancel_count == 1U);
+   forge::asio::blocking::run(runtime, value.async_close());
+   BOOST_TEST(model->close_count == 1U);
+   BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(transport_session_delegates_open_accept_close_cancel) {

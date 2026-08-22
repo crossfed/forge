@@ -134,6 +134,7 @@ class engine_stream : public std::enable_shared_from_this<engine_stream> {
    boost::asio::awaitable<void> async_close();
    void cancel_write();
    void cancel();
+   void request_cancel() noexcept;
 
  private:
    friend class engine_connection;

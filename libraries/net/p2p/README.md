@@ -47,6 +47,13 @@ of currently executed optional interop tests or a release-readiness verdict. A
 coverage; it does not prove normal lifecycle activation or a passing current
 donor run.
 
+`discovery::policy` and `node::limits::discovery` remain Stable source
+compatibility surfaces. Node construction normalizes non-default legacy values
+into the single managed topology policy and rejects conflicting non-default
+legacy and topology settings. `peer_store::apply_peer_exchange` likewise
+remains the legacy capability-union mutator; received third-party Forge Peer
+Exchange facts do not call it and remain capability-free until Identify.
+
 ## When To Use
 
 - Nodes need to connect by peer identity, not just host/port.
@@ -221,6 +228,12 @@ prefers libp2p TLS (`/tls/1.0.0`) and keeps Noise as fallback. `/ws` and `/wss`
 multiaddrs are parseable but direct dial/listen returns typed unsupported until
 a dedicated compatibility block wires a production transport. Future transports
 must use the same private direct profile boundary.
+
+The Noise transport treats the secured connection as a byte stream and segments
+large Yamux writes into independently authenticated Noise records whose encrypted
+length fits the protocol's 16-bit record header. The live TCP Noise matrix sends
+a 192 KiB echo payload in both Forge/Go/Rust directions so record segmentation is
+proved across donor implementations rather than inferred from raw Yamux tests.
 
 `local_endpoints()` is the full canonical listen/advertise set and each endpoint
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint

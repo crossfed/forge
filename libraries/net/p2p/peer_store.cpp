@@ -46,6 +46,10 @@ std::optional<peer_store::record> peer_store::apply_discovery(const peer_id& pee
    return impl_->apply_discovery(peer, std::move(update));
 }
 
+void peer_store::apply_peer_exchange(const peer_id& peer, capability_set capabilities) {
+   impl_->apply_peer_exchange(peer, capabilities);
+}
+
 void peer_store::upsert_relay_reservation(relay_record value) {
    impl_->upsert_relay_reservation(std::move(value));
 }

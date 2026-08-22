@@ -1275,6 +1275,18 @@ BOOST_AUTO_TEST_CASE(quic_options_validation_rejects_bad_alpn) {
    }
 }
 
+BOOST_AUTO_TEST_CASE(quic_client_options_legacy_positional_initializer_keeps_test_failpoint) {
+   const auto options = client_options{
+       "legacy", std::chrono::milliseconds{1}, std::chrono::milliseconds{2}, std::chrono::milliseconds{3},
+       transport_limits{}, security_options{}, "certificate", "private-key",
+       [](std::string_view) { return true; },
+   };
+
+   BOOST_REQUIRE(static_cast<bool>(options.test_failpoint));
+   BOOST_TEST(options.test_failpoint("test"));
+   BOOST_TEST(!options.client_tokens);
+}
+
 BOOST_AUTO_TEST_CASE(quic_runtime_initializes_ngtcp2_crypto_ossl) {
    const auto capabilities = initialize_runtime();
 

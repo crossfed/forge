@@ -32,6 +32,7 @@ struct peer_store::impl {
    [[nodiscard]] peer_store::record apply_identify(const peer_id& peer, peer_store::identify_update update);
    [[nodiscard]] std::optional<peer_store::record> apply_discovery(const peer_id& peer,
                                                                    peer_store::discovery_update update);
+   void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
    void upsert_relay_reservation(peer_store::relay_record value);
    [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
    [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,

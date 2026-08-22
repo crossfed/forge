@@ -187,26 +187,15 @@ void node::impl::initialize_lifecycle() {
 }
 
 void node::impl::request_lifecycle_stop() noexcept {
-   auto active_peer_exchange_operations = std::vector<std::shared_ptr<peer_exchange_operation>>{};
+   auto active_peer_exchange_operations = std::map<std::uint64_t, std::shared_ptr<peer_exchange_operation>>{};
    {
-      auto lock = std::scoped_lock{mutex};
+      const auto lock = std::scoped_lock{mutex};
       peer_exchange_admission_closed = true;
       peer_exchange_value.close();
-      active_peer_exchange_operations.reserve(peer_exchange_operations.size());
-      for (const auto& [_, operation] : peer_exchange_operations) {
-         active_peer_exchange_operations.push_back(operation);
-      }
+      active_peer_exchange_operations.swap(peer_exchange_operations);
    }
-   for (const auto& operation : active_peer_exchange_operations) {
-      auto cancel = std::function<void()>{};
-      {
-         const auto lock = std::scoped_lock{operation->mutex};
-         operation->stop_requested = true;
-         cancel = operation->cancel;
-      }
-      if (cancel) {
-         cancel();
-      }
+   for (const auto& [_, operation] : active_peer_exchange_operations) {
+      operation->cancellation.request_stop();
    }
    if (topology_manager_value) {
       topology_manager_value->request_stop();

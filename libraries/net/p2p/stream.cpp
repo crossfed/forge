@@ -116,6 +116,12 @@ void stream::cancel() {
    }
 }
 
+void stream::request_cancel() noexcept {
+   if (impl_) {
+      impl_->transport.request_cancel();
+   }
+}
+
 forge::net::transport::stream stream::into_transport_stream() && {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid P2P stream");

@@ -18,6 +18,7 @@ class cancellation_latch;
 namespace detail {
 
 class lifecycle_wakeup;
+class worker_stop_bridge;
 
 class dht_routing_refresh final {
  public:
@@ -37,7 +38,8 @@ class dht_routing_refresh final {
       std::chrono::milliseconds query_timeout{};
    };
 
-   using query_callback = std::function<boost::asio::awaitable<bool>(protocol_id, dht::key, std::chrono::milliseconds)>;
+   using query_callback = std::function<boost::asio::awaitable<bool>(
+       protocol_id, dht::key, std::chrono::milliseconds, std::shared_ptr<cancellation_latch>)>;
 
    struct time_source {
       std::function<time_point()> now;
@@ -82,7 +84,7 @@ class dht_routing_refresh final {
    time_source time_;
    std::shared_ptr<lifecycle_wakeup> changed_;
    mutable std::mutex mutex_;
-   std::shared_ptr<cancellation_latch> active_query_cancellation_;
+   std::shared_ptr<worker_stop_bridge> active_query_stop_;
    bool stopped_ = false;
 };
 

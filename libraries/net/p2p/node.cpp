@@ -1,5 +1,7 @@
 module;
 
+#include "details/rendezvous_time.hxx"
+
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
@@ -90,7 +92,7 @@ void remember_dht_peer(peer_store& store, const protocol_id& protocol, dht::rout
                        std::chrono::milliseconds refresh_interval, const dht::peer& value,
                        dht::routing_admission admission) {
    store.upsert_routing_peer(protocol, value, discovery::source::dht,
-                             std::chrono::system_clock::now() + refresh_interval);
+                             detail::saturating_topology_expiry(std::chrono::system_clock::now(), refresh_interval));
    routing.upsert(value, admission);
 }
 
@@ -281,7 +283,7 @@ exchange_rendezvous(const auto& self, const peer_id& peer, rendezvous::message r
    auto stream =
        co_await self->open_protocol_direct(peer, builtins::rendezvous, remaining_timeout(started, timeout, operation));
    auto deadline = operation_deadline{self->runtime.context(), remaining_timeout(started, timeout, operation)};
-   deadline.arm([&stream] { stream.cancel(); });
+   deadline.arm([&stream] noexcept { stream.request_cancel(); });
    try {
       co_await stream.async_write(rendezvous::codec::encode(request, self->options.limits.rendezvous));
       auto buffer = std::vector<std::uint8_t>{};
@@ -404,6 +406,7 @@ node::impl::exchange_rendezvous(const peer_id& peer, rendezvous::message request
 }
 
 node::node(forge::asio::runtime& runtime, node::options options) {
+   normalize_legacy_discovery(options);
    validate(options);
    impl_ = std::make_shared<impl>(runtime, std::move(options));
    impl_->validate_local_identify_document();
@@ -818,13 +821,10 @@ node::async_rendezvous_discover(peer_id rendezvous_peer, rendezvous::discover_re
    const auto context = third_party_discovery_context();
    const auto received_at = std::chrono::system_clock::now();
    for (auto& registration : response.discover_response_value->registrations) {
-      registration.expires_at = received_at + registration.ttl;
+      registration.expires_at = detail::rendezvous_expiry_after(received_at, registration.ttl);
       auto sanitized = sanitize_discovered_registration(std::move(registration), context);
       if (!sanitized) {
          continue;
-      }
-      if (valid_peer_id(sanitized->peer)) {
-         co_await self->store.async_upsert_rendezvous(*sanitized);
       }
       sanitized_registrations.push_back(std::move(*sanitized));
    }

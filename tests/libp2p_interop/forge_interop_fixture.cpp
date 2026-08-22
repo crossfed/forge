@@ -61,6 +61,8 @@ namespace {
 using namespace std::chrono_literals;
 
 constexpr auto echo_protocol = std::string_view{"/forge/interop/relay-echo/1"};
+constexpr auto maximum_echo_payload = std::size_t{256 * 1024};
+constexpr auto large_echo_payload_size = std::size_t{192 * 1024};
 constexpr auto rendezvous_namespace = std::string_view{"forge.discovery"};
 constexpr auto pubsub_topic = std::string_view{"forge.pubsub.interop"};
 constexpr auto pubsub_payload = std::string_view{"forge-gossipsub-live"};
@@ -491,7 +493,7 @@ void register_echo(forge::net::p2p::node& value) {
    value.register_protocol_handler(
        forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
        [](forge::net::p2p::node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {
-          auto payload = co_await read_length_delimited(incoming.stream, 16 * 1024);
+          auto payload = co_await read_length_delimited(incoming.stream, maximum_echo_payload);
           co_await incoming.stream.async_write(wrap_length_delimited(payload));
        });
 }
@@ -897,7 +899,7 @@ int destination_mode(const std::map<std::string, std::string>& args) {
 
 std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& value, std::string_view scenario,
                          std::string_view payload, const forge::net::p2p::peer_id& peer,
-                         std::string_view target_peer_id = {}) {
+                         const forge::net::p2p::endpoint& remote, std::string_view target_peer_id = {}) {
    if (scenario == "ping") {
       const auto rtt = forge::asio::blocking::run(
           runtime,
@@ -965,23 +967,96 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
    }
    if (scenario == "dht_provide_find_provider") {
       const auto key = provider_key();
-      auto registration =
-          forge::asio::blocking::run(runtime, value.async_provide(forge::net::p2p::builtins::kad_dht, key));
-      if (!registration.active()) {
-         throw std::runtime_error{"FORGE DHT provider registration did not become active"};
+      const auto provider_identity = generate_libp2p_identity();
+      const auto querier_identity = generate_libp2p_identity();
+      auto provider = forge::net::p2p::node{runtime, node_options({}, provider_identity)};
+      auto querier = forge::net::p2p::node{runtime, node_options({}, querier_identity)};
+      try {
+         forge::asio::blocking::run(runtime, provider.async_hydrate_peer_state());
+         forge::asio::blocking::run(runtime, provider.async_listen(loopback_quic_endpoint()));
+         provider.peers().learn_endpoint(
+             peer, remote,
+             forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic});
+         static_cast<void>(forge::asio::blocking::run(
+             runtime, provider.async_connect(remote, forge::net::p2p::node::connect_options{
+                                                   .expected_peer = peer,
+                                                   .allow_relay = false,
+                                                   .allow_hole_punch = false})));
+         if (provider.local_peer() == value.local_peer()) {
+            throw std::runtime_error{"DHT provider proof requires an independent querier"};
+         }
+         auto registration =
+             forge::asio::blocking::run(runtime, provider.async_provide(forge::net::p2p::builtins::kad_dht, key));
+         if (!registration.active()) {
+            throw std::runtime_error{"FORGE DHT provider registration did not become active"};
+         }
+         const auto provider_peer = provider.local_peer();
+         forge::asio::blocking::run(runtime, querier.async_hydrate_peer_state());
+         forge::asio::blocking::run(runtime, querier.async_listen(loopback_quic_endpoint()));
+         querier.peers().learn_endpoint(
+             peer, remote,
+             forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic});
+         static_cast<void>(forge::asio::blocking::run(
+             runtime, querier.async_connect(remote, forge::net::p2p::node::connect_options{
+                                                  .expected_peer = peer,
+                                                  .allow_relay = false,
+                                                  .allow_hole_punch = false})));
+         if (provider.local_peer() == querier.local_peer()) {
+            throw std::runtime_error{"DHT provider proof requires an independent querier"};
+         }
+         const auto streams_before = querier.metrics().protocol_streams_opened;
+         constexpr auto retry_interval = 50ms;
+         const auto deadline = std::chrono::steady_clock::now() + 5s;
+         auto provider_count = std::size_t{};
+         auto address_count = std::size_t{};
+         auto returned_provider_peer = std::string{};
+         while (true) {
+            const auto providers = forge::asio::blocking::run(
+                runtime,
+                querier.async_find_providers(forge::net::p2p::builtins::kad_dht, key,
+                                             {.requested_count = 1, .quorum = 1, .timeout = 1s}));
+            const auto found = std::ranges::find(providers, provider_peer, &forge::net::p2p::dht::peer::id);
+            if (found != providers.end()) {
+               if (found->endpoints.empty() ||
+                   !std::ranges::all_of(found->endpoints, [&](const auto& endpoint) {
+                      return endpoint.peer && *endpoint.peer == provider_peer;
+                   })) {
+                  throw std::runtime_error{"FORGE DHT provider query did not preserve provider-bound endpoints"};
+               }
+               provider_count = providers.size();
+               address_count = found->endpoints.size();
+               returned_provider_peer = found->id.to_string();
+               break;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+               throw std::runtime_error{"FORGE DHT provider query did not return the independent provider"};
+            }
+            // ADD_PROVIDER is one-way, so wait for the listener's store to become visible to a different peer.
+            std::this_thread::sleep_for(retry_interval);
+         }
+         const auto streams_after = querier.metrics().protocol_streams_opened;
+         if (streams_after <= streams_before) {
+            throw std::runtime_error{"FORGE DHT provider proof did not open a production provider stream"};
+         }
+         forge::asio::blocking::run(runtime, querier.async_stop());
+         forge::asio::blocking::run(runtime, provider.async_stop());
+         return "\"provider_count\":" + std::to_string(provider_count) + ",\"provider_peer\":\"" +
+                json_escape(provider_peer.to_string()) + "\",\"querier_peer\":\"" +
+                json_escape(querier_identity.peer.to_string()) + "\",\"returned_provider_peer\":\"" +
+                json_escape(returned_provider_peer) + "\",\"address_count\":" + std::to_string(address_count) +
+                ",\"protocol_streams_opened_delta\":" + std::to_string(streams_after - streams_before) +
+                ",\"negotiated_protocol\":\"/ipfs/kad/1.0.0\"";
+      } catch (...) {
+         try {
+            forge::asio::blocking::run(runtime, querier.async_stop());
+         } catch (...) {
+         }
+         try {
+            forge::asio::blocking::run(runtime, provider.async_stop());
+         } catch (...) {
+         }
+         throw;
       }
-      auto stream = forge::asio::blocking::run(
-          runtime, value.async_open_protocol_stream(peer, forge::net::p2p::builtins::kad_dht,
-                                                    forge::net::p2p::node::open_options{.allow_relay = false}));
-      forge::asio::blocking::run(runtime, stream.async_write(forge::net::p2p::dht::codec::encode(
-                                              forge::net::p2p::dht::message{
-                                                  .type = forge::net::p2p::dht::message_type::get_providers,
-                                                  .key_value = key,
-                                              },
-                                              forge::net::p2p::dht::options{})));
-      const auto response = forge::net::p2p::dht::codec::decode(
-          wrap_length_delimited(forge::asio::blocking::run(runtime, read_length_delimited(stream, 1024 * 1024))));
-      return "\"provider_count\":" + std::to_string(response.provider_peers.size());
    }
    if (is_dht_value_scenario(scenario)) {
       const auto fixture = value_fixture(scenario);
@@ -1208,14 +1283,20 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
              "\",\"payload_bytes\":" + std::to_string(message.data.size()) +
              ",\"signed\":" + std::string{message.signature.empty() ? "false" : "true"};
    }
-   if (scenario == "echo") {
+   if (scenario == "echo" || scenario == "echo_large") {
       auto stream = forge::asio::blocking::run(
           runtime, value.async_open_protocol_stream(
                        peer, forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
                        forge::net::p2p::node::open_options{.allow_relay = false, .allow_hole_punch = false}));
-      const auto bytes = std::vector<std::uint8_t>{payload.begin(), payload.end()};
+      auto bytes = std::vector<std::uint8_t>{payload.begin(), payload.end()};
+      if (scenario == "echo_large") {
+         bytes.resize(large_echo_payload_size);
+         for (auto index = std::size_t{}; index < bytes.size(); ++index) {
+            bytes[index] = static_cast<std::uint8_t>(index % 251U);
+         }
+      }
       forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(bytes)));
-      const auto echoed = forge::asio::blocking::run(runtime, read_length_delimited(stream, 16 * 1024));
+      const auto echoed = forge::asio::blocking::run(runtime, read_length_delimited(stream, maximum_echo_payload));
       if (echoed != bytes) {
          throw std::runtime_error{"FORGE echo mismatch"};
       }
@@ -1275,7 +1356,7 @@ int dial_mode(const std::map<std::string, std::string>& args) {
    }
 
    const auto details = run_scenario(runtime, value, scenario, optional_value(args, "payload", pubsub_payload), peer,
-                                     optional_value(args, "target-peer-id"));
+                                     remote, optional_value(args, "target-peer-id"));
    forge::asio::blocking::run(runtime, value.async_stop());
    write_file(required(args, "result-file"), "{\"implementation\":\"forge\",\"role\":\"dialer\",\"scenario\":\"" +
                                                  json_escape(scenario) + "\",\"status\":\"ok\"," + details + "}\n");

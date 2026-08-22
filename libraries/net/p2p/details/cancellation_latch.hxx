@@ -31,6 +31,7 @@ class cancellation_latch {
    [[nodiscard]] static subscription subscribe(const std::shared_ptr<cancellation_latch>& parent,
                                                std::function<void()> cancel);
    void request_stop() noexcept;
+   [[nodiscard]] bool stop_requested() const noexcept;
    void clear() noexcept;
    [[nodiscard]] bool finish() noexcept;
 
@@ -44,7 +45,7 @@ class cancellation_latch {
    void complete_callback() noexcept;
    void unsubscribe(const std::shared_ptr<observer>& observer) noexcept;
 
-   std::mutex mutex_;
+   mutable std::mutex mutex_;
    std::condition_variable completion_;
    std::function<void()> cancel_;
    std::vector<std::shared_ptr<observer>> observers_;

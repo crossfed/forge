@@ -48,6 +48,7 @@ class stream {
    async_read_frame_chunk(forge::net::transport::frame_options options);
    boost::asio::awaitable<void> async_close();
    void cancel();
+   void request_cancel() noexcept;
    [[nodiscard]] forge::net::transport::stream into_transport_stream() &&;
 
  private:

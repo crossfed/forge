@@ -63,9 +63,10 @@ class node {
       std::size_t max_peer_exchange_queue = 4096;
       relay::limits relay{};
       resource_manager::limits resources{};
-      topology::policy topology{};
+      discovery::policy discovery{};
       rendezvous::options rendezvous{};
       pubsub::options pubsub{};
+      topology::policy topology{};
    };
 
    struct options {

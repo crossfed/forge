@@ -9,6 +9,7 @@ sys.dont_write_bytecode = True
 from provenance import graph_hash, sha256_file
 
 
+EXPECTED_FORGE_BUILD_PROFILES = ["default", "Debug", "Release", "RelWithDebInfo", "MinSizeRel"]
 EXPECTED_TOOLCHAINS = {
     "go": {
         "version": "1.26.3",
@@ -25,7 +26,7 @@ EXPECTED_TOOLCHAINS = {
     "forge_fixture": {
         "compiler_id": "Clang",
         "compiler_version": "22.1.8",
-        "build_profile": "default",
+        "build_profiles": EXPECTED_FORGE_BUILD_PROFILES,
     },
 }
 
@@ -74,7 +75,21 @@ def check_hashes(root: Path, label: str, values: object, expected_paths: set[str
 
 
 def check_toolchains(values: object, errors: list[str]) -> None:
-    if values != EXPECTED_TOOLCHAINS:
+    if not isinstance(values, dict) or set(values) != set(EXPECTED_TOOLCHAINS):
+        errors.append("fixture lock toolchains do not match the supported exact interop baseline")
+        return
+    forge_fixture = values.get("forge_fixture")
+    expected_fixture = EXPECTED_TOOLCHAINS["forge_fixture"]
+    if not isinstance(forge_fixture, dict) or set(forge_fixture) != set(expected_fixture):
+        errors.append("fixture lock Forge fixture toolchain requirements are malformed")
+        return
+    if (
+        forge_fixture.get("compiler_id") != expected_fixture["compiler_id"]
+        or forge_fixture.get("compiler_version") != expected_fixture["compiler_version"]
+        or forge_fixture.get("build_profiles") != EXPECTED_FORGE_BUILD_PROFILES
+    ):
+        errors.append("fixture lock Forge fixture toolchain requirements do not match the supported exact baseline")
+    if values.get("go") != EXPECTED_TOOLCHAINS["go"] or values.get("rust") != EXPECTED_TOOLCHAINS["rust"]:
         errors.append("fixture lock toolchains do not match the supported exact interop baseline")
 
 

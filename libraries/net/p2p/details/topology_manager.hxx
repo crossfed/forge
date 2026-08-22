@@ -26,6 +26,9 @@ namespace detail {
 class lifecycle_tracker;
 class lifecycle_wakeup;
 
+[[nodiscard]] std::chrono::system_clock::time_point
+saturating_topology_expiry(std::chrono::system_clock::time_point now, std::chrono::milliseconds interval) noexcept;
+
 class topology_manager : public std::enable_shared_from_this<topology_manager> {
  public:
    enum class phase : std::uint8_t {
@@ -50,7 +53,6 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
          enum class status : std::uint8_t {
             ok,
             invalid_cookie,
-            local_failure,
             rejected,
          };
 
@@ -88,6 +90,9 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       std::function<std::chrono::system_clock::time_point()> system_now;
       std::function<void()> before_idle_wait;
       std::function<boost::asio::awaitable<void>(std::chrono::steady_clock::time_point)> idle_wait;
+      std::function<void()> before_refresh_completion;
+      std::function<void()> before_parent_completion;
+      std::function<void()> before_dial_join_wait;
    };
 
    struct status {
@@ -101,7 +106,8 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       std::uint64_t failed_refreshes = 0;
    };
 
-   topology_manager(topology::policy policy, callbacks callbacks_value, clocks clocks_value = {});
+   topology_manager(topology::policy policy, callbacks callbacks_value, clocks clocks_value = {},
+                    std::uint64_t periodic_jitter_seed = 0);
    ~topology_manager();
 
    topology_manager(const topology_manager&) = delete;
@@ -157,6 +163,7 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       mutable std::mutex mutex;
       std::vector<discovery::result> candidates;
       std::shared_ptr<lifecycle_wakeup> completed;
+      std::shared_ptr<cancellation_latch> cancellation;
       std::size_t next = 0;
       std::size_t remaining_workers = 0;
       std::size_t successes = 0;
@@ -171,8 +178,18 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       std::exception_ptr failure;
    };
 
+   struct refresh_waiters {
+      std::size_t count = 0;
+      std::optional<completion> completed;
+   };
+
    [[nodiscard]] bool stopping() const noexcept;
+   [[nodiscard]] std::chrono::milliseconds periodic_refresh_delay(std::uint64_t sequence) const noexcept;
+   [[nodiscard]] bool rendezvous_refresh_due_locked(std::chrono::steady_clock::time_point steady_now,
+                                                    std::chrono::system_clock::time_point system_now) const noexcept;
    [[nodiscard]] std::chrono::steady_clock::time_point next_autonomous_wakeup() const;
+   [[nodiscard]] bool queue_due_refresh_locked(std::chrono::steady_clock::time_point steady_now,
+                                               std::chrono::system_clock::time_point system_now);
    [[nodiscard]] std::uint64_t queue_refresh_locked();
    void release_waiter(std::uint64_t generation) noexcept;
    void finish_parent(std::exception_ptr failure) noexcept;
@@ -201,7 +218,9 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
    topology::policy policy_;
    callbacks callbacks_;
    clocks clocks_;
+   std::uint64_t periodic_jitter_seed_ = 0;
    std::shared_ptr<lifecycle_wakeup> changed_;
+   lifecycle_tracker* lifecycle_ = nullptr;
    mutable std::mutex mutex_;
    std::map<observation_key, observation> observations_;
    std::map<rendezvous_key, rendezvous_state> rendezvous_clients_;
@@ -214,10 +233,11 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
    std::uint64_t next_generation_ = 1;
    std::uint64_t queued_generation_ = 0;
    std::uint64_t running_generation_ = 0;
-   std::map<std::uint64_t, std::size_t> waiters_;
-   std::map<std::uint64_t, completion> completions_;
+   std::map<std::uint64_t, refresh_waiters> waiters_;
    std::uint64_t completed_refreshes_ = 0;
    std::uint64_t failed_refreshes_ = 0;
+   std::chrono::steady_clock::time_point next_periodic_refresh_{};
+   std::uint64_t periodic_refresh_sequence_ = 0;
    std::size_t next_source_index_ = 0;
 };
 

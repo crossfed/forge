@@ -41,9 +41,9 @@ struct client_options {
    security_options security{};
    std::string certificate_pem;
    std::string private_key_pem;
+   std::function<bool(std::string_view)> test_failpoint;
    // Absent uses connector-owned caching. Both empty explicitly disables it.
    std::optional<client_token_callbacks> client_tokens;
-   std::function<bool(std::string_view)> test_failpoint;
 };
 
 struct server_options {

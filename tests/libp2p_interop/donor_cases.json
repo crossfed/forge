@@ -344,8 +344,10 @@
         "Identify over TCP"
       ],
       "mapping_state": "mapped",
-      "forge_tests":
-          [ "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify", "test_forge_libp2p_interop echo" ],
+      "forge_tests": [
+        "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop echo", "test_forge_libp2p_interop echo_large"
+      ],
       "forge_live_scenario": [
         {
           "profile": "tcp_noise",
@@ -358,6 +360,10 @@
         {
           "profile": "tcp_noise",
           "scenario": "echo"
+        },
+        {
+          "profile": "tcp_noise",
+          "scenario": "echo_large"
         }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."

@@ -387,7 +387,7 @@ node::impl::request_relay_reservation(const peer_id& relay_peer, relay::reservat
    const auto started = std::chrono::steady_clock::now();
    auto relay_session = co_await ensure_direct_session(relay_peer, timeout);
    auto deadline = operation_deadline{runtime.context(), remaining_timeout(started, timeout, "P2P relay reservation")};
-   deadline.arm([relay_session] { relay_session->connection.cancel(); });
+   deadline.arm([relay_session] noexcept { relay_session->connection.cancel(); });
    try {
       auto stream = co_await open_session_stream(relay_session, builtins::relay_hop, true);
       co_await stream.async_write(
@@ -597,7 +597,7 @@ node::impl::open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std
    auto relay_session = co_await ensure_direct_session(relay_peer, timeout);
    auto deadline =
        operation_deadline{runtime.context(), remaining_timeout(started, timeout, "P2P relay protocol open")};
-   deadline.arm([relay_session] { relay_session->connection.cancel(); });
+   deadline.arm([relay_session] noexcept { relay_session->connection.cancel(); });
    try {
       auto stream = co_await open_session_stream(relay_session, builtins::relay_hop, true);
       co_await stream.async_write(relay::codec::encode_hop(relay::hop_message{

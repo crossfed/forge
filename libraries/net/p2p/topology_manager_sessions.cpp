@@ -1,5 +1,7 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -18,6 +20,7 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -25,10 +28,11 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.notification;
-import forge.exceptions;
 import forge.net.p2p.discovery;
+import forge.net.p2p.exceptions;
 
 #include "details/cancellation_latch.hxx"
+#include "details/lifecycle_tracker.hxx"
 #include "details/lifecycle_wakeup.hxx"
 #include "details/topology_manager.hxx"
 
@@ -67,22 +71,44 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
    auto batch = std::make_shared<dial_batch>();
    batch->candidates = std::move(candidates);
    batch->completed = std::make_shared<lifecycle_wakeup>();
+   batch->cancellation = std::make_shared<cancellation_latch>();
    batch->required = required;
+   add_cancellation(batch->cancellation);
    const auto executor = co_await boost::asio::this_coro::executor;
+   auto launch_failure = std::exception_ptr{};
    for (auto index = std::size_t{}; index < workers; ++index) {
-      {
-         const auto lock = std::scoped_lock{batch->mutex};
-         ++batch->remaining_workers;
-      }
+      auto operation = std::shared_ptr<lifecycle_tracker::operation>{};
+      auto worker_executor = executor;
+      auto lifecycle_stop = std::shared_ptr<lifecycle_stop_source>{};
+      auto worker_reserved = false;
       try {
+         if (lifecycle_ == nullptr) {
+            FORGE_THROW_EXCEPTION(exceptions::internal, "P2P topology dial worker has no lifecycle owner");
+         }
+         auto tracked = lifecycle_->track();
+         if (!tracked.active()) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "P2P topology dial worker lifecycle is stopped");
+         }
+         operation = std::make_shared<lifecycle_tracker::operation>(std::move(tracked));
+         worker_executor = operation->executor();
+         lifecycle_stop = operation->stop_source();
          auto self = shared_from_this();
+         {
+            const auto lock = std::scoped_lock{batch->mutex};
+            ++batch->remaining_workers;
+            worker_reserved = true;
+         }
          boost::asio::co_spawn(
-             executor,
-             [self = std::move(self), batch]() -> boost::asio::awaitable<void> {
+             worker_executor,
+             [self, batch, lifecycle_stop]() -> boost::asio::awaitable<void> {
+                if (lifecycle_stop && lifecycle_stop->stop_requested()) {
+                   co_return;
+                }
                 co_await self->async_dial_worker(batch);
              },
-             [batch](std::exception_ptr error) {
+             [self, batch, operation](std::exception_ptr error) noexcept {
                 auto notify = false;
+                auto drained = false;
                 {
                    const auto lock = std::scoped_lock{batch->mutex};
                    if (error && !batch->failure) {
@@ -93,20 +119,25 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
                    }
                    notify = batch->launches_complete && batch->remaining_workers == 0 &&
                             !std::exchange(batch->completion_notified, true);
+                   drained = batch->launches_complete && batch->remaining_workers == 0;
                 }
                 if (notify) {
                    batch->completed->notify();
                 }
+                if (drained) {
+                   self->remove_cancellation(batch->cancellation);
+                }
+                operation->release();
              });
       } catch (...) {
-         const auto failure = std::current_exception();
+         launch_failure = std::current_exception();
          {
             const auto lock = std::scoped_lock{batch->mutex};
-            if (!batch->failure) {
-               batch->failure = failure;
+            if (worker_reserved && batch->remaining_workers != 0) {
+               --batch->remaining_workers;
             }
-            --batch->remaining_workers;
          }
+         batch->cancellation->request_stop();
          break;
       }
    }
@@ -121,15 +152,39 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
       batch->completed->notify();
    }
 
-   while (true) {
-      const auto observed = batch->completed->epoch();
-      {
-         const auto lock = std::scoped_lock{batch->mutex};
-         if (batch->remaining_workers == 0) {
-            break;
+   auto join_failure = std::exception_ptr{};
+   auto join_complete = false;
+   while (!join_complete) {
+      try {
+         co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+         while (true) {
+            const auto observed = batch->completed->epoch();
+            {
+               const auto lock = std::scoped_lock{batch->mutex};
+               if (batch->remaining_workers == 0) {
+                  break;
+               }
+            }
+            if (!join_failure && clocks_.before_dial_join_wait) {
+               clocks_.before_dial_join_wait();
+            }
+            static_cast<void>(co_await batch->completed->async_wait(observed));
          }
+         join_complete = true;
+      } catch (...) {
+         if (!join_failure) {
+            join_failure = std::current_exception();
+         }
+         batch->cancellation->request_stop();
       }
-      static_cast<void>(co_await batch->completed->async_wait(observed));
+   }
+   if (launch_failure) {
+      remove_cancellation(batch->cancellation);
+      std::rethrow_exception(launch_failure);
+   }
+   if (join_failure) {
+      remove_cancellation(batch->cancellation);
+      std::rethrow_exception(join_failure);
    }
    auto failure = std::exception_ptr{};
    {
@@ -137,12 +192,14 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
       failure = batch->failure;
    }
    if (failure) {
+      remove_cancellation(batch->cancellation);
       std::rethrow_exception(failure);
    }
+   remove_cancellation(batch->cancellation);
 }
 
 boost::asio::awaitable<void> topology_manager::async_dial_worker(const std::shared_ptr<dial_batch>& batch) {
-   while (!stopping()) {
+   while (!stopping() && !batch->cancellation->stop_requested()) {
       auto candidate = std::optional<discovery::result>{};
       {
          const auto lock = std::scoped_lock{batch->mutex};
@@ -152,6 +209,10 @@ boost::asio::awaitable<void> topology_manager::async_dial_worker(const std::shar
          candidate = batch->candidates[batch->next++];
       }
       auto cancellation = std::make_shared<cancellation_latch>();
+      auto root_subscription = cancellation_latch::subscribe(batch->cancellation, [cancellation] noexcept {
+         cancellation->request_stop();
+      });
+      static_cast<void>(root_subscription);
       add_cancellation(cancellation);
       auto succeeded = false;
       try {

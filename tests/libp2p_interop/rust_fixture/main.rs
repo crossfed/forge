@@ -315,7 +315,7 @@ where
             return Err("frame varint is too large".into());
         }
     }
-    if size == 0 || size > 16 * 1024 {
+    if size == 0 || size > 256 * 1024 {
         return Err(format!("invalid frame size {size}").into());
     }
     let mut payload = vec![0; size];
@@ -462,37 +462,79 @@ async fn expect_unknown_stream_rejection(
     }
 }
 
+struct DhtFindPeerEvidence {
+    closest_peers: usize,
+    requests: u32,
+    successes: u32,
+    failures: u32,
+}
+
 async fn wait_dht_find_peer(
     swarm: &mut libp2p::Swarm<Behaviour>,
     remote_peer: PeerId,
-) -> Result<usize, Box<dyn Error>> {
-    let id = swarm.behaviour_mut().kad.get_closest_peers(remote_peer);
+) -> Result<DhtFindPeerEvidence, Box<dyn Error>> {
+    let mut query = None;
+    let mut routing_admitted = false;
+    let mut amino_advertised = false;
     let deadline = tokio::time::sleep(Duration::from_secs(20));
     tokio::pin!(deadline);
     loop {
         tokio::select! {
-            _ = &mut deadline => return Err("timed out waiting for Kademlia closest peers".into()),
+            _ = &mut deadline => return Err("timed out waiting for Kademlia routing admission or closest peers".into()),
             event = swarm.select_next_some() => {
                 match event {
+                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::RoutingUpdated {
+                        peer,
+                        ..
+                    })) if peer == remote_peer => {
+                        routing_admitted = true;
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
+                        peer_id,
+                        info,
+                        ..
+                    })) if peer_id == remote_peer => {
+                        amino_advertised = info
+                            .protocols
+                            .iter()
+                            .any(|protocol| protocol.as_ref() == "/ipfs/kad/1.0.0");
+                    }
                     SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
                         id: event_id,
                         result: kad::QueryResult::GetClosestPeers(Ok(ok)),
+                        stats,
                         ..
-                    })) if event_id == id => {
-                        if ok.peers.iter().any(|peer| peer.peer_id == remote_peer) || !ok.peers.is_empty() {
-                            return Ok(ok.peers.len());
+                    })) if Some(event_id) == query => {
+                        if !ok.peers.iter().any(|peer| peer.peer_id == remote_peer) {
+                            return Err("Kademlia closest peers result omitted the queried Forge peer".into());
                         }
-                        return Err("Kademlia closest peers result was empty".into());
+                        if stats.num_requests() == 0 || stats.num_successes() == 0 || stats.num_failures() != 0 {
+                            return Err(format!(
+                                "Kademlia query evidence was incomplete: requests={}, successes={}, failures={}",
+                                stats.num_requests(),
+                                stats.num_successes(),
+                                stats.num_failures(),
+                            ).into());
+                        }
+                        return Ok(DhtFindPeerEvidence {
+                            closest_peers: ok.peers.len(),
+                            requests: stats.num_requests(),
+                            successes: stats.num_successes(),
+                            failures: stats.num_failures(),
+                        });
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
                         id: event_id,
                         result: kad::QueryResult::GetClosestPeers(Err(error)),
                         ..
-                    })) if event_id == id => {
+                    })) if Some(event_id) == query => {
                         return Err(format!("Kademlia closest peers failed: {error:?}").into());
                     }
                     SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
                     _ => {}
+                }
+                if routing_admitted && amino_advertised && query.is_none() {
+                    query = Some(swarm.behaviour_mut().kad.get_closest_peers(remote_peer));
                 }
             }
         }
@@ -929,8 +971,7 @@ async fn wait_rendezvous_discovered(
 }
 
 fn rendezvous_lifecycle_ttl(ttl: u64, stage: &str) -> Result<Duration, Box<dyn Error>> {
-    if !(RENDEZVOUS_LIFECYCLE_MIN_TTL_SECONDS..=RENDEZVOUS_LIFECYCLE_MAX_TTL_SECONDS)
-        .contains(&ttl)
+    if !(RENDEZVOUS_LIFECYCLE_MIN_TTL_SECONDS..=RENDEZVOUS_LIFECYCLE_MAX_TTL_SECONDS).contains(&ttl)
     {
         return Err(format!(
             "rendezvous {stage} TTL {ttl} cannot support bounded renewal evidence"
@@ -1015,7 +1056,9 @@ async fn wait_rendezvous_lifecycle(
     let initial_visible_count =
         rendezvous_registration_count(&initial_registrations, local_peer, initial_sequence, None);
     if initial_visible_count != 1 {
-        return Err("rendezvous initial discovery did not contain exactly one matching record".into());
+        return Err(
+            "rendezvous initial discovery did not contain exactly one matching record".into(),
+        );
     }
 
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1128,7 +1171,9 @@ async fn wait_rendezvous_lifecycle(
         Some(&updated_address),
     );
     if renewed_visible_count != 1 {
-        return Err("rendezvous renewal discovery did not contain exactly one renewed record".into());
+        return Err(
+            "rendezvous renewal discovery did not contain exactly one renewed record".into(),
+        );
     }
 
     sleep_until_monotonic(
@@ -1142,7 +1187,8 @@ async fn wait_rendezvous_lifecycle(
         remote_peer,
     );
     let (expired_registrations, _) = wait_rendezvous_discovered(swarm, remote_peer).await?;
-    let expired_registration_count = rendezvous_peer_registration_count(&expired_registrations, local_peer);
+    let expired_registration_count =
+        rendezvous_peer_registration_count(&expired_registrations, local_peer);
     if expired_registration_count != 0 {
         return Err("rendezvous registration survived its returned TTL".into());
     }
@@ -1189,7 +1235,8 @@ async fn wait_rendezvous_lifecycle(
     );
     if pre_unregister_count != 1 {
         return Err(
-            "rendezvous pre-unregister discovery did not contain exactly one matching record".into(),
+            "rendezvous pre-unregister discovery did not contain exactly one matching record"
+                .into(),
         );
     }
     swarm
@@ -1513,9 +1560,15 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             open_required_stream(&mut swarm, remote_peer, "/libp2p/circuit/relay/0.2.0/hop")
                 .await?;
         }
-        "echo" => {
-            let bytes =
-                open_echo_stream_direct(&mut swarm, remote_peer, opts.payload.as_bytes()).await?;
+        "echo" | "echo_large" => {
+            let payload = if opts.scenario == "echo_large" {
+                (0..192 * 1024)
+                    .map(|index| (index % 251) as u8)
+                    .collect::<Vec<_>>()
+            } else {
+                opts.payload.as_bytes().to_vec()
+            };
+            let bytes = open_echo_stream_direct(&mut swarm, remote_peer, &payload).await?;
             write_json(
                 &opts.result_file,
                 json!({
@@ -1534,7 +1587,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             open_required_stream(&mut swarm, remote_peer, "/libp2p/dcutr").await?;
         }
         "dht_find_peer" => {
-            let count = wait_dht_find_peer(&mut swarm, remote_peer).await?;
+            let evidence = wait_dht_find_peer(&mut swarm, remote_peer).await?;
             write_json(
                 &opts.result_file,
                 json!({
@@ -1542,7 +1595,10 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     "role": "dialer",
                     "scenario": opts.scenario,
                     "status": "ok",
-                    "closest_peers": count
+                    "closest_peers": evidence.closest_peers,
+                    "query_requests": evidence.requests,
+                    "query_successes": evidence.successes,
+                    "query_failures": evidence.failures
                 }),
             )?;
             return Ok(());

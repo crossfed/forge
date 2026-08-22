@@ -3,6 +3,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -20,6 +21,8 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/compat/move_only_function.hpp>
 
 module forge.net.p2p.node;
 
@@ -48,6 +51,7 @@ import forge.net.transport.session;
 
 #include "details/direct_transport.hxx"
 #include "details/cancellation_latch.hxx"
+#include "details/owner_cancellation.hxx"
 #include "details/quic_client_token_cache.hxx"
 #include "details/quic_client_options.hxx"
 
@@ -295,18 +299,38 @@ class quic_profile final {
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
                                                     const node::connect_options& options,
                                                     std::shared_ptr<cancellation_latch> cancellation) {
-      auto cancel_current = cancellation ? std::move(cancellation) : std::make_shared<cancellation_latch>();
+      auto cancel_current = std::make_shared<cancellation_latch>();
+      auto parent_subscription = cancellation_latch::subscribe(
+          cancellation, [cancel_current] noexcept { cancel_current->request_stop(); });
       track(cancel_current);
       auto connector = std::make_shared<forge::net::quic::connector>(runtime_);
-      cancel_current->arm([connector] { connector->cancel(); });
+      auto operation_stop = std::make_shared<forge::net::p2p::detail::worker_stop_bridge>();
+      auto stop_requested = std::make_shared<std::atomic_bool>(false);
+      cancel_current->arm([operation_stop, stop_requested] noexcept {
+         stop_requested->store(true, std::memory_order_release);
+         operation_stop->request_stop();
+      });
       try {
          const auto expected_peer = expected_peer_for(endpoint, options);
-         auto quic = co_await connector->async_connect(
-             quic_endpoint_for(endpoint),
-             detail::make_quic_client_options(endpoint, expected_peer, options.timeout,
-                                              quic_limits(options_.transport_limits), options_.certificate_pem,
-                                              options_.private_key_pem, options_.allow_insecure_test_mode,
-                                              client_tokens_));
+         auto connected = std::optional<forge::net::quic::connection>{};
+         co_await forge::net::p2p::detail::async_run_with_owner_cancellation(
+             operation_stop,
+             [this, connector, endpoint, options, expected_peer, stop_requested,
+              &connected](boost::asio::cancellation_slot) mutable -> boost::asio::awaitable<void> {
+                if (stop_requested->load(std::memory_order_acquire)) {
+                   FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P QUIC direct connect canceled before start");
+                }
+                connected.emplace(co_await connector->async_connect(
+                    quic_endpoint_for(endpoint),
+                    detail::make_quic_client_options(endpoint, expected_peer, options.timeout,
+                                                     quic_limits(options_.transport_limits), options_.certificate_pem,
+                                                     options_.private_key_pem, options_.allow_insecure_test_mode,
+                                                     client_tokens_)));
+             });
+         if (!connected || stop_requested->load(std::memory_order_acquire)) {
+            FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P QUIC direct connect canceled");
+         }
+         auto quic = std::move(*connected);
          const auto remote = verified_peer_id_for(quic, expected_peer, options_.allow_insecure_test_mode);
          auto local_endpoint = p2p_endpoint_for(quic.local_endpoint());
          auto remote_endpoint = p2p_endpoint_for(quic.remote_endpoint());

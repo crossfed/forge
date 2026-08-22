@@ -20,7 +20,7 @@ from provenance import WorktreeIdentity, sha256_file, worktree_identity
 
 LIVE_SCENARIO_PROFILES = {
     "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
-    "tcp_noise": ("ping", "identify", "echo"),
+    "tcp_noise": ("ping", "identify", "echo", "echo_large"),
     "tcp_tls": ("ping", "identify", "echo"),
     "quic_dht": (
         "dht_find_peer",
@@ -54,6 +54,11 @@ HIDDEN_DHT_PERMUTATIONS = (
     ("go", "forge", "rust"),
     ("rust", "go", "forge"),
 )
+SUPPORTED_FORGE_BUILD_PROFILES = ("default", "Debug", "Release", "RelWithDebInfo", "MinSizeRel")
+LOCKED_FORGE_FIXTURE_COMPILER = {
+    "compiler_id": "Clang",
+    "compiler_version": "22.1.8",
+}
 
 
 def run(command: list[str], cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None) -> None:
@@ -146,12 +151,24 @@ def forge_fixture_requirements(fixture_lock: dict) -> dict:
     if not isinstance(toolchains, dict):
         raise RuntimeError("fixture lock has no toolchain requirements")
     requirements = toolchains.get("forge_fixture")
-    expected_fields = {"compiler_id", "compiler_version", "build_profile"}
+    expected_fields = {"compiler_id", "compiler_version", "build_profiles"}
     if not isinstance(requirements, dict) or set(requirements) != expected_fields:
         raise RuntimeError("fixture lock Forge fixture requirements are malformed")
-    if not all(isinstance(value, str) and value for value in requirements.values()):
+    if (
+        requirements.get("compiler_id") != LOCKED_FORGE_FIXTURE_COMPILER["compiler_id"]
+        or requirements.get("compiler_version") != LOCKED_FORGE_FIXTURE_COMPILER["compiler_version"]
+        or requirements.get("build_profiles") != list(SUPPORTED_FORGE_BUILD_PROFILES)
+    ):
         raise RuntimeError("fixture lock Forge fixture requirements are malformed")
     return requirements
+
+
+def require_supported_forge_build_profile(build_profile: object, requirements: dict) -> None:
+    if not isinstance(build_profile, str) or build_profile not in requirements["build_profiles"]:
+        raise RuntimeError(
+            "Forge interop fixture build profile is not supported by the locked baseline: "
+            f"embedded={build_profile!r}, supported={requirements['build_profiles']!r}"
+        )
 
 
 def require_fixture_provenance(binary: Path, expected: WorktreeIdentity, fixture_lock: dict) -> tuple[dict, dict]:
@@ -186,11 +203,7 @@ def require_fixture_provenance(binary: Path, expected: WorktreeIdentity, fixture
             "Forge interop fixture compiler does not match the locked baseline: "
             f"embedded={compiler}, required={requirements}"
         )
-    if build_profile != requirements["build_profile"]:
-        raise RuntimeError(
-            "Forge interop fixture build profile does not match the locked baseline: "
-            f"embedded={build_profile!r}, required={requirements['build_profile']!r}"
-        )
+    require_supported_forge_build_profile(build_profile, requirements)
     return build_info, command
 
 
@@ -811,6 +824,32 @@ def require_rendezvous_lifecycle_evidence(result: dict, dialer: str, listener: s
         raise RuntimeError(f"{dialer} rendezvous lifecycle did not expire and unregister: {result}")
 
 
+def require_dht_provider_evidence(result: dict, dialer: str) -> None:
+    provider_count = result.get("provider_count")
+    if type(provider_count) is not int or provider_count < 1:
+        raise RuntimeError(f"{dialer} DHT provider lookup did not return a provider: {result}")
+    if dialer != "forge":
+        return
+    provider_peer = result.get("provider_peer")
+    querier_peer = result.get("querier_peer")
+    if not isinstance(provider_peer, str) or not provider_peer:
+        raise RuntimeError(f"FORGE DHT provider proof did not identify the provider: {result}")
+    if not isinstance(querier_peer, str) or not querier_peer:
+        raise RuntimeError(f"FORGE DHT provider proof did not identify the querier: {result}")
+    if provider_peer == querier_peer:
+        raise RuntimeError(f"FORGE DHT provider proof reused the provider as its querier: {result}")
+    if result.get("returned_provider_peer") != provider_peer:
+        raise RuntimeError(f"FORGE DHT provider proof returned a different provider: {result}")
+    address_count = result.get("address_count")
+    if type(address_count) is not int or address_count < 1:
+        raise RuntimeError(f"FORGE DHT provider proof returned no provider address: {result}")
+    stream_delta = result.get("protocol_streams_opened_delta")
+    if type(stream_delta) is not int or stream_delta < 1:
+        raise RuntimeError(f"FORGE DHT provider proof did not open a DHT protocol stream: {result}")
+    if result.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
+        raise RuntimeError(f"FORGE DHT provider proof negotiated the wrong protocol: {result}")
+
+
 def run_pair(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str, root: Path) -> dict:
     return run_pair_with_transport(dialer_binary, dialer, listener_binary, listener, scenario, root, "quic")
 
@@ -884,6 +923,8 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
             require_rendezvous_register_discover_evidence(result, dialer)
         if scenario == "rendezvous_lifecycle":
             require_rendezvous_lifecycle_evidence(result, dialer, listener)
+        if scenario == "dht_provide_find_provider":
+            require_dht_provider_evidence(result, dialer)
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")

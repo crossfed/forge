@@ -16,30 +16,36 @@
     "forge_fixture": {
       "compiler_id": "Clang",
       "compiler_version": "22.1.8",
-      "build_profile": "default"
+      "build_profiles": [
+        "default",
+        "Debug",
+        "Release",
+        "RelWithDebInfo",
+        "MinSizeRel"
+      ]
     }
   },
   "fixture_files": {
     "go_fixture/go.mod": "d932393c652c4fcab045bc9e35d70bb8ee6700610b63f5ed9c4d2b3b8e1e6be2",
     "go_fixture/go.sum": "4c5c4bab5b838e9027b83777413feb9c2540f2d0c076c86214a549cfad47902a",
-    "go_fixture/main.go": "6cd1f837a1eb213dc9d2f7ba27906f5523a6b1da3dd835b1ccb4d637c261d1f4",
+    "go_fixture/main.go": "105dfbaa25f8dc78fe0376ed6dd1199ba9a4ce1c76d0c3b2319484bfc9fa480b",
     "rust_fixture/Cargo.lock": "14b5e00e49ffa65cc10ff42c2ec0ad49d7d3654846f749ca12d8e80090a6d781",
     "rust_fixture/Cargo.toml": "a4992715e8f7eaa9576f9f8b9a877b52bb847eb0af0ec70e9078c8113b85d71e",
-    "rust_fixture/main.rs": "6098355430d8dcc379991ca2b76364f28a1ef15ecd872f7a88c002c2d15ef1fc",
+    "rust_fixture/main.rs": "9c8f9ab1f0867e26c7de4b15d57fb8116aa6828fa3f63a3bccddb11b4bdf3403",
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
-    "../CMakeLists.txt": "57432300de838877b78451947dc5bde1c3e54b7e24c242dfde75fbbf916c9ba9",
-    "check_fixture_lock.py": "9f9c64c3851f1478ea7b98eca9fe82c501cfe9b1f9ee1b0430211d520ec44253",
-    "forge_interop_fixture.cpp": "50507309d67be8ffca0142b0418a05e5f21c7e8fd53b2fd7a2b41237a13817b2",
+    "../CMakeLists.txt": "99d9d43dba70abc3c50371d5923be8b07335663bd24f2d8f06eabb77052e404e",
+    "check_fixture_lock.py": "1e9f0229bc3fc13e99724cb7e6c8cafae5b257e14a86128dcee670c7fd8dd0c7",
+    "forge_interop_fixture.cpp": "34ef754b4b131689a4fc60d7db3c5e747cc60d94a2c52588c96f82a68fd50d0b",
     "provenance.py": "b52c97e6a817022eddbee267959c5bf722502bdaf19ba73b535ff92e41348745",
-    "runner.py": "f8abc75905d740fc2646d476c351c109b1643dd3358e8d886f06b1111d508f77"
+    "runner.py": "9d285d356d606a68d36dadb9ac5a7336f711aa61f8a61fa9dab11a219ca84378"
   },
   "evidence_sources": {
-    "donor_cases.json": "ef65728b81ff107e03769ca8b6a24a06c803ee0520e602a74666a34d36b8f86f"
+    "donor_cases.json": "c1e6122e7c0a16a902ee89a3627f4e95d8688c09155d4e64c10737c6b4d90117"
   },
   "regression_sources": {
-    "test_provenance.py": "27d50a9d0f319433ed9aa9e503cc5a3a5243ab573d862cd5aa71711256e068cd"
+    "test_provenance.py": "74dd7ca1d08ba2510a0f0d9003e57a3f4895af3bed9f1c64ac937a0d4d4521f8"
   },
   "dependency_graphs": {
     "go": {

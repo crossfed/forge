@@ -1,15 +1,19 @@
 #pragma once
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace forge::net::p2p::detail {
+
+class lifecycle_wakeup;
 
 class connection_singleflight_registry {
  private:
@@ -19,6 +23,7 @@ class connection_singleflight_registry {
    enum class test_stage : std::uint8_t {
       before_new_entry_publish,
       before_existing_entry_commit,
+      before_completion_delivery,
    };
 
    struct test_hooks {
@@ -47,16 +52,14 @@ class connection_singleflight_registry {
       lease& operator=(lease&&) noexcept = default;
 
       boost::asio::awaitable<outcome> wait();
+      void request_stop() noexcept;
 
     private:
-      using completion_channel =
-          boost::asio::experimental::concurrent_channel<void(boost::system::error_code, outcome)>;
-
-      lease(peer_id peer, std::shared_ptr<entry> owner, std::shared_ptr<completion_channel> completion, bool queued);
+      lease(peer_id peer, std::shared_ptr<entry> owner, bool queued);
 
       peer_id peer_;
       std::shared_ptr<entry> owner_;
-      std::shared_ptr<completion_channel> completion_;
+      std::shared_ptr<std::atomic_bool> stop_requested_;
       bool queued_ = false;
       friend class connection_singleflight_registry;
    };
@@ -91,24 +94,28 @@ class connection_singleflight_registry {
                              std::size_t maximum_waiters = (std::numeric_limits<std::size_t>::max)());
    void succeed(operation& active) noexcept;
    void fail(operation& active, exceptions::code error, std::string message) noexcept;
+   void rollback_unpublished(operation& active, lease& participant) noexcept;
    void leave(lease& participant) noexcept;
    void close() noexcept;
    [[nodiscard]] std::size_t size() const noexcept;
 
  private:
    struct entry {
+      explicit entry(std::shared_ptr<lifecycle_wakeup> completion) noexcept;
+
+      // completion_mutex publishes result exactly once before completion wakes
+      // waiters; leases retain entry lifetime while reading the immutable value.
+      mutable std::mutex completion_mutex;
+      std::shared_ptr<lifecycle_wakeup> completion;
       outcome result;
       bool completed = false;
       bool operation_active = true;
       std::size_t participants = 0;
-      std::vector<std::weak_ptr<lease::completion_channel>> completions;
    };
 
-   void complete(entry& owner, outcome result) noexcept;
+   void complete(const std::shared_ptr<entry>& owner, outcome result) noexcept;
    void finish(operation& active, outcome result) noexcept;
    void erase_if_unused(const peer_id& peer, const std::shared_ptr<entry>& owner) noexcept;
-   static void prune_completions(entry& owner) noexcept;
-   static void prune_completions(std::vector<std::weak_ptr<lease::completion_channel>>& completions) noexcept;
    void reach_test_failpoint(test_stage stage) const;
 
    std::map<peer_id, std::shared_ptr<entry>> entries_;

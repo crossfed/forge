@@ -42,6 +42,9 @@ credited as live donor proof.
   untrusted hints until authenticated connect and Identify.
 - Public API stays owner-shaped: `dht::options`, `dht::query_result`,
   `rendezvous::options`, `rendezvous::registration`, `discovery::policy`.
+  The Stable legacy discovery policy is normalized into the node-owned Stage 5
+  topology manager; incompatible non-default legacy and topology values are
+  rejected rather than creating a second orchestrator.
 - `peer_store::persistence` and `dht::record_store::persistence` are
   backend-neutral and asynchronous. The official plugin owns private ObjectDB
   adapters for both; `forge_net_p2p` has no RocksDB or DB Store dependency.

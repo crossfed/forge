@@ -44,6 +44,7 @@ struct topology {
       std::size_t max_tag_size = 128;
       double retry_jitter = 0.20;
       bool dht_enabled = true;
+      bool rendezvous_enabled = true;
       bool peer_exchange_enabled = true;
       std::vector<rendezvous_point> rendezvous_points;
    };

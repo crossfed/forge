@@ -14,6 +14,7 @@ module;
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -271,6 +272,53 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_coalesces_refresh_waiters) {
    stop_topology_manager(runtime, *manager, lifecycle);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_completion_publication_survives_failpoint) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(lifecycle.begin_start());
+   auto release = std::make_shared<forge::asio::notification>();
+   auto started = std::promise<void>{};
+   auto fail_refresh_completion = std::atomic_bool{true};
+   auto fail_parent_completion = std::atomic_bool{true};
+   auto callbacks = topology_callbacks();
+   callbacks.discover = [release, &started](std::shared_ptr<cancellation_latch>)
+       -> boost::asio::awaitable<std::vector<discovery::result>> {
+      const auto observed = release->epoch();
+      started.set_value();
+      static_cast<void>(co_await release->async_wait(observed));
+      co_return std::vector<discovery::result>{};
+   };
+   auto manager = std::make_shared<detail::topology_manager>(
+       test_topology_policy(), std::move(callbacks), detail::topology_manager::clocks{
+                                                       .before_refresh_completion = [&] {
+                                                          if (fail_refresh_completion.exchange(false)) {
+                                                             throw std::bad_alloc{};
+                                                          }
+                                                       },
+                                                       .before_parent_completion = [&] {
+                                                          if (fail_parent_completion.exchange(false)) {
+                                                             throw std::bad_alloc{};
+                                                          }
+                                                       },
+                                                   });
+   manager->start(lifecycle);
+   started.get_future().wait();
+
+   auto first = boost::asio::co_spawn(runtime.context(), manager->async_refresh(), boost::asio::use_future);
+   auto second = boost::asio::co_spawn(runtime.context(), manager->async_refresh(), boost::asio::use_future);
+   release->notify();
+   static_cast<void>(first.get());
+   static_cast<void>(second.get());
+
+   manager->request_stop();
+   forge::asio::blocking::run(runtime, manager->async_join());
+   BOOST_TEST(!fail_refresh_completion.load());
+   BOOST_TEST(!fail_parent_completion.load());
+   BOOST_TEST(static_cast<int>(manager->current().lifecycle_phase) ==
+              static_cast<int>(detail::topology_manager::phase::stopped));
+   lifecycle.request_stop();
+}
+
 BOOST_AUTO_TEST_CASE(p2p_topology_manager_coalesces_and_repeats_peer_exchange_batches) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
@@ -430,6 +478,197 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_renews_confirmed_rendezvous_before_per
    BOOST_TEST(static_cast<int>(manager->current().lifecycle_phase) ==
               static_cast<int>(detail::topology_manager::phase::stopped));
    lifecycle.request_stop();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_keeps_jittered_periodic_deadline_across_early_wakes) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(lifecycle.begin_start());
+   auto steady_now = std::chrono::steady_clock::now();
+   auto system_now = std::chrono::system_clock::time_point{std::chrono::hours{400}};
+   auto policy = test_topology_policy();
+   policy.refresh_interval = std::chrono::seconds{10};
+   policy.retry_jitter = 0.20;
+   policy.peer_exchange_enabled = false;
+   policy.rendezvous_enabled = false;
+   auto refreshes = std::size_t{};
+   auto idle_waits = std::size_t{};
+   auto first_deadline = std::chrono::steady_clock::time_point{};
+   auto manager_value = static_cast<detail::topology_manager*>(nullptr);
+   auto callbacks = topology_callbacks();
+   callbacks.discover = [&refreshes](std::shared_ptr<cancellation_latch>)
+       -> boost::asio::awaitable<std::vector<discovery::result>> {
+      ++refreshes;
+      co_return std::vector<discovery::result>{};
+   };
+   auto manager = std::make_shared<detail::topology_manager>(
+       std::move(policy), std::move(callbacks),
+       detail::topology_manager::clocks{
+           .steady_now = [&steady_now] { return steady_now; },
+           .system_now = [&system_now] { return system_now; },
+           .idle_wait = [&](std::chrono::steady_clock::time_point deadline) -> boost::asio::awaitable<void> {
+              ++idle_waits;
+              if (idle_waits == 1) {
+                 first_deadline = deadline;
+                 const auto delay = deadline - steady_now;
+                 BOOST_CHECK(delay >= std::chrono::seconds{8});
+                 BOOST_CHECK(delay <= std::chrono::seconds{12});
+              } else if (idle_waits == 2) {
+                 BOOST_CHECK(deadline == first_deadline);
+                 const auto elapsed = deadline - steady_now;
+                 steady_now = deadline;
+                 system_now += std::chrono::duration_cast<std::chrono::system_clock::duration>(elapsed);
+              } else {
+                 manager_value->request_stop();
+              }
+              co_return;
+           },
+       });
+   manager_value = manager.get();
+   manager->start(lifecycle);
+   forge::asio::blocking::run(runtime, manager->async_join());
+
+   BOOST_TEST(refreshes == 2U);
+   BOOST_TEST(idle_waits >= 3U);
+   lifecycle.request_stop();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_jitters_first_periodic_deadline_by_node_seed) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto steady_now = std::chrono::steady_clock::time_point{std::chrono::seconds{100}};
+   const auto system_now = std::chrono::system_clock::time_point{std::chrono::hours{400}};
+   auto policy = test_topology_policy();
+   policy.refresh_interval = std::chrono::seconds{10};
+   policy.retry_jitter = 0.20;
+   policy.peer_exchange_enabled = false;
+   policy.rendezvous_enabled = false;
+
+   const auto first_deadline_for = [&](std::uint64_t seed) {
+      auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+      BOOST_TEST(lifecycle.begin_start());
+      auto deadline = std::chrono::steady_clock::time_point{};
+      auto manager_value = static_cast<detail::topology_manager*>(nullptr);
+      auto manager = std::make_shared<detail::topology_manager>(
+          policy, topology_callbacks(),
+          detail::topology_manager::clocks{
+              .steady_now = [&] { return steady_now; },
+              .system_now = [&] { return system_now; },
+              .idle_wait = [&](std::chrono::steady_clock::time_point candidate) -> boost::asio::awaitable<void> {
+                 deadline = candidate;
+                 manager_value->request_stop();
+                 co_return;
+              },
+          },
+          seed);
+      manager_value = manager.get();
+      manager->start(lifecycle);
+      forge::asio::blocking::run(runtime, manager->async_join());
+      lifecycle.request_stop();
+      BOOST_TEST(deadline.time_since_epoch().count() != 0);
+      const auto delay = deadline - steady_now;
+      BOOST_CHECK(delay >= std::chrono::seconds{8});
+      BOOST_CHECK(delay <= std::chrono::seconds{12});
+      return deadline;
+   };
+
+   const auto first = first_deadline_for(0);
+   const auto repeated = first_deadline_for(0);
+   const auto different = first_deadline_for(10'000);
+
+   BOOST_TEST(first.time_since_epoch().count() == repeated.time_since_epoch().count());
+   BOOST_TEST(first.time_since_epoch().count() != different.time_since_epoch().count());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_saturates_maximum_periodic_deadline) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(lifecycle.begin_start());
+   const auto steady_now = std::chrono::steady_clock::time_point{std::chrono::milliseconds{1}};
+   const auto system_now = std::chrono::system_clock::time_point{std::chrono::hours{500}};
+   auto policy = test_topology_policy();
+   policy.refresh_interval = (std::chrono::milliseconds::max)();
+   policy.retry_jitter = 0.0;
+   policy.dht_enabled = false;
+   policy.peer_exchange_enabled = false;
+   policy.rendezvous_enabled = false;
+   auto deadline = std::chrono::steady_clock::time_point{};
+   auto manager_value = static_cast<detail::topology_manager*>(nullptr);
+   auto manager = std::make_shared<detail::topology_manager>(
+       std::move(policy), topology_callbacks(),
+       detail::topology_manager::clocks{
+           .steady_now = [&] { return steady_now; },
+           .system_now = [&] { return system_now; },
+           .idle_wait = [&](std::chrono::steady_clock::time_point candidate) -> boost::asio::awaitable<void> {
+              deadline = candidate;
+              manager_value->request_stop();
+              co_return;
+           },
+       });
+   manager_value = manager.get();
+   manager->start(lifecycle);
+   forge::asio::blocking::run(runtime, manager->async_join());
+
+   BOOST_TEST(deadline.time_since_epoch().count() ==
+              std::chrono::steady_clock::time_point::max().time_since_epoch().count());
+   lifecycle.request_stop();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_saturates_dial_retry_deadline_near_steady_clock_maximum) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(lifecycle.begin_start());
+   const auto steady_now = std::chrono::steady_clock::time_point::max() - std::chrono::milliseconds{1};
+   const auto system_now = std::chrono::system_clock::time_point{std::chrono::hours{500}};
+   auto policy = test_topology_policy();
+   policy.refresh_interval = (std::chrono::milliseconds::max)();
+   policy.retry_jitter = 0.0;
+   policy.peer_exchange_enabled = false;
+   policy.rendezvous_enabled = false;
+   auto dials = std::size_t{};
+   auto deadline = std::chrono::steady_clock::time_point{};
+   auto callbacks = topology_callbacks();
+   callbacks.discover = [](std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<std::vector<discovery::result>> {
+      co_return std::vector<discovery::result>{
+          discovery::result{
+              .peer = test_peer(98),
+              .endpoints = {configured_rendezvous_endpoint(test_peer(98), 4098)},
+              .discovered_by = discovery::source::dht,
+              .score = 1.0,
+          },
+      };
+   };
+   callbacks.dial = [&dials](discovery::result, std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<bool> {
+      ++dials;
+      co_return false;
+   };
+   auto manager_value = static_cast<detail::topology_manager*>(nullptr);
+   auto manager = std::make_shared<detail::topology_manager>(
+       std::move(policy), std::move(callbacks),
+       detail::topology_manager::clocks{
+           .steady_now = [&] { return steady_now; },
+           .system_now = [&] { return system_now; },
+           .idle_wait = [&](std::chrono::steady_clock::time_point candidate) -> boost::asio::awaitable<void> {
+              deadline = candidate;
+              manager_value->request_stop();
+              co_return;
+           },
+       });
+   manager_value = manager.get();
+   manager->start(lifecycle);
+   forge::asio::blocking::run(runtime, manager->async_join());
+
+   BOOST_TEST(dials == 1U);
+   BOOST_TEST(deadline.time_since_epoch().count() ==
+              std::chrono::steady_clock::time_point::max().time_since_epoch().count());
+   lifecycle.request_stop();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_saturates_maximum_discovery_expiry) {
+   const auto now = std::chrono::system_clock::time_point{std::chrono::milliseconds{1}};
+   const auto expiry = detail::saturating_topology_expiry(now, (std::chrono::milliseconds::max)());
+
+   BOOST_TEST(expiry.time_since_epoch().count() ==
+              std::chrono::system_clock::time_point::max().time_since_epoch().count());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_sources_and_prevents_peer_exchange_starvation) {
@@ -879,6 +1118,108 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_dials_to_target_and_prunes_to_target) 
    stop_topology_manager(runtime, *prune_manager, prune_lifecycle);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_topology_manager_dial_join_failure_cancels_and_drains_before_next_refresh) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
+   BOOST_REQUIRE(lifecycle.begin_start());
+   auto release = std::make_shared<forge::asio::notification>();
+   auto cancellation_seen = std::make_shared<forge::asio::notification>();
+   auto first_worker_finished = std::make_shared<forge::asio::notification>();
+   auto dial_started = std::promise<void>{};
+   auto dial_started_future = dial_started.get_future().share();
+   auto fail_join = std::atomic_bool{true};
+   auto dial_calls = std::atomic_size_t{0};
+   auto active_dials = std::atomic_size_t{0};
+   auto maximum_active_dials = std::atomic_size_t{0};
+   auto callbacks = topology_callbacks();
+   callbacks.discover = [](std::shared_ptr<cancellation_latch>)
+       -> boost::asio::awaitable<std::vector<discovery::result>> {
+      co_return std::vector<discovery::result>{
+          discovery::result{.peer = test_peer(44),
+                            .endpoints = {configured_rendezvous_endpoint(test_peer(44), 4144)},
+                            .discovered_by = discovery::source::dht,
+                            .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
+                            .score = 2.0},
+          discovery::result{.peer = test_peer(45),
+                            .endpoints = {configured_rendezvous_endpoint(test_peer(45), 4145)},
+                            .discovered_by = discovery::source::dht,
+                            .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
+                            .score = 1.0},
+      };
+   };
+   callbacks.dial = [release, cancellation_seen, first_worker_finished, &dial_started, &dial_calls, &active_dials,
+                     &maximum_active_dials](discovery::result, std::shared_ptr<cancellation_latch> cancellation)
+       -> boost::asio::awaitable<bool> {
+      const auto call = dial_calls.fetch_add(1, std::memory_order_acq_rel);
+      const auto active = active_dials.fetch_add(1, std::memory_order_acq_rel) + 1;
+      auto maximum = maximum_active_dials.load(std::memory_order_acquire);
+      while (maximum < active && !maximum_active_dials.compare_exchange_weak(
+                                     maximum, active, std::memory_order_acq_rel, std::memory_order_acquire)) {
+      }
+      if (call == 0) {
+         const auto release_epoch = release->epoch();
+         const auto cancellation_epoch = cancellation_seen->epoch();
+         auto subscription = cancellation_latch::subscribe(
+             cancellation, [cancellation_seen] noexcept { cancellation_seen->notify(); });
+         static_cast<void>(subscription);
+         dial_started.set_value();
+         static_cast<void>(co_await cancellation_seen->async_wait(cancellation_epoch));
+         static_cast<void>(co_await release->async_wait(release_epoch));
+         active_dials.fetch_sub(1, std::memory_order_acq_rel);
+         first_worker_finished->notify();
+         co_return false;
+      }
+      active_dials.fetch_sub(1, std::memory_order_acq_rel);
+      co_return true;
+   };
+   auto policy = test_topology_policy();
+   policy.max_parallel_dials = 1;
+   policy.peer_exchange_enabled = false;
+   auto manager = std::make_shared<detail::topology_manager>(
+       std::move(policy), std::move(callbacks),
+       detail::topology_manager::clocks{
+           .before_dial_join_wait = [&] {
+              if (fail_join.exchange(false, std::memory_order_acq_rel)) {
+                 dial_started_future.wait();
+                 throw std::bad_alloc{};
+              }
+           },
+       });
+   const auto cancellation_epoch = cancellation_seen->epoch();
+   auto canceled = boost::asio::co_spawn(runtime.context(), cancellation_seen->async_wait(cancellation_epoch),
+                                          boost::asio::use_future);
+   const auto finished_epoch = first_worker_finished->epoch();
+   auto finished = boost::asio::co_spawn(runtime.context(), first_worker_finished->async_wait(finished_epoch),
+                                         boost::asio::use_future);
+   manager->start(lifecycle);
+   auto first = boost::asio::co_spawn(runtime.context(), manager->async_refresh(), boost::asio::use_future);
+
+   BOOST_REQUIRE(canceled.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   static_cast<void>(canceled.get());
+   BOOST_TEST(active_dials.load(std::memory_order_acquire) == 1U);
+   const auto parent_waited_for_worker = first.wait_for(std::chrono::milliseconds{20}) == std::future_status::timeout;
+   if (!parent_waited_for_worker) {
+      BOOST_CHECK_THROW(static_cast<void>(first.get()), std::bad_alloc);
+      BOOST_CHECK_NO_THROW(static_cast<void>(forge::asio::blocking::run(runtime, manager->async_refresh())));
+   }
+   BOOST_TEST(parent_waited_for_worker);
+   release->notify();
+   if (parent_waited_for_worker) {
+      BOOST_REQUIRE(first.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+      BOOST_CHECK_THROW(static_cast<void>(first.get()), std::bad_alloc);
+   }
+   BOOST_REQUIRE(finished.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   static_cast<void>(finished.get());
+   BOOST_TEST(active_dials.load(std::memory_order_acquire) == 0U);
+
+   if (parent_waited_for_worker) {
+      BOOST_CHECK_NO_THROW(static_cast<void>(forge::asio::blocking::run(runtime, manager->async_refresh())));
+   }
+   BOOST_TEST(dial_calls.load(std::memory_order_acquire) == 2U);
+   BOOST_TEST(maximum_active_dials.load(std::memory_order_acquire) == 1U);
+   stop_topology_manager(runtime, *manager, lifecycle);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_topology_manager_deduplicates_sources_and_retries_after_backoff) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto lifecycle = detail::lifecycle_tracker{runtime.context().get_executor()};
@@ -948,7 +1289,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_stop_cancels_a_running_source) {
        [release, &entered](
            std::shared_ptr<cancellation_latch> cancellation) -> boost::asio::awaitable<std::vector<discovery::result>> {
       const auto observed = release->epoch();
-      cancellation->arm([release] { release->notify(); });
+      cancellation->arm([release] noexcept { release->notify(); });
       entered.set_value();
       static_cast<void>(co_await release->async_wait(observed));
       co_return std::vector<discovery::result>{};
@@ -963,10 +1304,12 @@ BOOST_AUTO_TEST_CASE(p2p_topology_child_cancellation_honors_stop_before_arm) {
    auto parent = std::make_shared<cancellation_latch>();
    auto child = std::make_shared<cancellation_latch>();
    parent->request_stop();
+   BOOST_TEST(parent->stop_requested());
 
-   auto subscription = cancellation_latch::subscribe(parent, [child] { child->request_stop(); });
+   auto subscription = cancellation_latch::subscribe(parent, [child] noexcept { child->request_stop(); });
+   BOOST_TEST(child->stop_requested());
    auto canceled = false;
-   child->arm([&canceled] { canceled = true; });
+   child->arm([&canceled] noexcept { canceled = true; });
 
    BOOST_TEST(canceled);
    BOOST_TEST(!child->finish());
@@ -985,7 +1328,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_stop_cancels_a_running_peer_exchange_b
                               &entered](std::shared_ptr<cancellation_latch> cancellation,
                                         std::size_t) -> boost::asio::awaitable<std::vector<discovery::result>> {
       const auto observed = release->epoch();
-      cancellation->arm([release] { release->notify(); });
+      cancellation->arm([release] noexcept { release->notify(); });
       entered.set_value();
       static_cast<void>(co_await release->async_wait(observed));
       co_return std::vector<discovery::result>{};

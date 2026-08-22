@@ -1,5 +1,7 @@
 module;
 
+#include "details/rendezvous_time.hxx"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -23,13 +25,7 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/cancellation_type.hpp>
-#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/strand.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
 
 module forge.net.p2p.node;
 
@@ -65,19 +61,6 @@ namespace {
    return value;
 }
 
-[[nodiscard]] std::chrono::system_clock::time_point
-saturating_add(std::chrono::system_clock::time_point now, std::chrono::seconds ttl) {
-   if (ttl.count() <= 0) {
-      return now;
-   }
-   const auto available =
-       std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::time_point::max() - now);
-   if (ttl >= available) {
-      return std::chrono::system_clock::time_point::max();
-   }
-   return now + ttl;
-}
-
 [[nodiscard]] std::chrono::system_clock::time_point rendezvous_renewal_time(
     std::chrono::system_clock::time_point now, std::chrono::system_clock::time_point expires_at) {
    const auto lifetime = expires_at - now;
@@ -93,6 +76,16 @@ saturating_add(std::chrono::system_clock::time_point now, std::chrono::seconds t
       return now;
    }
    return expires_at - margin;
+}
+
+[[nodiscard]] std::chrono::steady_clock::time_point
+bounded_retry_deadline(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay) noexcept {
+   if (delay <= std::chrono::milliseconds::zero() || now == std::chrono::steady_clock::time_point::max()) {
+      return now;
+   }
+   const auto available = std::chrono::steady_clock::time_point::max() - now;
+   const auto requested = std::chrono::duration_cast<std::chrono::steady_clock::duration>(delay);
+   return requested >= available ? std::chrono::steady_clock::time_point::max() : now + requested;
 }
 
 void bound_source_results(std::vector<discovery::result>& results, std::size_t limit) {
@@ -117,13 +110,11 @@ void bound_source_results(std::vector<discovery::result>& results, std::size_t l
 
 boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_collect_discovery() {
    auto cancellation = std::make_shared<cancellation_latch>();
-   auto signal = std::make_shared<boost::asio::cancellation_signal>();
-   cancellation->arm([signal] { signal->emit(boost::asio::cancellation_type::terminal); });
    add_cancellation(cancellation);
    try {
-      const auto executor = co_await boost::asio::this_coro::executor;
       const auto dht_enabled = policy_.dht_enabled && static_cast<bool>(callbacks_.discover);
-      const auto rendezvous_enabled = !rendezvous_clients_.empty() && static_cast<bool>(callbacks_.local_rendezvous_record) &&
+      const auto rendezvous_enabled = policy_.rendezvous_enabled && !rendezvous_clients_.empty() &&
+                                      static_cast<bool>(callbacks_.local_rendezvous_record) &&
                                       static_cast<bool>(callbacks_.rendezvous_register) &&
                                       static_cast<bool>(callbacks_.rendezvous_discover);
       const auto peer_exchange_enabled = policy_.peer_exchange_enabled && static_cast<bool>(callbacks_.peer_exchange);
@@ -143,9 +134,10 @@ boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_c
       if (dht_enabled) {
          ++enabled_sources;
          try {
-            dht = co_await boost::asio::co_spawn(
-                executor, callbacks_.discover(cancellation),
-                boost::asio::bind_cancellation_slot(signal->slot(), boost::asio::use_awaitable));
+            // Each source receives the same sticky latch. Direct awaiting keeps
+            // its caller cancellation intact without relaying a raw signal from
+            // the topology stop thread into another executor.
+            dht = co_await callbacks_.discover(cancellation);
             bound_source_results(dht, policy_.max_candidates);
             ++successful_sources;
          } catch (...) {
@@ -171,11 +163,8 @@ boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_c
       if (!stopping() && peer_exchange_enabled) {
          ++enabled_sources;
          try {
-            peer_exchange = co_await boost::asio::co_spawn(
-                executor,
-                callbacks_.peer_exchange(cancellation,
-                                         std::min(policy_.max_peer_exchange_peers, policy_.max_parallel_queries)),
-                boost::asio::bind_cancellation_slot(signal->slot(), boost::asio::use_awaitable));
+            peer_exchange = co_await callbacks_.peer_exchange(
+                cancellation, std::min(policy_.max_peer_exchange_peers, policy_.max_parallel_queries));
             bound_source_results(peer_exchange, policy_.max_candidates);
             ++successful_sources;
          } catch (...) {
@@ -238,7 +227,7 @@ boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_c
 
 boost::asio::awaitable<std::vector<discovery::result>>
 topology_manager::async_collect_rendezvous(const std::shared_ptr<cancellation_latch>& cancellation, std::size_t limit) {
-   if (policy_.operating_mode == topology::mode::static_only || rendezvous_clients_.empty() ||
+   if (policy_.operating_mode == topology::mode::static_only || !policy_.rendezvous_enabled || rendezvous_clients_.empty() ||
        !callbacks_.local_rendezvous_record || !callbacks_.rendezvous_register || !callbacks_.rendezvous_discover) {
       co_return std::vector<discovery::result>{};
    }
@@ -289,13 +278,16 @@ topology_manager::async_collect_rendezvous(const std::shared_ptr<cancellation_la
                continue;
             }
             const auto now = clocks_.system_now();
-            const auto expires_at = saturating_add(now, registered.ttl);
+            const auto expires_at = rendezvous_expiry_after(now, registered.ttl);
             const auto lock = std::scoped_lock{mutex_};
             if (const auto state = rendezvous_clients_.find(work.key); state != rendezvous_clients_.end()) {
                state->second.confirmed_registration = true;
                state->second.registered_generation = local_record.generation;
                state->second.expires_at = expires_at;
                state->second.renew_after = rendezvous_renewal_time(now, expires_at);
+               // A successful registration clears transport backoff for this point.
+               state->second.failures = 0;
+               state->second.retry_after = {};
             }
          }
 
@@ -311,12 +303,6 @@ topology_manager::async_collect_rendezvous(const std::shared_ptr<cancellation_la
             }
             discovered = co_await callbacks_.rendezvous_discover(work.point_index, work.key.namespace_name,
                                                                    policy_.max_candidates, {}, cancellation);
-         }
-         if (discovered.response_status == callbacks::rendezvous_discover_result::status::local_failure) {
-            // The remote point answered successfully. Keep its retry state and cookie unchanged so a later
-            // refresh can retry the durable local update without penalising a healthy Rendezvous server.
-            succeeded = true;
-            continue;
          }
          if (discovered.response_status != callbacks::rendezvous_discover_result::status::ok) {
             note_rendezvous_failure(work.key);
@@ -375,7 +361,7 @@ boost::asio::awaitable<void> topology_manager::async_unregister_rendezvous() {
 
 void topology_manager::merge_observations(const std::vector<discovery::result>& results) {
    const auto now = clocks_.system_now();
-   const auto fallback_expiry = now + policy_.refresh_interval;
+   const auto fallback_expiry = saturating_topology_expiry(now, policy_.refresh_interval);
    const auto lock = std::scoped_lock{mutex_};
    for (auto it = observations_.begin(); it != observations_.end();) {
       if (it->second.expires_at <= now) {
@@ -522,7 +508,7 @@ void topology_manager::note_rendezvous_failure(const rendezvous_key& key) noexce
       if (state->second.failures < (std::numeric_limits<std::size_t>::max)()) {
          ++state->second.failures;
       }
-      state->second.retry_after = now + retry_delay(key, state->second.failures);
+      state->second.retry_after = bounded_retry_deadline(now, retry_delay(key, state->second.failures));
    } catch (...) {
    }
 }
@@ -557,7 +543,7 @@ void topology_manager::note_dial_result(const discovery::result& result, bool su
    if (found->second.failures < (std::numeric_limits<std::size_t>::max)()) {
       ++found->second.failures;
    }
-   found->second.retry_after = now + retry_delay(key, found->second.failures);
+   found->second.retry_after = bounded_retry_deadline(now, retry_delay(key, found->second.failures));
 }
 
 } // namespace forge::net::p2p::detail

@@ -511,6 +511,8 @@ struct engine_stream::impl {
    bool fin_queued = false;
    bool reset = false;
    bool closed = false;
+   bool cancel_worker_started = false;
+   forge::asio::notification cancel_requested;
    std::vector<std::weak_ptr<asio::steady_timer>> read_waiters;
    std::vector<std::weak_ptr<asio::steady_timer>> write_waiters;
 };
@@ -804,6 +806,70 @@ struct engine_connection::impl {
       stream->retained.clear();
    }
 
+   [[nodiscard]] bool reset_stream_on_owner(const std::shared_ptr<engine_stream::impl>& stream) noexcept {
+      assert(strand.running_in_this_thread());
+      if (!stream || stream->reset || stream->closed) {
+         return false;
+      }
+      auto shutdown_result = 0;
+      auto should_drain = false;
+      if (conn != nullptr && !closing && !canceled) {
+         shutdown_result = ngtcp2_conn_shutdown_stream(conn, 0, stream->id, 0);
+         should_drain = shutdown_result == 0;
+      }
+      release_queued_stream_writes(stream);
+      stream->reset = true;
+      wake(stream->read_waiters);
+      wake(stream->write_waiters);
+      metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
+      update_active_stream_metrics();
+      if (shutdown_result != 0) {
+         fail_all();
+         return false;
+      }
+      return should_drain;
+   }
+
+   void start_stream_cancel_worker(const std::shared_ptr<engine_stream::impl>& stream) {
+      assert(strand.running_in_this_thread());
+      if (stream->cancel_worker_started) {
+         return;
+      }
+      auto shared = self.lock();
+      if (!shared) {
+         throw_engine(engine_error_kind::connection_closed, "QUIC connection expired before stream publication");
+      }
+
+      stream->cancel_worker_started = true;
+      background_jobs.fetch_add(1, std::memory_order_release);
+      try {
+         asio::co_spawn(
+             strand,
+             [shared = std::move(shared), stream]() -> asio::awaitable<void> {
+                auto finish = std::unique_ptr<engine_connection::impl, void (*)(engine_connection::impl*)>{
+                    shared.get(), [](engine_connection::impl* value) { value->finish_background_job(); }};
+                try {
+                   static_cast<void>(co_await stream->cancel_requested.async_wait(0));
+                } catch (...) {
+                   // Failure to arm the waiter terminalizes this stream on its owner.
+                }
+                if (!shared->reset_stream_on_owner(stream)) {
+                   co_return;
+                }
+                try {
+                   co_await shared->drain_send();
+                } catch (...) {
+                   // Local stream reset is terminal; wire RESET_STREAM is best effort.
+                }
+             },
+             asio::detached);
+      } catch (...) {
+         stream->cancel_worker_started = false;
+         finish_background_job();
+         throw;
+      }
+   }
+
    void wake_and_clear_streams(bool reset_streams) {
       for (auto& [_, stream] : streams) {
          if (reset_streams) {
@@ -814,6 +880,7 @@ struct engine_connection::impl {
          wake(stream->read_waiters);
          wake(stream->write_waiters);
          release_queued_stream_writes(stream);
+         stream->cancel_requested.notify();
       }
       update_active_stream_metrics();
    }
@@ -1685,6 +1752,7 @@ int stream_close_cb(ngtcp2_conn* conn, std::uint32_t, std::int64_t stream_id, st
       connection->streams.erase(it);
       connection->release_queued_stream_writes(stream);
       stream->closed = true;
+      stream->cancel_requested.notify();
       if (ngtcp2_is_bidi_stream(stream_id) && ngtcp2_conn_is_local_stream(conn, stream_id) == 0) {
          ngtcp2_conn_extend_max_streams_bidi(conn, 1);
       }
@@ -2097,45 +2165,14 @@ void engine_stream::cancel_write() {
 }
 
 void engine_stream::cancel() {
+   request_cancel();
+}
+
+void engine_stream::request_cancel() noexcept {
    if (!impl_) {
       return;
    }
-   auto connection = impl_->connection.lock();
-   if (!connection) {
-      return;
-   }
-   auto stream = impl_;
-   asio::dispatch(connection->strand, [connection, stream] {
-      if (stream->reset || stream->closed) {
-         return;
-      }
-      auto shutdown_result = 0;
-      auto should_drain = false;
-      if (connection->conn != nullptr && !connection->closing && !connection->canceled) {
-         shutdown_result = ngtcp2_conn_shutdown_stream(connection->conn, 0, stream->id, 0);
-         should_drain = shutdown_result == 0;
-      }
-      connection->release_queued_stream_writes(stream);
-      stream->reset = true;
-      wake(stream->read_waiters);
-      wake(stream->write_waiters);
-      connection->metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
-      connection->update_active_stream_metrics();
-      if (shutdown_result != 0) {
-         connection->fail_all();
-         return;
-      }
-      if (!should_drain) {
-         return;
-      }
-      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
-         try {
-            co_await value->drain_send();
-         } catch (const engine_failure&) {
-            value->fail_all();
-         }
-      });
-   });
+   impl_->cancel_requested.notify();
 }
 
 engine_connection::engine_connection(std::shared_ptr<impl> impl_value) : impl_(std::move(impl_value)) {}
@@ -2221,6 +2258,21 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
           connection->streams.emplace(stream_id, stream);
           connection->update_active_stream_metrics();
           connection->metrics.streams_opened.fetch_add(1, std::memory_order_relaxed);
+          auto cancel_worker_failure = std::exception_ptr{};
+          try {
+             connection->start_stream_cancel_worker(stream);
+          } catch (...) {
+             cancel_worker_failure = std::current_exception();
+          }
+          if (cancel_worker_failure) {
+             if (connection->reset_stream_on_owner(stream)) {
+                try {
+                   co_await connection->drain_send();
+                } catch (...) {
+                }
+             }
+             std::rethrow_exception(cancel_worker_failure);
+          }
           co_await connection->drain_send();
           if (connection->closing || connection->canceled) {
              throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while opening stream");
@@ -2249,6 +2301,21 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
           }
           auto stream = std::move(connection->accepted_streams.front());
           connection->accepted_streams.pop_front();
+          auto cancel_worker_failure = std::exception_ptr{};
+          try {
+             connection->start_stream_cancel_worker(stream);
+          } catch (...) {
+             cancel_worker_failure = std::current_exception();
+          }
+          if (cancel_worker_failure) {
+             if (connection->reset_stream_on_owner(stream)) {
+                try {
+                   co_await connection->drain_send();
+                } catch (...) {
+                }
+             }
+             std::rethrow_exception(cancel_worker_failure);
+          }
           co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream)}};
        },
        asio::use_awaitable);

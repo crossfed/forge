@@ -9,6 +9,12 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 from provenance import worktree_identity
+from runner import (
+    SUPPORTED_FORGE_BUILD_PROFILES,
+    forge_fixture_requirements,
+    require_dht_provider_evidence,
+    require_supported_forge_build_profile,
+)
 
 
 def git(root: Path, *args: str) -> str:
@@ -108,6 +114,127 @@ class WorktreeFingerprintTest(unittest.TestCase):
             self.assertTrue(dirty_nested.dirty)
             self.restore_clean_submodules(root)
             self.assertEqual(worktree_identity(root), clean)
+
+
+class InteropCMakeConfigurationTest(unittest.TestCase):
+    def test_multi_config_artifacts_are_configuration_scoped(self) -> None:
+        source = (Path(__file__).parents[1] / "CMakeLists.txt").read_text()
+        self.assertIn(
+            "set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)", source
+        )
+        self.assertIn(
+            "set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${FORGE_INTEROP_ARTIFACT_DIRECTORY}/$<CONFIG>)", source
+        )
+        self.assertIn(
+            "set(FORGE_INTEROP_BUILD_INFO_HEADER ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.hxx)",
+            source,
+        )
+        self.assertIn(
+            "set(FORGE_INTEROP_BUILD_INFO_STAMP ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.json)",
+            source,
+        )
+        self.assertEqual(source.count("--build-dir ${FORGE_INTEROP_ARTIFACT_DIRECTORY}"), 3)
+        self.assertIn("add_dependencies(forge_interop_fixture forge_interop_fixture_build_info)", source)
+        self.assertNotIn("OBJECT_DEPENDS", source)
+
+
+class InteropFixtureContractTest(unittest.TestCase):
+    def fixture_lock(self, build_profiles: object = None) -> dict:
+        return {
+            "schema_version": 2,
+            "toolchains": {
+                "forge_fixture": {
+                    "compiler_id": "Clang",
+                    "compiler_version": "22.1.8",
+                    "build_profiles": list(SUPPORTED_FORGE_BUILD_PROFILES)
+                    if build_profiles is None else build_profiles,
+                },
+            },
+        }
+
+    def test_forge_fixture_accepts_each_locked_build_profile(self) -> None:
+        requirements = forge_fixture_requirements(self.fixture_lock())
+        for profile in SUPPORTED_FORGE_BUILD_PROFILES:
+            require_supported_forge_build_profile(profile, requirements)
+
+    def test_forge_fixture_rejects_unsupported_or_malformed_build_profiles(self) -> None:
+        requirements = forge_fixture_requirements(self.fixture_lock())
+        with self.assertRaises(RuntimeError):
+            require_supported_forge_build_profile("Experimental", requirements)
+        with self.assertRaises(RuntimeError):
+            require_supported_forge_build_profile(None, requirements)
+
+        malformed_profiles = (
+            "default",
+            list(SUPPORTED_FORGE_BUILD_PROFILES[:-1]),
+            [*SUPPORTED_FORGE_BUILD_PROFILES, "Experimental"],
+        )
+        for profiles in malformed_profiles:
+            with self.subTest(profiles=profiles), self.assertRaises(RuntimeError):
+                forge_fixture_requirements(self.fixture_lock(profiles))
+
+    def test_dht_provider_evidence_requires_at_least_one_provider(self) -> None:
+        require_dht_provider_evidence(
+            {
+                "provider_count": 1,
+                "provider_peer": "provider",
+                "querier_peer": "querier",
+                "returned_provider_peer": "provider",
+                "address_count": 1,
+                "protocol_streams_opened_delta": 1,
+                "negotiated_protocol": "/ipfs/kad/1.0.0",
+            },
+            "forge",
+        )
+        require_dht_provider_evidence({"provider_count": 1}, "rust")
+        for result in ({}, {"provider_count": 0}, {"provider_count": -1}, {"provider_count": True}):
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                require_dht_provider_evidence(result, "forge")
+        for result in (
+            {"provider_count": 1},
+            {"provider_count": 1, "provider_peer": "provider"},
+            {"provider_count": 1, "querier_peer": "querier"},
+            {"provider_count": 1, "provider_peer": "same", "querier_peer": "same"},
+            {"provider_count": 1, "provider_peer": "provider", "querier_peer": "querier"},
+            {
+                "provider_count": 1,
+                "provider_peer": "provider",
+                "querier_peer": "querier",
+                "returned_provider_peer": "different",
+                "address_count": 1,
+                "protocol_streams_opened_delta": 1,
+                "negotiated_protocol": "/ipfs/kad/1.0.0",
+            },
+            {
+                "provider_count": 1,
+                "provider_peer": "provider",
+                "querier_peer": "querier",
+                "returned_provider_peer": "provider",
+                "address_count": 0,
+                "protocol_streams_opened_delta": 1,
+                "negotiated_protocol": "/ipfs/kad/1.0.0",
+            },
+            {
+                "provider_count": 1,
+                "provider_peer": "provider",
+                "querier_peer": "querier",
+                "returned_provider_peer": "provider",
+                "address_count": 1,
+                "protocol_streams_opened_delta": 0,
+                "negotiated_protocol": "/ipfs/kad/1.0.0",
+            },
+            {
+                "provider_count": 1,
+                "provider_peer": "provider",
+                "querier_peer": "querier",
+                "returned_provider_peer": "provider",
+                "address_count": 1,
+                "protocol_streams_opened_delta": 1,
+                "negotiated_protocol": "/ipfs/kad/1.1.0",
+            },
+        ):
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                require_dht_provider_evidence(result, "forge")
 
 
 if __name__ == "__main__":

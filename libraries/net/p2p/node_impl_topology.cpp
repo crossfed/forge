@@ -1,5 +1,7 @@
 module;
 
+#include "details/rendezvous_time.hxx"
+
 #include <forge/exceptions/macros.hpp>
 
 #include <array>
@@ -29,10 +31,9 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
@@ -43,6 +44,7 @@ module;
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/compat/move_only_function.hpp>
 #include <boost/system/system_error.hpp>
 
 module forge.net.p2p.node;
@@ -64,8 +66,12 @@ import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/cancellation_latch.hxx"
+#include "details/owner_cancellation.hxx"
 #include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
+#include "details/topology_dht_fanout.hxx"
+#include "details/topology_peer_exchange_claims.hxx"
+#include "details/worker_stop_bridge.hxx"
 
 namespace forge::net::p2p {
 
@@ -74,6 +80,16 @@ namespace forge::net::p2p {
 sanitize_discovered_registration(rendezvous::registration registration, host_addresses::learning_context context);
 
 namespace {
+
+[[nodiscard]] std::uint64_t topology_periodic_jitter_seed(const peer_id& peer) noexcept {
+   // peer_id.value is the canonical base58 multihash retained by the local node identity.
+   auto seed = std::uint64_t{1469598103934665603ULL};
+   for (const auto character : peer.value) {
+      seed ^= static_cast<unsigned char>(character);
+      seed *= 1099511628211ULL;
+   }
+   return seed;
+}
 
 void append_topology_result(std::vector<discovery::result>& out, const peer_store::record& record,
                             discovery::source source, std::chrono::system_clock::time_point expires_at,
@@ -126,7 +142,7 @@ void append_topology_hint(std::vector<discovery::result>& out, const peer_id& pe
 [[nodiscard]] std::pair<std::shared_ptr<cancellation_latch>, cancellation_latch::subscription>
 make_topology_child_cancellation(const std::shared_ptr<cancellation_latch>& parent) {
    auto child = std::make_shared<cancellation_latch>();
-   auto subscription = cancellation_latch::subscribe(parent, [child] { child->request_stop(); });
+   auto subscription = cancellation_latch::subscribe(parent, [child] noexcept { child->request_stop(); });
    return {std::move(child), std::move(subscription)};
 }
 
@@ -222,7 +238,8 @@ void node::impl::initialize_topology_manager() {
                  co_await self->async_close_topology_sessions(std::move(session_ids));
               }
            },
-       });
+       },
+       detail::topology_manager::clocks{}, topology_periodic_jitter_seed(local));
 }
 
 void node::impl::start_topology_manager() {
@@ -392,36 +409,98 @@ node::impl::async_collect_topology_discovery(std::shared_ptr<cancellation_latch>
    const auto& policy = options.limits.topology;
    validate_operation_timeout(policy.query_timeout, "P2P discovery refresh timeout");
    const auto now = std::chrono::system_clock::now();
-   const auto expires_at = now + policy.refresh_interval;
-   const auto query_started = std::chrono::steady_clock::now();
+   const auto expires_at = detail::saturating_topology_expiry(now, policy.refresh_interval);
    auto out = std::vector<discovery::result>{};
    out.reserve(policy.max_candidates);
 
    if (policy.dht_enabled) {
+      auto batch = std::make_shared<topology_dht_batch>();
       for (const auto& [protocol, state] : dht_profiles) {
-         if (!state->profile.capabilities.peers || out.size() >= policy.max_candidates) {
-            continue;
+         if (state->profile.capabilities.peers) {
+            batch->profiles.push_back(protocol);
          }
-         auto lookup = co_await async_find_dht_peer(
-             protocol, local,
-             dht::query_options{
-                 .requested_count = policy.max_candidates,
-                 .quorum = 1,
-                 .timeout = remaining_timeout(query_started, policy.query_timeout, "P2P discovery refresh"),
-             });
-         for (const auto& peer : lookup.closest_peers) {
-            if (peer.id == local || out.size() >= policy.max_candidates) {
-               continue;
-            }
-            append_topology_hint(out, peer.id, peer.endpoints, discovery::source::dht, expires_at,
-                                 policy.max_candidates);
+      }
+      const auto workers = std::min(policy.max_parallel_queries, batch->profiles.size());
+      auto fanout = std::make_shared<detail::topology_dht_fanout::worker_batch>(workers);
+      const auto executor = co_await boost::asio::this_coro::executor;
+      const auto self = shared_from_this();
+      const auto launch_failure = co_await detail::topology_dht_fanout::async_run(
+          detail::topology_dht_fanout::request{
+              .executor = executor,
+              .workers = workers,
+              .cancellation = std::move(cancellation),
+              .worker = [self, batch, expires_at](std::shared_ptr<detail::worker_terminal_owner> terminal)
+                  -> boost::asio::awaitable<void> {
+                 co_await self->async_collect_topology_dht_worker(batch, expires_at, std::move(terminal));
+              },
+              .batch = std::move(fanout),
+              .lifecycle = std::addressof(lifecycle),
+          });
+      if (launch_failure) {
+         const auto lock = std::scoped_lock{batch->mutex};
+         if (!batch->first_failure) {
+            batch->first_failure = launch_failure;
          }
-         (void)remaining_timeout(query_started, policy.query_timeout, "P2P discovery refresh");
+      }
+      {
+         const auto lock = std::scoped_lock{batch->mutex};
+         if (batch->successful_profiles == 0 && batch->first_failure) {
+            std::rethrow_exception(batch->first_failure);
+         }
+         out = std::move(batch->results);
       }
    }
 
-   static_cast<void>(cancellation);
    co_return out;
+}
+
+boost::asio::awaitable<void>
+node::impl::async_collect_topology_dht_worker(const std::shared_ptr<topology_dht_batch>& batch,
+                                              std::chrono::system_clock::time_point expires_at,
+                                              std::shared_ptr<detail::worker_terminal_owner> terminal) {
+   const auto& policy = options.limits.topology;
+   auto cancellation = std::make_shared<cancellation_latch>();
+   static_cast<void>(terminal->publish(detail::worker_terminal_owner::callback{
+       [cancellation]() noexcept { cancellation->request_stop(); },
+   }));
+   if (cancellation->stop_requested()) {
+      FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P topology DHT worker canceled before query");
+   }
+   while (true) {
+      auto protocol = std::optional<protocol_id>{};
+      {
+         const auto lock = std::scoped_lock{batch->mutex};
+         if (batch->next_profile == batch->profiles.size()) {
+            co_return;
+         }
+         protocol = batch->profiles[batch->next_profile++];
+      }
+      try {
+         auto lookup = co_await async_find_dht_peer(
+             std::move(*protocol), local,
+             dht::query_options{
+                 .requested_count = policy.max_candidates,
+                 .quorum = 1,
+                 .timeout = policy.query_timeout,
+             },
+             std::size_t{1}, cancellation);
+         const auto lock = std::scoped_lock{batch->mutex};
+         ++batch->successful_profiles;
+         for (const auto& peer : lookup.closest_peers) {
+            if (peer.id == local || batch->results.size() >= policy.max_candidates) {
+               continue;
+            }
+            append_topology_hint(batch->results, peer.id, peer.endpoints, discovery::source::dht, expires_at,
+                                 policy.max_candidates);
+         }
+      } catch (...) {
+         const auto lock = std::scoped_lock{batch->mutex};
+         ++batch->failed_profiles;
+         if (!batch->first_failure) {
+            batch->first_failure = std::current_exception();
+         }
+      }
+   }
 }
 
 detail::topology_manager::callbacks::rendezvous_local_record node::impl::topology_rendezvous_local_record() const {
@@ -532,34 +611,38 @@ node::impl::exchange_topology_rendezvous(const std::shared_ptr<session_state>& s
    const auto timeout = options.limits.topology.query_timeout;
    auto deadline = operation_deadline{runtime.context(), remaining_timeout(started, timeout, operation)};
    auto [operation_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
-   auto stream_mutex = std::make_shared<std::mutex>();
-   auto active_stream = std::make_shared<std::shared_ptr<forge::net::p2p::stream>>();
-   operation_cancellation->arm([session, stream_mutex, active_stream] {
-      auto stream = std::shared_ptr<forge::net::p2p::stream>{};
-      {
-         const auto lock = std::scoped_lock{*stream_mutex};
-         stream = *active_stream;
-      }
-      if (stream) {
-         stream->cancel();
-      } else {
-         session->connection.cancel();
-      }
+   auto operation_stop = std::make_shared<detail::worker_stop_bridge>();
+   auto stop_requested = std::make_shared<std::atomic_bool>(false);
+   operation_cancellation->arm([operation_stop, stop_requested] noexcept {
+      stop_requested->store(true, std::memory_order_release);
+      operation_stop->request_stop();
    });
-   deadline.arm([operation_cancellation] { operation_cancellation->request_stop(); });
-   auto stream = std::shared_ptr<forge::net::p2p::stream>{};
+   deadline.arm([operation_cancellation] noexcept { operation_cancellation->request_stop(); });
    try {
-      stream = std::make_shared<forge::net::p2p::stream>(co_await open_session_stream(session, builtins::rendezvous));
-      {
-         const auto lock = std::scoped_lock{*stream_mutex};
-         *active_stream = stream;
-      }
-      co_await stream->async_write(rendezvous::codec::encode(request, options.limits.rendezvous));
-      auto buffer = std::vector<std::uint8_t>{};
-      auto response = rendezvous::codec::decode(
-          co_await async_read_length_delimited(*stream, buffer, options.limits.rendezvous.max_message_size),
-          options.limits.rendezvous);
-      co_await stream->async_close();
+      auto response = std::optional<rendezvous::message>{};
+      co_await detail::async_run_with_owner_cancellation(
+          operation_stop,
+          [this, session, request = std::move(request), stop_requested,
+           &response](boost::asio::cancellation_slot slot) mutable -> boost::asio::awaitable<void> {
+             if (stop_requested->load(std::memory_order_acquire)) {
+                FORGE_THROW_EXCEPTION(exceptions::canceled,
+                                      "P2P topology rendezvous operation canceled before stream open");
+             }
+             auto stream = std::make_shared<forge::net::p2p::stream>(
+                 co_await open_session_stream(session, builtins::rendezvous));
+             auto owner_cancellation = detail::owner_stream_cancellation{std::move(slot), stream};
+             if (stop_requested->load(std::memory_order_acquire)) {
+                owner_cancellation.request_cancel();
+                FORGE_THROW_EXCEPTION(exceptions::canceled,
+                                      "P2P topology rendezvous operation canceled during stream open");
+             }
+             co_await stream->async_write(rendezvous::codec::encode(request, options.limits.rendezvous));
+             auto buffer = std::vector<std::uint8_t>{};
+             response.emplace(rendezvous::codec::decode(
+                 co_await async_read_length_delimited(*stream, buffer, options.limits.rendezvous.max_message_size),
+                 options.limits.rendezvous));
+             co_await stream->async_close();
+          });
       if (!deadline.finish()) {
          throw_operation_timeout(operation);
       }
@@ -568,14 +651,15 @@ node::impl::exchange_topology_rendezvous(const std::shared_ptr<session_state>& s
       if (!cancellation_completed) {
          FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P topology rendezvous operation canceled");
       }
-      co_return response;
+      if (!response) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled,
+                               "P2P topology rendezvous operation canceled before operation start");
+      }
+      co_return std::move(*response);
    } catch (...) {
       const auto deadline_completed = deadline.finish();
       const auto cancellation_completed = operation_cancellation->finish();
       parent_subscription.reset();
-      if (stream) {
-         stream->cancel();
-      }
       if (deadline.timed_out() || !deadline_completed) {
          throw_operation_timeout(operation);
       }
@@ -656,20 +740,10 @@ node::impl::async_discover_topology_rendezvous(std::size_t point_index, std::str
    auto results = std::vector<discovery::result>{};
    results.reserve(std::min(limit, response.discover_response_value->registrations.size()));
    for (auto registration : response.discover_response_value->registrations) {
-      registration.expires_at = received_at + registration.ttl;
+      registration.expires_at = detail::rendezvous_expiry_after(received_at, registration.ttl);
       auto sanitized = sanitize_discovered_registration(std::move(registration), third_party_discovery_context());
       if (!sanitized) {
          continue;
-      }
-      if (valid_peer_id(sanitized->peer)) {
-         try {
-            co_await store.async_upsert_rendezvous(*sanitized);
-         } catch (...) {
-            co_return detail::topology_manager::callbacks::rendezvous_discover_result{
-                .response_status =
-                    detail::topology_manager::callbacks::rendezvous_discover_result::status::local_failure,
-            };
-         }
       }
       if (sanitized->peer == local || results.size() >= limit) {
          continue;
@@ -694,26 +768,52 @@ boost::asio::awaitable<void> node::impl::async_unregister_topology_rendezvous(st
    const auto timeout = options.limits.topology.query_timeout;
    auto deadline =
        operation_deadline{runtime.context(), remaining_timeout(started, timeout, "P2P topology rendezvous unregister")};
-   deadline.arm([session] { session->connection.cancel(); });
+   auto operation_stop = std::make_shared<detail::worker_stop_bridge>();
+   auto stop_requested = std::make_shared<std::atomic_bool>(false);
+   deadline.arm([operation_stop, stop_requested] noexcept {
+      stop_requested->store(true, std::memory_order_release);
+      operation_stop->request_stop();
+   });
    try {
-      auto stream = co_await open_session_stream(session, builtins::rendezvous);
-      co_await stream.async_write(rendezvous::codec::encode(
-          rendezvous::message{
-              .type = rendezvous::message_type::unregister_peer,
-              .unregister_value =
-                  rendezvous::unregister_request{
-                      .namespace_name = std::move(namespace_name),
-                      .peer = local,
-                  },
-          },
-          options.limits.rendezvous));
-      co_await stream.async_close();
+      auto started_operation = false;
+      co_await detail::async_run_with_owner_cancellation(
+          operation_stop,
+          [this, session, namespace_name = std::move(namespace_name), stop_requested,
+           &started_operation](boost::asio::cancellation_slot slot) mutable -> boost::asio::awaitable<void> {
+             started_operation = true;
+             if (stop_requested->load(std::memory_order_acquire)) {
+                FORGE_THROW_EXCEPTION(exceptions::canceled,
+                                      "P2P topology rendezvous unregister canceled before stream open");
+             }
+             auto stream = std::make_shared<forge::net::p2p::stream>(
+                 co_await open_session_stream(session, builtins::rendezvous));
+             auto owner_cancellation = detail::owner_stream_cancellation{std::move(slot), stream};
+             if (stop_requested->load(std::memory_order_acquire)) {
+                owner_cancellation.request_cancel();
+                FORGE_THROW_EXCEPTION(exceptions::canceled,
+                                      "P2P topology rendezvous unregister canceled during stream open");
+             }
+             co_await stream->async_write(rendezvous::codec::encode(
+                 rendezvous::message{
+                     .type = rendezvous::message_type::unregister_peer,
+                     .unregister_value =
+                         rendezvous::unregister_request{
+                             .namespace_name = std::move(namespace_name),
+                             .peer = local,
+                         },
+                 },
+                 options.limits.rendezvous));
+             co_await stream->async_close();
+          });
       if (!deadline.finish()) {
          throw_operation_timeout("P2P topology rendezvous unregister");
       }
+      if (!started_operation) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled,
+                               "P2P topology rendezvous unregister canceled before operation start");
+      }
    } catch (...) {
       const auto completed = deadline.finish();
-      session->connection.cancel();
       if (deadline.timed_out() || !completed) {
          throw_operation_timeout("P2P topology rendezvous unregister");
       }
@@ -737,88 +837,92 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
       co_return std::vector<discovery::result>{};
    }
 
-   auto parent_cancellation = co_await boost::asio::this_coro::cancellation_state;
-   if (parent_cancellation.cancelled() != boost::asio::cancellation_type::none) {
+   if (cancellation->stop_requested()) {
       FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P topology peer exchange canceled before launch");
    }
 
    const auto executor = co_await boost::asio::this_coro::executor;
-   auto claims = std::vector<std::shared_ptr<detail::peer_exchange_scheduler::claim>>{};
-   {
+   auto claim_guard = [&] {
       const auto lock = std::scoped_lock{mutex};
       if (stopped || peer_exchange_admission_closed) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node stopped before topology peer exchange");
       }
-      auto selected = peer_exchange_value.claim_batch(peer_exchange_sessions_locked(), std::chrono::steady_clock::now(),
-                                                      policy.max_peer_exchange_peers, workers, executor);
-      claims.reserve(selected.size());
-      for (auto& claim : selected) {
-         claims.push_back(std::make_shared<detail::peer_exchange_scheduler::claim>(std::move(claim)));
-      }
-   }
+      // claim_batch commits scheduler/singleflight ownership. Construct its
+      // no-throw stack owner before unlock or any allocating operation.
+      return detail::topology_peer_exchange_claims{
+          mutex, peer_exchange_value,
+          peer_exchange_value.claim_batch(peer_exchange_sessions_locked(), std::chrono::steady_clock::now(),
+                                           policy.max_peer_exchange_peers, workers, executor),
+          policy.query_timeout};
+   }();
+   auto claimed = std::make_shared<detail::topology_peer_exchange_claims>(std::move(claim_guard));
+   claimed->stage();
+   const auto& claims = claimed->staged_claims();
 
    if (!claims.empty()) {
       auto batch = std::make_shared<peer_exchange_batch>();
       batch->completed = std::make_shared<detail::lifecycle_wakeup>();
-      const auto complete_worker = [batch] {
-         auto notify = false;
-         {
-            const auto lock = std::scoped_lock{batch->mutex};
-            if (batch->remaining_workers != 0) {
-               --batch->remaining_workers;
-            }
-            notify = batch->launches_complete && batch->remaining_workers == 0 &&
-                     !std::exchange(batch->completion_notified, true);
-         }
-         if (notify) {
-            batch->completed->notify();
-         }
-      };
-      const auto cancel_workers = [batch] {
-         auto cancels = std::vector<std::function<void()>>{};
-         {
-            const auto lock = std::scoped_lock{batch->mutex};
-            batch->stop_requested = true;
-            cancels = batch->cancel_workers;
-         }
-         for (const auto& cancel : cancels) {
-            cancel();
-         }
-      };
-      auto parent_slot = parent_cancellation.slot();
-      if (parent_slot.is_connected()) {
-         parent_slot.assign([cancel_workers](boost::asio::cancellation_type) { cancel_workers(); });
-      }
-      const auto clear_parent_slot = [](boost::asio::cancellation_slot* slot) noexcept { slot->clear(); };
-      auto parent_slot_cleanup =
-          std::unique_ptr<boost::asio::cancellation_slot, decltype(clear_parent_slot)>{&parent_slot, clear_parent_slot};
-      if (parent_cancellation.cancelled() != boost::asio::cancellation_type::none) {
-         cancel_workers();
-      }
-      for (const auto& claim : claims) {
-         auto child_signal = std::make_shared<boost::asio::cancellation_signal>();
-         const auto cancel_child = [child_signal] { child_signal->emit(boost::asio::cancellation_type::terminal); };
-         auto cancel_now = false;
-         {
-            const auto lock = std::scoped_lock{batch->mutex};
-            ++batch->remaining_workers;
-            cancel_now = batch->stop_requested;
-            if (!cancel_now) {
-               batch->cancel_workers.push_back(cancel_child);
-            }
-         }
-         if (cancel_now) {
-            cancel_child();
-         }
+      batch->cancellation = std::make_shared<cancellation_latch>();
+      const auto complete_worker = [batch] noexcept {
          try {
+            auto notify = false;
+            {
+               const auto lock = std::scoped_lock{batch->mutex};
+               if (batch->remaining_workers != 0) {
+                  --batch->remaining_workers;
+               }
+               notify = batch->launches_complete && batch->remaining_workers == 0 &&
+                        !std::exchange(batch->completion_notified, true);
+            }
+            if (notify) {
+               batch->completed->notify();
+            }
+         } catch (...) {
+            // Completion handlers must never escape into the executor.
+         }
+      };
+      const auto cancel_workers = [batch] noexcept {
+         batch->cancellation->request_stop();
+      };
+      auto launch_failure = std::exception_ptr{};
+      auto parent_subscription = cancellation_latch::subscription{};
+      auto child_subscriptions = std::vector<cancellation_latch::subscription>{};
+      try {
+         // A child is published only after every captured owner exists. Later
+         // setup failure requests this sticky batch stop and joins the already
+         // published children before the failure leaves this coroutine.
+         child_subscriptions.reserve(claims.size());
+         parent_subscription = cancellation_latch::subscribe(cancellation, [batch] noexcept {
+            batch->cancellation->request_stop();
+         });
+         if (cancellation->stop_requested()) {
+            cancel_workers();
+         }
+         for (const auto& claim : claims) {
+            auto stop = std::make_shared<detail::worker_stop_bridge>();
+            auto child_subscription = cancellation_latch::subscribe(
+                batch->cancellation, [stop] noexcept { stop->request_stop(); });
             auto self = shared_from_this();
-            boost::asio::co_spawn(
-                executor,
-                [self = std::move(self), claim, child_signal]() -> boost::asio::awaitable<void> {
-                   static_cast<void>(child_signal);
+            auto operation = std::make_shared<detail::lifecycle_tracker::operation>(lifecycle.track());
+            if (!operation->active()) {
+               FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node stopped before topology peer exchange worker launch");
+            }
+            const auto worker_executor = boost::asio::make_strand(operation->executor());
+            const auto lifecycle_stop = operation->stop_source();
+            auto claim_settled = std::make_shared<std::atomic_bool>(false);
+            auto worker_completed = std::make_shared<std::atomic_bool>(false);
+            const auto settle_claim = [claimed, claim, claim_settled] noexcept {
+               if (!claim_settled->exchange(true, std::memory_order_acq_rel)) {
+                  claimed->settle_worker(*claim);
+               }
+            };
+            auto task = detail::worker_stop_work{
+                [self, claim, settle_claim](std::shared_ptr<detail::worker_terminal_owner> terminal)
+                    -> boost::asio::awaitable<void> {
                    try {
-                      co_await self->await_peer_exchange_claim(*claim);
+                      co_await self->await_peer_exchange_claim(*claim, std::move(terminal));
                    } catch (const forge::exceptions::base& error) {
+                      settle_claim();
                       auto node_stopped = false;
                       {
                          const auto lock = std::scoped_lock{self->mutex};
@@ -827,7 +931,9 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
                       if (!node_stopped && p2p_code(error) != exceptions::code::canceled) {
                          forge::exceptions::capture_and_log("P2P topology peer exchange query failed");
                       }
+                      co_return;
                    } catch (...) {
+                      settle_claim();
                       auto node_stopped = false;
                       {
                          const auto lock = std::scoped_lock{self->mutex};
@@ -836,20 +942,55 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
                       if (!node_stopped) {
                          forge::exceptions::capture_and_log("P2P topology peer exchange query failed");
                       }
+                      co_return;
                    }
+                   // await_peer_exchange_claim may fail while its awaitable is
+                   // constructed, after coroutine entry but before scheduler work.
+                   settle_claim();
                 },
-                boost::asio::bind_cancellation_slot(child_signal->slot(),
-                                                    [complete_worker](std::exception_ptr) { complete_worker(); }));
-         } catch (...) {
-            {
-               const auto lock = std::scoped_lock{mutex};
-               peer_exchange_value.fail(*claim, exceptions::code::closed, "P2P topology peer exchange could not start",
-                                        std::chrono::steady_clock::now(), policy.query_timeout);
-               peer_exchange_value.leave(*claim);
+            };
+            auto worker_reserved = false;
+            try {
+               // Capacity is reserved before any publication; this move is
+               // non-allocating and keeps the stop bridge alive until join.
+               child_subscriptions.emplace_back(std::move(child_subscription));
+               {
+                  const auto lock = std::scoped_lock{batch->mutex};
+                  ++batch->remaining_workers;
+                  worker_reserved = true;
+               }
+               boost::asio::co_spawn(
+                   worker_executor,
+                   [stop = std::move(stop), task = std::move(task), lifecycle_stop]() mutable
+                       -> boost::asio::awaitable<void> {
+                      co_await detail::async_run_with_stop_bridge(
+                          std::move(stop), std::move(task),
+                          detail::worker_stop_bridge_options{.lifecycle_stop = std::move(lifecycle_stop)});
+                   },
+                   boost::asio::bind_executor(
+                       worker_executor,
+                       [settle_claim, complete_worker, operation, worker_completed](std::exception_ptr) noexcept {
+                          // The bridge joins both branches before completion. This
+                          // fallback also settles failure before task entry.
+                          settle_claim();
+                          if (worker_completed->exchange(true, std::memory_order_acq_rel)) {
+                             return;
+                          }
+                          complete_worker();
+                          operation->release();
+                       }));
+            } catch (...) {
+               if (worker_reserved && !worker_completed->exchange(true, std::memory_order_acq_rel)) {
+                  settle_claim();
+                  complete_worker();
+                  operation->release();
+               }
+               throw;
             }
-            complete_worker();
-            forge::exceptions::capture_and_log("P2P topology peer exchange query could not launch");
          }
+      } catch (...) {
+         launch_failure = std::current_exception();
+         cancel_workers();
       }
 
       auto notify = false;
@@ -862,27 +1003,55 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
          batch->completed->notify();
       }
 
-      // The parent slot fans out to every child; the coordinator remains cancelable only after joining them.
-      co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
-      while (true) {
-         const auto observed = batch->completed->epoch();
-         {
-            const auto lock = std::scoped_lock{batch->mutex};
-            if (batch->remaining_workers == 0) {
-               break;
+      // The explicit sticky latch owns cancellation. This coroutine does not
+      // release lifecycle ownership until every composed child race has joined.
+      auto join_failure = std::exception_ptr{};
+      auto join_complete = false;
+      while (!join_complete) {
+         try {
+            co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+            while (true) {
+               const auto observed = batch->completed->epoch();
+               {
+                  const auto lock = std::scoped_lock{batch->mutex};
+                  if (batch->remaining_workers == 0) {
+                     break;
+                  }
+               }
+               static_cast<void>(co_await batch->completed->async_wait(observed));
             }
+            join_complete = true;
+         } catch (...) {
+            if (!join_failure) {
+               join_failure = std::current_exception();
+            }
+            cancel_workers();
          }
-         static_cast<void>(co_await batch->completed->async_wait(observed));
+      }
+
+      if (launch_failure || join_failure) {
+         claimed->settle();
+         if (launch_failure) {
+            std::rethrow_exception(launch_failure);
+         }
+         std::rethrow_exception(join_failure);
+      } else {
+         claimed->release();
       }
    }
 
-   if (parent_cancellation.cancelled() != boost::asio::cancellation_type::none) {
+   if (claims.empty()) {
+      claimed->release();
+   }
+
+   if (cancellation->stop_requested()) {
       FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P topology peer exchange canceled");
    }
 
    auto out = std::vector<discovery::result>{};
    out.reserve(policy.max_candidates);
-   const auto fallback_expiry = std::chrono::system_clock::now() + policy.refresh_interval;
+   const auto fallback_expiry =
+       detail::saturating_topology_expiry(std::chrono::system_clock::now(), policy.refresh_interval);
    for (const auto& record : store.scored_candidates(discovery::source::peer_exchange, policy.max_candidates)) {
       if (record.peer == local) {
          continue;

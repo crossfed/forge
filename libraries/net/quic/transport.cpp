@@ -100,6 +100,10 @@ class quic_stream_concept final : public forge::net::transport::detail::stream_c
       value_.cancel();
    }
 
+   void request_cancel() noexcept {
+      value_.request_cancel();
+   }
+
  private:
    stream value_;
 };
@@ -401,7 +405,18 @@ endpoint from_transport_endpoint(const forge::net::transport::endpoint& value) {
 }
 
 forge::net::transport::stream as_transport_stream(stream value) {
-   return forge::net::transport::detail::stream_access::make(std::make_shared<quic_stream_concept>(std::move(value)));
+   auto model = std::make_shared<quic_stream_concept>(std::move(value));
+   auto cancel_on_failure = std::unique_ptr<quic_stream_concept, void (*)(quic_stream_concept*)>{
+       model.get(), [](quic_stream_concept* stream) { stream->request_cancel(); }};
+   auto weak = std::weak_ptr<quic_stream_concept>{model};
+   auto result = forge::net::transport::detail::stream_access::make_cancelable(
+       std::move(model), [weak = std::move(weak)]() noexcept {
+          if (auto stream = weak.lock()) {
+             stream->request_cancel();
+          }
+       });
+   static_cast<void>(cancel_on_failure.release());
+   return result;
 }
 
 forge::net::transport::session as_transport_session(connection value) {

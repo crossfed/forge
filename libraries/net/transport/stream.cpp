@@ -2,6 +2,7 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -10,6 +11,7 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/compat/move_only_function.hpp>
 
 module forge.net.transport.stream;
 
@@ -20,14 +22,77 @@ import forge.net.transport.exceptions;
 namespace forge::net::transport {
 
 struct stream::impl {
+   enum class terminal_state : std::uint8_t {
+      active,
+      close_requested,
+      cancel_requested,
+   };
+
+   impl(std::shared_ptr<detail::stream_concept> model_value,
+        detail::stream_cancel_request request_cancel_value)
+       : model(std::move(model_value)), request_cancel(std::move(request_cancel_value)) {}
+
+   ~impl() {
+      request_abandon_cancel();
+   }
+
+   [[nodiscard]] bool claim_terminal(terminal_state requested) noexcept {
+      auto expected = terminal_state::active;
+      return terminal.compare_exchange_strong(expected, requested, std::memory_order_acq_rel,
+                                              std::memory_order_acquire);
+   }
+
+   [[nodiscard]] bool claim_cancel() noexcept {
+      auto current = terminal.load(std::memory_order_acquire);
+      while (current == terminal_state::active || current == terminal_state::close_requested) {
+         if (terminal.compare_exchange_weak(current, terminal_state::cancel_requested,
+                                            std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return true;
+         }
+      }
+      return false;
+   }
+
+   void invoke_cancel() noexcept {
+      if (request_cancel) {
+         request_cancel();
+         return;
+      }
+      try {
+         model->cancel();
+      } catch (...) {
+         // Legacy third-party models may expose a throwing cancel().
+      }
+   }
+
+   void request_terminal_cancel() noexcept {
+      if (claim_cancel()) {
+         invoke_cancel();
+      }
+   }
+
+   void request_abandon_cancel() noexcept {
+      if (claim_terminal(terminal_state::cancel_requested)) {
+         invoke_cancel();
+      }
+   }
+
+   void release_close_after_failure() noexcept {
+      auto expected = terminal_state::close_requested;
+      terminal.compare_exchange_strong(expected, terminal_state::active, std::memory_order_acq_rel,
+                                       std::memory_order_acquire);
+   }
+
    std::shared_ptr<detail::stream_concept> model;
    detail::bounded_frame_buffer buffer;
+   // Immutable after publication. terminal is the sole invocation gate.
+   detail::stream_cancel_request request_cancel;
+   std::atomic<terminal_state> terminal{terminal_state::active};
 };
 
 stream::stream() = default;
-stream::stream(std::shared_ptr<detail::stream_concept> model) : impl_(std::make_shared<impl>()) {
-   impl_->model = std::move(model);
-}
+stream::stream(std::shared_ptr<detail::stream_concept> model, detail::stream_cancel_request request_cancel)
+    : impl_(std::make_shared<impl>(std::move(model), std::move(request_cancel))) {}
 
 stream::~stream() = default;
 stream::stream(stream&&) noexcept = default;
@@ -120,17 +185,45 @@ boost::asio::awaitable<void> stream::async_close() {
    if (!impl_ || !impl_->model) {
       co_return;
    }
-   co_await impl_->model->async_close();
+   auto state = impl_;
+   auto expected = impl::terminal_state::active;
+   const auto owns_close = state->terminal.compare_exchange_strong(
+       expected, impl::terminal_state::close_requested, std::memory_order_acq_rel,
+       std::memory_order_acquire);
+   if (!owns_close && expected != impl::terminal_state::cancel_requested) {
+      co_return;
+   }
+   try {
+      co_await state->model->async_close();
+   } catch (...) {
+      if (owns_close) {
+         state->release_close_after_failure();
+      }
+      throw;
+   }
 }
 
 void stream::cancel() {
-   if (impl_ && impl_->model) {
-      impl_->model->cancel();
+   auto state = impl_;
+   if (state && state->model && state->claim_cancel()) {
+      state->model->cancel();
+   }
+}
+
+void stream::request_cancel() noexcept {
+   auto state = impl_;
+   if (state && state->model) {
+      state->request_terminal_cancel();
    }
 }
 
 stream detail::stream_access::make(std::shared_ptr<stream_concept> model) {
    return stream{std::move(model)};
+}
+
+stream detail::stream_access::make_cancelable(std::shared_ptr<stream_concept> model,
+                                              stream_cancel_request request_cancel) {
+   return stream{std::move(model), std::move(request_cancel)};
 }
 
 stream detail::stream_access::with_buffer(stream value, std::vector<std::uint8_t> buffered) {

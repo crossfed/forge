@@ -7,7 +7,9 @@ module;
 #include <map>
 #include <optional>
 #include <ranges>
+#include <ratio>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -29,6 +31,8 @@ import forge.net.p2p.protocol;
 namespace forge::net::p2p::detail {
 namespace {
 
+static_assert(std::is_nothrow_move_constructible_v<peer_exchange_scheduler::claim>);
+
 [[nodiscard]] bool session_less(const peer_exchange_scheduler::session& left,
                                 const peer_exchange_scheduler::session& right) noexcept {
    if (left.peer != right.peer) {
@@ -42,9 +46,20 @@ retry_deadline(peer_exchange_scheduler::clock::time_point now, std::chrono::mill
    if (delay.count() <= 0 || now == peer_exchange_scheduler::clock::time_point::max()) {
       return now;
    }
-   const auto remaining = peer_exchange_scheduler::clock::time_point::max() - now;
-   const auto requested = std::chrono::duration_cast<peer_exchange_scheduler::clock::duration>(delay);
-   return requested >= remaining ? peer_exchange_scheduler::clock::time_point::max() : now + requested;
+
+   using clock_duration = peer_exchange_scheduler::clock::duration;
+   using conversion = std::ratio_divide<std::milli, clock_duration::period>;
+   const auto requested =
+       (static_cast<unsigned __int128>(delay.count()) * static_cast<unsigned __int128>(conversion::num)) /
+       static_cast<unsigned __int128>(conversion::den);
+   const auto maximum = static_cast<__int128>((std::numeric_limits<clock_duration::rep>::max)());
+   const auto base = static_cast<__int128>(now.time_since_epoch().count());
+   const auto available = maximum - base;
+   if (available <= 0 || requested >= static_cast<unsigned __int128>(available)) {
+      return peer_exchange_scheduler::clock::time_point::max();
+   }
+   return peer_exchange_scheduler::clock::time_point{
+       clock_duration{static_cast<clock_duration::rep>(base + static_cast<__int128>(requested))}};
 }
 
 } // namespace
@@ -60,6 +75,9 @@ bool peer_exchange_scheduler::eligible(const session& value) noexcept {
 
 peer_exchange_scheduler::peer_exchange_scheduler(std::size_t maximum_waiters) noexcept
     : maximum_waiters_{maximum_waiters} {}
+
+peer_exchange_scheduler::peer_exchange_scheduler(std::size_t maximum_waiters, test_hooks test_hooks) noexcept
+    : maximum_waiters_{maximum_waiters}, test_hooks_{test_hooks} {}
 
 std::vector<peer_exchange_scheduler::session>
 peer_exchange_scheduler::normalized(const std::vector<session>& candidates) {
@@ -77,24 +95,41 @@ peer_exchange_scheduler::claim peer_exchange_scheduler::begin(const session& sel
    if (closed_) {
       return {.status = claim_status::closed, .selected = selected};
    }
+   auto selected_value = selected;
    auto joined = operations_.join(selected.peer, std::move(executor), maximum_waiters_);
    if (joined.status == connection_singleflight_registry::join_status::closed) {
-      return {.status = claim_status::closed, .selected = selected};
+      return {.status = claim_status::closed, .selected = std::move(selected_value)};
    }
    if (joined.status == connection_singleflight_registry::join_status::backpressure) {
-      return {.status = claim_status::backpressure, .selected = selected};
+      return {.status = claim_status::backpressure, .selected = std::move(selected_value)};
    }
-   auto [found, inserted] = entries_.try_emplace(selected.peer, entry{.active = true});
-   if (!inserted) {
-      found->second.active = true;
-      found->second.retry_after = {};
+   try {
+      reach_test_failpoint(test_stage::before_entry_publish);
+      auto [found, inserted] = entries_.try_emplace(selected.peer, entry{.active = true});
+      if (!inserted) {
+         found->second.active = true;
+         found->second.retry_after = {};
+      }
+   } catch (...) {
+      if (joined.start) {
+         operations_.rollback_unpublished(*joined.start, joined.participant);
+      } else {
+         operations_.leave(joined.participant);
+      }
+      throw;
    }
    return claim{
        .status = joined.start ? claim_status::started : claim_status::joined,
-       .selected = selected,
+       .selected = std::move(selected_value),
        .participant = std::move(joined.participant),
        .start = std::move(joined.start),
    };
+}
+
+void peer_exchange_scheduler::reach_test_failpoint(test_stage stage) const {
+   if (test_hooks_.reach != nullptr) {
+      test_hooks_.reach(test_hooks_.context, stage);
+   }
 }
 
 void peer_exchange_scheduler::expire(clock::time_point now) noexcept {
@@ -147,35 +182,41 @@ peer_exchange_scheduler::claim_batch(const std::vector<session>& candidates, clo
 
    expire(now);
    result.reserve(batch_limit);
-   for (const auto& candidate : normalized(candidates)) {
-      if (!eligible(candidate)) {
-         continue;
-      }
-
-      if (const auto current = entries_.find(candidate.peer); current != entries_.end()) {
-         if (!current->second.active) {
+   try {
+      for (const auto& candidate : normalized(candidates)) {
+         if (!eligible(candidate)) {
             continue;
          }
-         auto joined = operations_.join(candidate.peer, executor, maximum_waiters_);
-         if (joined.status != connection_singleflight_registry::join_status::accepted) {
-            if (joined.status == connection_singleflight_registry::join_status::closed) {
-               break;
+
+         if (const auto current = entries_.find(candidate.peer); current != entries_.end()) {
+            if (!current->second.active) {
+               continue;
             }
-            continue;
+            auto selected_value = candidate;
+            auto joined = operations_.join(candidate.peer, executor, maximum_waiters_);
+            if (joined.status != connection_singleflight_registry::join_status::accepted) {
+               if (joined.status == connection_singleflight_registry::join_status::closed) {
+                  break;
+               }
+               continue;
+            }
+            result.push_back(claim{
+                .status = joined.start ? claim_status::started : claim_status::joined,
+                .selected = std::move(selected_value),
+                .participant = std::move(joined.participant),
+                .start = std::move(joined.start),
+            });
+         } else if (entries_.size() < state_limit) {
+            result.push_back(begin(candidate, executor));
          }
-         result.push_back(claim{
-             .status = joined.start ? claim_status::started : claim_status::joined,
-             .selected = candidate,
-             .participant = std::move(joined.participant),
-             .start = std::move(joined.start),
-         });
-      } else if (entries_.size() < state_limit) {
-         result.push_back(begin(candidate, executor));
-      }
 
-      if (result.size() == batch_limit) {
-         break;
+         if (result.size() == batch_limit) {
+            break;
+         }
       }
+   } catch (...) {
+      rollback_batch(result, now);
+      throw;
    }
    return result;
 }
@@ -199,16 +240,17 @@ peer_exchange_scheduler::claim peer_exchange_scheduler::claim_peer(const peer_id
 
    if (const auto current = entries_.find(peer); current != entries_.end()) {
       if (current->second.active) {
+         auto selected_value = *selected;
          auto joined = operations_.join(peer, std::move(executor), maximum_waiters_);
          if (joined.status == connection_singleflight_registry::join_status::closed) {
-            return {.status = claim_status::closed, .selected = *selected};
+            return {.status = claim_status::closed, .selected = std::move(selected_value)};
          }
          if (joined.status == connection_singleflight_registry::join_status::backpressure) {
-            return {.status = claim_status::backpressure, .selected = *selected};
+            return {.status = claim_status::backpressure, .selected = std::move(selected_value)};
          }
          return claim{
              .status = joined.start ? claim_status::started : claim_status::joined,
-             .selected = *selected,
+             .selected = std::move(selected_value),
              .participant = std::move(joined.participant),
              .start = std::move(joined.start),
          };
@@ -262,6 +304,18 @@ void peer_exchange_scheduler::fail(claim& active, exceptions::code error, std::s
 
 void peer_exchange_scheduler::leave(claim& participant) noexcept {
    operations_.leave(participant.participant);
+}
+
+void peer_exchange_scheduler::rollback_batch(std::vector<claim>& claims, clock::time_point now) noexcept {
+   for (auto& claim : claims) {
+      try {
+         fail(claim, exceptions::code::closed, {}, now, std::chrono::milliseconds::zero());
+         leave(claim);
+      } catch (...) {
+         // A batch failure must not turn an already-started predecessor into
+         // an ownerless singleflight operation while unwinding.
+      }
+   }
 }
 
 void peer_exchange_scheduler::close() noexcept {

@@ -232,9 +232,9 @@ struct diagnostics {
       std::vector<session> sessions;
       persistence_state persistence;
       std::vector<dht_profile_state> dht_profiles;
-      topology_state topology;
       lifecycle_status lifecycle;
       resource_manager::limits effective_limits;
+      topology_state topology;
    };
 };
 
@@ -286,4 +286,4 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::topology_state, (),
                        observations, active_operations, waiting_refreshes, completed_refreshes, failed_refreshes))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
                       (network, metrics, resources, pubsub, connections, peers, sessions, persistence, dht_profiles,
-                       topology, lifecycle, effective_limits))
+                       lifecycle, effective_limits, topology))

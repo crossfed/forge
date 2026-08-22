@@ -73,6 +73,7 @@ import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/direct_transport.hxx"
+#include "details/cancellation_latch.hxx"
 #include "details/node_impl.hxx"
 #include "details/path_selector.hxx"
 #include "details/peer_exchange_codec.hxx"
@@ -466,7 +467,11 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
 
 boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
 node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds timeout,
-                                  std::size_t max_direct_endpoints, std::chrono::milliseconds direct_attempt_timeout) {
+                                  std::size_t max_direct_endpoints, std::chrono::milliseconds direct_attempt_timeout,
+                                  std::shared_ptr<cancellation_latch> cancellation) {
+   if (cancellation && cancellation->stop_requested()) {
+      FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P direct session acquisition canceled");
+   }
    if (auto existing = session_for_path(peer, path::kind::direct)) {
       co_return existing;
    }
@@ -492,6 +497,9 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P per-peer dial limit reached");
    }
    for (std::size_t index = 0; index < attempts; ++index) {
+      if (cancellation && cancellation->stop_requested()) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P direct session acquisition canceled");
+      }
       const auto remaining = remaining_timeout(started, timeout, "P2P direct path");
       const auto per_attempt = attempt_timeout(remaining, direct_attempt_timeout, "P2P direct path attempt");
       const auto endpoint = preferred[index].endpoint;
@@ -499,7 +507,7 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
       try {
          co_return co_await connect_direct(
              endpoint, node::connect_options{.expected_peer = peer, .allow_relay = false, .timeout = per_attempt},
-             &*dial);
+             &*dial, cancellation);
       } catch (const forge::exceptions::base& error) {
          const auto kind = p2p_code(error);
          last_kind = kind;

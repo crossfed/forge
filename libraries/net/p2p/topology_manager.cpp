@@ -10,16 +10,19 @@ module;
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ratio>
 #include <set>
 #include <utility>
 #include <vector>
@@ -38,10 +41,64 @@ import forge.net.p2p.topology;
 #include "details/topology_manager.hxx"
 
 namespace forge::net::p2p::detail {
+namespace {
 
-topology_manager::topology_manager(topology::policy policy, callbacks callbacks_value, clocks clocks_value)
+constexpr auto periodic_jitter_scale = std::uint64_t{1'000'000};
+
+[[nodiscard]] std::chrono::milliseconds scale_periodic_delay(std::uint64_t base, std::uint64_t numerator) noexcept {
+   const auto maximum = static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
+   const auto adjusted = (static_cast<unsigned __int128>(base) * numerator) / periodic_jitter_scale;
+   if (adjusted >= maximum) {
+      return std::chrono::milliseconds{(std::numeric_limits<std::int64_t>::max)()};
+   }
+   const auto bounded = static_cast<std::uint64_t>(adjusted);
+   return std::chrono::milliseconds{static_cast<std::int64_t>(std::max<std::uint64_t>(1, bounded))};
+}
+
+[[nodiscard]] std::chrono::steady_clock::time_point
+saturating_periodic_deadline(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay) noexcept {
+   if (delay <= std::chrono::milliseconds::zero() || now == std::chrono::steady_clock::time_point::max()) {
+      return now;
+   }
+
+   using steady_duration = std::chrono::steady_clock::duration;
+   using conversion = std::ratio_divide<std::milli, steady_duration::period>;
+   const auto increment = (static_cast<unsigned __int128>(delay.count()) * conversion::num) / conversion::den;
+   const auto maximum = static_cast<unsigned __int128>((std::numeric_limits<steady_duration::rep>::max)());
+   const auto base = static_cast<__int128>(now.time_since_epoch().count());
+   const auto available = static_cast<__int128>(maximum) - base;
+   if (available <= 0 || increment >= static_cast<unsigned __int128>(available)) {
+      return std::chrono::steady_clock::time_point::max();
+   }
+   return std::chrono::steady_clock::time_point{
+       steady_duration{static_cast<steady_duration::rep>(base + static_cast<__int128>(increment))}};
+}
+
+} // namespace
+
+std::chrono::system_clock::time_point
+saturating_topology_expiry(std::chrono::system_clock::time_point now, std::chrono::milliseconds interval) noexcept {
+   if (interval <= std::chrono::milliseconds::zero() || now == std::chrono::system_clock::time_point::max()) {
+      return now;
+   }
+
+   using system_duration = std::chrono::system_clock::duration;
+   using conversion = std::ratio_divide<std::milli, system_duration::period>;
+   const auto increment = (static_cast<unsigned __int128>(interval.count()) * conversion::num) / conversion::den;
+   const auto maximum = static_cast<__int128>((std::numeric_limits<system_duration::rep>::max)());
+   const auto base = static_cast<__int128>(now.time_since_epoch().count());
+   const auto available = maximum - base;
+   if (available <= 0 || increment >= static_cast<unsigned __int128>(available)) {
+      return std::chrono::system_clock::time_point::max();
+   }
+   return std::chrono::system_clock::time_point{
+       system_duration{static_cast<system_duration::rep>(base + static_cast<__int128>(increment))}};
+}
+
+topology_manager::topology_manager(topology::policy policy, callbacks callbacks_value, clocks clocks_value,
+                                   std::uint64_t periodic_jitter_seed)
     : policy_{std::move(policy)}, callbacks_{std::move(callbacks_value)}, clocks_{std::move(clocks_value)},
-      changed_{std::make_shared<lifecycle_wakeup>()} {
+      periodic_jitter_seed_{periodic_jitter_seed}, changed_{std::make_shared<lifecycle_wakeup>()} {
    forge::net::p2p::validate(policy_);
    if (!clocks_.steady_now) {
       clocks_.steady_now = [] { return std::chrono::steady_clock::now(); };
@@ -88,10 +145,42 @@ bool topology_manager::stopping() const noexcept {
    return phase_ == phase::stopping || phase_ == phase::stopped;
 }
 
+std::chrono::milliseconds topology_manager::periodic_refresh_delay(std::uint64_t sequence) const noexcept {
+   const auto base = static_cast<std::uint64_t>(policy_.refresh_interval.count());
+   auto value = std::uint64_t{1469598103934665603ULL};
+   value ^= periodic_jitter_seed_;
+   value ^= sequence;
+   value *= 1099511628211ULL;
+   const auto jitter = static_cast<std::uint64_t>(std::llround(policy_.retry_jitter * periodic_jitter_scale));
+   const auto sample = value % (periodic_jitter_scale + 1U);
+   const auto numerator = periodic_jitter_scale - jitter +
+                          ((2U * jitter * sample) / periodic_jitter_scale);
+   return scale_periodic_delay(base, numerator);
+}
+
+bool topology_manager::rendezvous_refresh_due_locked(std::chrono::steady_clock::time_point steady_now,
+                                                     std::chrono::system_clock::time_point system_now) const noexcept {
+   if (!policy_.rendezvous_enabled) {
+      return false;
+   }
+   for (const auto& [_, state] : rendezvous_clients_) {
+      if (state.retry_after != std::chrono::steady_clock::time_point{}) {
+         if (state.retry_after <= steady_now) {
+            return true;
+         }
+         continue;
+      }
+      if (state.confirmed_registration && state.renew_after != std::chrono::system_clock::time_point{} &&
+          state.renew_after <= system_now) {
+         return true;
+      }
+   }
+   return false;
+}
+
 std::chrono::steady_clock::time_point topology_manager::next_autonomous_wakeup() const {
    const auto steady_now = clocks_.steady_now();
    const auto system_now = clocks_.system_now();
-   auto deadline = steady_now + policy_.refresh_interval;
    const auto saturating_deadline = [steady_now](std::chrono::system_clock::duration remaining) {
       if (remaining <= std::chrono::system_clock::duration::zero()) {
          return steady_now;
@@ -104,22 +193,54 @@ std::chrono::steady_clock::time_point topology_manager::next_autonomous_wakeup()
    };
 
    const auto lock = std::scoped_lock{mutex_};
-   for (const auto& [_, state] : rendezvous_clients_) {
-      if (state.retry_after != std::chrono::steady_clock::time_point{}) {
-         deadline = std::min(deadline, state.retry_after);
-      }
-      if (state.confirmed_registration && state.renew_after != std::chrono::system_clock::time_point{}) {
-         deadline = std::min(deadline, saturating_deadline(state.renew_after - system_now));
+   if (rendezvous_refresh_due_locked(steady_now, system_now)) {
+      return steady_now;
+   }
+   auto deadline = next_periodic_refresh_ == std::chrono::steady_clock::time_point{}
+                       ? steady_now
+                       : next_periodic_refresh_;
+   if (policy_.rendezvous_enabled) {
+      for (const auto& [_, state] : rendezvous_clients_) {
+         if (state.retry_after != std::chrono::steady_clock::time_point{}) {
+            deadline = std::min(deadline, state.retry_after);
+            continue;
+         }
+         if (state.confirmed_registration && state.renew_after != std::chrono::system_clock::time_point{}) {
+            deadline = std::min(deadline, saturating_deadline(state.renew_after - system_now));
+         }
       }
    }
    return deadline;
 }
 
+bool topology_manager::queue_due_refresh_locked(std::chrono::steady_clock::time_point steady_now,
+                                                std::chrono::system_clock::time_point system_now) {
+   if (phase_ != phase::running || refresh_queued_ || refresh_running_) {
+      return false;
+   }
+
+   const auto periodic_due = next_periodic_refresh_ == std::chrono::steady_clock::time_point{} ||
+                             next_periodic_refresh_ <= steady_now;
+   if (!periodic_due && !rendezvous_refresh_due_locked(steady_now, system_now)) {
+      return false;
+   }
+   if (periodic_due) {
+      const auto maximum = (std::chrono::steady_clock::time_point::max)();
+      do {
+         ++periodic_refresh_sequence_;
+         const auto delay = periodic_refresh_delay(periodic_refresh_sequence_);
+         next_periodic_refresh_ = saturating_periodic_deadline(next_periodic_refresh_, delay);
+      } while (next_periodic_refresh_ <= steady_now && next_periodic_refresh_ != maximum);
+   }
+   static_cast<void>(queue_refresh_locked());
+   return true;
+}
+
 topology_manager::status topology_manager::current() const {
    const auto lock = std::scoped_lock{mutex_};
    auto waiting = std::size_t{};
-   for (const auto& [_, count] : waiters_) {
-      waiting += count;
+   for (const auto& [_, value] : waiters_) {
+      waiting += value.count;
    }
    return status{
        .lifecycle_phase = phase_,
@@ -149,12 +270,11 @@ void topology_manager::release_waiter(std::uint64_t generation) noexcept {
    try {
       const auto lock = std::scoped_lock{mutex_};
       const auto waiter = waiters_.find(generation);
-      if (waiter == waiters_.end() || waiter->second == 0) {
+      if (waiter == waiters_.end() || waiter->second.count == 0) {
          return;
       }
-      if (--waiter->second == 0) {
+      if (--waiter->second.count == 0) {
          waiters_.erase(waiter);
-         completions_.erase(generation);
       }
    } catch (...) {
       // Waiter cancellation must not prevent the caller from receiving its original error.
@@ -180,6 +300,7 @@ void topology_manager::start(lifecycle_tracker& lifecycle) {
    if (!operation.active()) {
       FORGE_THROW_EXCEPTION(exceptions::closed, "cannot start P2P topology manager after shutdown");
    }
+   lifecycle_ = std::addressof(lifecycle);
    {
       const auto lock = std::scoped_lock{mutex_};
       if (phase_ == phase::stopping || phase_ == phase::stopped) {
@@ -190,6 +311,9 @@ void topology_manager::start(lifecycle_tracker& lifecycle) {
       }
       started_ = true;
       phase_ = phase::running;
+      periodic_refresh_sequence_ = 0;
+      next_periodic_refresh_ =
+          saturating_periodic_deadline(clocks_.steady_now(), periodic_refresh_delay(periodic_refresh_sequence_));
       static_cast<void>(queue_refresh_locked());
    }
 
@@ -227,7 +351,9 @@ void topology_manager::request_stop() noexcept {
          phase_ = phase::stopping;
          refresh_queued_ = false;
          queued_generation_ = 0;
-         cancellations = active_cancellations_;
+         // request_stop() is noexcept. Transfer the existing cancellation
+         // owners instead of copying a vector on the shutdown path.
+         cancellations.swap(active_cancellations_);
          if (policy_.operating_mode == topology::mode::static_only) {
             parent_finished_ = true;
             phase_ = phase::stopped;
@@ -243,48 +369,63 @@ void topology_manager::request_stop() noexcept {
 }
 
 void topology_manager::finish_parent(std::exception_ptr failure) noexcept {
-   try {
-      auto should_log = false;
-      {
-         const auto lock = std::scoped_lock{mutex_};
-         should_log = failure && phase_ != phase::stopping && phase_ != phase::stopped;
-         if (refresh_running_ && waiters_.contains(running_generation_)) {
-            completions_.insert_or_assign(running_generation_, completion{.failure = failure});
+   if (clocks_.before_parent_completion) {
+      try {
+         clocks_.before_parent_completion();
+      } catch (...) {
+         // Completion publication cannot depend on ancillary diagnostics or test hooks.
+      }
+   }
+
+   auto should_log = false;
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      should_log = failure && phase_ != phase::stopping && phase_ != phase::stopped;
+      if (refresh_running_) {
+         if (const auto waiter = waiters_.find(running_generation_); waiter != waiters_.end()) {
+            // The waiter slot was allocated before this generation could start.
+            waiter->second.completed.emplace(completion{.failure = std::move(failure)});
          }
-         refresh_running_ = false;
-         refresh_queued_ = false;
-         parent_finished_ = true;
-         phase_ = phase::stopped;
       }
-      if (should_log) {
+      refresh_running_ = false;
+      refresh_queued_ = false;
+      parent_finished_ = true;
+      phase_ = phase::stopped;
+   }
+   changed_->notify();
+   if (should_log) {
+      try {
          forge::exceptions::capture_and_log("P2P topology manager stopped unexpectedly");
+      } catch (...) {
+         // Completion handlers must remain noexcept so lifecycle tracking is released.
       }
-      changed_->notify();
-   } catch (...) {
-      // Completion handlers must remain noexcept so lifecycle tracking is released.
    }
 }
 
 void topology_manager::finish_refresh(std::uint64_t generation, std::vector<discovery::result> results,
                                       std::exception_ptr failure) noexcept {
-   try {
-      {
-         const auto lock = std::scoped_lock{mutex_};
-         refresh_running_ = false;
-         running_generation_ = 0;
-         ++completed_refreshes_;
-         if (failure) {
-            ++failed_refreshes_;
-         }
-         if (waiters_.contains(generation)) {
-            completions_.insert_or_assign(generation,
-                                          completion{.results = std::move(results), .failure = std::move(failure)});
-         }
+   if (clocks_.before_refresh_completion) {
+      try {
+         clocks_.before_refresh_completion();
+      } catch (...) {
+         // Completion publication cannot depend on ancillary diagnostics or test hooks.
       }
-      changed_->notify();
-   } catch (...) {
-      // Refresh completion must not strand the lifecycle parent operation.
    }
+
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      refresh_running_ = false;
+      running_generation_ = 0;
+      ++completed_refreshes_;
+      if (failure) {
+         ++failed_refreshes_;
+      }
+      if (const auto waiter = waiters_.find(generation); waiter != waiters_.end()) {
+         // The waiter slot was allocated before this generation could start.
+         waiter->second.completed.emplace(completion{.results = std::move(results), .failure = std::move(failure)});
+      }
+   }
+   changed_->notify();
 }
 
 void topology_manager::add_cancellation(const std::shared_ptr<cancellation_latch>& cancellation) {
@@ -322,7 +463,8 @@ boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_r
          FORGE_THROW_EXCEPTION(exceptions::closed, "P2P topology refresh requires a started node");
       }
       generation = queue_refresh_locked();
-      ++waiters_[generation];
+      auto [waiter, _] = waiters_.try_emplace(generation);
+      ++waiter->second.count;
    }
    changed_->notify();
 
@@ -330,13 +472,16 @@ boost::asio::awaitable<std::vector<discovery::result>> topology_manager::async_r
       const auto observed = changed_->epoch();
       auto result = std::optional<completion>{};
       auto stopped = false;
-      {
+      try {
          const auto lock = std::scoped_lock{mutex_};
-         if (const auto completed = completions_.find(generation); completed != completions_.end()) {
-            result = completed->second;
+         if (const auto waiter = waiters_.find(generation); waiter != waiters_.end() && waiter->second.completed) {
+            result = *waiter->second.completed;
          } else {
             stopped = phase_ == phase::stopping || phase_ == phase::stopped;
          }
+      } catch (...) {
+         release_waiter(generation);
+         throw;
       }
       if (result) {
          release_waiter(generation);
@@ -411,11 +556,10 @@ boost::asio::awaitable<void> topology_manager::async_run() {
             }
          }
          {
+            const auto steady_now = clocks_.steady_now();
+            const auto system_now = clocks_.system_now();
             const auto lock = std::scoped_lock{mutex_};
-            if (phase_ == phase::running && !refresh_queued_ && !refresh_running_ &&
-                clocks_.steady_now() >= deadline) {
-               static_cast<void>(queue_refresh_locked());
-            }
+            static_cast<void>(queue_due_refresh_locked(steady_now, system_now));
          }
       }
    } catch (...) {

@@ -158,7 +158,7 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if size == 0 || size > 16*1024 {
+	if size == 0 || size > 256*1024 {
 		return nil, fmt.Errorf("invalid frame size %d", size)
 	}
 	payload := make([]byte, size)
@@ -834,8 +834,15 @@ func dial(opts options) error {
 			}
 		}
 		result["payload_bytes"] = size
-	case "echo":
-		size, err := openEchoProtocol(ctx, h, info.ID, []byte(opts.payload))
+	case "echo", "echo_large":
+		payload := []byte(opts.payload)
+		if opts.scenario == "echo_large" {
+			payload = make([]byte, 192*1024)
+			for index := range payload {
+				payload[index] = byte(index % 251)
+			}
+		}
+		size, err := openEchoProtocol(ctx, h, info.ID, payload)
 		if err != nil {
 			return err
 		}
