@@ -76,8 +76,8 @@ import forge.net.yamux.session;
 namespace forge::net::p2p {
 
 boost::asio::awaitable<forge::net::p2p::stream>
-node::impl::open_session_stream(const std::shared_ptr<session_state>& session, const protocol_id& protocol,
-                                bool relay, detail::stream_admission_handler admitted) {
+node::impl::open_session_stream(const std::shared_ptr<session_state>& session, const protocol_id& protocol, bool relay,
+                                detail::stream_admission_handler admitted) {
    const auto relayed = relay || session->info.path == path::kind::relay;
    auto reservation = relayed ? resources.reserve_relay_stream() : resources.reserve_stream();
    if (!reservation) {
@@ -105,6 +105,12 @@ node::impl::open_session_stream(const std::shared_ptr<session_state>& session, c
       ++metrics_value.backpressure_rejections;
       ++metrics_value.protocol_rejections;
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P scoped stream limit reached");
+   }
+   try {
+      admitted.commit();
+   } catch (...) {
+      selected.request_cancel();
+      throw;
    }
    co_return selected;
 }
@@ -165,16 +171,12 @@ node::impl::accept_resource_stream(const peer_id& peer, forge::net::transport::s
    };
 }
 
-boost::asio::awaitable<forge::net::p2p::stream>
-node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_id& protocol,
-                                            std::shared_ptr<node::impl::session_state> session,
-                                            std::chrono::milliseconds timeout,
-                                            std::shared_ptr<cancellation_latch> cancellation) {
+boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_direct_session(
+    const peer_id& peer, const protocol_id& protocol, std::shared_ptr<node::impl::session_state> session,
+    std::chrono::milliseconds timeout, std::shared_ptr<cancellation_latch> cancellation) {
    auto deadline = operation_deadline{runtime.context(), timeout};
-   auto cancellation_subscription =
-       cancellation_latch::subscribe(cancellation, [stop = deadline.stopping()] noexcept {
-          static_cast<void>(stop.request_stop());
-       });
+   auto cancellation_subscription = cancellation_latch::subscribe(
+       cancellation, [stop = deadline.stopping()] noexcept { static_cast<void>(stop.request_stop()); });
    auto deadline_id = std::uint64_t{};
    auto stopping = deadline.stopping();
    auto stop_before_arm = false;
@@ -224,12 +226,14 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
       auto selected = std::optional<forge::net::p2p::stream>{};
       co_await detail::async_run_with_owner_cancellation(
           stream_stop,
-          [this, session, protocol, stream_stop_requested,
-           &selected](boost::asio::cancellation_slot) -> boost::asio::awaitable<void> {
+          [this, session, protocol, stream_stop, stream_stop_requested,
+           &selected](boost::asio::cancellation_slot slot) -> boost::asio::awaitable<void> {
              if (stream_stop_requested->load(std::memory_order_acquire)) {
                 FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P protocol open canceled before stream admission");
              }
-             selected.emplace(co_await open_session_stream(session, protocol));
+             selected.emplace(co_await open_session_stream(
+                 session, protocol, false,
+                 detail::make_owner_stream_admission(slot, stream_stop, detail::owner_stream_lifetime::negotiation)));
           });
       const auto completed = deadline.finish();
       if (cancellation && cancellation->stop_requested()) {
@@ -314,8 +318,7 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
 
 boost::asio::awaitable<node::impl::opened_direct_stream>
 node::impl::open_protocol_direct_with_context(const peer_id& peer, const protocol_id& protocol,
-                                              std::chrono::milliseconds timeout,
-                                              std::size_t max_direct_endpoints,
+                                              std::chrono::milliseconds timeout, std::size_t max_direct_endpoints,
                                               std::chrono::milliseconds direct_attempt_timeout,
                                               std::shared_ptr<cancellation_latch> cancellation) {
    const auto started = std::chrono::steady_clock::now();
@@ -356,7 +359,7 @@ boost::asio::awaitable<forge::net::p2p::stream>
 node::impl::open_protocol_direct(const peer_id& peer, const protocol_id& protocol, std::chrono::milliseconds timeout,
                                  std::size_t max_direct_endpoints, std::chrono::milliseconds direct_attempt_timeout) {
    auto selected = co_await open_protocol_direct_with_context(peer, protocol, timeout, max_direct_endpoints,
-                                                               direct_attempt_timeout, {});
+                                                              direct_attempt_timeout, {});
    co_return std::move(selected.stream);
 }
 

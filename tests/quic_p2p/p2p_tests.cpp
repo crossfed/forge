@@ -2296,6 +2296,53 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_negotiates_the_smaller_receive_limit) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_peer_exchange_timeout_cancels_only_stalled_yamux_stream) {
+   auto server_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto client_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = node{server_runtime, options_for(make_test_identity())};
+   auto client_options = options_for(make_test_identity());
+   client_options.limits.topology.query_timeout = std::chrono::milliseconds{100};
+   auto client = node{client_runtime, std::move(client_options)};
+   register_echo(server);
+
+   const auto server_endpoint = listen_tcp(server, server_runtime);
+   static_cast<void>(forge::asio::blocking::run(
+       client_runtime,
+       client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()})));
+   const auto sessions_opened = client.metrics().sessions_opened;
+   auto release_server = block_runtime(server_runtime, "peer exchange Yamux multistream negotiation barrier");
+   auto request = boost::asio::co_spawn(
+       client_runtime.context(), client.async_request_peer_exchange(server.local_peer()), boost::asio::use_future);
+   const auto canceled = request.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+   release_server->set_value();
+   BOOST_REQUIRE(canceled);
+   try {
+      request.get();
+      BOOST_FAIL("expected stalled peer exchange Yamux negotiation timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   auto sibling = forge::asio::blocking::run(
+       client_runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo,
+                                                         node::open_options{
+                                                             .allow_relay = false,
+                                                             .timeout = std::chrono::seconds{2},
+                                                             .direct_attempt_timeout = std::chrono::seconds{2},
+                                                             .max_direct_endpoints = 1,
+                                                         }));
+   const auto payload = std::vector<std::uint8_t>{'p', 'e', 'x'};
+   forge::asio::blocking::run(client_runtime, sibling.async_write_frame(payload));
+   const auto reply = forge::asio::blocking::run(client_runtime, sibling.async_read_frame());
+   BOOST_TEST(reply == payload, boost::test_tools::per_element());
+   forge::asio::blocking::run(client_runtime, sibling.async_close());
+   BOOST_TEST(client.metrics().sessions_opened == sessions_opened);
+
+   forge::asio::blocking::run(client_runtime, client.async_stop());
+   forge::asio::blocking::run(server_runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_peer_exchange_receive_limits_are_typed_and_v1_bounded) {
    const auto local = peer_exchange_codec::options{.max_message_size = 1024};
    BOOST_TEST(peer_exchange_message{}.max_frame_size == peer_exchange_codec::options{}.max_message_size);
@@ -2474,48 +2521,48 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_saturates_maximum_success_and_f
    };
 
    auto success_scheduler = detail::peer_exchange_scheduler{};
-   auto successful =
-       success_scheduler.claim_peer(success_candidate.peer, {success_candidate}, now, 1, runtime.context().get_executor());
+   auto successful = success_scheduler.claim_peer(success_candidate.peer, {success_candidate}, now, 1,
+                                                  runtime.context().get_executor());
    BOOST_TEST(successful.started());
    success_scheduler.succeed(successful, now, maximum);
    success_scheduler.leave(successful);
-   const auto success_blocked =
-       success_scheduler.claim_peer(success_candidate.peer, {success_candidate}, now, 1, runtime.context().get_executor());
+   const auto success_blocked = success_scheduler.claim_peer(success_candidate.peer, {success_candidate}, now, 1,
+                                                             runtime.context().get_executor());
    BOOST_TEST(static_cast<int>(success_blocked.status) ==
               static_cast<int>(detail::peer_exchange_scheduler::claim_status::backoff));
-   const auto success_before_max = success_scheduler.claim_peer(
-       success_candidate.peer, {success_candidate}, std::chrono::steady_clock::time_point::max() -
-                                                       std::chrono::steady_clock::duration{1},
-       1, runtime.context().get_executor());
+   const auto success_before_max = success_scheduler.claim_peer(success_candidate.peer, {success_candidate},
+                                                                std::chrono::steady_clock::time_point::max() -
+                                                                    std::chrono::steady_clock::duration{1},
+                                                                1, runtime.context().get_executor());
    BOOST_TEST(static_cast<int>(success_before_max.status) ==
               static_cast<int>(detail::peer_exchange_scheduler::claim_status::backoff));
-   auto success_retry = success_scheduler.claim_peer(success_candidate.peer, {success_candidate},
-                                                      std::chrono::steady_clock::time_point::max(), 1,
-                                                      runtime.context().get_executor());
+   auto success_retry =
+       success_scheduler.claim_peer(success_candidate.peer, {success_candidate},
+                                    std::chrono::steady_clock::time_point::max(), 1, runtime.context().get_executor());
    BOOST_TEST(success_retry.started());
    success_scheduler.succeed(success_retry, std::chrono::steady_clock::time_point::max(),
                              std::chrono::milliseconds::zero());
    success_scheduler.leave(success_retry);
 
    auto failure_scheduler = detail::peer_exchange_scheduler{};
-   auto failed =
-       failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate}, now, 1, runtime.context().get_executor());
+   auto failed = failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate}, now, 1,
+                                              runtime.context().get_executor());
    BOOST_TEST(failed.started());
    failure_scheduler.fail(failed, exceptions::code::timeout, {}, now, maximum);
    failure_scheduler.leave(failed);
-   const auto failure_blocked =
-       failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate}, now, 1, runtime.context().get_executor());
+   const auto failure_blocked = failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate}, now, 1,
+                                                             runtime.context().get_executor());
    BOOST_TEST(static_cast<int>(failure_blocked.status) ==
               static_cast<int>(detail::peer_exchange_scheduler::claim_status::backoff));
-   const auto failure_before_max = failure_scheduler.claim_peer(
-       failure_candidate.peer, {failure_candidate}, std::chrono::steady_clock::time_point::max() -
-                                                       std::chrono::steady_clock::duration{1},
-       1, runtime.context().get_executor());
+   const auto failure_before_max = failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate},
+                                                                std::chrono::steady_clock::time_point::max() -
+                                                                    std::chrono::steady_clock::duration{1},
+                                                                1, runtime.context().get_executor());
    BOOST_TEST(static_cast<int>(failure_before_max.status) ==
               static_cast<int>(detail::peer_exchange_scheduler::claim_status::backoff));
-   auto failure_retry = failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate},
-                                                      std::chrono::steady_clock::time_point::max(), 1,
-                                                      runtime.context().get_executor());
+   auto failure_retry =
+       failure_scheduler.claim_peer(failure_candidate.peer, {failure_candidate},
+                                    std::chrono::steady_clock::time_point::max(), 1, runtime.context().get_executor());
    BOOST_TEST(failure_retry.started());
    failure_scheduler.succeed(failure_retry, std::chrono::steady_clock::time_point::max(),
                              std::chrono::milliseconds::zero());
@@ -2570,12 +2617,14 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_entry_publish_failure_rolls_bac
        1,
        detail::peer_exchange_scheduler::test_hooks{
            .context = &state,
-           .reach = [](void* context, detail::peer_exchange_scheduler::test_stage stage) {
-              auto& value = *static_cast<failure_state*>(context);
-              if (stage == detail::peer_exchange_scheduler::test_stage::before_entry_publish && value.fail_publish) {
-                 throw std::bad_alloc{};
-              }
-           },
+           .reach =
+               [](void* context, detail::peer_exchange_scheduler::test_stage stage) {
+                  auto& value = *static_cast<failure_state*>(context);
+                  if (stage == detail::peer_exchange_scheduler::test_stage::before_entry_publish &&
+                      value.fail_publish) {
+                     throw std::bad_alloc{};
+                  }
+               },
        },
    };
    const auto now = std::chrono::steady_clock::time_point{} + std::chrono::seconds{1};
@@ -2586,13 +2635,14 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_entry_publish_failure_rolls_bac
        .protocols = {builtins::peer_exchange},
    };
 
-   BOOST_CHECK_THROW(
-       static_cast<void>(scheduler.claim_next({candidate}, now, 1, runtime.context().get_executor())), std::bad_alloc);
+   BOOST_CHECK_THROW(static_cast<void>(scheduler.claim_next({candidate}, now, 1, runtime.context().get_executor())),
+                     std::bad_alloc);
    BOOST_TEST(scheduler.size() == 0U);
 
    state.fail_publish = false;
    auto retry = scheduler.claim_next({candidate}, now, 1, runtime.context().get_executor());
-   BOOST_TEST(static_cast<int>(retry.status) == static_cast<int>(detail::peer_exchange_scheduler::claim_status::started));
+   BOOST_TEST(static_cast<int>(retry.status) ==
+              static_cast<int>(detail::peer_exchange_scheduler::claim_status::started));
    scheduler.succeed(retry, now, std::chrono::seconds{1});
    scheduler.leave(retry);
 }
@@ -2608,13 +2658,14 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_batch_failure_rolls_back_every_
        1,
        detail::peer_exchange_scheduler::test_hooks{
            .context = &failure,
-           .reach = [](void* context, detail::peer_exchange_scheduler::test_stage stage) {
-              auto& value = *static_cast<failure_state*>(context);
-              if (stage == detail::peer_exchange_scheduler::test_stage::before_entry_publish &&
-                  ++value.entry_publishes == 2U) {
-                 throw std::bad_alloc{};
-              }
-           },
+           .reach =
+               [](void* context, detail::peer_exchange_scheduler::test_stage stage) {
+                  auto& value = *static_cast<failure_state*>(context);
+                  if (stage == detail::peer_exchange_scheduler::test_stage::before_entry_publish &&
+                      ++value.entry_publishes == 2U) {
+                     throw std::bad_alloc{};
+                  }
+               },
        },
    };
    const auto now = std::chrono::steady_clock::time_point{} + std::chrono::seconds{1};
@@ -2631,9 +2682,9 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_batch_failure_rolls_back_every_
        .protocols = {builtins::peer_exchange},
    };
 
-   BOOST_CHECK_THROW(static_cast<void>(scheduler.claim_batch({first, second}, now, 2, 2,
-                                                              runtime.context().get_executor())),
-                     std::bad_alloc);
+   BOOST_CHECK_THROW(
+       static_cast<void>(scheduler.claim_batch({first, second}, now, 2, 2, runtime.context().get_executor())),
+       std::bad_alloc);
 
    auto retry = scheduler.claim_batch({first, second}, now, 2, 2, runtime.context().get_executor());
    BOOST_REQUIRE_EQUAL(retry.size(), 2U);
@@ -2661,8 +2712,8 @@ BOOST_AUTO_TEST_CASE(p2p_topology_peer_exchange_claims_settle_post_entry_pre_awa
    const auto fail_after_claim = [&] {
       auto pending = scheduler.claim_batch({candidate}, now, 1, 1, runtime.context().get_executor());
       BOOST_REQUIRE_EQUAL(pending.size(), 1U);
-      auto claim_guard = detail::topology_peer_exchange_claims{
-          scheduler_mutex, scheduler, std::move(pending), query_timeout};
+      auto claim_guard =
+          detail::topology_peer_exchange_claims{scheduler_mutex, scheduler, std::move(pending), query_timeout};
       auto claimed = std::make_shared<detail::topology_peer_exchange_claims>(std::move(claim_guard));
       claimed->stage();
       const auto worker_claim = claimed->staged_claims().front();
@@ -2706,8 +2757,8 @@ BOOST_AUTO_TEST_CASE(p2p_topology_peer_exchange_claims_roll_back_commit_before_s
    const auto fail_before_shared_owner = [&] {
       auto pending = scheduler.claim_batch({candidate}, now, 1, 1, runtime.context().get_executor());
       BOOST_REQUIRE_EQUAL(pending.size(), 1U);
-      auto claim_guard = detail::topology_peer_exchange_claims{
-          scheduler_mutex, scheduler, std::move(pending), query_timeout};
+      auto claim_guard =
+          detail::topology_peer_exchange_claims{scheduler_mutex, scheduler, std::move(pending), query_timeout};
       // Exact failpoint: claim_batch committed, but make_shared has not yet
       // established the worker-visible settlement owner.
       static_cast<void>(claim_guard);
@@ -2821,11 +2872,12 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_honors_stop_before_worker_start) {
    stop->request_stop();
    auto worker = boost::asio::co_spawn(
        runtime.context(),
-       detail::async_run_with_stop_bridge(stop, [&started](std::shared_ptr<detail::worker_terminal_owner>)
-                                                    -> boost::asio::awaitable<void> {
-          started = true;
-          co_return;
-       }),
+       detail::async_run_with_stop_bridge(
+           stop,
+           [&started](std::shared_ptr<detail::worker_terminal_owner>) -> boost::asio::awaitable<void> {
+              started = true;
+              co_return;
+           }),
        boost::asio::use_future);
 
    BOOST_CHECK_NO_THROW(worker.get());
@@ -2845,8 +2897,9 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_inherits_caller_cancellation) {
    auto worker = asio::co_spawn(
        runtime.context(),
        detail::async_run_with_stop_bridge(
-           stop, [entered, &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                     -> asio::awaitable<void> {
+           stop,
+           [entered,
+            &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal) -> asio::awaitable<void> {
               const auto executor = co_await asio::this_coro::executor;
               auto wait = std::make_shared<asio::steady_timer>(executor, asio::steady_timer::time_point::max());
               BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
@@ -2887,9 +2940,9 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_serializes_stop_on_the_worker_strand
    auto worker = asio::co_spawn(
        worker_strand,
        detail::async_run_with_stop_bridge(
-           stop, [worker_strand, entered, canceled, &started_on_strand, &canceled_on_strand,
-                  &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                     -> asio::awaitable<void> {
+           stop,
+           [worker_strand, entered, canceled, &started_on_strand, &canceled_on_strand,
+            &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal) -> asio::awaitable<void> {
               const auto executor = co_await asio::this_coro::executor;
               started_on_strand.store(worker_strand.running_in_this_thread(), std::memory_order_release);
               auto wait = std::make_shared<asio::steady_timer>(executor, asio::steady_timer::time_point::max());
@@ -2939,8 +2992,8 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_lifecycle_stop_after_both_branches_s
        operation.executor(),
        detail::async_run_with_stop_bridge(
            stop,
-           [work_started, &cancellation_count, &work_completed](
-               std::shared_ptr<detail::worker_terminal_owner> terminal) -> asio::awaitable<void> {
+           [work_started, &cancellation_count,
+            &work_completed](std::shared_ptr<detail::worker_terminal_owner> terminal) -> asio::awaitable<void> {
               const auto executor = co_await asio::this_coro::executor;
               auto wait = std::make_shared<asio::steady_timer>(executor, asio::steady_timer::time_point::max());
               BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
@@ -2961,9 +3014,8 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_lifecycle_stop_after_both_branches_s
            }),
        asio::use_future);
 
-   static_cast<void>(asio::co_spawn(runtime.context(), stop_wait_started->async_wait(stop_wait_epoch),
-                                    asio::use_future)
-                         .get());
+   static_cast<void>(
+       asio::co_spawn(runtime.context(), stop_wait_started->async_wait(stop_wait_epoch), asio::use_future).get());
    static_cast<void>(asio::co_spawn(runtime.context(), work_started->async_wait(work_epoch), asio::use_future).get());
    BOOST_TEST(!stop->stop_requested());
 
@@ -2997,9 +3049,9 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_stop_before_terminal_publication_is_
    auto worker = asio::co_spawn(
        worker_strand,
        detail::async_run_with_stop_bridge(
-           stop, [worker_strand, entered, release_publication, release_epoch, &cancellation_count,
-                  &canceled_on_strand](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                     -> asio::awaitable<void> {
+           stop,
+           [worker_strand, entered, release_publication, release_epoch, &cancellation_count,
+            &canceled_on_strand](std::shared_ptr<detail::worker_terminal_owner> terminal) -> asio::awaitable<void> {
               entered->notify();
               static_cast<void>(co_await release_publication->async_wait(release_epoch));
               BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
@@ -3029,8 +3081,9 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_natural_completion_seals_terminal_ca
    auto worker = boost::asio::co_spawn(
        runtime.context(),
        detail::async_run_with_stop_bridge(
-           stop, [&cancellation_count, &completion_count](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                     -> boost::asio::awaitable<void> {
+           stop,
+           [&cancellation_count, &completion_count](
+               std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
               BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
                   [&cancellation_count]() noexcept { cancellation_count.fetch_add(1, std::memory_order_acq_rel); },
               }));
@@ -3058,11 +3111,12 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_does_not_own_arbitrary_throwing_asio
    auto worker = boost::asio::co_spawn(
        runtime.context(),
        detail::async_run_with_stop_bridge(
-           stop, [entered, &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                     -> boost::asio::awaitable<void> {
+           stop,
+           [entered, &cancellation_count](
+               std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
               const auto executor = co_await boost::asio::this_coro::executor;
-              auto wait = std::make_shared<boost::asio::steady_timer>(
-                  executor, boost::asio::steady_timer::time_point::max());
+              auto wait =
+                  std::make_shared<boost::asio::steady_timer>(executor, boost::asio::steady_timer::time_point::max());
               BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
                   [wait, &cancellation_count]() noexcept {
                      cancellation_count.fetch_add(1, std::memory_order_acq_rel);
@@ -3076,9 +3130,8 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_does_not_own_arbitrary_throwing_asio
            }),
        boost::asio::use_future);
 
-   static_cast<void>(boost::asio::co_spawn(runtime.context(), entered->async_wait(entered_epoch),
-                                           boost::asio::use_future)
-                         .get());
+   static_cast<void>(
+       boost::asio::co_spawn(runtime.context(), entered->async_wait(entered_epoch), boost::asio::use_future).get());
    stop->request_stop();
    BOOST_CHECK_NO_THROW(worker.get());
    BOOST_TEST(cancellation_count.load(std::memory_order_acquire) == 1U);
@@ -3092,7 +3145,8 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_joins_the_published_stop_waiter_afte
    auto worker = boost::asio::co_spawn(
        runtime.context(),
        detail::async_run_with_stop_bridge(
-           stop, [&work_started](std::shared_ptr<detail::worker_terminal_owner>) -> boost::asio::awaitable<void> {
+           stop,
+           [&work_started](std::shared_ptr<detail::worker_terminal_owner>) -> boost::asio::awaitable<void> {
               work_started = true;
               co_return;
            },
@@ -3988,6 +4042,117 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_direct_tcp_protocol_timeout_cancels_only_stalled_yamux_stream) {
+   auto server_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto client_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = node{server_runtime, options_for(make_test_identity())};
+   auto client = node{client_runtime, options_for(make_test_identity())};
+   register_echo(server);
+
+   const auto server_endpoint = listen_tcp(server, server_runtime);
+   static_cast<void>(forge::asio::blocking::run(
+       client_runtime,
+       client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()})));
+   const auto sessions_opened = client.metrics().sessions_opened;
+   auto sibling = forge::asio::blocking::run(
+       client_runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo,
+                                                         node::open_options{
+                                                             .allow_relay = false,
+                                                             .timeout = std::chrono::seconds{2},
+                                                             .direct_attempt_timeout = std::chrono::seconds{2},
+                                                             .max_direct_endpoints = 1,
+                                                         }));
+
+   auto release_server = block_runtime(server_runtime, "direct Yamux multistream negotiation barrier");
+   auto stalled = boost::asio::co_spawn(
+       client_runtime.context(),
+       client.async_open_protocol_stream(server.local_peer(), builtins::echo,
+                                         node::open_options{
+                                             .allow_relay = false,
+                                             .timeout = std::chrono::milliseconds{100},
+                                             .direct_attempt_timeout = std::chrono::milliseconds{100},
+                                             .max_direct_endpoints = 1,
+                                         }),
+       boost::asio::use_future);
+   const auto canceled = stalled.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+   release_server->set_value();
+   BOOST_REQUIRE(canceled);
+   try {
+      static_cast<void>(stalled.get());
+      BOOST_FAIL("expected stalled Yamux protocol negotiation timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   const auto payload = std::vector<std::uint8_t>{'s', 'i', 'b', 'l', 'i', 'n', 'g'};
+   forge::asio::blocking::run(client_runtime, sibling.async_write_frame(payload));
+   const auto reply = forge::asio::blocking::run(client_runtime, sibling.async_read_frame());
+   BOOST_TEST(reply == payload, boost::test_tools::per_element());
+   forge::asio::blocking::run(client_runtime, sibling.async_close());
+   BOOST_TEST(client.metrics().sessions_opened == sessions_opened);
+
+   forge::asio::blocking::run(client_runtime, client.async_stop());
+   forge::asio::blocking::run(server_runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dht_timeout_cancels_stalled_yamux_negotiation_and_preserves_session) {
+   auto server_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto client_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto limits = dht::options{};
+   limits.query_timeout = std::chrono::milliseconds{100};
+   auto server =
+       node{server_runtime, dht_options_for(make_test_identity(), custom_test_dht_profile(dht::mode::server, limits))};
+   auto client =
+       node{client_runtime, dht_options_for(make_test_identity(), custom_test_dht_profile(dht::mode::client, limits))};
+   register_echo(server);
+
+   const auto server_endpoint = listen_tcp(server, server_runtime);
+   client.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic});
+   static_cast<void>(forge::asio::blocking::run(
+       client_runtime,
+       client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()})));
+   BOOST_REQUIRE(client.routing_status(content_swarm_test_dht).active > 0U);
+   const auto sessions_opened = client.metrics().sessions_opened;
+
+   auto release_server = block_runtime(server_runtime, "DHT Yamux multistream negotiation barrier");
+   auto lookup = boost::asio::co_spawn(
+       client_runtime.context(),
+       client.async_find_peer(
+           content_swarm_test_dht, peer(199),
+           dht::query_options{.requested_count = 1, .quorum = 1, .timeout = std::chrono::milliseconds{100}}),
+       boost::asio::use_future);
+   const auto canceled = lookup.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+   release_server->set_value();
+   BOOST_REQUIRE(canceled);
+   try {
+      const auto result = lookup.get();
+      BOOST_TEST(!result.complete);
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   auto sibling = forge::asio::blocking::run(
+       client_runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo,
+                                                         node::open_options{
+                                                             .allow_relay = false,
+                                                             .timeout = std::chrono::seconds{2},
+                                                             .direct_attempt_timeout = std::chrono::seconds{2},
+                                                             .max_direct_endpoints = 1,
+                                                         }));
+   const auto payload = std::vector<std::uint8_t>{'d', 'h', 't'};
+   forge::asio::blocking::run(client_runtime, sibling.async_write_frame(payload));
+   const auto reply = forge::asio::blocking::run(client_runtime, sibling.async_read_frame());
+   BOOST_TEST(reply == payload, boost::test_tools::per_element());
+   forge::asio::blocking::run(client_runtime, sibling.async_close());
+   BOOST_TEST(client.metrics().sessions_opened == sessions_opened);
+
+   forge::asio::blocking::run(client_runtime, client.async_stop());
+   forge::asio::blocking::run(server_runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_direct_tcp_accept_survives_aborted_inbound_upgrade) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    const auto server_identity = make_test_identity();
@@ -4639,20 +4804,20 @@ BOOST_AUTO_TEST_CASE(p2p_host_address_sanitizer_respects_routed_scope) {
    auto public_response_session = make_tcp_endpoint(4002, "8.8.8.8");
    auto private_other_session = make_tcp_endpoint(4003, "192.168.1.21");
 
-   const auto from_public_response = host_addresses::sanitize_discovered_endpoints(
-       {private_candidate}, discovered,
-       host_addresses::learning_context{
-           .source = host_addresses::source_kind::routed,
-           .remote_endpoint = public_response_session,
-       });
+   const auto from_public_response =
+       host_addresses::sanitize_discovered_endpoints({private_candidate}, discovered,
+                                                     host_addresses::learning_context{
+                                                         .source = host_addresses::source_kind::routed,
+                                                         .remote_endpoint = public_response_session,
+                                                     });
    BOOST_TEST(from_public_response.empty());
 
-   const auto from_private_response = host_addresses::sanitize_discovered_endpoints(
-       {private_candidate}, discovered,
-       host_addresses::learning_context{
-           .source = host_addresses::source_kind::routed,
-           .remote_endpoint = private_other_session,
-       });
+   const auto from_private_response =
+       host_addresses::sanitize_discovered_endpoints({private_candidate}, discovered,
+                                                     host_addresses::learning_context{
+                                                         .source = host_addresses::source_kind::routed,
+                                                         .remote_endpoint = private_other_session,
+                                                     });
    BOOST_REQUIRE_EQUAL(from_private_response.size(), 1U);
    BOOST_TEST(from_private_response.front().to_string() == private_candidate.to_string());
 }
@@ -5072,8 +5237,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_fanout_early_quorum_cancels_and_drains_blocked_sibl
                                },
                                [slow_started, slow_wait, slow, fast, unnecessary, &slow_drained, &unnecessary_started](
                                    const peer_id& current, std::chrono::milliseconds,
-                                   std::shared_ptr<cancellation_latch> cancellation)
-                                   -> boost::asio::awaitable<bool> {
+                                   std::shared_ptr<cancellation_latch> cancellation) -> boost::asio::awaitable<bool> {
                                   if (current == slow) {
                                      cancellation->arm([slow_wait] noexcept { cancel_timer_noexcept(slow_wait); });
                                      static_cast<void>(slow_started->try_send(boost::system::error_code{}));
@@ -5123,20 +5287,22 @@ BOOST_AUTO_TEST_CASE(p2p_dht_fanout_timeout_before_coordinator_spawn_is_sticky) 
                .success_target = 1,
                .timeout = std::chrono::milliseconds{20},
                .operation = "test pre-spawn DHT fanout timeout",
-               .hooks = detail::dht_fanout::test_hooks{
-                   .context = &barrier,
-                   .reach = [](void* context, detail::dht_fanout::test_stage stage) {
-                      auto& value = *static_cast<barrier_state*>(context);
-                      if (stage == detail::dht_fanout::test_stage::before_coordinator_spawn) {
-                         auto lock = std::unique_lock{value.mutex};
-                         value.changed.wait(lock, [&value] { return value.stop_requested; });
-                      } else if (stage == detail::dht_fanout::test_stage::after_stop_request) {
-                         const auto lock = std::scoped_lock{value.mutex};
-                         value.stop_requested = true;
-                         value.changed.notify_all();
-                      }
+               .hooks =
+                   detail::dht_fanout::test_hooks{
+                       .context = &barrier,
+                       .reach =
+                           [](void* context, detail::dht_fanout::test_stage stage) {
+                              auto& value = *static_cast<barrier_state*>(context);
+                              if (stage == detail::dht_fanout::test_stage::before_coordinator_spawn) {
+                                 auto lock = std::unique_lock{value.mutex};
+                                 value.changed.wait(lock, [&value] { return value.stop_requested; });
+                              } else if (stage == detail::dht_fanout::test_stage::after_stop_request) {
+                                 const auto lock = std::scoped_lock{value.mutex};
+                                 value.stop_requested = true;
+                                 value.changed.notify_all();
+                              }
+                           },
                    },
-               },
            },
            [&operation_started](const peer_id&, std::chrono::milliseconds,
                                 std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<bool> {
@@ -5168,29 +5334,29 @@ BOOST_AUTO_TEST_CASE(p2p_dht_fanout_worker_failure_cancels_and_joins_sibling) {
 
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::dht_fanout::run(
-           runtime.context(),
-           detail::dht_fanout::request{
-               .peers = {slow, failing},
-               .concurrency = 2,
-               .success_target = 2,
-               .timeout = std::chrono::seconds{1},
-               .operation = "test failing DHT fanout",
-           },
-           [slow_started, slow_wait, slow, &slow_drained](const peer_id& current, std::chrono::milliseconds,
-                                                          std::shared_ptr<cancellation_latch> cancellation)
-               -> boost::asio::awaitable<bool> {
-              if (current == slow) {
-                 cancellation->arm([slow_wait] noexcept { cancel_timer_noexcept(slow_wait); });
-                 static_cast<void>(slow_started->try_send(boost::system::error_code{}));
-                 auto error = boost::system::error_code{};
-                 co_await slow_wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-                 slow_drained = error == boost::asio::error::operation_aborted;
-                 co_return false;
-              }
-              co_await slow_started->async_receive(boost::asio::use_awaitable);
-              throw std::runtime_error{"DHT fanout worker failure"};
-           }),
+       detail::dht_fanout::run(runtime.context(),
+                               detail::dht_fanout::request{
+                                   .peers = {slow, failing},
+                                   .concurrency = 2,
+                                   .success_target = 2,
+                                   .timeout = std::chrono::seconds{1},
+                                   .operation = "test failing DHT fanout",
+                               },
+                               [slow_started, slow_wait, slow, &slow_drained](
+                                   const peer_id& current, std::chrono::milliseconds,
+                                   std::shared_ptr<cancellation_latch> cancellation) -> boost::asio::awaitable<bool> {
+                                  if (current == slow) {
+                                     cancellation->arm([slow_wait] noexcept { cancel_timer_noexcept(slow_wait); });
+                                     static_cast<void>(slow_started->try_send(boost::system::error_code{}));
+                                     auto error = boost::system::error_code{};
+                                     co_await slow_wait->async_wait(
+                                         boost::asio::redirect_error(boost::asio::use_awaitable, error));
+                                     slow_drained = error == boost::asio::error::operation_aborted;
+                                     co_return false;
+                                  }
+                                  co_await slow_started->async_receive(boost::asio::use_awaitable);
+                                  throw std::runtime_error{"DHT fanout worker failure"};
+                               }),
        boost::asio::use_future);
 
    BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -5210,38 +5376,36 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_second_spawn_setup_failure_cancels_
    auto worker_saw_cancellation = std::atomic_bool{false};
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = runtime.context().get_executor(),
-               .workers = 2,
-               .cancellation = std::make_shared<cancellation_latch>(),
-               .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  ++workers_started;
-                  const auto executor = co_await boost::asio::this_coro::executor;
-                  auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [wait]() noexcept {
-                         cancel_timer_noexcept(wait);
-                      },
-                  }));
-                  auto error = boost::system::error_code{};
-                  co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-                  worker_saw_cancellation.store(error == boost::asio::error::operation_aborted,
-                                                std::memory_order_release);
-                  ++workers_completed;
-                  co_return;
-               },
-               .hooks = detail::topology_dht_fanout::test_hooks{
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = runtime.context().get_executor(),
+           .workers = 2,
+           .cancellation = std::make_shared<cancellation_latch>(),
+           .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              ++workers_started;
+              const auto executor = co_await boost::asio::this_coro::executor;
+              auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait]() noexcept { cancel_timer_noexcept(wait); },
+              }));
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+              worker_saw_cancellation.store(error == boost::asio::error::operation_aborted, std::memory_order_release);
+              ++workers_completed;
+              co_return;
+           },
+           .hooks =
+               detail::topology_dht_fanout::test_hooks{
                    .context = &failure,
-                   .reach = [](void* context, detail::topology_dht_fanout::test_stage stage) {
-                      auto& value = *static_cast<failure_state*>(context);
-                      if (stage == detail::topology_dht_fanout::test_stage::before_worker_spawn && ++value.setups == 2) {
-                         throw std::bad_alloc{};
-                      }
-                   },
+                   .reach =
+                       [](void* context, detail::topology_dht_fanout::test_stage stage) {
+                          auto& value = *static_cast<failure_state*>(context);
+                          if (stage == detail::topology_dht_fanout::test_stage::before_worker_spawn &&
+                              ++value.setups == 2) {
+                             throw std::bad_alloc{};
+                          }
+                       },
                },
-           }),
+       }),
        boost::asio::use_future);
 
    BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -5270,41 +5434,41 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_stop_after_publish_before_worker_st
    auto barrier = barrier_state{};
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = runtime.context().get_executor(),
-               .workers = 1,
-               .cancellation = cancellation,
-               .worker = [](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  const auto executor = co_await boost::asio::this_coro::executor;
-                  auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [wait]() noexcept { cancel_timer_noexcept(wait); },
-                  }));
-                  if (terminal->stop_requested()) {
-                     co_return;
-                  }
-                  auto error = boost::system::error_code{};
-                  co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-               },
-               .lifecycle = std::addressof(lifecycle),
-               .hooks = detail::topology_dht_fanout::test_hooks{
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = runtime.context().get_executor(),
+           .workers = 1,
+           .cancellation = cancellation,
+           .worker = [](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              const auto executor = co_await boost::asio::this_coro::executor;
+              auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait]() noexcept { cancel_timer_noexcept(wait); },
+              }));
+              if (terminal->stop_requested()) {
+                 co_return;
+              }
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+           },
+           .lifecycle = std::addressof(lifecycle),
+           .hooks =
+               detail::topology_dht_fanout::test_hooks{
                    .context = std::addressof(barrier),
-                   .reach = [](void* context, detail::topology_dht_fanout::test_stage stage) {
-                      auto& value = *static_cast<barrier_state*>(context);
-                      if (stage == detail::topology_dht_fanout::test_stage::before_worker_spawn) {
-                         auto lock = std::unique_lock{value.mutex};
-                         value.published = true;
-                         value.changed.notify_all();
-                         value.changed.wait(lock, [&value] { return value.release_spawn; });
-                      } else if (stage == detail::topology_dht_fanout::test_stage::before_worker_completion) {
-                         const auto lock = std::scoped_lock{value.mutex};
-                         ++value.completions;
-                      }
-                   },
+                   .reach =
+                       [](void* context, detail::topology_dht_fanout::test_stage stage) {
+                          auto& value = *static_cast<barrier_state*>(context);
+                          if (stage == detail::topology_dht_fanout::test_stage::before_worker_spawn) {
+                             auto lock = std::unique_lock{value.mutex};
+                             value.published = true;
+                             value.changed.notify_all();
+                             value.changed.wait(lock, [&value] { return value.release_spawn; });
+                          } else if (stage == detail::topology_dht_fanout::test_stage::before_worker_completion) {
+                             const auto lock = std::scoped_lock{value.mutex};
+                             ++value.completions;
+                          }
+                       },
                },
-           }),
+       }),
        boost::asio::use_future);
 
    {
@@ -5338,37 +5502,37 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_stop_wait_setup_failure_cancels_and
    BOOST_REQUIRE(lifecycle.begin_start());
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = runtime.context().get_executor(),
-               .workers = 1,
-               .cancellation = std::make_shared<cancellation_latch>(),
-               .worker = [](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  const auto executor = co_await boost::asio::this_coro::executor;
-                  auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [wait]() noexcept { cancel_timer_noexcept(wait); },
-                  }));
-                  if (terminal->stop_requested()) {
-                     co_return;
-                  }
-                  auto error = boost::system::error_code{};
-                  co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-               },
-               .lifecycle = std::addressof(lifecycle),
-               .hooks = detail::topology_dht_fanout::test_hooks{
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = runtime.context().get_executor(),
+           .workers = 1,
+           .cancellation = std::make_shared<cancellation_latch>(),
+           .worker = [](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              const auto executor = co_await boost::asio::this_coro::executor;
+              auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait]() noexcept { cancel_timer_noexcept(wait); },
+              }));
+              if (terminal->stop_requested()) {
+                 co_return;
+              }
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+           },
+           .lifecycle = std::addressof(lifecycle),
+           .hooks =
+               detail::topology_dht_fanout::test_hooks{
                    .context = std::addressof(completion_callbacks),
-                   .reach = [](void* context, detail::topology_dht_fanout::test_stage stage) {
-                      if (stage == detail::topology_dht_fanout::test_stage::before_worker_stop_wait) {
-                         throw std::bad_alloc{};
-                      }
-                      if (stage == detail::topology_dht_fanout::test_stage::before_worker_completion) {
-                         static_cast<std::atomic_uint*>(context)->fetch_add(1, std::memory_order_acq_rel);
-                      }
-                   },
+                   .reach =
+                       [](void* context, detail::topology_dht_fanout::test_stage stage) {
+                          if (stage == detail::topology_dht_fanout::test_stage::before_worker_stop_wait) {
+                             throw std::bad_alloc{};
+                          }
+                          if (stage == detail::topology_dht_fanout::test_stage::before_worker_completion) {
+                             static_cast<std::atomic_uint*>(context)->fetch_add(1, std::memory_order_acq_rel);
+                          }
+                       },
                },
-           }),
+       }),
        boost::asio::use_future);
 
    BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -5402,41 +5566,37 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_stop_wait_bridge_is_sticky_and_work
    auto worker_resumed_on_strand = std::atomic_bool{false};
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = worker_strand,
-               .workers = 1,
-               .cancellation = cancellation,
-               .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  workers_started.fetch_add(1, std::memory_order_acq_rel);
-                  worker_started_on_strand.store(worker_strand.running_in_this_thread(), std::memory_order_release);
-                  const auto executor = co_await boost::asio::this_coro::executor;
-                  auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [wait]() noexcept {
-                         cancel_timer_noexcept(wait);
-                      },
-                  }));
-                  {
-                     auto lock = std::unique_lock{barrier.mutex};
-                     barrier.worker_started = true;
-                     barrier.changed.notify_all();
-                     barrier.changed.wait(lock, [&barrier] { return barrier.release_worker; });
-                  }
-                  auto error = boost::system::error_code{};
-                  co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-                  worker_saw_cancellation.store(error == boost::asio::error::operation_aborted,
-                                                std::memory_order_release);
-                  worker_resumed_on_strand.store(worker_strand.running_in_this_thread(), std::memory_order_release);
-                  workers_completed.fetch_add(1, std::memory_order_acq_rel);
-               },
-           }),
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = worker_strand,
+           .workers = 1,
+           .cancellation = cancellation,
+           .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              workers_started.fetch_add(1, std::memory_order_acq_rel);
+              worker_started_on_strand.store(worker_strand.running_in_this_thread(), std::memory_order_release);
+              const auto executor = co_await boost::asio::this_coro::executor;
+              auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait]() noexcept { cancel_timer_noexcept(wait); },
+              }));
+              {
+                 auto lock = std::unique_lock{barrier.mutex};
+                 barrier.worker_started = true;
+                 barrier.changed.notify_all();
+                 barrier.changed.wait(lock, [&barrier] { return barrier.release_worker; });
+              }
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+              worker_saw_cancellation.store(error == boost::asio::error::operation_aborted, std::memory_order_release);
+              worker_resumed_on_strand.store(worker_strand.running_in_this_thread(), std::memory_order_release);
+              workers_completed.fetch_add(1, std::memory_order_acq_rel);
+           },
+       }),
        boost::asio::use_future);
 
    {
       auto lock = std::unique_lock{barrier.mutex};
-      BOOST_REQUIRE(barrier.changed.wait_for(lock, std::chrono::seconds{1}, [&barrier] { return barrier.worker_started; }));
+      BOOST_REQUIRE(
+          barrier.changed.wait_for(lock, std::chrono::seconds{1}, [&barrier] { return barrier.worker_started; }));
    }
    cancellation->request_stop();
    {
@@ -5474,36 +5634,36 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_completion_seals_pending_cancellati
    auto cancellations = std::atomic_uint{0};
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = runtime.context().get_executor(),
-               .workers = 1,
-               .cancellation = cancellation,
-               .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [&cancellations]() noexcept { cancellations.fetch_add(1, std::memory_order_acq_rel); },
-                  }));
-                  workers_started.fetch_add(1, std::memory_order_acq_rel);
-                  workers_completed.fetch_add(1, std::memory_order_acq_rel);
-                  co_return;
-               },
-               .lifecycle = std::addressof(lifecycle),
-               .hooks = detail::topology_dht_fanout::test_hooks{
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = runtime.context().get_executor(),
+           .workers = 1,
+           .cancellation = cancellation,
+           .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [&cancellations]() noexcept { cancellations.fetch_add(1, std::memory_order_acq_rel); },
+              }));
+              workers_started.fetch_add(1, std::memory_order_acq_rel);
+              workers_completed.fetch_add(1, std::memory_order_acq_rel);
+              co_return;
+           },
+           .lifecycle = std::addressof(lifecycle),
+           .hooks =
+               detail::topology_dht_fanout::test_hooks{
                    .context = std::addressof(barrier),
-                   .reach = [](void* context, detail::topology_dht_fanout::test_stage stage) {
-                      if (stage != detail::topology_dht_fanout::test_stage::before_worker_completion) {
-                         return;
-                      }
-                      auto& value = *static_cast<barrier_state*>(context);
-                      auto lock = std::unique_lock{value.mutex};
-                      ++value.completion_callbacks;
-                      value.completion_entered = true;
-                      value.changed.notify_all();
-                      value.changed.wait(lock, [&value] { return value.release_completion; });
-                   },
+                   .reach =
+                       [](void* context, detail::topology_dht_fanout::test_stage stage) {
+                          if (stage != detail::topology_dht_fanout::test_stage::before_worker_completion) {
+                             return;
+                          }
+                          auto& value = *static_cast<barrier_state*>(context);
+                          auto lock = std::unique_lock{value.mutex};
+                          ++value.completion_callbacks;
+                          value.completion_entered = true;
+                          value.changed.notify_all();
+                          value.changed.wait(lock, [&value] { return value.release_completion; });
+                       },
                },
-           }),
+       }),
        boost::asio::use_future);
 
    {
@@ -5547,36 +5707,34 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_fanout_join_failure_cancels_lifecycle_trac
    auto worker_completed = std::atomic_bool{false};
    auto pending = boost::asio::co_spawn(
        runtime.context(),
-       detail::topology_dht_fanout::async_run(
-           detail::topology_dht_fanout::request{
-               .executor = runtime.context().get_executor(),
-               .workers = 1,
-               .cancellation = std::make_shared<cancellation_latch>(),
-               .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                   -> boost::asio::awaitable<void> {
-                  worker_started.store(true, std::memory_order_release);
-                  const auto executor = co_await boost::asio::this_coro::executor;
-                  auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
-                  BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
-                      [wait]() noexcept {
-                         cancel_timer_noexcept(wait);
-                      },
-                  }));
-                  auto error = boost::system::error_code{};
-                  co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-                  worker_completed.store(true, std::memory_order_release);
-               },
-               .lifecycle = std::addressof(lifecycle),
-               .hooks = detail::topology_dht_fanout::test_hooks{
+       detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+           .executor = runtime.context().get_executor(),
+           .workers = 1,
+           .cancellation = std::make_shared<cancellation_latch>(),
+           .worker = [&](std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+              worker_started.store(true, std::memory_order_release);
+              const auto executor = co_await boost::asio::this_coro::executor;
+              auto wait = std::make_shared<boost::asio::steady_timer>(executor, std::chrono::hours{1});
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait]() noexcept { cancel_timer_noexcept(wait); },
+              }));
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+              worker_completed.store(true, std::memory_order_release);
+           },
+           .lifecycle = std::addressof(lifecycle),
+           .hooks =
+               detail::topology_dht_fanout::test_hooks{
                    .context = &failure,
-                   .reach = [](void* context, detail::topology_dht_fanout::test_stage stage) {
-                      const auto& value = *static_cast<failure_state*>(context);
-                      if (value.fail_join && stage == detail::topology_dht_fanout::test_stage::before_join_wait) {
-                         throw std::bad_alloc{};
-                      }
-                   },
+                   .reach =
+                       [](void* context, detail::topology_dht_fanout::test_stage stage) {
+                          const auto& value = *static_cast<failure_state*>(context);
+                          if (value.fail_join && stage == detail::topology_dht_fanout::test_stage::before_join_wait) {
+                             throw std::bad_alloc{};
+                          }
+                       },
                },
-           }),
+       }),
        boost::asio::use_future);
 
    BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -5599,20 +5757,20 @@ BOOST_AUTO_TEST_CASE(p2p_dht_fanout_full_target_attempts_every_closest_peer) {
    auto attempted = std::vector<peer_id>{};
 
    const auto result = forge::asio::blocking::run(
-       runtime, detail::dht_fanout::run(
-                    runtime.context(),
-                    detail::dht_fanout::request{
-                        .peers = {first, second},
-                        .concurrency = 1,
-                        .success_target = 2,
-                        .timeout = std::chrono::seconds{1},
-                        .operation = "test full DHT fanout",
-                    },
-                    [&attempted](const peer_id& current, std::chrono::milliseconds,
-                                 std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<bool> {
-                       attempted.push_back(current);
-                       co_return true;
-                    }));
+       runtime,
+       detail::dht_fanout::run(runtime.context(),
+                               detail::dht_fanout::request{
+                                   .peers = {first, second},
+                                   .concurrency = 1,
+                                   .success_target = 2,
+                                   .timeout = std::chrono::seconds{1},
+                                   .operation = "test full DHT fanout",
+                               },
+                               [&attempted](const peer_id& current, std::chrono::milliseconds,
+                                            std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<bool> {
+                                  attempted.push_back(current);
+                                  co_return true;
+                               }));
 
    BOOST_TEST(result.succeeded == 2U);
    BOOST_TEST(result.attempted == 2U);
@@ -6027,13 +6185,12 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_codec_roundtrips_register_discover_cookie_an
        rendezvous::codec::decode(register_response_with_ttl(signed_maximum), unbounded_ttl);
    BOOST_REQUIRE(decoded_maximum_response.register_response_value.has_value());
    BOOST_TEST(decoded_maximum_response.register_response_value->ttl == std::chrono::seconds::max());
-   BOOST_CHECK_THROW((void)rendezvous::codec::decode(register_with_ttl((std::numeric_limits<std::uint64_t>::max)()),
-                                                        unbounded_ttl),
-                     exceptions::codec_error);
    BOOST_CHECK_THROW(
-       (void)rendezvous::codec::decode(register_response_with_ttl((std::numeric_limits<std::uint64_t>::max)()),
-                                       unbounded_ttl),
+       (void)rendezvous::codec::decode(register_with_ttl((std::numeric_limits<std::uint64_t>::max)()), unbounded_ttl),
        exceptions::codec_error);
+   BOOST_CHECK_THROW((void)rendezvous::codec::decode(
+                         register_response_with_ttl((std::numeric_limits<std::uint64_t>::max)()), unbounded_ttl),
+                     exceptions::codec_error);
 
    BOOST_CHECK_THROW((void)rendezvous::codec::encode(rendezvous::message{
                          .type = rendezvous::message_type::register_peer,
@@ -6352,8 +6509,7 @@ BOOST_AUTO_TEST_CASE(p2p_owner_cancellation_reaches_published_stream) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto entered = std::make_shared<forge::asio::notification>();
    auto backend = std::make_shared<stalling_transport_stream>(508, entered);
-   auto stream = std::make_shared<forge::net::p2p::stream>(
-       forge::net::transport::detail::stream_access::make(backend));
+   auto stream = std::make_shared<forge::net::p2p::stream>(forge::net::transport::detail::stream_access::make(backend));
    auto signal = boost::asio::cancellation_signal{};
    const auto observed = entered->epoch();
 
@@ -6375,6 +6531,71 @@ BOOST_AUTO_TEST_CASE(p2p_owner_cancellation_reaches_published_stream) {
       BOOST_TEST(error.code() == boost::asio::error::operation_aborted);
    }
    BOOST_TEST(backend->closed);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_owner_admission_commit_detaches_negotiation_cancellation) {
+   auto manager = resource_manager{resource_manager::limits{.max_streams = 1}};
+   auto reservation = manager.reserve_stream();
+   BOOST_REQUIRE(reservation);
+   auto backend = std::make_shared<queued_transport_stream>(509);
+   auto resource = std::make_shared<detail::resource_stream>(manager, std::move(*reservation));
+   resource->attach(forge::net::transport::detail::stream_access::make(backend));
+   auto signal = boost::asio::cancellation_signal{};
+   auto stop = std::make_shared<detail::worker_stop_bridge>();
+   auto admission =
+       detail::make_owner_stream_admission(signal.slot(), stop, detail::owner_stream_lifetime::negotiation);
+
+   admission(resource);
+   BOOST_CHECK_NO_THROW(admission.commit());
+   signal.emit(boost::asio::cancellation_type::all);
+
+   BOOST_TEST(!backend->closed);
+   BOOST_TEST(manager.current().active_streams == 1U);
+   resource.reset();
+   BOOST_TEST(backend->closed);
+   BOOST_TEST(manager.current().active_streams == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_owner_admission_commit_rejects_sticky_stop_before_publication) {
+   auto manager = resource_manager{resource_manager::limits{.max_streams = 1}};
+   auto reservation = manager.reserve_stream();
+   BOOST_REQUIRE(reservation);
+   auto backend = std::make_shared<queued_transport_stream>(510);
+   auto resource = std::make_shared<detail::resource_stream>(manager, std::move(*reservation));
+   resource->attach(forge::net::transport::detail::stream_access::make(backend));
+   auto signal = boost::asio::cancellation_signal{};
+   auto stop = std::make_shared<detail::worker_stop_bridge>();
+   auto admission =
+       detail::make_owner_stream_admission(signal.slot(), stop, detail::owner_stream_lifetime::negotiation);
+
+   admission(resource);
+   stop->request_stop();
+
+   BOOST_CHECK_THROW(admission.commit(), forge::exceptions::base);
+   BOOST_TEST(backend->closed);
+   resource.reset();
+   BOOST_TEST(manager.current().active_streams == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_owner_admission_commit_preserves_operation_cancellation) {
+   auto manager = resource_manager{resource_manager::limits{.max_streams = 1}};
+   auto reservation = manager.reserve_stream();
+   BOOST_REQUIRE(reservation);
+   auto backend = std::make_shared<queued_transport_stream>(511);
+   auto resource = std::make_shared<detail::resource_stream>(manager, std::move(*reservation));
+   resource->attach(forge::net::transport::detail::stream_access::make(backend));
+   auto signal = boost::asio::cancellation_signal{};
+   auto stop = std::make_shared<detail::worker_stop_bridge>();
+   auto admission = detail::make_owner_stream_admission(signal.slot(), stop);
+
+   admission(resource);
+   BOOST_CHECK_NO_THROW(admission.commit());
+   stop->request_stop();
+   signal.emit(boost::asio::cancellation_type::all);
+
+   BOOST_TEST(backend->closed);
+   resource.reset();
+   BOOST_TEST(manager.current().active_streams == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_resource_stream_close_preserves_error_and_releases_reservation_when_cancel_throws) {
@@ -6464,13 +6685,13 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_only_the_owned_stream) {
 
    try {
       (void)forge::asio::blocking::run(
-          runtime, detail::async_exchange_relay_hop(
-                       runtime.context(), std::chrono::milliseconds{20}, "test relay HOP",
-                       [operation_stream](detail::stream_admission_handler)
-                           -> boost::asio::awaitable<forge::net::p2p::stream> {
-                          co_return std::move(*operation_stream);
-                       },
-                       relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
+          runtime,
+          detail::async_exchange_relay_hop(
+              runtime.context(), std::chrono::milliseconds{20}, "test relay HOP",
+              [operation_stream](detail::stream_admission_handler) -> boost::asio::awaitable<forge::net::p2p::stream> {
+                 co_return std::move(*operation_stream);
+              },
+              relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
       BOOST_FAIL("expected relay HOP timeout");
    } catch (const forge::exceptions::base& error) {
       BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::timeout));
@@ -6496,24 +6717,25 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_before_stream_publication) {
 
    try {
       (void)forge::asio::blocking::run(
-          runtime, detail::async_exchange_relay_hop(
-                       runtime.context(), std::chrono::milliseconds{20}, "test relay HOP pre-open",
-                       [manager, backend, open_started](detail::stream_admission_handler admitted) mutable
-                           -> boost::asio::awaitable<forge::net::p2p::stream> {
-                          open_started->store(true, std::memory_order_release);
-                          co_await boost::asio::this_coro::reset_cancellation_state(
-                              boost::asio::disable_cancellation{});
-                          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
-                          timer.expires_after(std::chrono::milliseconds{50});
-                          co_await timer.async_wait(boost::asio::use_awaitable);
-                          auto reservation = manager.reserve_relay_stream();
-                          BOOST_REQUIRE(reservation);
-                          auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
-                          resource->attach(forge::net::transport::detail::stream_access::make(backend));
-                          admitted(resource);
-                          co_return forge::net::p2p::stream{std::move(guarded)};
-                       },
-                       relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
+          runtime,
+          detail::async_exchange_relay_hop(
+              runtime.context(), std::chrono::milliseconds{20}, "test relay HOP pre-open",
+              [manager, backend, open_started](detail::stream_admission_handler admitted) mutable
+                  -> boost::asio::awaitable<forge::net::p2p::stream> {
+                 open_started->store(true, std::memory_order_release);
+                 co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+                 auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+                 timer.expires_after(std::chrono::milliseconds{50});
+                 co_await timer.async_wait(boost::asio::use_awaitable);
+                 auto reservation = manager.reserve_relay_stream();
+                 BOOST_REQUIRE(reservation);
+                 auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
+                 resource->attach(forge::net::transport::detail::stream_access::make(backend));
+                 admitted(resource);
+                 admitted.commit();
+                 co_return forge::net::p2p::stream{std::move(guarded)};
+              },
+              relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
       BOOST_FAIL("expected pre-open relay HOP timeout");
    } catch (const forge::exceptions::base& error) {
       BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::timeout));
@@ -6522,8 +6744,9 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_before_stream_publication) {
    BOOST_TEST(open_started->load(std::memory_order_acquire));
    BOOST_TEST(backend->closed);
    BOOST_TEST(manager.current().active_relay_streams == 0U);
-   BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() <
-              1000);
+   BOOST_TEST(
+       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() <
+       1000);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_admitted_stream_during_negotiation) {
@@ -6543,6 +6766,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_admitted_stream_during_negoti
                           resource->attach(forge::net::transport::detail::stream_access::make(backend));
                           admitted(resource);
                           (void)co_await guarded.async_read();
+                          admitted.commit();
                           co_return forge::net::p2p::stream{std::move(guarded)};
                        },
                        relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
@@ -6567,8 +6791,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_inherits_caller_cancellation) {
        runtime.context(),
        detail::async_exchange_relay_hop(
            runtime.context(), std::chrono::seconds{30}, "test relay HOP caller cancellation",
-           [operation_stream](detail::stream_admission_handler)
-               -> boost::asio::awaitable<forge::net::p2p::stream> {
+           [operation_stream](detail::stream_admission_handler) -> boost::asio::awaitable<forge::net::p2p::stream> {
               co_return std::move(*operation_stream);
            },
            relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024),
@@ -6597,8 +6820,8 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_caller_cancellation_is_sticky_until_stream_ad
        runtime.context(),
        detail::async_exchange_relay_hop(
            runtime.context(), std::chrono::seconds{30}, "test relay HOP late caller cancellation",
-           [manager, backend, entered](detail::stream_admission_handler admitted) mutable
-               -> boost::asio::awaitable<forge::net::p2p::stream> {
+           [manager, backend, entered](
+               detail::stream_admission_handler admitted) mutable -> boost::asio::awaitable<forge::net::p2p::stream> {
               entered->notify();
               co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
               auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
@@ -6609,6 +6832,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_caller_cancellation_is_sticky_until_stream_ad
               auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
               resource->attach(forge::net::transport::detail::stream_access::make(backend));
               admitted(resource);
+              admitted.commit();
               co_return forge::net::p2p::stream{std::move(guarded)};
            },
            relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024),
@@ -7628,14 +7852,16 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_preserves_shared_authenticated_sessio
    const auto relay_identity = make_test_certificate_identity("relay-hop-session-relay");
    const auto source_identity = make_test_certificate_identity("relay-hop-session-source");
    const auto target_identity = make_test_certificate_identity("relay-hop-session-target");
-   auto relay_node = node{
-       relay_runtime, options_for(relay_identity, capability_set{.bits = capabilities::direct_quic |
-                                                                         capabilities::relay |
-                                                                         capabilities::relay_reservation})};
-   auto source = node{client_runtime, options_for(source_identity, capability_set{.bits = capabilities::direct_quic |
-                                                                                          capabilities::relay_reservation})};
-   auto target = node{client_runtime, options_for(target_identity, capability_set{.bits = capabilities::direct_quic |
-                                                                                          capabilities::relay_reservation})};
+   auto relay_node =
+       node{relay_runtime,
+            options_for(relay_identity, capability_set{.bits = capabilities::direct_quic | capabilities::relay |
+                                                               capabilities::relay_reservation})};
+   auto source = node{client_runtime,
+                      options_for(source_identity,
+                                  capability_set{.bits = capabilities::direct_quic | capabilities::relay_reservation})};
+   auto target = node{client_runtime,
+                      options_for(target_identity,
+                                  capability_set{.bits = capabilities::direct_quic | capabilities::relay_reservation})};
    relay_node.register_protocol_handler(
        builtins::echo, [](node::incoming_protocol_stream incoming) mutable -> boost::asio::awaitable<void> {
           for (auto request = 0U; request < 2U; ++request) {
@@ -7646,8 +7872,8 @@ BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_preserves_shared_authenticated_sessio
        });
 
    const auto relay_endpoint = listen(relay_node, relay_runtime);
-   const auto relay_capabilities = capability_set{.bits = capabilities::direct_quic | capabilities::relay |
-                                                           capabilities::relay_reservation};
+   const auto relay_capabilities =
+       capability_set{.bits = capabilities::direct_quic | capabilities::relay | capabilities::relay_reservation};
    source.peers().learn_endpoint(relay_node.local_peer(), relay_endpoint, relay_capabilities);
    target.peers().learn_endpoint(relay_node.local_peer(), relay_endpoint, relay_capabilities);
    static_cast<void>(forge::asio::blocking::run(client_runtime, source.async_reserve_relay(relay_node.local_peer())));
@@ -8252,6 +8478,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_only_open_does_not_record_direct_failure_or_evict
                                                           capabilities::relay_reservation});
    auto custom_limits = dht::options{};
    custom_limits.failure_threshold = 1;
+   custom_limits.query_timeout = std::chrono::milliseconds{250};
    auto source_options = dht_options_for(source_identity, custom_test_dht_profile(dht::mode::client, custom_limits));
    source_options.path_policy.allow_direct = false;
    auto target_options =
@@ -8876,18 +9103,18 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_tcp_candidate_timeout_does_not_poison_parent_
    auto stalled_accepted_future = stalled_accepted->get_future();
    auto stalled_endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{5}, stalled_accepted);
    stalled_endpoint.peer = stalled_peer;
-   client.peers().upsert_routing_peer(
-       builtins::kad_dht,
-       dht::peer{.id = stalled_peer,
-                 .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
-                 .connection = dht::connection_type::can_connect},
-       discovery::source::explicit_config, std::chrono::system_clock::now() + std::chrono::hours{1});
-   client.peers().upsert_routing_peer(
-       builtins::kad_dht,
-       dht::peer{.id = donor.local_peer(),
-                 .endpoints = std::vector<endpoint>{donor_endpoint},
-                 .connection = dht::connection_type::can_connect},
-       discovery::source::explicit_config, std::chrono::system_clock::now() + std::chrono::hours{1});
+   client.peers().upsert_routing_peer(builtins::kad_dht,
+                                      dht::peer{.id = stalled_peer,
+                                                .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
+                                                .connection = dht::connection_type::can_connect},
+                                      discovery::source::explicit_config,
+                                      std::chrono::system_clock::now() + std::chrono::hours{1});
+   client.peers().upsert_routing_peer(builtins::kad_dht,
+                                      dht::peer{.id = donor.local_peer(),
+                                                .endpoints = std::vector<endpoint>{donor_endpoint},
+                                                .connection = dht::connection_type::can_connect},
+                                      discovery::source::explicit_config,
+                                      std::chrono::system_clock::now() + std::chrono::hours{1});
    forge::asio::blocking::run(runtime, client.peers().async_flush());
    forge::asio::blocking::run(runtime, client.async_hydrate_peer_state());
 
@@ -8914,15 +9141,15 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_profiles_isolate_a_timed_out_profile) {
    const auto fast_protocol = protocol_id{.value = "/forge/test/fast-topology/kad/1.0.0"};
    auto limits = dht::options{};
    limits.alpha = 2;
-   const auto slow_profile = custom_dht_profile(
-       slow_protocol, dht::mode::client,
-       dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
-   const auto fast_client_profile = custom_dht_profile(
-       fast_protocol, dht::mode::client,
-       dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
-   const auto fast_server_profile = custom_dht_profile(
-       fast_protocol, dht::mode::server,
-       dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
+   const auto slow_profile =
+       custom_dht_profile(slow_protocol, dht::mode::client,
+                          dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
+   const auto fast_client_profile =
+       custom_dht_profile(fast_protocol, dht::mode::client,
+                          dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
+   const auto fast_server_profile =
+       custom_dht_profile(fast_protocol, dht::mode::server,
+                          dht::profile_capabilities{.peers = true, .providers = false, .values = false}, {}, limits);
    auto server = node{runtime, dht_options_for(peer(239), fast_server_profile)};
    auto client_options = dht_options_for(peer(240), slow_profile);
    client_options.dht_profiles.push_back(fast_client_profile);
@@ -8933,25 +9160,25 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_profiles_isolate_a_timed_out_profile) {
    auto client = node{runtime, std::move(client_options)};
 
    const auto server_endpoint = listen(server, runtime);
-   client.peers().upsert_routing_peer(
-       fast_protocol,
-       dht::peer{
-           .id = server.local_peer(),
-           .endpoints = std::vector<endpoint>{server_endpoint},
-           .connection = dht::connection_type::can_connect,
-       },
-       discovery::source::explicit_config, std::chrono::system_clock::now() + std::chrono::hours{1});
+   client.peers().upsert_routing_peer(fast_protocol,
+                                      dht::peer{
+                                          .id = server.local_peer(),
+                                          .endpoints = std::vector<endpoint>{server_endpoint},
+                                          .connection = dht::connection_type::can_connect,
+                                      },
+                                      discovery::source::explicit_config,
+                                      std::chrono::system_clock::now() + std::chrono::hours{1});
    auto stalled_endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{2});
    const auto stalled_peer = peer(241);
    stalled_endpoint.peer = stalled_peer;
-   client.peers().upsert_routing_peer(
-       slow_protocol,
-       dht::peer{
-           .id = stalled_peer,
-           .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
-           .connection = dht::connection_type::can_connect,
-       },
-       discovery::source::explicit_config, std::chrono::system_clock::now() + std::chrono::hours{1});
+   client.peers().upsert_routing_peer(slow_protocol,
+                                      dht::peer{
+                                          .id = stalled_peer,
+                                          .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
+                                          .connection = dht::connection_type::can_connect,
+                                      },
+                                      discovery::source::explicit_config,
+                                      std::chrono::system_clock::now() + std::chrono::hours{1});
    forge::asio::blocking::run(runtime, client.peers().async_flush());
    forge::asio::blocking::run(runtime, client.async_hydrate_peer_state());
 
@@ -10013,7 +10240,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_stream_timeout_preserves_shared_aut
    server_options.limits.rendezvous.operating_role = rendezvous::role::server;
    auto server = node{server_runtime, std::move(server_options)};
    register_echo(server);
-   auto server_endpoint = listen(server, server_runtime);
+   auto server_endpoint = listen_tcp(server, server_runtime);
    server_endpoint.peer = server.local_peer();
 
    auto client_options = options_for(client_identity, capability_set{.bits = capabilities::direct_quic});
@@ -10044,8 +10271,8 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_stream_timeout_preserves_shared_aut
    const auto sessions_opened = client.metrics().sessions_opened;
 
    auto release_server = block_runtime(server_runtime, "topology Rendezvous stream negotiation barrier");
-   auto refresh = boost::asio::co_spawn(client_runtime.context(), client.async_refresh_discovery(),
-                                        boost::asio::use_future);
+   auto refresh =
+       boost::asio::co_spawn(client_runtime.context(), client.async_refresh_discovery(), boost::asio::use_future);
    const auto refresh_ready = refresh.wait_for(std::chrono::seconds{2}) == std::future_status::ready;
    auto refresh_returned = false;
    auto refresh_code = std::optional<exceptions::code>{};
@@ -10058,9 +10285,10 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_stream_timeout_preserves_shared_aut
       }
    }
    const auto while_blocked = client.diagnostics();
-   const auto original_session_alive = std::ranges::any_of(while_blocked.sessions, [&](const diagnostics::session& session) {
-      return session.id == session_id && session.remote_peer == server.local_peer() && !session.closed;
-   });
+   const auto original_session_alive =
+       std::ranges::any_of(while_blocked.sessions, [&](const diagnostics::session& session) {
+          return session.id == session_id && session.remote_peer == server.local_peer() && !session.closed;
+       });
    release_server->set_value();
 
    BOOST_REQUIRE(refresh_ready);
@@ -10133,10 +10361,10 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
        make_signed_rendezvous_peer_record(registrar_identity, std::vector<endpoint>{registrar_endpoint}, 1);
    const auto registered_upstream = forge::asio::blocking::run(
        runtime, registrar.async_rendezvous_register(upstream.local_peer(), rendezvous::register_request{
-                                                                              .namespace_name = "forge.readvertise",
-                                                                              .signed_peer_record = signed_record,
-                                                                              .ttl = std::chrono::seconds{7'200},
-                                                                          }));
+                                                                               .namespace_name = "forge.readvertise",
+                                                                               .signed_peer_record = signed_record,
+                                                                               .ttl = std::chrono::seconds{7'200},
+                                                                           }));
    BOOST_REQUIRE(static_cast<int>(registered_upstream.status_value) == static_cast<int>(rendezvous::status::ok));
 
    static_cast<void>(forge::asio::blocking::run(runtime, bridge.async_start()));
@@ -10168,19 +10396,19 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
                                                                             .limit = 10,
                                                                         }));
    BOOST_REQUIRE(static_cast<int>(before_local_registration.status_value) == static_cast<int>(rendezvous::status::ok));
-   BOOST_TEST(std::ranges::none_of(before_local_registration.registrations,
-                                   [&](const rendezvous::registration& registration) {
-                                      return registration.peer == registrar.local_peer();
-                                   }));
+   BOOST_TEST(
+       std::ranges::none_of(before_local_registration.registrations, [&](const rendezvous::registration& registration) {
+          return registration.peer == registrar.local_peer();
+       }));
 
    registrar.peers().learn_endpoint(bridge.local_peer(), bridge_endpoint,
                                     capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
    const auto registered_locally = forge::asio::blocking::run(
        runtime, registrar.async_rendezvous_register(bridge.local_peer(), rendezvous::register_request{
-                                                                            .namespace_name = "forge.readvertise",
-                                                                            .signed_peer_record = signed_record,
-                                                                            .ttl = std::chrono::seconds{7'200},
-                                                                        }));
+                                                                             .namespace_name = "forge.readvertise",
+                                                                             .signed_peer_record = signed_record,
+                                                                             .ttl = std::chrono::seconds{7'200},
+                                                                         }));
    BOOST_REQUIRE(static_cast<int>(registered_locally.status_value) == static_cast<int>(rendezvous::status::ok));
 
    const auto after_local_registration = forge::asio::blocking::run(
@@ -10189,9 +10417,10 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
                                                                             .limit = 10,
                                                                         }));
    BOOST_REQUIRE(static_cast<int>(after_local_registration.status_value) == static_cast<int>(rendezvous::status::ok));
-   const auto served = std::ranges::find_if(
-       after_local_registration.registrations,
-       [&](const rendezvous::registration& registration) { return registration.peer == registrar.local_peer(); });
+   const auto served =
+       std::ranges::find_if(after_local_registration.registrations, [&](const rendezvous::registration& registration) {
+          return registration.peer == registrar.local_peer();
+       });
    BOOST_REQUIRE(served != after_local_registration.registrations.end());
    BOOST_REQUIRE(!served->endpoints.empty());
    BOOST_TEST(std::ranges::any_of(served->endpoints, [&](const endpoint& current) {
@@ -10811,7 +11040,8 @@ BOOST_AUTO_TEST_CASE(p2p_connection_singleflight_waiter_cancellation_does_not_po
    BOOST_REQUIRE(owner.start.has_value());
    BOOST_TEST(!canceled.start.has_value());
 
-   auto canceled_result = boost::asio::co_spawn(runtime.context(), canceled.participant.wait(), boost::asio::use_future);
+   auto canceled_result =
+       boost::asio::co_spawn(runtime.context(), canceled.participant.wait(), boost::asio::use_future);
    canceled.participant.request_stop();
    BOOST_REQUIRE(canceled_result.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
    try {
@@ -15112,9 +15342,9 @@ BOOST_AUTO_TEST_CASE(p2p_async_stop_completes_teardown_after_inherited_cancellat
    BOOST_REQUIRE(client.diagnostics().metrics.active_sessions == 1U);
 
    auto cancellation = boost::asio::cancellation_signal{};
-   auto stopped = boost::asio::co_spawn(
-       runtime.context(), client.async_stop(),
-       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   auto stopped =
+       boost::asio::co_spawn(runtime.context(), client.async_stop(),
+                             boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
    BOOST_REQUIRE(persistence->wait_until_close_blocked());
 
    cancellation.emit(boost::asio::cancellation_type::terminal);

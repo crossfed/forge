@@ -424,18 +424,17 @@ node::impl::async_collect_topology_discovery(std::shared_ptr<cancellation_latch>
       auto fanout = std::make_shared<detail::topology_dht_fanout::worker_batch>(workers);
       const auto executor = co_await boost::asio::this_coro::executor;
       const auto self = shared_from_this();
-      const auto launch_failure = co_await detail::topology_dht_fanout::async_run(
-          detail::topology_dht_fanout::request{
-              .executor = executor,
-              .workers = workers,
-              .cancellation = std::move(cancellation),
-              .worker = [self, batch, expires_at](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                  -> boost::asio::awaitable<void> {
-                 co_await self->async_collect_topology_dht_worker(batch, expires_at, std::move(terminal));
-              },
-              .batch = std::move(fanout),
-              .lifecycle = std::addressof(lifecycle),
-          });
+      const auto launch_failure = co_await detail::topology_dht_fanout::async_run(detail::topology_dht_fanout::request{
+          .executor = executor,
+          .workers = workers,
+          .cancellation = std::move(cancellation),
+          .worker = [self, batch, expires_at](
+                        std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
+             co_await self->async_collect_topology_dht_worker(batch, expires_at, std::move(terminal));
+          },
+          .batch = std::move(fanout),
+          .lifecycle = std::addressof(lifecycle),
+      });
       if (launch_failure) {
          const auto lock = std::scoped_lock{batch->mutex};
          if (!batch->first_failure) {
@@ -476,14 +475,13 @@ node::impl::async_collect_topology_dht_worker(const std::shared_ptr<topology_dht
          protocol = batch->profiles[batch->next_profile++];
       }
       try {
-         auto lookup = co_await async_find_dht_peer(
-             std::move(*protocol), local,
-             dht::query_options{
-                 .requested_count = policy.max_candidates,
-                 .quorum = 1,
-                 .timeout = policy.query_timeout,
-             },
-             std::size_t{1}, cancellation);
+         auto lookup = co_await async_find_dht_peer(std::move(*protocol), local,
+                                                    dht::query_options{
+                                                        .requested_count = policy.max_candidates,
+                                                        .quorum = 1,
+                                                        .timeout = policy.query_timeout,
+                                                    },
+                                                    std::size_t{1}, cancellation);
          const auto lock = std::scoped_lock{batch->mutex};
          ++batch->successful_profiles;
          for (const auto& peer : lookup.closest_peers) {
@@ -622,14 +620,15 @@ node::impl::exchange_topology_rendezvous(const std::shared_ptr<session_state>& s
       auto response = std::optional<rendezvous::message>{};
       co_await detail::async_run_with_owner_cancellation(
           operation_stop,
-          [this, session, request = std::move(request), stop_requested,
+          [this, session, request = std::move(request), operation_stop, stop_requested,
            &response](boost::asio::cancellation_slot slot) mutable -> boost::asio::awaitable<void> {
              if (stop_requested->load(std::memory_order_acquire)) {
                 FORGE_THROW_EXCEPTION(exceptions::canceled,
                                       "P2P topology rendezvous operation canceled before stream open");
              }
+             auto admission = detail::make_owner_stream_admission(slot, operation_stop);
              auto stream = std::make_shared<forge::net::p2p::stream>(
-                 co_await open_session_stream(session, builtins::rendezvous));
+                 co_await open_session_stream(session, builtins::rendezvous, false, std::move(admission)));
              auto owner_cancellation = detail::owner_stream_cancellation{std::move(slot), stream};
              if (stop_requested->load(std::memory_order_acquire)) {
                 owner_cancellation.request_cancel();
@@ -778,15 +777,16 @@ boost::asio::awaitable<void> node::impl::async_unregister_topology_rendezvous(st
       auto started_operation = false;
       co_await detail::async_run_with_owner_cancellation(
           operation_stop,
-          [this, session, namespace_name = std::move(namespace_name), stop_requested,
+          [this, session, namespace_name = std::move(namespace_name), operation_stop, stop_requested,
            &started_operation](boost::asio::cancellation_slot slot) mutable -> boost::asio::awaitable<void> {
              started_operation = true;
              if (stop_requested->load(std::memory_order_acquire)) {
                 FORGE_THROW_EXCEPTION(exceptions::canceled,
                                       "P2P topology rendezvous unregister canceled before stream open");
              }
+             auto admission = detail::make_owner_stream_admission(slot, operation_stop);
              auto stream = std::make_shared<forge::net::p2p::stream>(
-                 co_await open_session_stream(session, builtins::rendezvous));
+                 co_await open_session_stream(session, builtins::rendezvous, false, std::move(admission)));
              auto owner_cancellation = detail::owner_stream_cancellation{std::move(slot), stream};
              if (stop_requested->load(std::memory_order_acquire)) {
                 owner_cancellation.request_cancel();
@@ -852,7 +852,7 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
       return detail::topology_peer_exchange_claims{
           mutex, peer_exchange_value,
           peer_exchange_value.claim_batch(peer_exchange_sessions_locked(), std::chrono::steady_clock::now(),
-                                           policy.max_peer_exchange_peers, workers, executor),
+                                          policy.max_peer_exchange_peers, workers, executor),
           policy.query_timeout};
    }();
    auto claimed = std::make_shared<detail::topology_peer_exchange_claims>(std::move(claim_guard));
@@ -881,9 +881,7 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
             // Completion handlers must never escape into the executor.
          }
       };
-      const auto cancel_workers = [batch] noexcept {
-         batch->cancellation->request_stop();
-      };
+      const auto cancel_workers = [batch] noexcept { batch->cancellation->request_stop(); };
       auto launch_failure = std::exception_ptr{};
       auto parent_subscription = cancellation_latch::subscription{};
       auto child_subscriptions = std::vector<cancellation_latch::subscription>{};
@@ -892,20 +890,20 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
          // setup failure requests this sticky batch stop and joins the already
          // published children before the failure leaves this coroutine.
          child_subscriptions.reserve(claims.size());
-         parent_subscription = cancellation_latch::subscribe(cancellation, [batch] noexcept {
-            batch->cancellation->request_stop();
-         });
+         parent_subscription =
+             cancellation_latch::subscribe(cancellation, [batch] noexcept { batch->cancellation->request_stop(); });
          if (cancellation->stop_requested()) {
             cancel_workers();
          }
          for (const auto& claim : claims) {
             auto stop = std::make_shared<detail::worker_stop_bridge>();
-            auto child_subscription = cancellation_latch::subscribe(
-                batch->cancellation, [stop] noexcept { stop->request_stop(); });
+            auto child_subscription =
+                cancellation_latch::subscribe(batch->cancellation, [stop] noexcept { stop->request_stop(); });
             auto self = shared_from_this();
             auto operation = std::make_shared<detail::lifecycle_tracker::operation>(lifecycle.track());
             if (!operation->active()) {
-               FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node stopped before topology peer exchange worker launch");
+               FORGE_THROW_EXCEPTION(exceptions::closed,
+                                     "P2P node stopped before topology peer exchange worker launch");
             }
             const auto worker_executor = boost::asio::make_strand(operation->executor());
             const auto lifecycle_stop = operation->stop_source();
@@ -917,8 +915,8 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
                }
             };
             auto task = detail::worker_stop_work{
-                [self, claim, settle_claim](std::shared_ptr<detail::worker_terminal_owner> terminal)
-                    -> boost::asio::awaitable<void> {
+                [self, claim, settle_claim](
+                    std::shared_ptr<detail::worker_terminal_owner> terminal) -> boost::asio::awaitable<void> {
                    try {
                       co_await self->await_peer_exchange_claim(*claim, std::move(terminal));
                    } catch (const forge::exceptions::base& error) {
@@ -961,24 +959,23 @@ node::impl::async_collect_topology_peer_exchange(std::shared_ptr<cancellation_la
                }
                boost::asio::co_spawn(
                    worker_executor,
-                   [stop = std::move(stop), task = std::move(task), lifecycle_stop]() mutable
-                       -> boost::asio::awaitable<void> {
+                   [stop = std::move(stop), task = std::move(task),
+                    lifecycle_stop]() mutable -> boost::asio::awaitable<void> {
                       co_await detail::async_run_with_stop_bridge(
                           std::move(stop), std::move(task),
                           detail::worker_stop_bridge_options{.lifecycle_stop = std::move(lifecycle_stop)});
                    },
-                   boost::asio::bind_executor(
-                       worker_executor,
-                       [settle_claim, complete_worker, operation, worker_completed](std::exception_ptr) noexcept {
-                          // The bridge joins both branches before completion. This
-                          // fallback also settles failure before task entry.
-                          settle_claim();
-                          if (worker_completed->exchange(true, std::memory_order_acq_rel)) {
-                             return;
-                          }
-                          complete_worker();
-                          operation->release();
-                       }));
+                   boost::asio::bind_executor(worker_executor, [settle_claim, complete_worker, operation,
+                                                                worker_completed](std::exception_ptr) noexcept {
+                      // The bridge joins both branches before completion. This
+                      // fallback also settles failure before task entry.
+                      settle_claim();
+                      if (worker_completed->exchange(true, std::memory_order_acq_rel)) {
+                         return;
+                      }
+                      complete_worker();
+                      operation->release();
+                   }));
             } catch (...) {
                if (worker_reserved && !worker_completed->exchange(true, std::memory_order_acq_rel)) {
                   settle_claim();

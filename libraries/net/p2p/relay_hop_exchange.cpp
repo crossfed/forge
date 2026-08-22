@@ -50,19 +50,7 @@ async_exchange_relay_hop(boost::asio::io_context& context, std::chrono::millisec
                 FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P relay HOP exchange canceled before stream admission");
              }
 
-             auto admission = [slot, stop](const std::shared_ptr<resource_stream>& resource) mutable {
-                auto weak = std::weak_ptr<resource_stream>{resource};
-                if (slot.is_connected()) {
-                   slot.assign([weak = std::move(weak)](boost::asio::cancellation_type) noexcept {
-                      if (auto owned = weak.lock()) {
-                         owned->request_cancel();
-                      }
-                   });
-                }
-                if (stop->stop_requested()) {
-                   resource->request_cancel();
-                }
-             };
+             auto admission = make_owner_stream_admission(slot, stop);
              auto owned_stream = std::make_shared<forge::net::p2p::stream>(co_await open_stream(std::move(admission)));
              auto cancellation = owner_stream_cancellation{std::move(slot), owned_stream};
              if (stop->stop_requested()) {
