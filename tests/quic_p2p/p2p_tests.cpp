@@ -158,6 +158,7 @@ FORGE_API(::p2p_live_types::live_api, FORGE_API_CONTRACT("test.p2p.live", 1, 0),
 #include "../../libraries/net/p2p/details/quic_client_options.hxx"
 #include "../../libraries/net/p2p/details/operation_deadline.hxx"
 #include "../../libraries/net/p2p/details/owner_cancellation.hxx"
+#include "../../libraries/net/p2p/details/relay_hop_exchange.hxx"
 #include "../../libraries/net/p2p/details/peer_exchange_codec.hxx"
 #include "../../libraries/net/p2p/details/peer_exchange_cancellation.hxx"
 #include "../../libraries/net/p2p/details/peer_exchange_learning.hxx"
@@ -2829,6 +2830,45 @@ BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_honors_stop_before_worker_start) {
 
    BOOST_CHECK_NO_THROW(worker.get());
    BOOST_TEST(!started);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_inherits_caller_cancellation) {
+   namespace asio = boost::asio;
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto stop = std::make_shared<detail::worker_stop_bridge>();
+   auto entered = std::make_shared<forge::asio::notification>();
+   auto cancellation_count = std::atomic_size_t{};
+   const auto entered_epoch = entered->epoch();
+   auto signal = asio::cancellation_signal{};
+
+   auto worker = asio::co_spawn(
+       runtime.context(),
+       detail::async_run_with_stop_bridge(
+           stop, [entered, &cancellation_count](std::shared_ptr<detail::worker_terminal_owner> terminal)
+                     -> asio::awaitable<void> {
+              const auto executor = co_await asio::this_coro::executor;
+              auto wait = std::make_shared<asio::steady_timer>(executor, asio::steady_timer::time_point::max());
+              BOOST_REQUIRE(terminal->publish(detail::worker_terminal_owner::callback{
+                  [wait, &cancellation_count]() noexcept {
+                     cancellation_count.fetch_add(1, std::memory_order_acq_rel);
+                     cancel_timer_noexcept(wait);
+                  },
+              }));
+              entered->notify();
+              auto error = boost::system::error_code{};
+              co_await wait->async_wait(asio::redirect_error(asio::use_awaitable, error));
+              BOOST_TEST(error == asio::error::operation_aborted);
+           }),
+       asio::bind_cancellation_slot(signal.slot(), asio::use_future));
+
+   static_cast<void>(asio::co_spawn(runtime.context(), entered->async_wait(entered_epoch), asio::use_future).get());
+   signal.emit(asio::cancellation_type::terminal);
+
+   BOOST_REQUIRE(worker.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(worker.get());
+   BOOST_TEST(stop->stop_requested());
+   BOOST_TEST(cancellation_count.load(std::memory_order_acquire) == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_worker_stop_bridge_serializes_stop_on_the_worker_strand) {
@@ -6414,6 +6454,179 @@ BOOST_AUTO_TEST_CASE(p2p_relay_deadline_cancel_before_wait_is_latched) {
    BOOST_TEST(manager.current().active_relay_streams == 0U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_only_the_owned_stream) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto operation_backend = std::make_shared<stalling_transport_stream>(503);
+   auto operation_stream =
+       std::make_shared<forge::net::p2p::stream>(forge::net::transport::detail::stream_access::make(operation_backend));
+   auto sibling_backend = std::make_shared<queued_transport_stream>(504);
+   auto sibling = forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(sibling_backend)};
+
+   try {
+      (void)forge::asio::blocking::run(
+          runtime, detail::async_exchange_relay_hop(
+                       runtime.context(), std::chrono::milliseconds{20}, "test relay HOP",
+                       [operation_stream](detail::stream_admission_handler)
+                           -> boost::asio::awaitable<forge::net::p2p::stream> {
+                          co_return std::move(*operation_stream);
+                       },
+                       relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
+      BOOST_FAIL("expected relay HOP timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   BOOST_TEST(operation_backend->closed);
+   BOOST_TEST(!sibling_backend->closed);
+   sibling_backend->reads.push_back(std::vector<std::uint8_t>{'o', 'k'});
+   const auto reply = forge::asio::blocking::run(runtime, sibling.async_read());
+   BOOST_TEST(reply == std::vector<std::uint8_t>({'o', 'k'}), boost::test_tools::per_element());
+   forge::asio::blocking::run(runtime, sibling.async_write(std::vector<std::uint8_t>{'u', 'p'}));
+   BOOST_REQUIRE_EQUAL(sibling_backend->writes.size(), 1U);
+   BOOST_TEST(sibling_backend->writes.front() == std::vector<std::uint8_t>({'u', 'p'}),
+              boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_before_stream_publication) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto manager = resource_manager{};
+   auto backend = std::make_shared<stalling_transport_stream>(507);
+   auto open_started = std::make_shared<std::atomic_bool>(false);
+   const auto started = std::chrono::steady_clock::now();
+
+   try {
+      (void)forge::asio::blocking::run(
+          runtime, detail::async_exchange_relay_hop(
+                       runtime.context(), std::chrono::milliseconds{20}, "test relay HOP pre-open",
+                       [manager, backend, open_started](detail::stream_admission_handler admitted) mutable
+                           -> boost::asio::awaitable<forge::net::p2p::stream> {
+                          open_started->store(true, std::memory_order_release);
+                          co_await boost::asio::this_coro::reset_cancellation_state(
+                              boost::asio::disable_cancellation{});
+                          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+                          timer.expires_after(std::chrono::milliseconds{50});
+                          co_await timer.async_wait(boost::asio::use_awaitable);
+                          auto reservation = manager.reserve_relay_stream();
+                          BOOST_REQUIRE(reservation);
+                          auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
+                          resource->attach(forge::net::transport::detail::stream_access::make(backend));
+                          admitted(resource);
+                          co_return forge::net::p2p::stream{std::move(guarded)};
+                       },
+                       relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
+      BOOST_FAIL("expected pre-open relay HOP timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   BOOST_TEST(open_started->load(std::memory_order_acquire));
+   BOOST_TEST(backend->closed);
+   BOOST_TEST(manager.current().active_relay_streams == 0U);
+   BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() <
+              1000);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_cancels_admitted_stream_during_negotiation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto manager = resource_manager{};
+   auto backend = std::make_shared<stalling_transport_stream>(506);
+
+   try {
+      (void)forge::asio::blocking::run(
+          runtime, detail::async_exchange_relay_hop(
+                       runtime.context(), std::chrono::milliseconds{20}, "test relay HOP negotiation",
+                       [manager, backend](detail::stream_admission_handler admitted) mutable
+                           -> boost::asio::awaitable<forge::net::p2p::stream> {
+                          auto reservation = manager.reserve_relay_stream();
+                          BOOST_REQUIRE(reservation);
+                          auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
+                          resource->attach(forge::net::transport::detail::stream_access::make(backend));
+                          admitted(resource);
+                          (void)co_await guarded.async_read();
+                          co_return forge::net::p2p::stream{std::move(guarded)};
+                       },
+                       relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024));
+      BOOST_FAIL("expected relay HOP negotiation timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::timeout));
+   }
+
+   BOOST_TEST(backend->closed);
+   BOOST_TEST(manager.current().active_relay_streams == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_inherits_caller_cancellation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto entered = std::make_shared<forge::asio::notification>();
+   const auto observed = entered->epoch();
+   auto operation_backend = std::make_shared<stalling_transport_stream>(505, entered);
+   auto operation_stream =
+       std::make_shared<forge::net::p2p::stream>(forge::net::transport::detail::stream_access::make(operation_backend));
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto pending = boost::asio::co_spawn(
+       runtime.context(),
+       detail::async_exchange_relay_hop(
+           runtime.context(), std::chrono::seconds{30}, "test relay HOP caller cancellation",
+           [operation_stream](detail::stream_admission_handler)
+               -> boost::asio::awaitable<forge::net::p2p::stream> {
+              co_return std::move(*operation_stream);
+           },
+           relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024),
+       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+
+   (void)forge::asio::blocking::run(runtime, entered->async_wait(observed));
+   cancellation.emit(boost::asio::cancellation_type::terminal);
+   BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   try {
+      (void)pending.get();
+      BOOST_FAIL("expected relay HOP caller cancellation");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::canceled));
+   }
+   BOOST_TEST(operation_backend->closed);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_caller_cancellation_is_sticky_until_stream_admission) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto manager = resource_manager{};
+   auto backend = std::make_shared<stalling_transport_stream>(508);
+   auto entered = std::make_shared<forge::asio::notification>();
+   const auto observed = entered->epoch();
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto pending = boost::asio::co_spawn(
+       runtime.context(),
+       detail::async_exchange_relay_hop(
+           runtime.context(), std::chrono::seconds{30}, "test relay HOP late caller cancellation",
+           [manager, backend, entered](detail::stream_admission_handler admitted) mutable
+               -> boost::asio::awaitable<forge::net::p2p::stream> {
+              entered->notify();
+              co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+              auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+              timer.expires_after(std::chrono::milliseconds{50});
+              co_await timer.async_wait(boost::asio::use_awaitable);
+              auto reservation = manager.reserve_relay_stream();
+              BOOST_REQUIRE(reservation);
+              auto [guarded, resource] = detail::prepare_resource_stream(manager, std::move(*reservation));
+              resource->attach(forge::net::transport::detail::stream_access::make(backend));
+              admitted(resource);
+              co_return forge::net::p2p::stream{std::move(guarded)};
+           },
+           relay::hop_message{.kind = relay::hop_message::message_kind::reserve}, 4 * 1024),
+       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+
+   (void)forge::asio::blocking::run(runtime, entered->async_wait(observed));
+   cancellation.emit(boost::asio::cancellation_type::terminal);
+   BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   try {
+      static_cast<void>(pending.get());
+      BOOST_FAIL("expected relay HOP caller cancellation before stream admission");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_TEST(static_cast<int>(exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::canceled));
+   }
+   BOOST_TEST(backend->closed);
+   BOOST_TEST(manager.current().active_relay_streams == 0U);
+}
+
 static_assert(requires { diagnostics::connection_state{std::size_t{1}, std::vector<peer_id>{peer(51)}}; });
 
 BOOST_AUTO_TEST_CASE(p2p_resource_manager_enforces_peer_protocol_dial_and_reservation_scopes) {
@@ -7407,6 +7620,98 @@ BOOST_AUTO_TEST_CASE(p2p_relay_reservation_persists_candidate) {
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, relay_node.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_relay_hop_timeout_preserves_shared_authenticated_session) {
+   auto relay_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto client_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   const auto relay_identity = make_test_certificate_identity("relay-hop-session-relay");
+   const auto source_identity = make_test_certificate_identity("relay-hop-session-source");
+   const auto target_identity = make_test_certificate_identity("relay-hop-session-target");
+   auto relay_node = node{
+       relay_runtime, options_for(relay_identity, capability_set{.bits = capabilities::direct_quic |
+                                                                         capabilities::relay |
+                                                                         capabilities::relay_reservation})};
+   auto source = node{client_runtime, options_for(source_identity, capability_set{.bits = capabilities::direct_quic |
+                                                                                          capabilities::relay_reservation})};
+   auto target = node{client_runtime, options_for(target_identity, capability_set{.bits = capabilities::direct_quic |
+                                                                                          capabilities::relay_reservation})};
+   relay_node.register_protocol_handler(
+       builtins::echo, [](node::incoming_protocol_stream incoming) mutable -> boost::asio::awaitable<void> {
+          for (auto request = 0U; request < 2U; ++request) {
+             auto payload = co_await incoming.stream.async_read_frame();
+             co_await incoming.stream.async_write_frame(payload);
+          }
+          co_await incoming.stream.async_close();
+       });
+
+   const auto relay_endpoint = listen(relay_node, relay_runtime);
+   const auto relay_capabilities = capability_set{.bits = capabilities::direct_quic | capabilities::relay |
+                                                           capabilities::relay_reservation};
+   source.peers().learn_endpoint(relay_node.local_peer(), relay_endpoint, relay_capabilities);
+   target.peers().learn_endpoint(relay_node.local_peer(), relay_endpoint, relay_capabilities);
+   static_cast<void>(forge::asio::blocking::run(client_runtime, source.async_reserve_relay(relay_node.local_peer())));
+   static_cast<void>(forge::asio::blocking::run(client_runtime, target.async_reserve_relay(relay_node.local_peer())));
+
+   const auto before = source.diagnostics();
+   const auto established = std::ranges::find_if(before.sessions, [&](const diagnostics::session& session) {
+      return session.remote_peer == relay_node.local_peer() && !session.closed &&
+             session.identify_state == identify::state::identified;
+   });
+   BOOST_REQUIRE(established != before.sessions.end());
+   const auto session_id = established->id;
+   const auto sessions_opened = source.metrics().sessions_opened;
+   auto sibling = forge::asio::blocking::run(
+       client_runtime, source.async_open_protocol_stream(relay_node.local_peer(), builtins::echo,
+                                                         node::open_options{
+                                                             .allow_relay = false,
+                                                             .timeout = std::chrono::seconds{2},
+                                                             .direct_attempt_timeout = std::chrono::seconds{2},
+                                                             .max_direct_endpoints = 1,
+                                                         }));
+   const auto first_payload = std::vector<std::uint8_t>{'b', 'e', 'f', 'o', 'r', 'e'};
+   forge::asio::blocking::run(client_runtime, sibling.async_write_frame(first_payload));
+   BOOST_TEST(forge::asio::blocking::run(client_runtime, sibling.async_read_frame()) == first_payload,
+              boost::test_tools::per_element());
+
+   auto release_relay = block_runtime(relay_runtime, "relay HOP stream negotiation barrier");
+   auto open = boost::asio::co_spawn(
+       client_runtime.context(),
+       source.async_open_protocol_stream(target.local_peer(), builtins::echo,
+                                         node::open_options{
+                                             .allow_relay = true,
+                                             .relay_peer = relay_node.local_peer(),
+                                             .direct_attempt_timeout = std::chrono::milliseconds{50},
+                                             .relay_attempt_timeout = std::chrono::milliseconds{200},
+                                             .allow_hole_punch = false,
+                                         }),
+       boost::asio::use_future);
+   BOOST_REQUIRE(open.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   try {
+      static_cast<void>(open.get());
+      BOOST_FAIL("expected relay HOP timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+   BOOST_TEST(std::ranges::any_of(source.diagnostics().sessions, [&](const diagnostics::session& session) {
+      return session.id == session_id && session.remote_peer == relay_node.local_peer() && !session.closed;
+   }));
+   release_relay->set_value();
+
+   const auto second_payload = std::vector<std::uint8_t>{'a', 'f', 't', 'e', 'r'};
+   forge::asio::blocking::run(client_runtime, sibling.async_write_frame(second_payload));
+   BOOST_TEST(forge::asio::blocking::run(client_runtime, sibling.async_read_frame()) == second_payload,
+              boost::test_tools::per_element());
+   forge::asio::blocking::run(client_runtime, sibling.async_close());
+   BOOST_TEST(source.metrics().sessions_opened == sessions_opened);
+   BOOST_TEST(std::ranges::any_of(source.diagnostics().sessions, [&](const diagnostics::session& session) {
+      return session.id == session_id && session.remote_peer == relay_node.local_peer() && !session.closed;
+   }));
+
+   forge::asio::blocking::run(client_runtime, target.async_stop());
+   forge::asio::blocking::run(client_runtime, source.async_stop());
+   forge::asio::blocking::run(relay_runtime, relay_node.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_autorelay_refresh_reserves_peer_store_candidate) {

@@ -77,7 +77,7 @@ namespace forge::net::p2p {
 
 boost::asio::awaitable<forge::net::p2p::stream>
 node::impl::open_session_stream(const std::shared_ptr<session_state>& session, const protocol_id& protocol,
-                                bool relay) {
+                                bool relay, detail::stream_admission_handler admitted) {
    const auto relayed = relay || session->info.path == path::kind::relay;
    auto reservation = relayed ? resources.reserve_relay_stream() : resources.reserve_stream();
    if (!reservation) {
@@ -89,6 +89,9 @@ node::impl::open_session_stream(const std::shared_ptr<session_state>& session, c
    auto [guarded, resource] = detail::prepare_resource_stream(resources, std::move(*reservation));
    auto raw = co_await session->connection.async_open_stream();
    resource->attach(std::move(raw));
+   if (admitted) {
+      admitted(resource);
+   }
    auto selected = forge::net::p2p::stream{};
    try {
       selected = co_await protocol_negotiation::async_select(std::move(guarded), protocol);

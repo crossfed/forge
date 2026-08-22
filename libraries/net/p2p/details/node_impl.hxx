@@ -8,6 +8,7 @@
 #include "dht_routing_refresh.hxx"
 #include "host_addresses.hxx"
 #include "identify_service.hxx"
+#include "length_delimited.hxx"
 #include "libp2p_identity_material.hxx"
 #include "lifecycle_tracker.hxx"
 #include "operation_deadline.hxx"
@@ -19,6 +20,7 @@
 #include "pubsub_outbound_budget.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
+#include "resource_stream.hxx"
 #include "session_teardown.hxx"
 #include "topology_manager.hxx"
 
@@ -46,9 +48,6 @@ class worker_terminal_owner;
 [[nodiscard]] bool is_clean_stream_eof(const forge::exceptions::base& error) noexcept;
 [[nodiscard]] std::uint64_t random_nonce();
 [[nodiscard]] std::string bytes_key(std::span<const std::uint8_t> bytes);
-boost::asio::awaitable<std::vector<std::uint8_t>> async_read_length_delimited(forge::net::p2p::stream& stream,
-                                                                              std::vector<std::uint8_t>& buffer,
-                                                                              std::size_t max_payload_size);
 [[nodiscard]] std::vector<std::uint8_t> wrap_length_delimited(std::span<const std::uint8_t> payload);
 [[nodiscard]] std::vector<std::uint8_t> unwrap_length_delimited(std::span<const std::uint8_t> bytes,
                                                                 std::size_t max_payload_size);
@@ -592,8 +591,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    boost::asio::awaitable<void> handle_inbound_connection(direct::connection connection,
                                                           resource_manager::session_reservation reservation);
 
-   boost::asio::awaitable<forge::net::p2p::stream> open_session_stream(const std::shared_ptr<session_state>& session,
-                                                                       const protocol_id& protocol, bool relay = false);
+   boost::asio::awaitable<forge::net::p2p::stream>
+   open_session_stream(const std::shared_ptr<session_state>& session, const protocol_id& protocol, bool relay = false,
+                       detail::stream_admission_handler admitted = {});
 
    boost::asio::awaitable<forge::net::p2p::stream>
    open_yamux_stream(const peer_id& peer, const std::shared_ptr<forge::net::yamux::session>& yamux,

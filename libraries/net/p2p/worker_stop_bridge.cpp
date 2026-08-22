@@ -14,6 +14,8 @@ module;
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/bind_executor.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/strand.hpp>
@@ -177,7 +179,18 @@ boost::asio::awaitable<void> async_run_with_stop_bridge(std::shared_ptr<worker_s
    // The parent is the transaction owner. It publishes the stop waiter first,
    // then either publishes work or wakes and joins that waiter on every setup
    // failure. Only the worker strand accesses terminal callback state.
-   co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+   const auto inherited_cancellation = co_await asio::this_coro::cancellation_state;
+   if (inherited_cancellation.cancelled() != asio::cancellation_type::none) {
+      stop->request_stop();
+   }
+   co_await asio::this_coro::reset_cancellation_state(
+       [stop](asio::cancellation_type type) noexcept {
+          if (type != asio::cancellation_type::none) {
+             stop->request_stop();
+          }
+          return asio::cancellation_type::none;
+       },
+       asio::disable_cancellation{});
    co_await asio::co_spawn(
        worker_executor,
        [worker_executor, stop_state, observed_stop, work = std::move(work), options = std::move(options),

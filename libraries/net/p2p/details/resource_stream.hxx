@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 namespace forge::net::p2p::detail {
 
 class resource_stream final : public forge::net::transport::detail::stream_concept {
@@ -39,6 +41,8 @@ class resource_stream final : public forge::net::transport::detail::stream_conce
    resource_manager::stream_reservation reservation_;
    std::atomic<terminal_state> terminal_{terminal_state::active};
 };
+
+using stream_admission_handler = std::function<void(const std::shared_ptr<resource_stream>&)>;
 
 [[nodiscard]] std::pair<forge::net::transport::stream, std::shared_ptr<resource_stream>>
 prepare_resource_stream(resource_manager manager, resource_manager::stream_reservation reservation);

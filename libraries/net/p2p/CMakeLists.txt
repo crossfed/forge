@@ -42,6 +42,10 @@ add_library(
    scoring.cpp
    reachability.cpp
    relay.cpp
+   length_delimited.cpp
+   details/length_delimited.hxx
+   relay_hop_exchange.cpp
+   details/relay_hop_exchange.hxx
    hole_punch.cpp
    topology.cpp
    topology_manager.cpp
