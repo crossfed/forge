@@ -958,6 +958,23 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         server.close()
 
 
+def require_local_topology_evidence(result: dict, scenario: str) -> None:
+    if result.get("status") != "ok":
+        raise RuntimeError(f"Forge topology fixture reported non-success: {result}")
+    if scenario == "relay_echo_topology":
+        if result.get("relay_echo") is not True or result.get("relay_bytes", 0) <= 0:
+            raise RuntimeError(f"Forge relay topology lacks successful relay evidence: {result}")
+        return
+    if scenario == "dcutr_relay_topology":
+        if (
+            result.get("hole_punch_status") != 3
+            or result.get("relay_echo") is not True
+            or result.get("source_hole_punch_successes", 0) <= 0
+            or result.get("relay_bytes", 0) <= 0
+        ):
+            raise RuntimeError(f"Forge DCUtR topology lacks successful hole-punch and direct-echo evidence: {result}")
+
+
 def run_topology(binary: Path, implementation: str, scenario: str, root: Path) -> dict:
     work = root / f"{implementation}-{scenario}"
     work.mkdir(parents=True, exist_ok=True)
@@ -980,10 +997,12 @@ def run_topology(binary: Path, implementation: str, scenario: str, root: Path) -
         if result_file.exists():
             detail += f"; result={result_file.read_text(errors='replace')}"
         raise RuntimeError(detail)
+    result = attach_attempts(json.loads(result_file.read_text()), attempts)
+    require_local_topology_evidence(result, scenario)
     return {
         "implementation": implementation,
         "scenario": scenario,
-        "result": attach_attempts(json.loads(result_file.read_text()), attempts),
+        "result": result,
     }
 
 

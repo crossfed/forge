@@ -13,6 +13,7 @@ from runner import (
     SUPPORTED_FORGE_BUILD_PROFILES,
     forge_fixture_requirements,
     require_dht_provider_evidence,
+    require_local_topology_evidence,
     require_supported_forge_build_profile,
 )
 
@@ -190,6 +191,7 @@ class InteropFixtureContractTest(unittest.TestCase):
         for result in ({}, {"provider_count": 0}, {"provider_count": -1}, {"provider_count": True}):
             with self.subTest(result=result), self.assertRaises(RuntimeError):
                 require_dht_provider_evidence(result, "forge")
+
         for result in (
             {"provider_count": 1},
             {"provider_count": 1, "provider_peer": "provider"},
@@ -235,6 +237,30 @@ class InteropFixtureContractTest(unittest.TestCase):
         ):
             with self.subTest(result=result), self.assertRaises(RuntimeError):
                 require_dht_provider_evidence(result, "forge")
+
+    def test_local_topology_evidence_is_fail_closed(self) -> None:
+        require_local_topology_evidence(
+            {"status": "ok", "relay_echo": True, "relay_bytes": 1}, "relay_echo_topology"
+        )
+        valid_dcutr = {
+            "status": "ok",
+            "hole_punch_status": 3,
+            "relay_echo": True,
+            "source_hole_punch_successes": 1,
+            "relay_bytes": 1,
+        }
+        require_local_topology_evidence(valid_dcutr, "dcutr_relay_topology")
+
+        invalid = (
+            {**valid_dcutr, "status": "failed"},
+            {**valid_dcutr, "hole_punch_status": 4},
+            {**valid_dcutr, "relay_echo": False},
+            {**valid_dcutr, "source_hole_punch_successes": 0},
+            {**valid_dcutr, "relay_bytes": 0},
+        )
+        for result in invalid:
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                require_local_topology_evidence(result, "dcutr_relay_topology")
 
 
 if __name__ == "__main__":

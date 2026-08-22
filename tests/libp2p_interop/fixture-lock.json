@@ -37,15 +37,15 @@
   "runtime_artifact_sources": {
     "../CMakeLists.txt": "b2eb329a602f2bcb373d2736a2b97965943de099b13c23f2ebcc1d529f27a2a9",
     "check_fixture_lock.py": "1e9f0229bc3fc13e99724cb7e6c8cafae5b257e14a86128dcee670c7fd8dd0c7",
-    "forge_interop_fixture.cpp": "34ef754b4b131689a4fc60d7db3c5e747cc60d94a2c52588c96f82a68fd50d0b",
+    "forge_interop_fixture.cpp": "19cff24c7046f5ce6bc0459715b244dfc27b6f8d7ebbf8d4ae7e00c03a653c1a",
     "provenance.py": "b52c97e6a817022eddbee267959c5bf722502bdaf19ba73b535ff92e41348745",
-    "runner.py": "9d285d356d606a68d36dadb9ac5a7336f711aa61f8a61fa9dab11a219ca84378"
+    "runner.py": "720e9b7d3db799fedeede116de91c705fe200157354da5719a99ce91f33ef721"
   },
   "evidence_sources": {
     "donor_cases.json": "c1e6122e7c0a16a902ee89a3627f4e95d8688c09155d4e64c10737c6b4d90117"
   },
   "regression_sources": {
-    "test_provenance.py": "74dd7ca1d08ba2510a0f0d9003e57a3f4895af3bed9f1c64ac937a0d4d4521f8"
+    "test_provenance.py": "76de524cf6613752186953bc59d9b18b99477ee1ea6d23468a4cd67beb83dafb"
   },
   "dependency_graphs": {
     "go": {
