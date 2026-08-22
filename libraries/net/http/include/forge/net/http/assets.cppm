@@ -10,6 +10,8 @@ module;
 
 export module forge.net.http.assets;
 
+export import forge.asio.compute;
+
 import forge.net.http.stream;
 import forge.net.http.types;
 
@@ -26,7 +28,7 @@ struct asset_mount {
 
 class asset_bundle {
  public:
-   explicit asset_bundle(asset_mount value);
+   asset_bundle(asset_mount value, forge::asio::compute::executor read_executor);
    ~asset_bundle();
 
    asset_bundle(const asset_bundle&) = default;

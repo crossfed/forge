@@ -384,14 +384,17 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}: TLS session mechanics belong to forge_net_tls ({token})")
 
    package_components = {
-      "tests/package_net_tls_component/CMakeLists.txt": "net_tls",
-      "tests/package_net_stcp_component/CMakeLists.txt": "net_stcp",
-      "tests/package_net_http_component/CMakeLists.txt": "net_http",
+      "tests/package_net_tls_component/CMakeLists.txt": ("net_tls",),
+      "tests/package_net_stcp_component/CMakeLists.txt": ("net_stcp",),
+      "tests/package_net_http_component/CMakeLists.txt": ("asio", "net_http"),
    }
-   for relative, component in package_components.items():
+   for relative, components in package_components.items():
       source = (root / relative).read_text(errors="ignore")
-      if f"COMPONENTS {component}" not in source:
-         errors.append(f"{relative}: relocated package consumer must request {component}")
+      package = re.search(r"find_package\s*\(\s*Forge\b(?P<body>.*?)\)", source, re.DOTALL)
+      requested = set(re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", package.group("body"))) if package else set()
+      for component in components:
+         if component not in requested:
+            errors.append(f"{relative}: relocated package consumer must request {component}")
 
    if "tls::context_provider" not in http_source or "tls_context_provider.snapshot()" not in http_source:
       errors.append("libraries/net/http/connection.cpp: HTTPS client must acquire forge_net_tls snapshots")
@@ -482,7 +485,8 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
 
    asset_module = (root / "libraries/net/http/include/forge/net/http/assets.cppm").read_text(errors="ignore")
    asset_source = (root / "libraries/net/http/assets.cpp").read_text(errors="ignore")
-   for token in ("export module forge.net.http.assets", "asset_mount", "asset_bundle", "max_file_bytes", "max_path_bytes"):
+   for token in ("export module forge.net.http.assets", "asset_mount", "asset_bundle",
+                 "forge::asio::compute::executor read_executor", "max_file_bytes", "max_path_bytes"):
       if token not in asset_module:
          errors.append(f"libraries/net/http/include/forge/net/http/assets.cppm: asset API is incomplete ({token})")
    for token in (
@@ -499,12 +503,13 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
 
    file_module = (root / "libraries/net/http/include/forge/net/http/file.cppm").read_text(errors="ignore")
    file_source = (root / "libraries/net/http/file.cpp").read_text(errors="ignore")
-   for token in ("symlink_policy", "symlinks = symlink_policy::reject"):
+   for token in ("symlink_policy", "symlinks = symlink_policy::reject", "forge::asio::compute::executor read_executor"):
       if token not in file_module:
          errors.append(f"libraries/net/http/include/forge/net/http/file.cppm: public symlink policy is missing ({token})")
    for token in ("openat(", "O_NOFOLLOW", "O_NONBLOCK", "fstat(", "pread(", "open_relative_file",
                  "open_followed_relative_file", "resolved.lexically_relative(root)", "if_none_match_matches",
-                 "if_range_matches"):
+                 "if_range_matches", "execute_file_io", '"http-file-open"', '"http-static-file-open"',
+                 '"http-file-pread"'):
       if token not in file_source:
          errors.append(f"libraries/net/http/file.cpp: descriptor-relative static file invariant is missing ({token})")
    if "open_file(resolved" in file_source:
@@ -514,7 +519,8 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
 
    router_module = (root / "libraries/net/http/include/forge/net/http/router.cppm").read_text(errors="ignore")
    router_source = (root / "libraries/net/http/router.cpp").read_text(errors="ignore")
-   for token in ("mount_assets", "reserve_path_prefix", "asset_mounts_", "reserved_path_prefixes_"):
+   for token in ("mount_assets(asset_mount value, forge::asio::compute::executor read_executor)",
+                 "reserve_path_prefix", "asset_mounts_", "reserved_path_prefixes_"):
       if token not in router_module:
          errors.append(f"libraries/net/http/include/forge/net/http/router.cppm: asset router boundary is incomplete ({token})")
    for token in (
@@ -540,6 +546,13 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
       errors.append("plugins/http/server/plugin.cpp: repeated Set-Cookie projection must use insert")
    if "HTTP asset mounts must not overlap" not in plugin_impl:
       errors.append("plugins/http/server/plugin_impl.cpp: plugin asset overlap validation is missing")
+   for token in ("context.has_compute()", "context.compute()", "file_read_executor"):
+      if token not in plugin_source:
+         errors.append(f"plugins/http/server/plugin.cpp: asset compute ownership is incomplete ({token})")
+   for token in ("asset_bundle{std::move(value), std::move(executor)}",
+                 "HTTP asset mounts require the application compute executor"):
+      if token not in plugin_impl:
+         errors.append(f"plugins/http/server/plugin_impl.cpp: asset compute injection is incomplete ({token})")
 
    package_http = (root / "tests/package_net_http_component/main.cpp").read_text(errors="ignore")
    package_plugin = (root / "tests/package_plugins_http_server/main.cpp").read_text(errors="ignore")
@@ -548,6 +561,8 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
          errors.append(f"tests/package_net_http_component/main.cpp: direct package import is missing ({token})")
    if "import forge.net.http.assets;" not in package_plugin:
       errors.append("tests/package_plugins_http_server/main.cpp: plugin package consumer must import asset mount directly")
+   if "import forge.asio.compute;" not in package_http:
+      errors.append("tests/package_net_http_component/main.cpp: low-level file package consumer must import compute")
 
    http_tests = (root / "tests/http_websocket/network_tests.cpp").read_text(errors="ignore")
    for token in (
@@ -563,6 +578,8 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
       "http_static_file_root_keeps_root_descriptor_across_root_name_swap",
       "http_static_file_root_keeps_opened_descriptor_across_name_swap",
       "http_static_file_root_rejects_fifo_without_blocking",
+      "http_file_reads_use_bounded_compute_capacity_without_stalling_runtime_workers",
+      "http_request_time_file_open_is_bounded_and_does_not_stall_runtime_workers",
    ):
       if token not in http_tests:
          errors.append(f"tests/http_websocket/network_tests.cpp: cookie/assets regression is missing ({token})")
@@ -570,10 +587,17 @@ def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
    for token in (
       "http_server_plugin_preserves_repeated_set_cookie_from_middleware",
       "http_server_plugin_mounts_assets_without_shadowing_a_narrow_api_prefix",
+      "http_server_plugin_rejects_asset_publication_without_application_compute",
       "http_server_plugin_rejects_root_api_prefix_overlapping_asset_mount_before_listener_start",
    ):
       if token not in plugin_tests:
          errors.append(f"tests/plugins/plugins_tests.cpp: plugin cookie/assets regression is missing ({token})")
+
+   migration = (root / "docs/iterations/forge-native-admin-foundation-v1.md").read_text(errors="ignore")
+   for token in ("response.set_cookie(name, value)", "append_set_cookie(", "Stable source surface",
+                 "release notes must name `response::set_cookie`"):
+      if token not in migration:
+         errors.append(f"docs/iterations/forge-native-admin-foundation-v1.md: HTTP cookie migration is incomplete ({token})")
 
 
 def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:

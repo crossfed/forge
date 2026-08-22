@@ -28,6 +28,40 @@ modes:
 Static files are not an authorization boundary in either mode. Every protected
 API request is authenticated and authorized by the native backend itself.
 
+## Approved HTTP Source Migration
+
+The native-admin foundation includes an approved pre-stabilization clean break
+in the Stable `forge.net.http.types::response` source surface. The removed
+member is not restored through an alias or forwarding overload. Migrate each
+call mechanically:
+
+```cpp
+// Before
+response.set_cookie(name, value);
+
+// After
+forge::net::http::append_set_cookie(
+   response,
+   forge::net::http::set_cookie{.name = name, .value = value});
+```
+
+The replacement is owned by `forge.net.http.cookie` and preserves repeated
+`Set-Cookie` fields through `response::insert`. Before the branch is promoted
+to a release, its release notes must name `response::set_cookie` as the affected
+Stable source surface and repeat this mechanical migration. No compatibility
+alias is required for this maintainer-approved pre-stabilization break.
+
+The bounded file-I/O correction also makes ownership explicit on the low-level
+Stable file surfaces. Migrate `file_response::from_path(path, options)` and
+`static_file_root(root, options)` by inserting the caller-owned
+`forge::asio::compute::pool::get_executor()` before `options`. Migrate direct
+`router::mount_assets(mount)` calls to
+`router::mount_assets(mount, file_reads.get_executor())`. The HTTP Server plugin
+API remains `mount_assets(asset_mount)` because the plugin injects its
+application `context.compute()` executor. Release notes must list these three
+low-level signatures alongside the cookie migration; no executor compatibility
+overloads are retained.
+
 ## Goal
 
 Provide reusable browser authentication and HTTP publication mechanics without

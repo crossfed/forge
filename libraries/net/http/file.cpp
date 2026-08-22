@@ -17,6 +17,7 @@ module;
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,8 @@ module;
 
 module forge.net.http.file;
 
+import forge.asio.compute;
+import forge.asio.exceptions;
 import forge.net.http.body;
 import forge.net.http.exceptions;
 import forge.exceptions;
@@ -152,8 +155,8 @@ namespace {
    return date.has_value() && modified_seconds <= static_cast<std::int64_t>(*date);
 }
 
-[[nodiscard]] bool if_range_matches(std::string_view value, std::string_view etag_value,
-                                    std::int64_t modified_seconds, const file_options& options) {
+[[nodiscard]] bool if_range_matches(std::string_view value, std::string_view etag_value, std::int64_t modified_seconds,
+                                    const file_options& options) {
    value = trim_ows(value);
    if (value.starts_with("W/") || value.starts_with("\"")) {
       return options.etag && strong_etag_matches(value, etag_value);
@@ -296,6 +299,11 @@ struct opened_file_metadata {
    std::int64_t modified_nanoseconds = 0;
 };
 
+struct opened_file {
+   std::shared_ptr<int> descriptor;
+   opened_file_metadata metadata;
+};
+
 [[nodiscard]] opened_file_metadata inspect_open_file(const std::shared_ptr<int>& descriptor,
                                                      const file_options& options) {
    struct stat metadata{};
@@ -321,6 +329,24 @@ struct opened_file_metadata {
 #endif
 }
 
+template <typename Work> using file_io_result = std::invoke_result_t<Work&, forge::asio::compute::context&>;
+
+template <typename Work>
+boost::asio::awaitable<file_io_result<Work>> execute_file_io(forge::asio::compute::executor executor, std::string name,
+                                                             Work work) {
+   try {
+      co_return co_await executor.execute({.name = std::move(name)}, std::move(work));
+   } catch (const forge::asio::exceptions::canceled&) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "HTTP file operation was canceled");
+   } catch (const forge::asio::exceptions::rejected&) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "HTTP file operation capacity is unavailable");
+   } catch (const forge::asio::exceptions::invalid_state&) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "HTTP file operation executor is unavailable");
+   } catch (const forge::asio::exceptions::internal&) {
+      FORGE_THROW_EXCEPTION(exceptions::internal, "HTTP file operation executor failed");
+   }
+}
+
 [[nodiscard]] stream_response not_modified_response(const request& request_value, const std::string& etag_value,
                                                     const std::string& modified_value, const file_options& options) {
    auto reply = response{status::not_modified, request_value.version()};
@@ -338,7 +364,8 @@ struct opened_file_metadata {
 }
 
 [[nodiscard]] stream_response make_file_stream(const request& request_value, const std::shared_ptr<int>& descriptor,
-                                               const opened_file_metadata& metadata, const file_options& options) {
+                                               const opened_file_metadata& metadata, const file_options& options,
+                                               forge::asio::compute::executor read_executor) {
    const auto modified_value = http_date(static_cast<std::time_t>(metadata.modified_seconds));
    const auto etag_value = file_etag(metadata.size, metadata.modified_seconds, metadata.modified_nanoseconds);
    if (options.etag) {
@@ -409,23 +436,31 @@ struct opened_file_metadata {
    const auto chunk_size = std::max<std::size_t>(1, options.chunk_bytes);
    return stream_response{
        .head = std::move(reply),
-       .body = [descriptor, remaining, offset,
-                chunk_size]() mutable -> boost::asio::awaitable<std::optional<body_chunk>> {
+       .body = [descriptor, remaining, offset, chunk_size, read_executor = std::move(read_executor)]() mutable
+           -> boost::asio::awaitable<std::optional<body_chunk>> {
           if (*remaining == 0) {
              co_return std::nullopt;
           }
           const auto bytes_to_read =
               static_cast<std::size_t>(std::min<std::uint64_t>(*remaining, static_cast<std::uint64_t>(chunk_size)));
-          auto bytes = std::vector<std::byte>(bytes_to_read);
-          const auto read = ::pread(*descriptor, bytes.data(), bytes.size(), static_cast<off_t>(*offset));
-          if (read < 0) {
-             FORGE_THROW_EXCEPTION(exceptions::internal, "failed to read opened HTTP file");
-          }
-          if (read == 0) {
-             FORGE_THROW_EXCEPTION(exceptions::internal, "opened HTTP file ended before its advertised size");
-          }
-          const auto count = static_cast<std::size_t>(read);
-          bytes.resize(count);
+          const auto read_offset = *offset;
+          auto bytes = co_await execute_file_io(
+              read_executor, "http-file-pread",
+              [descriptor, bytes_to_read, read_offset](forge::asio::compute::context& context) {
+                 context.throw_if_stop_requested();
+                 auto result = std::vector<std::byte>(bytes_to_read);
+                 const auto read = ::pread(*descriptor, result.data(), result.size(), static_cast<off_t>(read_offset));
+                 if (read < 0) {
+                    FORGE_THROW_EXCEPTION(exceptions::internal, "failed to read opened HTTP file");
+                 }
+                 if (read == 0) {
+                    FORGE_THROW_EXCEPTION(exceptions::internal, "opened HTTP file ended before its advertised size");
+                 }
+                 result.resize(static_cast<std::size_t>(read));
+                 context.throw_if_stop_requested();
+                 return result;
+              });
+          const auto count = bytes.size();
           *remaining -= count;
           *offset += count;
           co_return body_chunk{.bytes = std::move(bytes)};
@@ -434,6 +469,19 @@ struct opened_file_metadata {
 }
 
 } // namespace
+
+file_response file_response::from_path(std::filesystem::path path, forge::asio::compute::executor read_executor,
+                                       file_options options) {
+   if (!read_executor.valid()) {
+      throw exceptions::bad_request{"HTTP file response requires a file read executor"};
+   }
+   auto result = file_response{};
+   result.path_ = std::move(path);
+   result.read_executor_ = std::move(read_executor);
+   result.options_ = std::move(options);
+   result.server_path_ = true;
+   return result;
+}
 
 boost::asio::awaitable<stream_response> file_response::materialize(const request& request_value) && {
    if (!server_path_) {
@@ -451,11 +499,19 @@ boost::asio::awaitable<stream_response> file_response::materialize(const request
       };
    }
 
-   auto descriptor = std::shared_ptr<int>{};
-   auto metadata = opened_file_metadata{};
+   auto path = std::move(path_);
+   auto options = std::move(options_);
+   auto read_executor = std::move(read_executor_);
+   auto opened = opened_file{};
    try {
-      descriptor = open_file(path_, options_.symlinks);
-      metadata = inspect_open_file(descriptor, options_);
+      opened = co_await execute_file_io(
+          read_executor, "http-file-open", [path = std::move(path), options](forge::asio::compute::context& context) {
+             context.throw_if_stop_requested();
+             auto descriptor = open_file(path, options.symlinks);
+             auto metadata = inspect_open_file(descriptor, options);
+             context.throw_if_stop_requested();
+             return opened_file{.descriptor = std::move(descriptor), .metadata = metadata};
+          });
    } catch (const exceptions::not_found&) {
       auto reply = make_text_response(request_value, status::not_found, "not found");
       if (request_value.method() == method::head) {
@@ -464,7 +520,7 @@ boost::asio::awaitable<stream_response> file_response::materialize(const request
       co_return stream_response::buffered(std::move(reply));
    }
 
-   co_return make_file_stream(request_value, descriptor, metadata, options_);
+   co_return make_file_stream(request_value, opened.descriptor, opened.metadata, options, std::move(read_executor));
 }
 
 boost::asio::awaitable<void> file_response::save_to(const std::filesystem::path& target) {
@@ -489,7 +545,12 @@ boost::asio::awaitable<void> file_response::save_to(const std::filesystem::path&
    }
 }
 
-static_file_root::static_file_root(std::filesystem::path root, file_options options) : options_(std::move(options)) {
+static_file_root::static_file_root(std::filesystem::path root, forge::asio::compute::executor read_executor,
+                                   file_options options)
+    : read_executor_{std::move(read_executor)}, options_(std::move(options)) {
+   if (!read_executor_.valid()) {
+      throw exceptions::bad_request{"static file root requires a file read executor"};
+   }
    auto error = std::error_code{};
    root_ = std::filesystem::weakly_canonical(std::move(root), error);
    if (error) {
@@ -514,11 +575,20 @@ boost::asio::awaitable<stream_response> static_file_root::serve(stream_request& 
 boost::asio::awaitable<stream_response>
 static_file_root::serve(stream_request& request_value, std::string_view relative_path, file_options options) const {
    try {
-      const auto descriptor = options.symlinks == symlink_policy::reject
-                                  ? open_relative_file(root_descriptor_, relative_path)
-                                  : open_followed_relative_file(root_, root_descriptor_, relative_path);
-      const auto metadata = inspect_open_file(descriptor, options);
-      co_return make_file_stream(request_value.context.request, descriptor, metadata, options);
+      const auto opened = co_await execute_file_io(
+          read_executor_, "http-static-file-open",
+          [root = root_, root_descriptor = root_descriptor_, relative_path = std::string{relative_path},
+           options](forge::asio::compute::context& context) {
+             context.throw_if_stop_requested();
+             auto descriptor = options.symlinks == symlink_policy::reject
+                                   ? open_relative_file(root_descriptor, relative_path)
+                                   : open_followed_relative_file(root, root_descriptor, relative_path);
+             auto metadata = inspect_open_file(descriptor, options);
+             context.throw_if_stop_requested();
+             return opened_file{.descriptor = std::move(descriptor), .metadata = metadata};
+          });
+      co_return make_file_stream(request_value.context.request, opened.descriptor, opened.metadata, options,
+                                 read_executor_);
    } catch (const exceptions::forbidden&) {
       co_return stream_response::buffered(
           make_text_response(request_value.context.request, status::forbidden, "forbidden"));

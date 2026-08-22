@@ -26,6 +26,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.asio.compute;
 import forge.net.http.exceptions;
 import forge.net.http.assets;
 import forge.net.http.middleware;
@@ -361,8 +362,8 @@ void router::websocket(std::string path, websocket_route_handler handler) {
    });
 }
 
-void router::mount_assets(asset_mount value) {
-   mount_assets(asset_bundle{std::move(value)});
+void router::mount_assets(asset_mount value, forge::asio::compute::executor read_executor) {
+   mount_assets(asset_bundle{std::move(value), std::move(read_executor)});
 }
 
 void router::mount_assets(asset_bundle bundle) {

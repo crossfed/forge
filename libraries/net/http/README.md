@@ -248,15 +248,27 @@ descriptor-relative opens, opened-file `fstat`, traversal rejection, `HEAD`,
 byte ranges and conditional metadata headers. `file_options::symlinks` defaults
 to `symlink_policy::reject`; `follow` is an explicit legacy/general file-serving
 mode, remains contained under a `static_file_root`, and must not be used for
-untrusted browser assets.
+untrusted browser assets. Request-time path resolution, descriptor opens,
+`fstat`, and body `pread` calls run on a caller-owned bounded
+`forge::asio::compute::pool`; the HTTP runtime worker only awaits completion.
+The pool owner must outlive every root and path-backed response that uses its
+executor, then stop or drain the pool as part of application shutdown.
 
 ```cpp
+import forge.asio.compute;
 import forge.net.http.file;
 import forge.net.http.router;
 import forge.net.http.stream;
 
+auto file_reads = forge::asio::compute::pool{forge::asio::compute::pool::options{
+   .worker_threads = 2,
+   .max_pending_tasks = 64,
+   .max_waiting_submissions = 64,
+   .thread_name = "forge-http-file",
+}};
 auto files = std::make_shared<forge::net::http::static_file_root>(
    "/srv/public",
+   file_reads.get_executor(),
    forge::net::http::file_options{
       .content_type = "application/octet-stream",
       .max_file_bytes = 64 * 1024 * 1024,
@@ -285,19 +297,30 @@ NUL and control bytes, permits a small MIME set, and preserves file streaming,
 ranges and ETags. Fingerprinted names receive immutable caching while
 `index.html` stays `no-cache`. It always uses `symlink_policy::reject`. SPA
 fallback applies only to extensionless asset paths after a static miss.
+The low-level router takes the caller-owned compute executor explicitly; one
+bounded pool may be shared across a bounded set of mounts.
 
 ```cpp
+import forge.asio.compute;
 import forge.net.http.assets;
 import forge.net.http.router;
 
+auto asset_reads = forge::asio::compute::pool{forge::asio::compute::pool::options{
+   .worker_threads = 2,
+   .max_pending_tasks = 64,
+   .max_waiting_submissions = 64,
+   .thread_name = "forge-http-assets",
+}};
 auto router = forge::net::http::router{};
-router.mount_assets(forge::net::http::asset_mount{
-   .path = "/admin",
-   .root = "/srv/admin-ui",
-   .index = "index.html",
-   .spa_fallback = true,
-   .max_file_bytes = 16 * 1024 * 1024,
-});
+router.mount_assets(
+   forge::net::http::asset_mount{
+      .path = "/admin",
+      .root = "/srv/admin-ui",
+      .index = "index.html",
+      .spa_fallback = true,
+      .max_file_bytes = 16 * 1024 * 1024,
+   },
+   asset_reads.get_executor());
 ```
 
 Asset mounts cannot overlap each other or a reserved typed API prefix. A normal

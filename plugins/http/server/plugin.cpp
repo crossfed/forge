@@ -17,6 +17,7 @@ module forge.plugins.http.server.plugin;
 import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
+import forge.asio.compute;
 import forge.asio.runtime;
 import forge.config.core.component;
 import forge.config.core.decode;
@@ -221,6 +222,7 @@ boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& cont
    {
       const auto lock = std::scoped_lock{impl_->mutex};
       impl_->runtime = &context.scheduler().runtime_context();
+      impl_->file_read_executor = context.has_compute() ? context.compute() : forge::asio::compute::executor{};
       impl_->apis = &context.apis().registry_ref();
       impl_->secrets = std::move(secrets);
       impl_->stopping = false;

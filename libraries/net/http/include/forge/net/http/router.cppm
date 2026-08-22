@@ -16,6 +16,8 @@ struct router_server_access;
 
 export module forge.net.http.router;
 
+export import forge.asio.compute;
+
 import forge.net.http.middleware;
 import forge.net.http.assets;
 import forge.net.http.route_context;
@@ -48,7 +50,7 @@ class router {
    void patch_stream(std::string path, stream_route_handler handler);
    void del_stream(std::string path, stream_route_handler handler);
    void websocket(std::string path, websocket_route_handler handler);
-   void mount_assets(asset_mount value);
+   void mount_assets(asset_mount value, forge::asio::compute::executor read_executor);
    void mount_assets(asset_bundle value);
    void reserve_path_prefix(std::string path);
 

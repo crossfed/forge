@@ -201,6 +201,11 @@ co_await http->mount_assets(forge::net::http::asset_mount{
 });
 ```
 
+The HTTP Server plugin injects the application-owned `context.compute()`
+executor when it builds the asset bundle. Applications that publish assets must
+configure that bounded compute pool; a missing executor fails publication before
+the listener starts. `asset_mount` itself remains a simple configuration DTO.
+
 ```cpp
 class object_http_plugin final : public forge::app::plugin {
  public:

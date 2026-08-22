@@ -15,6 +15,7 @@ struct plugin::impl {
    mutable std::mutex mutex;
    config settings;
    forge::asio::runtime* runtime = nullptr;
+   forge::asio::compute::executor file_read_executor;
    const forge::api::core::registry* apis = nullptr;
    std::vector<pending_binding> bindings;
    std::vector<middleware_descriptor> middleware;

@@ -245,9 +245,9 @@ void validate_relative_path(std::string_view value, std::string_view description
 } // namespace
 
 struct asset_bundle::impl {
-   explicit impl(asset_mount value)
+   impl(asset_mount value, forge::asio::compute::executor read_executor)
        : mount(std::move(value)), prefix(normalize_mount_path(mount.path)),
-         root(std::make_shared<static_file_root>(mount.root)) {
+         root(std::make_shared<static_file_root>(mount.root, std::move(read_executor))) {
       mount.path = prefix;
       if (mount.max_file_bytes == 0U || mount.max_file_bytes > 1024ULL * 1024ULL * 1024ULL) {
          FORGE_THROW_EXCEPTION(exceptions::bad_request, "asset max_file_bytes must be between 1 and 1073741824");
@@ -264,7 +264,8 @@ struct asset_bundle::impl {
    std::shared_ptr<static_file_root> root;
 };
 
-asset_bundle::asset_bundle(asset_mount value) : impl_(std::make_shared<impl>(std::move(value))) {}
+asset_bundle::asset_bundle(asset_mount value, forge::asio::compute::executor read_executor)
+    : impl_(std::make_shared<impl>(std::move(value), std::move(read_executor))) {}
 
 asset_bundle::~asset_bundle() = default;
 

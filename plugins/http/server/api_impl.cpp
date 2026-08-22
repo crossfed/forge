@@ -9,6 +9,7 @@ module;
 module forge.plugins.http.server.plugin;
 
 import forge.api.core.registry;
+import forge.asio.compute;
 import forge.asio.runtime;
 import forge.api.http.binding;
 import forge.net.http.assets;

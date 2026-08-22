@@ -76,6 +76,7 @@ import forge.app.application_builder;
 import forge.app.runner;
 import forge.app.daemon;
 import forge.asio.blocking;
+import forge.asio.compute;
 import forge.asio.runtime;
 import forge.asio.task;
 import forge.config.core.component;
@@ -605,6 +606,19 @@ struct http_asset_publish_state {
    std::string mount_path = "/admin";
 };
 
+[[nodiscard]] forge::app::application_shell_options http_asset_application_options(bool with_compute) {
+   auto options = forge::app::application_shell_options{};
+   if (with_compute) {
+      options.compute = forge::asio::compute::pool::options{
+          .worker_threads = 2,
+          .max_pending_tasks = 16,
+          .max_waiting_submissions = 16,
+          .thread_name = "forge-http-asset-test",
+      };
+   }
+   return options;
+}
+
 class http_stream_api_impl final : public http_stream_api {
  public:
    explicit http_stream_api_impl(std::shared_ptr<http_publish_state> state) : state_{std::move(state)} {}
@@ -685,7 +699,10 @@ class http_asset_publisher_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto http = context.apis().get<http_server::api>(http_server::api::ref());
-      co_await http->mount_assets(raw_http::asset_mount{.path = state_->mount_path, .root = state_->root});
+      co_await http->mount_assets(raw_http::asset_mount{
+          .path = state_->mount_path,
+          .root = state_->root,
+      });
    }
 
    boost::asio::awaitable<void> startup() override {
@@ -1869,8 +1886,9 @@ class http_server_application final : public forge::app::application_shell {
 class http_assets_server_application final : public forge::app::application_shell {
  public:
    http_assets_server_application(std::shared_ptr<http_publish_state> publish,
-                                  std::shared_ptr<http_asset_publish_state> assets)
-       : publish_{std::move(publish)}, assets_{std::move(assets)} {}
+                                  std::shared_ptr<http_asset_publish_state> assets, bool with_compute = true)
+       : forge::app::application_shell{http_asset_application_options(with_compute)}, publish_{std::move(publish)},
+         assets_{std::move(assets)} {}
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
@@ -2401,6 +2419,20 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_mounts_assets_without_shadowing_a_narrow
    BOOST_TEST(chunk.bytes == "asset:1:2");
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_asset_publication_without_application_compute) {
+   auto files = temp_directory{};
+   files.write("index.html", "asset-console");
+   auto publish = std::make_shared<http_publish_state>();
+   auto assets = std::make_shared<http_asset_publish_state>();
+   assets->root = files.path();
+   auto app = http_assets_server_application{publish, assets, false};
+   auto config = forge::config::core::document{};
+   config.set("plugins.http.server.port", std::uint64_t{reserve_loopback_port()});
+
+   app.configure(config);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), app.startup()), http_server::exceptions::startup_failed);
 }
 
 BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_root_api_prefix_overlapping_asset_mount_before_listener_start) {

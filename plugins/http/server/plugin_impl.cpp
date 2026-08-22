@@ -17,6 +17,7 @@ module;
 module forge.plugins.http.server.plugin;
 
 import forge.api.core.registry;
+import forge.asio.compute;
 import forge.asio.runtime;
 import forge.api.http.binding;
 import forge.crypto.core.types;
@@ -145,9 +146,23 @@ void plugin::impl::add(middleware_descriptor value) {
 }
 
 void plugin::impl::add(forge::net::http::asset_mount value) {
-   auto bundle = forge::net::http::asset_bundle{std::move(value)};
+   auto executor = forge::asio::compute::executor{};
+   auto publication_generation = std::uint64_t{};
+   {
+      const auto lock = std::scoped_lock{mutex};
+      if (publication_closed) {
+         FORGE_THROW_EXCEPTION(exceptions::publication_closed, "HTTP server publication is closed");
+      }
+      executor = file_read_executor;
+      publication_generation = lifecycle_generation;
+   }
+   if (!executor.valid()) {
+      FORGE_THROW_EXCEPTION(exceptions::startup_failed, "HTTP asset mounts require the application compute executor");
+   }
+
+   auto bundle = forge::net::http::asset_bundle{std::move(value), std::move(executor)};
    auto lock = std::scoped_lock{mutex};
-   if (publication_closed) {
+   if (publication_closed || lifecycle_generation != publication_generation) {
       FORGE_THROW_EXCEPTION(exceptions::publication_closed, "HTTP server publication is closed");
    }
    for (const auto& existing : asset_mounts) {
@@ -225,6 +240,7 @@ void plugin::impl::reset_runtime() noexcept {
    auto lock = std::scoped_lock{mutex};
    ++lifecycle_generation;
    apis = nullptr;
+   file_read_executor = {};
    secrets.reset();
    tls_context_provider.reset();
    runtime = nullptr;

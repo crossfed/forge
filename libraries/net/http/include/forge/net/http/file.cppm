@@ -13,6 +13,8 @@ module;
 
 export module forge.net.http.file;
 
+export import forge.asio.compute;
+
 import forge.net.http.body;
 import forge.net.http.stream;
 import forge.net.http.types;
@@ -37,13 +39,8 @@ struct file_options {
 struct file_response {
    file_response() = default;
 
-   [[nodiscard]] static file_response from_path(std::filesystem::path path, file_options options = {}) {
-      auto result = file_response{};
-      result.path_ = std::move(path);
-      result.options_ = std::move(options);
-      result.server_path_ = true;
-      return result;
-   }
+   [[nodiscard]] static file_response
+   from_path(std::filesystem::path path, forge::asio::compute::executor read_executor, file_options options = {});
 
    [[nodiscard]] static file_response from_body(response head, body_reader body) {
       auto result = file_response{};
@@ -82,6 +79,7 @@ struct file_response {
 
  private:
    std::filesystem::path path_;
+   forge::asio::compute::executor read_executor_;
    file_options options_;
    response head_{status::ok, 11};
    body_reader body_;
@@ -90,7 +88,8 @@ struct file_response {
 
 class static_file_root {
  public:
-   explicit static_file_root(std::filesystem::path root, file_options options = {});
+   explicit static_file_root(std::filesystem::path root, forge::asio::compute::executor read_executor,
+                             file_options options = {});
 
    [[nodiscard]] const std::filesystem::path& root() const noexcept;
    [[nodiscard]] boost::asio::awaitable<stream_response> serve(stream_request& request_value,
@@ -100,6 +99,7 @@ class static_file_root {
 
  private:
    std::filesystem::path root_;
+   forge::asio::compute::executor read_executor_;
    file_options options_;
    std::shared_ptr<int> root_descriptor_;
 };
