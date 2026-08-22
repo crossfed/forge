@@ -2,14 +2,11 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -21,7 +18,6 @@ module;
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/error.hpp>
-#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
@@ -33,16 +29,13 @@ module;
 #include <boost/asio/write.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
-#include <openssl/x509v3.h>
-
 #include "details/handshake_deadline.hxx"
 
 module forge.net.stcp.connection;
 
 import forge.asio.gate;
-import forge.crypto.pki.x509;
+import forge.net.tls.context;
+import forge.net.tls.exceptions;
 import forge.net.transport.stream;
 
 namespace forge::net::stcp {
@@ -59,14 +52,6 @@ enum class connection_state : std::uint8_t {
    handed_off,
    closed,
 };
-
-struct x509_deleter {
-   void operator()(X509* value) const noexcept {
-      X509_free(value);
-   }
-};
-
-using x509_ptr = std::unique_ptr<X509, x509_deleter>;
 
 [[nodiscard]] std::int64_t next_stream_id() noexcept {
    static auto next = std::atomic<std::int64_t>{1};
@@ -111,145 +96,65 @@ using x509_ptr = std::unique_ptr<X509, x509_deleter>;
    throw_io_error("stcp connection I/O failed", error);
 }
 
-[[nodiscard]] std::string normalize_fingerprint(std::string_view value) {
-   auto out = std::string{};
-   out.reserve(value.size());
-   for (const auto ch : value) {
-      if (ch == ':' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-         continue;
-      }
-      out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-   }
-   return out;
-}
-
-[[nodiscard]] std::vector<unsigned char> encode_alpn(const std::vector<std::string>& protocols) {
-   auto out = std::vector<unsigned char>{};
-   for (const auto& protocol : protocols) {
-      if (protocol.empty() || protocol.size() > 255) {
-         throw_invalid_options("stcp ALPN protocol length must be 1..255 bytes");
-      }
-      out.push_back(static_cast<unsigned char>(protocol.size()));
-      out.insert(out.end(), protocol.begin(), protocol.end());
-   }
-   return out;
-}
-
-int select_alpn(SSL*, const unsigned char** out, unsigned char* outlen, const unsigned char* in, unsigned int inlen,
-                void* arg) {
-   const auto* supported = static_cast<const std::vector<std::string>*>(arg);
-   auto offset = unsigned{0};
-   while (offset < inlen) {
-      const auto length = static_cast<unsigned>(in[offset]);
-      ++offset;
-      if (length == 0 || offset + length > inlen) {
-         return SSL_TLSEXT_ERR_NOACK;
-      }
-      const auto value = std::string_view{reinterpret_cast<const char*>(in + offset), length};
-      if (std::find(supported->begin(), supported->end(), value) != supported->end()) {
-         *out = in + offset;
-         *outlen = static_cast<unsigned char>(length);
-         return SSL_TLSEXT_ERR_OK;
-      }
-      offset += length;
-   }
-   return SSL_TLSEXT_ERR_NOACK;
-}
-
-void validate_identity_pair(std::string_view certificate_pem, std::string_view private_key_pem) {
-   if (certificate_pem.empty() != private_key_pem.empty()) {
-      throw_invalid_options("stcp certificate and private key must be configured together");
-   }
-}
-
-void validate_common(std::size_t read_chunk_size, const std::vector<std::string>& alpn_protocols) {
+void validate_common(std::size_t read_chunk_size) {
    if (read_chunk_size == 0) {
       throw_invalid_options("stcp read_chunk_size must be greater than zero");
    }
-   (void)encode_alpn(alpn_protocols);
 }
 
-void configure_tls_version(asio::ssl::context& context, bool tls13_only) {
-   if (!tls13_only) {
-      return;
+[[nodiscard]] tls::context_options make_tls_options(const client_options& options) {
+   auto out = tls::context_options{};
+   out.role = tls::endpoint_role::client;
+   out.protocols = options.tls13_only ? tls::protocol_policy::tls13_only : tls::protocol_policy::system_default;
+   out.verification = options.security.verify_peer ? tls::peer_verification::verify_peer : tls::peer_verification::none;
+   out.certificate_chain_pem = options.certificate_pem;
+   out.private_key_pem = options.private_key_pem;
+   out.alpn_protocols = options.alpn_protocols;
+   if (!options.security.trusted_ca_pem.empty()) {
+      out.trust_anchors_pem.push_back(options.security.trusted_ca_pem);
+      out.use_default_verify_paths = false;
    }
-   if (SSL_CTX_set_min_proto_version(context.native_handle(), TLS1_3_VERSION) != 1 ||
-       SSL_CTX_set_max_proto_version(context.native_handle(), TLS1_3_VERSION) != 1) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp TLS 1.3 only mode");
-   }
+   return out;
 }
 
-void load_identity(asio::ssl::context& context, std::string_view certificate_pem, std::string_view private_key_pem) {
-   if (certificate_pem.empty() && private_key_pem.empty()) {
-      return;
+[[nodiscard]] tls::context_options make_tls_options(const server_options& options) {
+   auto out = tls::context_options{};
+   out.role = tls::endpoint_role::server;
+   out.protocols = options.tls13_only ? tls::protocol_policy::tls13_only : tls::protocol_policy::system_default;
+   if (options.security.verify_peer) {
+      out.verification = tls::peer_verification::require_peer_certificate;
+   } else if (options.security.require_peer_certificate) {
+      out.verification = tls::peer_verification::require_peer_certificate_for_application_verification;
+   } else {
+      out.verification = tls::peer_verification::none;
    }
+   out.certificate_chain_pem = options.certificate_pem;
+   out.private_key_pem = options.private_key_pem;
+   out.alpn_protocols = options.alpn_protocols;
+   out.use_default_verify_paths = options.security.verify_peer;
+   if (!options.security.trusted_ca_pem.empty()) {
+      out.trust_anchors_pem.push_back(options.security.trusted_ca_pem);
+      out.use_default_verify_paths = false;
+   }
+   return out;
+}
+
+[[nodiscard]] tls::context_snapshot_ptr make_client_context(const client_options& options) {
+   validate_common(options.read_chunk_size);
    try {
-      context.use_certificate_chain(asio::buffer(certificate_pem.data(), certificate_pem.size()));
-      context.use_private_key(asio::buffer(private_key_pem.data(), private_key_pem.size()), asio::ssl::context::pem);
-   } catch (const boost::system::system_error& error) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp certificate or private key",
-                            forge::exceptions::ctx("reason", error.code().message()));
+      return tls::make_context(make_tls_options(options));
+   } catch (const forge::exceptions::base& error) {
+      throw_invalid_options("invalid stcp TLS client options: " + error.message());
    }
 }
 
-void load_trust(asio::ssl::context& context, const security_options& security) {
-   if (!security.trusted_ca_pem.empty()) {
-      try {
-         context.add_certificate_authority(
-             asio::buffer(security.trusted_ca_pem.data(), security.trusted_ca_pem.size()));
-      } catch (const boost::system::system_error& error) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp trusted CA",
-                               forge::exceptions::ctx("reason", error.code().message()));
-      }
-      return;
+[[nodiscard]] tls::context_snapshot_ptr make_server_context(const server_options& options) {
+   validate_common(options.read_chunk_size);
+   try {
+      return tls::make_context(make_tls_options(options));
+   } catch (const forge::exceptions::base& error) {
+      throw_invalid_options("invalid stcp TLS server options: " + error.message());
    }
-   if (security.verify_peer) {
-      auto error = boost::system::error_code{};
-      context.set_default_verify_paths(error);
-      if (error) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load default TLS verify paths",
-                               forge::exceptions::ctx("reason", error.message()));
-      }
-   }
-}
-
-[[nodiscard]] std::shared_ptr<asio::ssl::context> make_client_context(const client_options& options) {
-   validate_identity_pair(options.certificate_pem, options.private_key_pem);
-   validate_common(options.read_chunk_size, options.alpn_protocols);
-   auto context = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_client);
-   context->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-                        asio::ssl::context::no_sslv3);
-   configure_tls_version(*context, options.tls13_only);
-   load_identity(*context, options.certificate_pem, options.private_key_pem);
-   load_trust(*context, options.security);
-   context->set_verify_mode(options.security.verify_peer ? asio::ssl::verify_peer : asio::ssl::verify_none);
-   return context;
-}
-
-[[nodiscard]] std::shared_ptr<asio::ssl::context> make_server_context(const server_options& options) {
-   if (options.certificate_pem.empty() || options.private_key_pem.empty()) {
-      throw_invalid_options("stcp server requires certificate and private key");
-   }
-   validate_common(options.read_chunk_size, options.alpn_protocols);
-   auto context = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_server);
-   context->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-                        asio::ssl::context::no_sslv3);
-   configure_tls_version(*context, options.tls13_only);
-   load_identity(*context, options.certificate_pem, options.private_key_pem);
-   load_trust(*context, options.security);
-   auto mode = asio::ssl::verify_none;
-   if (options.security.verify_peer || options.security.require_peer_certificate) {
-      mode = asio::ssl::verify_peer;
-      if (options.security.verify_peer || options.security.require_peer_certificate) {
-         mode |= asio::ssl::verify_fail_if_no_peer_cert;
-      }
-   }
-   context->set_verify_mode(mode);
-   if (options.security.require_peer_certificate && !options.security.verify_peer) {
-      SSL_CTX_set_verify(context->native_handle(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                         [](int, X509_STORE_CTX*) { return 1; });
-   }
-   return context;
 }
 
 [[nodiscard]] transport::endpoint from_asio_endpoint(const asio_tcp::endpoint& endpoint) {
@@ -261,158 +166,44 @@ void load_trust(asio::ssl::context& context, const security_options& security) {
                               .port = endpoint.port()};
 }
 
-[[nodiscard]] std::vector<std::uint8_t> certificate_der(X509* certificate) {
-   const auto length = i2d_X509(certificate, nullptr);
-   if (length <= 0) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "failed to size peer certificate DER");
-   }
-   auto out = std::vector<std::uint8_t>(static_cast<std::size_t>(length));
-   auto* cursor = out.data();
-   if (i2d_X509(certificate, &cursor) != length) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "failed to write peer certificate DER");
-   }
-   return out;
-}
-
-[[nodiscard]] std::optional<peer_certificate> read_peer_certificate(native_stream& stream) {
-   auto certificate = x509_ptr{SSL_get1_peer_certificate(stream.native_handle())};
-   if (!certificate) {
-      return std::nullopt;
-   }
-   auto der = certificate_der(certificate.get());
-   auto parsed = crypto::pki::x509::certificate::from_der(der);
-   return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
-}
-
-[[nodiscard]] peer_certificate peer_certificate_from_x509(X509* certificate) {
-   auto der = certificate_der(certificate);
-   auto parsed = crypto::pki::x509::certificate::from_der(der);
-   return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
-}
-
-[[nodiscard]] bool same_der(std::span<const std::uint8_t> left, std::span<const std::uint8_t> right) {
-   return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
-}
-
-[[nodiscard]] certificate_chain read_peer_certificate_chain(native_stream& stream) {
-   auto out = certificate_chain{};
-   if (auto leaf = read_peer_certificate(stream)) {
-      out.certificates.push_back(std::move(*leaf));
-   }
-   auto* chain = SSL_get_peer_cert_chain(stream.native_handle());
-   if (chain == nullptr) {
-      return out;
-   }
-   const auto count = sk_X509_num(chain);
-   for (auto index = 0; index < count; ++index) {
-      auto* certificate = sk_X509_value(chain, index);
-      if (certificate == nullptr) {
-         continue;
+void configure_tls_client_stream(native_stream& stream, const client_options& options, std::string_view remote_host,
+                                 const tls::context_snapshot& context) {
+   try {
+      tls::configure_client_stream(
+          stream.native_handle(), context,
+          {.sni = options.sni, .endpoint_host = std::string{remote_host}, .server_name = options.server_name});
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_invalid_options("invalid stcp TLS client stream options: " + error.message());
       }
-      auto next = peer_certificate_from_x509(certificate);
-      const auto duplicate_leaf = !out.certificates.empty() && same_der(out.certificates.front().der, next.der);
-      if (!duplicate_leaf) {
-         out.certificates.push_back(std::move(next));
-      }
-   }
-   return out;
-}
-
-void verify_host_name(const peer_certificate& certificate, std::string_view host) {
-   if (host.empty()) {
-      return;
-   }
-   const auto* cursor = certificate.der.data();
-   auto parsed = x509_ptr{d2i_X509(nullptr, &cursor, static_cast<long>(certificate.der.size()))};
-   if (!parsed) {
-      throw_verification_failed("failed to parse peer certificate for host verification");
-   }
-
-   auto address_error = boost::system::error_code{};
-   (void)boost::asio::ip::make_address(std::string{host}, address_error);
-   const auto ok = address_error ? X509_check_host(parsed.get(), host.data(), host.size(), 0, nullptr)
-                                 : X509_check_ip_asc(parsed.get(), std::string{host}.c_str(), 0);
-   if (ok != 1) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate host mismatch",
-                            forge::exceptions::ctx("host", std::string{host}));
+      throw;
    }
 }
 
-void verify_peer(native_stream& stream, const security_options& security, std::string_view expected_host) {
-   if (!security.verify_peer && !security.expected_sha256_fingerprint && !security.verifier) {
-      return;
-   }
-   auto chain = read_peer_certificate_chain(stream);
-   if (chain.certificates.empty()) {
-      throw_verification_failed("stcp peer did not present certificate");
-   }
-   const auto& certificate = chain.certificates.front();
-   if (security.verify_peer) {
-      verify_host_name(certificate, expected_host);
-   }
-   if (security.expected_sha256_fingerprint) {
-      const auto actual = normalize_fingerprint(certificate.sha256_fingerprint);
-      const auto expected = normalize_fingerprint(*security.expected_sha256_fingerprint);
-      if (actual != expected) {
-         FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate fingerprint mismatch",
-                               forge::exceptions::ctx("actual", actual));
+void classify_tls_handshake_failure(native_stream& stream, const tls::context_snapshot& context) {
+   try {
+      tls::classify_handshake_failure(stream.native_handle(), context);
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_verification_failed("stcp TLS peer verification failed: " + error.message());
       }
-   }
-   if (security.verifier && !security.verifier(chain)) {
-      throw_verification_failed("stcp peer verifier rejected certificate");
+      throw;
    }
 }
 
-[[nodiscard]] std::optional<std::string> sni_host(const client_options& options, std::string_view remote_host) {
-   switch (options.sni) {
-   case sni_policy::endpoint_host:
-      if (!options.server_name.empty()) {
-         return options.server_name;
+void validate_tls_peer(native_stream& stream, const tls::context_snapshot& context, const security_options& security,
+                       std::string_view expected_host) {
+   try {
+      tls::validate_peer(stream.native_handle(), context,
+                         {.expected_host = security.verify_peer ? std::string{expected_host} : std::string{},
+                          .expected_sha256_fingerprint = security.expected_sha256_fingerprint,
+                          .verifier = security.verifier});
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_verification_failed("stcp TLS peer verification failed: " + error.message());
       }
-      if (!remote_host.empty()) {
-         return std::string{remote_host};
-      }
-      return std::nullopt;
-   case sni_policy::explicit_name:
-      if (options.server_name.empty()) {
-         throw_invalid_options("stcp explicit SNI requires server_name");
-      }
-      return options.server_name;
-   case sni_policy::disabled:
-      return std::nullopt;
+      throw;
    }
-   throw_invalid_options("unknown stcp SNI policy");
-}
-
-void configure_client_stream(native_stream& stream, const client_options& options, std::string_view remote_host) {
-   const auto host = sni_host(options, remote_host);
-   if (host && !host->empty()) {
-      if (SSL_set_tlsext_host_name(stream.native_handle(), host->c_str()) != 1) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp SNI");
-      }
-   }
-   const auto alpn = encode_alpn(options.alpn_protocols);
-   if (!alpn.empty() &&
-       SSL_set_alpn_protos(stream.native_handle(), alpn.data(), static_cast<unsigned>(alpn.size())) != 0) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp ALPN");
-   }
-}
-
-void configure_server_context(asio::ssl::context& context, const server_options& options) {
-   if (!options.alpn_protocols.empty()) {
-      SSL_CTX_set_alpn_select_cb(context.native_handle(), select_alpn,
-                                 const_cast<std::vector<std::string>*>(&options.alpn_protocols));
-   }
-}
-
-[[nodiscard]] std::string selected_alpn(native_stream& stream) {
-   const auto* data = static_cast<const unsigned char*>(nullptr);
-   auto length = unsigned{};
-   SSL_get0_alpn_selected(stream.native_handle(), &data, &length);
-   if (data == nullptr || length == 0) {
-      return {};
-   }
-   return std::string{reinterpret_cast<const char*>(data), length};
 }
 
 void validate_handshake_timeout(std::chrono::milliseconds timeout) {
@@ -494,8 +285,7 @@ struct io_gates {
 
 boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stream,
                                              asio::ssl::stream_base::handshake_type type,
-                                             std::optional<std::chrono::milliseconds> timeout,
-                                             std::stop_token stop) {
+                                             std::optional<std::chrono::milliseconds> timeout, std::stop_token stop) {
    auto strand = asio::make_strand(stream->lowest_layer().get_executor());
    co_await asio::co_spawn(
        strand,
@@ -563,7 +353,7 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
 
 class stream_model final : public transport::detail::stream_concept {
  public:
-   stream_model(std::shared_ptr<native_stream> stream, std::shared_ptr<asio::ssl::context> context,
+   stream_model(std::shared_ptr<native_stream> stream, tls::context_snapshot_ptr context,
                 asio::strand<asio::any_io_executor> strand, std::shared_ptr<io_gates> gates,
                 std::size_t read_chunk_size, std::int64_t id)
        : stream_(std::move(stream)), context_(std::move(context)), strand_(std::move(strand)), gates_(std::move(gates)),
@@ -678,7 +468,7 @@ class stream_model final : public transport::detail::stream_concept {
 
  private:
    std::shared_ptr<native_stream> stream_;
-   std::shared_ptr<asio::ssl::context> context_;
+   tls::context_snapshot_ptr context_;
    asio::strand<asio::any_io_executor> strand_;
    std::shared_ptr<io_gates> gates_;
    std::size_t read_chunk_size_ = 64 * 1024;
@@ -689,7 +479,7 @@ class stream_model final : public transport::detail::stream_concept {
 } // namespace
 
 struct connection::impl final : std::enable_shared_from_this<connection::impl> {
-   impl(std::shared_ptr<native_stream> stream_value, std::shared_ptr<asio::ssl::context> context_value,
+   impl(std::shared_ptr<native_stream> stream_value, tls::context_snapshot_ptr context_value,
         std::size_t read_chunk_size_value)
        : stream(std::move(stream_value)), context(std::move(context_value)),
          strand(asio::make_strand(stream->lowest_layer().get_executor())), gates(std::make_shared<io_gates>()),
@@ -703,11 +493,11 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       if (error) {
          throw_io_error("failed to read stcp remote endpoint", error);
       }
-      chain_value = read_peer_certificate_chain(*stream);
+      chain_value = tls::extract_peer_certificate_chain(stream->native_handle());
       if (!chain_value.certificates.empty()) {
          certificate_value = chain_value.certificates.front();
       }
-      alpn_value = ::forge::net::stcp::selected_alpn(*stream);
+      alpn_value = tls::selected_alpn(stream->native_handle());
    }
 
    [[nodiscard]] bool valid() const noexcept {
@@ -854,9 +644,8 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       auto current = detach_stream();
       auto transport_stream = transport::detail::stream_access::make(
           std::make_shared<stream_model>(std::move(current), context, strand, gates, read_chunk_size, id));
-      return transport::stream_connection{.local_endpoint = local_value,
-                                          .remote_endpoint = remote_value,
-                                          .stream = std::move(transport_stream)};
+      return transport::stream_connection{
+          .local_endpoint = local_value, .remote_endpoint = remote_value, .stream = std::move(transport_stream)};
    }
 
    [[nodiscard]] bool request_terminal(connection_state requested) noexcept {
@@ -920,7 +709,7 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
    }
 
    std::shared_ptr<native_stream> stream;
-   std::shared_ptr<asio::ssl::context> context;
+   tls::context_snapshot_ptr context;
    asio::strand<asio::any_io_executor> strand;
    std::shared_ptr<io_gates> gates;
    std::size_t read_chunk_size = 64 * 1024;
@@ -936,8 +725,8 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
 };
 
 connection::connection() = default;
-connection::connection(native_token, std::shared_ptr<native_stream> stream,
-                       std::shared_ptr<boost::asio::ssl::context> context, std::size_t read_chunk_size)
+connection::connection(native_token, std::shared_ptr<native_stream> stream, tls::context_snapshot_ptr context,
+                       std::size_t read_chunk_size)
     : impl_(std::make_shared<impl>(std::move(stream), std::move(context), read_chunk_size)) {}
 connection::~connection() = default;
 connection::connection(connection&&) noexcept = default;
@@ -1061,21 +850,17 @@ boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, 
    }
    const auto remote = source.remote_endpoint();
    auto context = make_client_context(options);
-   auto stream = std::make_shared<native_stream>(std::move(source).release_socket(), *context);
-   configure_client_stream(*stream, options, remote.host);
+   auto stream = tls::make_asio_stream(context, std::move(source).release_socket());
+   configure_tls_client_stream(*stream, options, remote.host, *context);
 
    try {
       co_await async_handshake(stream, asio::ssl::stream_base::client, timeout, stop);
    } catch (const exceptions::handshake_failed&) {
-      const auto verify_result = SSL_get_verify_result(stream->native_handle());
-      if (options.security.verify_peer && verify_result != X509_V_OK) {
-         FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp server certificate verification failed",
-                               forge::exceptions::ctx("reason", X509_verify_cert_error_string(verify_result)));
-      }
+      classify_tls_handshake_failure(*stream, *context);
       throw;
    }
    const auto expected_host = options.server_name.empty() ? remote.host : options.server_name;
-   verify_peer(*stream, options.security, expected_host);
+   validate_tls_peer(*stream, *context, options.security, expected_host);
    co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 
@@ -1105,10 +890,9 @@ boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, 
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid source tcp connection");
    }
    auto context = make_server_context(options);
-   configure_server_context(*context, options);
-   auto stream = std::make_shared<native_stream>(std::move(source).release_socket(), *context);
+   auto stream = tls::make_asio_stream(context, std::move(source).release_socket());
    co_await async_handshake(stream, asio::ssl::stream_base::server, timeout, stop);
-   verify_peer(*stream, options.security, {});
+   validate_tls_peer(*stream, *context, options.security, {});
    co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 

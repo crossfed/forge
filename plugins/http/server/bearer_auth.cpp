@@ -5,14 +5,13 @@ module;
 
 #include <algorithm>
 #include <cctype>
-#include <cstddef>
-#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
 
 module forge.plugins.http.server.bearer_auth;
 
+import forge.crypto.core.constant_time;
 import forge.net.http.types;
 import forge.plugins.http.server.exceptions;
 
@@ -49,17 +48,6 @@ std::string_view bearer_token(const middleware_request& request) noexcept {
       return {};
    }
    return token;
-}
-
-bool constant_time_equal(const forge::crypto::digest::sha256& left,
-                         const forge::crypto::digest::sha256& right) noexcept {
-   auto difference = std::uint8_t{};
-   const auto left_bytes = left.to_uint8_span();
-   const auto right_bytes = right.to_uint8_span();
-   for (auto index = std::size_t{}; index < left_bytes.size(); ++index) {
-      difference = static_cast<std::uint8_t>(difference | (left_bytes[index] ^ right_bytes[index]));
-   }
-   return difference == 0U;
 }
 
 middleware_response unauthorized() {
@@ -99,7 +87,8 @@ middleware_descriptor bearer_auth(bearer_auth_options options) {
           const auto candidate = hash_bearer_token(token);
           auto accepted = false;
           for (const auto& expected : hashes) {
-             accepted = constant_time_equal(candidate, expected) || accepted;
+             accepted = forge::crypto::core::constant_time_equal(candidate.to_uint8_span(), expected.to_uint8_span()) ||
+                        accepted;
           }
           if (!accepted) {
              co_return unauthorized();

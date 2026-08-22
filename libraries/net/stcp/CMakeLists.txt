@@ -14,9 +14,8 @@ target_link_libraries(
       forge_exceptions
       forge_net_transport
       forge_net_tcp
-      forge_crypto_pki
+      forge_net_tls
       Boost::asio
-      OpenSSL::SSL
    PRIVATE
       forge_asio
 )

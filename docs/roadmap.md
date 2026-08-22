@@ -86,6 +86,14 @@ plugins, telemetry and compatibility layers должны быть пригодн
 - [CLI Client Foundation v1](iterations/forge-cli-client-foundation-v1.md):
   CLI11-backed nested commands with Forge-owned public types;
   Boost.Program_options remains limited to config argv ingestion.
+- [Contract Tooling Family v1](iterations/forge-contract-tooling-family-v1.md):
+  host ABI generation, attributes, validation, manifests and contract testing
+  live in leaf libraries under `forge.tooling.*`; the guest Contract API and
+  Contract SDK identity remain unchanged.
+- [VM WASM Backend Family v1](iterations/forge-vm-wasm-backend-family-v1.md):
+  accepted clean-breaking split of the current EOS VM lane into
+  `forge.vm.wasm.interpret`, reserving sibling `forge.vm.wasm.optimizing` for
+  the future EOS VM OC backend without an aggregate VM target.
 - [Secret Provider](iterations/fcl-secret-provider-v1.md): neutral
   infrastructure plugin for local secret material, redacted source loading and
   purpose-gated AES-GCM/HKDF operations.

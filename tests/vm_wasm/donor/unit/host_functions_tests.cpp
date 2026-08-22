@@ -1,12 +1,12 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.backend;
-#define FORGE_VM_WASM_TEST_USES_BACKEND
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.backend;
+#define FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE host_functions_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE host_functions_tests
 
 #include <algorithm>
 #include <vector>
@@ -17,7 +17,7 @@ import forge.vm.wasm.backend;
 
 
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 // host functions that are C-style functions
 // wasm hex
@@ -200,8 +200,8 @@ struct init_backend {
    }
    decltype(auto) get_context() { return bkend.get_context(); }
 
-   using rhf_t     = forge::vm::wasm::registered_host_functions<Host, execution_interface, cnv<Host>>;
-   using backend_t = forge::vm::wasm::backend<rhf_t, Impl>;
+   using rhf_t     = forge::vm::wasm::interpret::registered_host_functions<Host, execution_interface, cnv<Host>>;
+   using backend_t = forge::vm::wasm::interpret::backend<rhf_t, Impl>;
    wasm_allocator wa;
    backend_t bkend{host_functions_tests_1_code, &wa};
    Host * _host;
@@ -354,8 +354,8 @@ BACKEND_TEST_CASE( "Test host function results", "[host_functions_results]" ) {
 
 BACKEND_TEST_CASE( "Test C-style host function system", "[C-style_host_functions_tests]") {
    wasm_allocator wa;
-   using rhf_t     = forge::vm::wasm::registered_host_functions<standalone_function_t, execution_interface, cnv<standalone_function_t>>;
-   using backend_t = forge::vm::wasm::backend<rhf_t, TestType>;
+   using rhf_t     = forge::vm::wasm::interpret::registered_host_functions<standalone_function_t, execution_interface, cnv<standalone_function_t>>;
+   using backend_t = forge::vm::wasm::interpret::backend<rhf_t, TestType>;
    rhf_t::add<&c_style_host_function_0>("env", "c_style_host_function_0");
    rhf_t::add<&c_style_host_function_1>("env", "c_style_host_function_1");
    rhf_t::add<&c_style_host_function_2>("env", "c_style_host_function_2");

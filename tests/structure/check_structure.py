@@ -10,7 +10,7 @@ from pathlib import Path
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
 LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
-SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "tests")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests", "tests", "tools")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -22,8 +22,39 @@ CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^\s*(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
-VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
+VM_WASM_INTERPRET_EXPORT = re.compile(r"\bFORGE_VM_WASM_INTERPRET_EXPORT\b")
 UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
+LEGACY_VM_WASM_SOURCE_IDENTITIES = (
+   (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
+   (re.compile(r"(?<![/A-Za-z0-9_])vm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"\bForge::vm_wasm_softfloat_internal\b"), "legacy SoftFloat export identity"),
+   (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
+   (re.compile(r"forge\.vm\.wasm(?!\.interpret(?:\b|:))"), "legacy VM module identity"),
+   (re.compile(r"forge::vm::wasm(?!::interpret(?:\b|::))"), "legacy VM namespace identity"),
+   (re.compile(r"forge/vm/wasm/(?!interpret/)"), "legacy VM public include identity"),
+   (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
+)
+LEGACY_VM_WASM_CMAKE_IDENTITIES = (
+   (re.compile(r"\bforge_vm_wasm(?!_interpret(?:_|\b))"), "legacy VM target identity"),
+   (re.compile(r"(?<![/A-Za-z0-9_])vm_wasm(?!_interpret(?:_|\b))"), "legacy VM component identity"),
+   (re.compile(r"forge/internal/vm_wasm/softfloat"), "legacy SoftFloat install path"),
+   (re.compile(r"libraries/vm/wasm/include"), "legacy VM include root"),
+   (re.compile(r"\bFORGE_VM_WASM(?!_INTERPRET(?:_|\b))"), "legacy VM macro identity"),
+)
+LEGACY_CONTRACT_TOOLING_SOURCE_IDENTITIES = (
+   (re.compile(r"\bforge_contract_(?:abi|attributes|validation|manifest|testing)\b"), "legacy Contract Tooling target identity"),
+   (re.compile(r"forge\.contract\.(?:abi|attributes|validation|manifest|testing)(?:\b|:)"), "legacy Contract Tooling module identity"),
+   (re.compile(r"forge::contract::(?:abi|attributes|validation|manifest|testing)(?:\b|::)"), "legacy Contract Tooling namespace identity"),
+   (re.compile(r"forge/contract/(?:abi|attributes|validation|manifest|testing)(?:\b|/)"), "legacy Contract Tooling include identity"),
+)
+LEGACY_CONTRACT_TOOLING_CMAKE_IDENTITIES = (
+   (re.compile(r"\bforge_contract_(?:abi|attributes|validation|manifest|testing)(?:\b|_)"), "legacy Contract Tooling target identity"),
+   (re.compile(r"\bForge::forge_contract_(?:abi|attributes|validation|manifest|testing)\b"), "legacy Contract Tooling export identity"),
+   (re.compile(r"libraries/contract/(?:abi|attributes|validation|manifest|testing)(?:\b|/)"), "legacy Contract Tooling library path"),
+   (re.compile(r"tests/package_contract_(?:abi|attributes|validation|manifest|testing)_component"), "legacy Contract Tooling package test path"),
+   (re.compile(r"\bFORGE_ENABLE_CONTRACT_TOOLING\b"), "legacy Contract Tooling option"),
+   (re.compile(r"\bForge_BUILT_WITH_CONTRACT_TOOLING\b"), "legacy Contract Tooling package variable"),
+)
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -150,6 +181,1016 @@ def check_pairing(root: Path, errors: list[str]) -> None:
          )
 
 
+def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
+   tls_root = root / "libraries" / "net" / "tls"
+   required = (
+      tls_root / "CMakeLists.txt",
+      tls_root / "context.cpp",
+      tls_root / "include" / "forge" / "net" / "tls" / "options.cppm",
+      tls_root / "include" / "forge" / "net" / "tls" / "context.cppm",
+      tls_root / "include" / "forge" / "net" / "tls" / "exceptions.cppm",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_net_tls ownership file is required")
+
+   context_source = (tls_root / "context.cpp").read_text(errors="ignore")
+   for required_token in (
+      "SSL_CTX_set_min_proto_version",
+      "SSL_CTX_check_private_key",
+      "X509_STORE_add_cert",
+      "SSL_CTX_add_client_CA",
+      "parse_trust_anchor_bundle",
+      "OPENSSL_cleanse",
+      "SSL_CTX_set_alpn_select_cb",
+      "client_alpn_wire",
+      "require_peer_certificate",
+      "SSL_set_tlsext_host_name",
+      "SSL_get1_peer_certificate",
+      "X509_check_host",
+      "validate_peer",
+      "context_provider::replace",
+   ):
+      if required_token not in context_source:
+         errors.append(f"libraries/net/tls/context.cpp: missing TLS context invariant {required_token}")
+
+   duplicated_context_setup = (
+      "asio::ssl::context::tls_client",
+      "asio::ssl::context::tls_server",
+      ".use_certificate_chain(",
+      ".use_private_key(",
+      ".add_certificate_authority(",
+      ".set_default_verify_paths(",
+      "SSL_CTX_set_min_proto_version(",
+      "SSL_CTX_set_max_proto_version(",
+      "SSL_CTX_set_alpn_select_cb(",
+   )
+   for relative in ("libraries/net/stcp/connection.cpp", "libraries/net/http/connection.cpp"):
+      source = (root / relative).read_text(errors="ignore")
+      for token in duplicated_context_setup:
+         if token in source:
+            errors.append(f"{relative}: TLS context setup belongs to forge_net_tls ({token})")
+
+   expected_dependencies = {
+      "libraries/net/stcp/CMakeLists.txt": "forge_net_tls",
+      "libraries/net/http/CMakeLists.txt": "forge_net_tls",
+      "libraries/net/websocket/CMakeLists.txt": "forge_net_tls",
+   }
+   for relative, dependency in expected_dependencies.items():
+      if dependency not in (root / relative).read_text(errors="ignore"):
+         errors.append(f"{relative}: TLS consumer must link {dependency}")
+
+   if "forge_crypto_pki" not in (tls_root / "CMakeLists.txt").read_text(errors="ignore"):
+      errors.append("libraries/net/tls/CMakeLists.txt: TLS peer extraction must link forge_crypto_pki")
+
+   http_server_source = (root / "libraries/net/http/server.cpp").read_text(errors="ignore")
+   for token in (
+      "template <typename Stream>",
+      "server_session_base",
+      "tls_context_provider->snapshot()",
+      "async_handshake(asio::ssl::stream_base::server",
+      "max_pending_tls_handshakes",
+      "reserve_tls_handshake",
+      "release_tls_handshake",
+      "cancel_pending_tls_handshakes",
+      "wait_until_tls_handshakes_complete",
+      "stream_.async_read_some",
+      "tls_snapshot_",
+      "disarm_stream_expiry",
+      "close_after_response",
+      "stream.async_shutdown(asio::as_tuple",
+      "cancel_tls_shutdown_at_deadline",
+      "run_tls_shutdown(stream) || cancel_tls_shutdown_at_deadline(stream, deadline)",
+   ):
+      if token not in http_server_source:
+         errors.append(f"libraries/net/http/server.cpp: TLS server invariant is missing ({token})")
+   if "stream_.socket().async_read_some" in http_server_source:
+      errors.append("libraries/net/http/server.cpp: disconnect monitor must read the outer HTTP/TLS stream")
+   if "async_wait([&stream" in http_server_source:
+      errors.append("libraries/net/http/server.cpp: TLS shutdown deadline must not outlive the stream by reference")
+
+   http_server_module = (root / "libraries/net/http/include/forge/net/http/server.cppm").read_text(errors="ignore")
+   for token in ("forge.net.tls.context", "tls_context_provider", "handshake_timeout", "max_pending_tls_handshakes"):
+      if token not in http_server_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/server.cppm: TLS server option is missing ({token})")
+
+   websocket_module = (root / "libraries/net/websocket/include/forge/net/websocket/connection.cppm").read_text(errors="ignore")
+   websocket_source = (root / "libraries/net/websocket/connection.cpp").read_text(errors="ignore")
+   for path, source, token in (
+      ("libraries/net/websocket/include/forge/net/websocket/connection.cppm", websocket_module,
+       "context_snapshot_ptr tls_context_snapshot"),
+      ("libraries/net/websocket/connection.cpp", websocket_source, "tls_context_snapshot"),
+   ):
+      if token not in source:
+         errors.append(f"{path}: TLS WebSocket handoff must retain the accepted context snapshot")
+
+   plugin_types = (root / "plugins/http/server/include/forge/plugins/http/server/types.cppm").read_text(errors="ignore")
+   plugin_config = (root / "plugins/http/server/config.cpp").read_text(errors="ignore")
+   plugin_source = (root / "plugins/http/server/plugin.cpp").read_text(errors="ignore")
+   plugin_impl = (root / "plugins/http/server/plugin_impl.cpp").read_text(errors="ignore")
+   tls_secret_material_header = (
+      root / "plugins/http/server/details/tls_secret_material.hxx").read_text(errors="ignore")
+   tls_secret_material_source = (root / "plugins/http/server/tls_secret_material.cpp").read_text(errors="ignore")
+   plugin_api = (root / "plugins/http/server/include/forge/plugins/http/server/api.cppm").read_text(errors="ignore")
+   plugin_impl_header = (root / "plugins/http/server/details/plugin_impl.hxx").read_text(errors="ignore")
+   for path, source, tokens in (
+      ("plugins/http/server/include/forge/plugins/http/server/types.cppm", plugin_types,
+       ("tls.mode", "tls.certificate-chain-secret", "tls.private-key-secret", "tls.client-ca-secret",
+        "tls.handshake-timeout-ms", "tls.max-pending-handshakes")),
+      ("plugins/http/server/config.cpp", plugin_config,
+       ("address.is_loopback()", 'value.bind_address == "localhost"', "validate_tls_config")),
+      ("plugins/http/server/plugin.cpp", plugin_source,
+       ("settings.tls_mode_value != tls_mode::disabled", "make_tls_context_provider", "lifecycle_generation")),
+      ("plugins/http/server/plugin_impl.cpp", plugin_impl,
+       ("http.server.tls.certificate-chain", "http.server.tls.private-key", "http.server.tls.client-ca",
+        "provider->replace(std::move(replacement))", "lifecycle_generation != reload_generation",
+        '"details/tls_secret_material.hxx"', "tls_secret_material", "clear_tls_context_options", "secure_erase")),
+      ("plugins/http/server/details/tls_secret_material.hxx", tls_secret_material_header,
+       ("struct tls_secret_material", "~tls_secret_material();",
+        "operator=(tls_secret_material&& other) noexcept;")),
+      ("plugins/http/server/tls_secret_material.cpp", tls_secret_material_source,
+       ("tls_secret_material::~tls_secret_material()", "tls_secret_material::operator=(tls_secret_material&& other)",
+        "secure_erase")),
+      ("plugins/http/server/details/plugin_impl.hxx", plugin_impl_header,
+       ("std::shared_ptr<forge::plugins::crypto::secrets::api>", "lifecycle_generation")),
+      ("plugins/http/server/include/forge/plugins/http/server/api.cppm", plugin_api,
+       ("reload_tls", 'FORGE_API_CONTRACT("forge.plugins.http.server", 2, 0)')),
+   ):
+      for token in tokens:
+         if token not in source:
+            errors.append(f"{path}: HTTP Server plugin TLS invariant is missing ({token})")
+
+   plugin_cmake = (root / "plugins/http/server/CMakeLists.txt").read_text(errors="ignore")
+   if "forge_plugins_crypto_secrets" not in plugin_cmake:
+      errors.append("plugins/http/server/CMakeLists.txt: TLS-enabled HTTP Server plugin must link Crypto Secrets")
+   if "tls_secret_material.cpp" not in plugin_cmake:
+      errors.append("plugins/http/server/CMakeLists.txt: private TLS secret material implementation is not compiled")
+   if "struct tls_secret_material" in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: private TLS secret material needs its exact details pair")
+   if "load_tls_context_options" in plugin_impl or "co_return forge::net::tls::context_options" in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: TLS secret material must not escape in context_options")
+
+   tls_http_tests = (root / "tests/tls/http_server_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_accepts_tls_1_3_before_parsing_http",
+      "http_server_mutual_tls_verifies_client_chain",
+      "http_server_tls_has_no_plaintext_fallback_and_bounds_pending_handshakes",
+      "http_server_tls_rotation_keeps_established_http_sessions_usable",
+      "http_server_shutdown_cancels_pending_tls_handshakes_without_waiting_for_close_notify",
+      "http_server_tls_normal_close_sends_close_notify",
+      "http_server_tls_close_joins_deadline_handlers_before_session_release",
+      "http_server_tls_reciprocates_client_close_notify_while_keep_alive_idle",
+      "http_server_tls_reciprocates_client_close_notify_before_first_request",
+      "http_server_tls_websocket_handoff_retains_the_connection_snapshot",
+      "http_server_tls_disconnect_cancels_streaming_body_owner",
+      "http_server_mutual_tls_loads_every_certificate_from_trust_anchor_bundle",
+      "tls_context_rejects_malformed_trailing_trust_anchor_bundle",
+   ):
+      if token not in tls_http_tests:
+         errors.append(f"tests/tls/http_server_tests.cpp: missing HTTP TLS regression ({token})")
+
+   plugin_tests = (root / "tests/plugins/plugins_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_plugin_tls_reload_preserves_live_context_and_cannot_publish_after_shutdown",
+      "http_server_plugin_tls_reload_rejects_malformed_material_and_keeps_live_context",
+   ):
+      if token not in plugin_tests:
+         errors.append(f"tests/plugins/plugins_tests.cpp: missing TLS reload regression ({token})")
+
+   http_source = (root / "libraries/net/http/connection.cpp").read_text(errors="ignore")
+   for token in (
+      "tls::context_provider",
+      "tls_context_provider.snapshot()",
+      "tls::protocol_policy::system_default",
+      "tls::make_beast_stream",
+      "tls::configure_client_stream",
+      "tls::validate_peer",
+   ):
+      if token not in http_source:
+         errors.append(f"libraries/net/http/connection.cpp: HTTPS TLS integration is incomplete ({token})")
+
+   stcp_interface = (root / "libraries/net/stcp/include/forge/net/stcp/connection.cppm").read_text(errors="ignore")
+   if "export import forge.net.tls.context" in stcp_interface:
+      errors.append("libraries/net/stcp/include/forge/net/stcp/connection.cppm: TLS is not an STCP public module")
+
+   stcp_source = (root / "libraries/net/stcp/connection.cpp").read_text(errors="ignore")
+   for token in (
+      "tls::make_asio_stream",
+      "tls::configure_client_stream",
+      "tls::validate_peer",
+      "tls::extract_peer_certificate_chain",
+      "tls::selected_alpn",
+   ):
+      if token not in stcp_source:
+         errors.append(f"libraries/net/stcp/connection.cpp: TLS delegation is incomplete ({token})")
+
+   for relative in ("libraries/net/stcp/connection.cpp", "libraries/net/http/connection.cpp"):
+      source = (root / relative).read_text(errors="ignore")
+      for token in (
+         "native_context(",
+         "SSL_set_tlsext_host_name",
+         "SSL_set_alpn_protos",
+         "SSL_get0_alpn_selected",
+         "SSL_get1_peer_certificate",
+         "SSL_get_peer_cert_chain",
+         "SSL_get_verify_result",
+         "X509_check_host",
+         "X509_check_ip_asc",
+         "host_name_verification",
+      ):
+         if token in source:
+            errors.append(f"{relative}: TLS session mechanics belong to forge_net_tls ({token})")
+
+   package_components = {
+      "tests/package_net_tls_component/CMakeLists.txt": ("net_tls",),
+      "tests/package_net_stcp_component/CMakeLists.txt": ("net_stcp",),
+      "tests/package_net_http_component/CMakeLists.txt": ("asio", "net_http"),
+   }
+   for relative, components in package_components.items():
+      source = (root / relative).read_text(errors="ignore")
+      package = re.search(r"find_package\s*\(\s*Forge\b(?P<body>.*?)\)", source, re.DOTALL)
+      requested = set(re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", package.group("body"))) if package else set()
+      for component in components:
+         if component not in requested:
+            errors.append(f"{relative}: relocated package consumer must request {component}")
+
+   if "tls::context_provider" not in http_source or "tls_context_provider.snapshot()" not in http_source:
+      errors.append("libraries/net/http/connection.cpp: HTTPS client must acquire forge_net_tls snapshots")
+
+   tls_context_module = (tls_root / "include" / "forge" / "net" / "tls" / "context.cppm").read_text(errors="ignore")
+   tls_context_source = (tls_root / "context.cpp").read_text(errors="ignore")
+   for token in (
+      "make_asio_stream",
+      "make_beast_stream",
+      "context_for_stream",
+      "context_snapshot_ptr snapshot",
+   ):
+      if token not in tls_context_module:
+         errors.append(f"libraries/net/tls/include/forge/net/tls/context.cppm: immutable stream factory is incomplete ({token})")
+   if "SSL_new(" in tls_context_source or "new_native_stream_handle" in tls_context_module:
+      errors.append("forge_net_tls: TLS stream factory must not transfer raw SSL handle ownership")
+   if "make_stream" in tls_context_module:
+      errors.append("forge_net_tls: TLS stream factory must not accept arbitrary stream types")
+   private_context_snapshot = tls_context_module.partition("private:")[2]
+   if "context_for_stream" not in private_context_snapshot:
+      errors.append("libraries/net/tls/include/forge/net/tls/context.cppm: TLS context access must remain private")
+
+   tls_tests = (root / "tests" / "tls" / "tls_tests.cpp").read_text(errors="ignore")
+   for token in ("stream_factory_creates_distinct_connection_ssl_handles", "make_asio_stream"):
+      if token not in tls_tests:
+         errors.append(f"tests/tls/tls_tests.cpp: TLS stream immutability regression coverage is incomplete ({token})")
+
+   tls_package_main = (root / "tests" / "package_net_tls_component" / "main.cpp").read_text(errors="ignore")
+   if "import forge.net.tls.exceptions;" not in tls_package_main:
+      errors.append("tests/package_net_tls_component/main.cpp: net_tls package consumer must import TLS exceptions directly")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("libraries/net/tls/include", "forge_net_tls", "net_tls"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_net_tls package registration is incomplete ({token})")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   for token in ("net_tls", '_forge_add_component(net_tls)', '"net_tls" IN_LIST _FORGE_COMPONENTS'):
+      if token not in package_config:
+         errors.append(f"cmake/ForgeConfig.cmake.in: forge_net_tls package registration is incomplete ({token})")
+   if 'elseif("${component}" STREQUAL "net_tls")\n         _forge_add_component(exceptions)\n         _forge_add_component(crypto_pki)' not in package_config:
+      errors.append("cmake/ForgeConfig.cmake.in: net_tls package component must resolve crypto_pki")
+   if 'elseif("${component}" STREQUAL "net_websocket")\n         _forge_add_component(exceptions)\n         _forge_add_component(asio)\n         _forge_add_component(net_tls)' not in package_config:
+      errors.append("cmake/ForgeConfig.cmake.in: net_websocket package component must resolve net_tls")
+   if 'elseif("${component}" STREQUAL "plugins_http_server")' not in package_config or \
+      '_forge_add_component(plugins_crypto_secrets)' not in package_config.partition('elseif("${component}" STREQUAL "plugins_http_server")')[2].partition('elseif("${component}" STREQUAL "plugins_log_otlp")')[0]:
+      errors.append("cmake/ForgeConfig.cmake.in: plugins_http_server package component must resolve Crypto Secrets")
+
+
+def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
+   required = (
+      "libraries/net/http/cookie.cpp",
+      "libraries/net/http/assets.cpp",
+      "libraries/net/http/include/forge/net/http/cookie.cppm",
+      "libraries/net/http/include/forge/net/http/assets.cppm",
+   )
+   for relative in required:
+      if not (root / relative).exists():
+         errors.append(f"{relative}: HTTP cookie/assets ownership file is required")
+
+   http_cmake = (root / "libraries/net/http/CMakeLists.txt").read_text(errors="ignore")
+   for token in ("cookie.cpp", "assets.cpp", "forge_target_modules_at(forge_net_http net/http)"):
+      if token not in http_cmake:
+         errors.append(f"libraries/net/http/CMakeLists.txt: HTTP cookie/assets target registration is incomplete ({token})")
+
+   cookie_module = (root / "libraries/net/http/include/forge/net/http/cookie.cppm").read_text(errors="ignore")
+   cookie_source = (root / "libraries/net/http/cookie.cpp").read_text(errors="ignore")
+   for token in (
+      "export module forge.net.http.cookie",
+      "parse_cookie_header",
+      "format_cookie_header",
+      "parse_set_cookie_header",
+      "format_set_cookie",
+      "append_set_cookie",
+      "same_site",
+   ):
+      if token not in cookie_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/cookie.cppm: cookie API is incomplete ({token})")
+   for token in ("reject_controls", "validate_domain", "label_ends_hyphen", "SameSite=None requires Secure",
+                 "cookie SameSite value is invalid"):
+      if token not in cookie_source:
+         errors.append(f"libraries/net/http/cookie.cpp: strict cookie validation is incomplete ({token})")
+
+   types_module = (root / "libraries/net/http/include/forge/net/http/types.cppm").read_text(errors="ignore")
+   types_source = (root / "libraries/net/http/types.cpp").read_text(errors="ignore")
+   if "set_cookie" in types_module or "response::set_cookie" in types_source:
+      errors.append("forge_net_http: raw response::set_cookie must not bypass forge.net.http.cookie")
+
+   asset_module = (root / "libraries/net/http/include/forge/net/http/assets.cppm").read_text(errors="ignore")
+   asset_source = (root / "libraries/net/http/assets.cpp").read_text(errors="ignore")
+   for token in ("export module forge.net.http.assets", "asset_mount", "asset_bundle",
+                 "forge::asio::compute::executor read_executor", "max_file_bytes", "max_path_bytes"):
+      if token not in asset_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/assets.cppm: asset API is incomplete ({token})")
+   for token in (
+      "percent_escaped",
+      "character == '\\\\'",
+      "percent_escaped && character == '/'",
+      ".symlinks = symlink_policy::reject",
+      "static_file_root",
+      "spa_fallback",
+      "public, max-age=31536000, immutable",
+   ):
+      if token not in asset_source:
+         errors.append(f"libraries/net/http/assets.cpp: asset safety/cache invariant is missing ({token})")
+
+   file_module = (root / "libraries/net/http/include/forge/net/http/file.cppm").read_text(errors="ignore")
+   file_source = (root / "libraries/net/http/file.cpp").read_text(errors="ignore")
+   for token in ("symlink_policy", "symlinks = symlink_policy::reject", "forge::asio::compute::executor read_executor"):
+      if token not in file_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/file.cppm: public symlink policy is missing ({token})")
+   for token in ("openat(", "O_NOFOLLOW", "O_NONBLOCK", "fstat(", "pread(", "open_relative_file",
+                 "open_followed_relative_file", "resolved.lexically_relative(root)", "if_none_match_matches",
+                 "if_range_matches", "execute_file_io", '"http-file-open"', '"http-static-file-open"',
+                 '"http-file-pread"'):
+      if token not in file_source:
+         errors.append(f"libraries/net/http/file.cpp: descriptor-relative static file invariant is missing ({token})")
+   if "open_file(resolved" in file_source:
+      errors.append("libraries/net/http/file.cpp: followed static files must reopen through the stable root descriptor")
+   if "if_range" not in types_module or 'return "If-Range"' not in types_source:
+      errors.append("forge_net_http: If-Range field mapping is missing")
+
+   router_module = (root / "libraries/net/http/include/forge/net/http/router.cppm").read_text(errors="ignore")
+   router_source = (root / "libraries/net/http/router.cpp").read_text(errors="ignore")
+   for token in ("mount_assets(asset_mount value, forge::asio::compute::executor read_executor)",
+                 "reserve_path_prefix", "asset_mounts_", "reserved_path_prefixes_"):
+      if token not in router_module:
+         errors.append(f"libraries/net/http/include/forge/net/http/router.cppm: asset router boundary is incomplete ({token})")
+   for token in (
+      "asset_mounts_overlap",
+      "reserved API path prefix",
+      "reserved HTTP path prefix overlaps an asset mount",
+      "path_exists(routes_",
+   ):
+      if token not in router_source:
+         errors.append(f"libraries/net/http/router.cpp: asset/API priority invariant is missing ({token})")
+   router_preflight = (root / "libraries/net/http/router_server_access.cpp").read_text(errors="ignore")
+   for token in ("mount.serves", "mount.contains", "status::method_not_allowed"):
+      if token not in router_preflight:
+         errors.append(f"libraries/net/http/router_server_access.cpp: asset preflight handling is incomplete ({token})")
+
+   plugin_api = (root / "plugins/http/server/include/forge/plugins/http/server/api.cppm").read_text(errors="ignore")
+   plugin_source = (root / "plugins/http/server/plugin.cpp").read_text(errors="ignore")
+   plugin_impl = (root / "plugins/http/server/plugin_impl.cpp").read_text(errors="ignore")
+   for token in ("mount_assets", "forge.net.http.assets"):
+      if token not in plugin_api:
+         errors.append(f"plugins/http/server/include/forge/plugins/http/server/api.cppm: typed asset mount is missing ({token})")
+   if "result.insert" not in plugin_source or '"Set-Cookie"' not in plugin_source:
+      errors.append("plugins/http/server/plugin.cpp: repeated Set-Cookie projection must use insert")
+   if "HTTP asset mounts must not overlap" not in plugin_impl:
+      errors.append("plugins/http/server/plugin_impl.cpp: plugin asset overlap validation is missing")
+   for token in ("context.has_compute()", "context.compute()", "file_read_executor"):
+      if token not in plugin_source:
+         errors.append(f"plugins/http/server/plugin.cpp: asset compute ownership is incomplete ({token})")
+   for token in ("asset_bundle{std::move(value), std::move(executor)}",
+                 "HTTP asset mounts require the application compute executor"):
+      if token not in plugin_impl:
+         errors.append(f"plugins/http/server/plugin_impl.cpp: asset compute injection is incomplete ({token})")
+
+   package_http = (root / "tests/package_net_http_component/main.cpp").read_text(errors="ignore")
+   package_plugin = (root / "tests/package_plugins_http_server/main.cpp").read_text(errors="ignore")
+   for token in ("import forge.net.http.cookie;", "import forge.net.http.assets;"):
+      if token not in package_http:
+         errors.append(f"tests/package_net_http_component/main.cpp: direct package import is missing ({token})")
+   if "import forge.net.http.assets;" not in package_plugin:
+      errors.append("tests/package_plugins_http_server/main.cpp: plugin package consumer must import asset mount directly")
+   if "import forge.asio.compute;" not in package_http:
+      errors.append("tests/package_net_http_component/main.cpp: low-level file package consumer must import compute")
+
+   http_tests = (root / "tests/http_websocket/network_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_cookie_rejects_malformed_and_injectable_headers",
+      "foo-.example",
+      "/admin/%2fsecret",
+      "/admin/%2Fsecret",
+      "/admin/%5csecret",
+      "http_asset_mount_serves_streaming_get_head_ranges_and_cache_policy",
+      "http_static_file_root_honors_conditional_and_if_range_semantics",
+      "http_static_file_options_preserve_legacy_aggregate_and_gate_conditionals",
+      "http_static_file_root_and_file_response_follow_contained_symlinks_when_explicitly_enabled",
+      "http_static_file_root_keeps_root_descriptor_across_root_name_swap",
+      "http_static_file_root_keeps_opened_descriptor_across_name_swap",
+      "http_static_file_root_rejects_fifo_without_blocking",
+      "http_file_reads_use_bounded_compute_capacity_without_stalling_runtime_workers",
+      "http_request_time_file_open_is_bounded_and_does_not_stall_runtime_workers",
+   ):
+      if token not in http_tests:
+         errors.append(f"tests/http_websocket/network_tests.cpp: cookie/assets regression is missing ({token})")
+   plugin_tests = (root / "tests/plugins/plugins_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "http_server_plugin_preserves_repeated_set_cookie_from_middleware",
+      "http_server_plugin_mounts_assets_without_shadowing_a_narrow_api_prefix",
+      "http_server_plugin_rejects_asset_publication_without_application_compute",
+      "http_server_plugin_rejects_root_api_prefix_overlapping_asset_mount_before_listener_start",
+   ):
+      if token not in plugin_tests:
+         errors.append(f"tests/plugins/plugins_tests.cpp: plugin cookie/assets regression is missing ({token})")
+
+   migration = (root / "docs/iterations/forge-native-admin-foundation-v1.md").read_text(errors="ignore")
+   for token in ("response.set_cookie(name, value)", "append_set_cookie(", "Stable source surface",
+                 "release notes must name `response::set_cookie`"):
+      if token not in migration:
+         errors.append(f"docs/iterations/forge-native-admin-foundation-v1.md: HTTP cookie migration is incomplete ({token})")
+
+
+def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "pairing"
+   required = (
+      family / "CMakeLists.txt",
+      leaf / "CMakeLists.txt",
+      leaf / "pairing.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "pairing" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "pairing" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "pairing" / "pairing.cppm",
+      root / "tests" / "auth" / "pairing_tests.cpp",
+      root / "tests" / "package_auth_pairing_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_pairing_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_pairing ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(pairing)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register pairing leaf")
+   if re.search(r"add_library\s*\(\s*forge_auth\s", family_cmake):
+      errors.append("libraries/auth/CMakeLists.txt: empty auth family root must not define forge_auth aggregate")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_pairing STATIC pairing.cpp)",
+      "forge_target_modules_at(forge_auth_pairing auth/pairing)",
+      "forge_codec_base64",
+      "forge_crypto_core",
+      "forge_crypto_digest",
+      "forge_exceptions",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/pairing/CMakeLists.txt: pairing target is missing {token}")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "pairing" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.exceptions",
+      "token_invalid",
+      "replayed",
+      "capacity_exceeded",
+      "generation_exhausted",
+      "credential_id_invalid",
+      "token_collision",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/exceptions.cppm: pairing exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "pairing" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.types",
+      "token_digest",
+      "bootstrap_record",
+      "pending_request",
+      "pending_issuance",
+      "pre_session_digest",
+      "pre_session_consumed",
+      "credential_binding",
+      "approved_credential",
+      "credential_id",
+      "approval_options",
+      "credential",
+      "trusted, non-decreasing wall-clock",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/types.cppm: pairing record is missing {token}")
+   bootstrap_record_match = re.search(r"struct bootstrap_record \{(.*?)\n\};", types_module, re.DOTALL)
+   if bootstrap_record_match is not None and "secret_string" in bootstrap_record_match.group(1):
+      errors.append("libraries/auth/pairing/include/forge/auth/pairing/types.cppm: persisted bootstrap record must not contain a clear token")
+   pending_record_match = re.search(r"struct pending_request \{(.*?)\n\};", types_module, re.DOTALL)
+   if pending_record_match is not None and "secret_string" in pending_record_match.group(1):
+      errors.append("libraries/auth/pairing/include/forge/auth/pairing/types.cppm: persisted pending record must not contain a clear pre-session token")
+
+   pairing_module = (leaf / "include" / "forge" / "auth" / "pairing" / "pairing.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.pairing.pairing",
+      "begin_bootstrap",
+      "consume_bootstrap",
+      "supersede_pending",
+      "identify_pre_session",
+      "validate_pre_session",
+      "consume_approved_pre_session",
+      "credential_binding",
+      "approve_pending",
+      "approval_options",
+      "rotate_credential_downscope",
+      "revoke_credential",
+   ):
+      if token not in pairing_module:
+         errors.append(f"libraries/auth/pairing/include/forge/auth/pairing/pairing.cppm: pairing transition is missing {token}")
+
+   pairing_source = (leaf / "pairing.cpp").read_text(errors="ignore")
+   for token in (
+      "random_bytes(bootstrap_token_bytes)",
+      "padding::omit",
+      "padding_policy::forbid",
+      "constant_time_equal",
+      "byte_view(token.view())",
+      "bootstrap creation",
+      "pending request creation",
+      "out-of-range resolution time",
+      "invalid revocation time",
+      "bootstrap.consumed = true",
+      "pre_session_digest",
+      "pre_session_consumed",
+      "issue_distinct_token",
+      "identify_pre_session",
+      "consume_approved_pre_session",
+      "approved_credential",
+      "require_pre_session_lifecycle",
+      "require_credential_id",
+      "scope_baseline",
+      "credential rotation cannot escalate scopes",
+   ):
+      if token not in pairing_source:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pairing security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.net", "forge.plugins", "objectdb", "mdbx"):
+      if forbidden in pairing_source or forbidden in pairing_module or forbidden in types_module:
+         errors.append(f"libraries/auth/pairing: product integration dependency is forbidden ({forbidden})")
+
+   consume_source = pairing_source.partition("pending_issuance consume_bootstrap")[2].partition(
+      "pending_issuance supersede_pending")[0]
+   supersede_source = pairing_source.partition("pending_issuance supersede_pending")[2].partition(
+      "token_digest identify_pre_session")[0]
+   if ("auto result = pending_issuance" not in consume_source or
+       consume_source.find("auto result = pending_issuance") > consume_source.find("bootstrap.consumed = true") or
+       "return result;" not in consume_source):
+      errors.append("libraries/auth/pairing/pairing.cpp: consume must construct its pre-session issuance before consuming bootstrap")
+   if ("auto result = pending_issuance" not in supersede_source or
+       supersede_source.find("auto result = pending_issuance") > supersede_source.find("pending.state = pending_state::superseded") or
+       "return result;" not in supersede_source):
+      errors.append("libraries/auth/pairing/pairing.cpp: supersede must construct its pre-session issuance before mutating pending")
+   approved_consume_source = pairing_source.partition("credential_binding consume_approved_pre_session")[2].partition(
+      "credential approve_pending")[0]
+   if ("require_pending_record" not in approved_consume_source or
+       "verify_token(pending.pre_session_digest, pre_session_token)" not in approved_consume_source or
+       "require_pre_session_lifecycle" not in approved_consume_source or
+       "pending.state != pending_state::approved" not in approved_consume_source or
+       "auto result = *pending.approved_credential;" not in approved_consume_source or
+       approved_consume_source.find("auto result = *pending.approved_credential;") >
+       approved_consume_source.find("pending.pre_session_consumed = true") or
+       approved_consume_source.find("pending.pre_session_consumed = true") <
+       approved_consume_source.find("pending.state != pending_state::approved")):
+      errors.append("libraries/auth/pairing/pairing.cpp: approved pre-session exchange must validate before consuming")
+
+   pre_session_validation = pairing_source.partition("void validate_pre_session")[2].partition(
+      "credential_binding consume_approved_pre_session")[0]
+   if ("require_pending_record" not in pre_session_validation or
+       "verify_token(pending.pre_session_digest, pre_session_token)" not in pre_session_validation or
+       "require_pre_session_lifecycle" not in pre_session_validation or
+       pre_session_validation.find("require_pending_record") >
+       pre_session_validation.find("verify_token(pending.pre_session_digest, pre_session_token)") or
+       pre_session_validation.find("verify_token(pending.pre_session_digest, pre_session_token)") >
+       pre_session_validation.find("require_pre_session_lifecycle")):
+      errors.append("libraries/auth/pairing/pairing.cpp: pre-session validation must verify the token before lifecycle")
+
+   approval_source = pairing_source.partition("credential approve_pending")[2].partition("void reject_pending")[0]
+   if ("pending.approved_credential.emplace" not in approval_source or
+       "auto approved_pending = pending;" not in approval_source or
+       "pending = std::move(approved_pending);" not in approval_source or
+       "pending.state = pending_state::approved" not in approval_source or
+       approval_source.find("pending.approved_credential.emplace") >
+       approval_source.find("pending.state = pending_state::approved") or
+       approval_source.find("auto approved_pending = pending;") >
+       approval_source.find("pending = std::move(approved_pending);")):
+      errors.append("libraries/auth/pairing/pairing.cpp: approval must bind the credential before publishing approved state")
+
+   record_validation = pairing_source.partition("void require_pending_record")[2].partition(
+      "void require_pending_time")[0]
+   for token in (
+      "pending.approved_credential.has_value()",
+      "!pending.approved_credential.has_value()",
+      "pending.approved_credential->generation != 1",
+   ):
+      if token not in record_validation:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pending binding invariant is missing ({token})")
+
+   pre_session_lifecycle = pairing_source.partition("void require_pre_session_lifecycle")[2].partition(
+      "void require_credential_record")[0]
+   for token in (
+      "now < pending.created_at",
+      "pending.pre_session_consumed",
+      "now >= pending.expires_at",
+   ):
+      if token not in pre_session_lifecycle:
+         errors.append(f"libraries/auth/pairing/pairing.cpp: pre-session lifecycle invariant is missing ({token})")
+   if (pre_session_lifecycle.find("now < pending.created_at") >
+       pre_session_lifecycle.find("pending.pre_session_consumed") or
+       pre_session_lifecycle.find("pending.pre_session_consumed") >
+       pre_session_lifecycle.find("now >= pending.expires_at")):
+      errors.append("libraries/auth/pairing/pairing.cpp: pre-session lifecycle must check time before replay and expiry")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_subdirectory(libraries/auth)",
+      "forge_auth_pairing",
+      "auth_pairing",
+      "libraries/auth/pairing/include/forge",
+   ):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_pairing registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/pairing](libraries/auth/pairing/README.md)" not in root_readme or "`forge_auth_pairing`" not in root_readme:
+      errors.append("README.md: forge_auth_pairing library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   for token in (
+      "auth_pairing",
+      'elseif("${component}" STREQUAL "auth_pairing")',
+      "_forge_add_component(codec_base64)",
+      "_forge_add_component(crypto_core)",
+      "_forge_add_component(crypto_digest)",
+   ):
+      if token not in package_config:
+         errors.append(f"cmake/ForgeConfig.cmake.in: auth_pairing package registration is incomplete ({token})")
+
+   pairing_tests = (root / "tests" / "auth" / "pairing_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "bootstrap_uses_random_base64url_secret_and_persists_only_a_digest",
+      "bootstrap_rejects_noncanonical_trailing_pad_bits_without_consuming_the_record",
+      "bootstrap_consumption_is_one_time_bounded_and_does_not_report_clear_tokens",
+      "pre_session_is_canonical_digest_only_and_strictly_identifiable",
+      "pre_session_validation_and_supersession_rotate_the_secret",
+      "approved_pre_session_exchanges_once_and_rejected_or_expired_requests_cannot_exchange",
+      "persisted_transition_clocks_reject_backdating_without_mutation",
+      "malformed_persisted_terminal_timestamps_are_rejected_without_mutation",
+      "pending_transitions_canonicalize_scopes_and_require_explicit_supersession",
+      "approval_rotation_and_revocation_are_terminal_and_cannot_escalate_scopes",
+   ):
+      if token not in pairing_tests:
+         errors.append(f"tests/auth/pairing_tests.cpp: pairing regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_pairing_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.pairing.exceptions;", "import forge.auth.pairing.pairing;", "consume_bootstrap",
+                 "identify_pre_session", "consume_approved_pre_session", "credential_binding"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_pairing_component/main.cpp: direct pairing package import is missing ({token})")
+
+
+def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "session"
+   required = (
+      leaf / "CMakeLists.txt",
+      leaf / "session.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "session" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "session" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "session" / "session.cppm",
+      root / "tests" / "auth" / "session_tests.cpp",
+      root / "tests" / "package_auth_session_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_session_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_session ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(session)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register session leaf")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_session STATIC session.cpp)",
+      "forge_target_modules_at(forge_auth_session auth/session)",
+      "forge_auth_pairing",
+      "forge_codec_base64",
+      "forge_crypto_core",
+      "forge_crypto_digest",
+      "forge_exceptions",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/session/CMakeLists.txt: session target is missing {token}")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "session" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.exceptions",
+      "token_invalid",
+      "csrf_invalid",
+      "idle_expired",
+      "credential_mismatch",
+      "credential_revoked",
+      "replayed",
+      "secret_collision",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/exceptions.cppm: session exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "session" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.types",
+      "forge.auth.pairing.types",
+      "trusted, non-decreasing wall-clock",
+      "session_record",
+      "session_issuance",
+      "principal",
+      "credential_generation",
+      "idle_timeout",
+      "session_state",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/types.cppm: session record is missing {token}")
+   session_record_match = re.search(r"struct session_record \{(.*?)\n\};", types_module, re.DOTALL)
+   if session_record_match is not None and "secret_string" in session_record_match.group(1):
+      errors.append("libraries/auth/session/include/forge/auth/session/types.cppm: persisted session record must not contain clear secrets")
+
+   session_module = (leaf / "include" / "forge" / "auth" / "session" / "session.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.session.session",
+      "issue_session",
+      "validate_issuance",
+      "identify_session_token",
+      "validate_session",
+      "verify_csrf_secret",
+      "renew_idle",
+      "rotate_session",
+      "logout_session",
+      "revoke_session",
+   ):
+      if token not in session_module:
+         errors.append(f"libraries/auth/session/include/forge/auth/session/session.cppm: session transition is missing {token}")
+   issue_declaration = session_module.partition("issue_session")[2].partition("identify_session_token")[0]
+   rotate_declaration = session_module.partition("rotate_session")[2].partition("logout_session")[0]
+   if "secret_string" in issue_declaration or "secret_string" in rotate_declaration:
+      errors.append("libraries/auth/session/include/forge/auth/session/session.cppm: issue/rotate must not accept caller-selected secrets")
+
+   session_source = (leaf / "session.cpp").read_text(errors="ignore")
+   for token in (
+      "random_bytes(secret_bytes)",
+      "padding::omit",
+      "padding_policy::forbid",
+      "identify_secret",
+      "validate_issuance",
+      "identify_session_token",
+      "constant_time_equal",
+      "require_session_record(issuance.record)",
+      "issuance.record.state != session_state::active",
+      "verify_secret(issuance.session_token, issuance.record.session_digest, false)",
+      "verify_secret(issuance.csrf_secret, issuance.record.csrf_digest, true)",
+      "credential_generation",
+      "credential_revoked",
+      "canonical_idle_expiry",
+      "session transition time regressed",
+      "record.state = session_state::rotated",
+      "record.state = session_state::revoked",
+      "record.idle_expires_at != canonical_idle_expiry",
+      "*record.terminal_at < record.last_activity_at",
+      "*record.terminal_at >= record.idle_expires_at",
+      "session and CSRF digests must differ",
+   ):
+      if token not in session_source:
+         errors.append(f"libraries/auth/session/session.cpp: session security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.net", "forge.plugins", "objectdb", "mdbx"):
+      if forbidden in session_source or forbidden in session_module or forbidden in types_module:
+         errors.append(f"libraries/auth/session: product integration dependency is forbidden ({forbidden})")
+
+   rotate_source = session_source.partition("session_issuance rotate_session")[2].partition("void logout_session")[0]
+   if ("auto result = issue_session" not in rotate_source or
+       rotate_source.find("auto result = issue_session") > rotate_source.find("record.state = session_state::rotated") or
+       "return result;" not in rotate_source):
+      errors.append("libraries/auth/session/session.cpp: rotation must construct its result before mutating the old session")
+
+   issue_source = session_source.partition("session_issuance issue_session")[2].partition("principal validate_session")[0]
+   collision_check = "constant_time_equal(session_material.span(), csrf_material.span())"
+   if (collision_check not in issue_source or "const auto session_digest" not in issue_source or
+       issue_source.find(collision_check) > issue_source.find("const auto session_digest") or
+       "exceptions::secret_collision" not in issue_source):
+      errors.append("libraries/auth/session/session.cpp: session and CSRF material must differ before record construction")
+
+   renewal_source = session_source.partition("void renew_idle")[2].partition("session_issuance rotate_session")[0]
+   next_expiry = "const auto next_idle_expires_at =\n       canonical_idle_expiry"
+   if (next_expiry not in renewal_source or "record.last_activity_at = now;" not in renewal_source or
+       "record.idle_expires_at = next_idle_expires_at;" not in renewal_source or
+       renewal_source.find(next_expiry) > renewal_source.find("record.last_activity_at = now;")):
+      errors.append("libraries/auth/session/session.cpp: renewal must compute expiry before mutating activity")
+
+   record_validation = session_source.partition("void require_session_record")[2].partition("void require_active_session")[0]
+   digest_check = "session and CSRF digests must differ"
+   if (digest_check not in record_validation or
+       record_validation.find(digest_check) > record_validation.find("require_credential_id") or
+       "record.idle_expires_at != canonical_idle_expiry" not in record_validation or
+       "require_supported_time(record.created_at, time_input::record)" not in record_validation):
+      errors.append("libraries/auth/session/session.cpp: persisted session validation must reject duplicate digests and non-canonical times")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("forge_auth_session", "auth_session", "libraries/auth/session/include/forge"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_session registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/session](libraries/auth/session/README.md)" not in root_readme or "`forge_auth_session`" not in root_readme:
+      errors.append("README.md: forge_auth_session library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   if ('elseif("${component}" STREQUAL "auth_session")\n         _forge_add_component(auth_pairing)' not in package_config or
+       "auth_session" not in package_config):
+      errors.append("cmake/ForgeConfig.cmake.in: auth_session package registration is incomplete")
+
+   session_tests = (root / "tests" / "auth" / "session_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "issue_generates_independent_digest_only_canonical_secrets",
+      "issuance_validation_rejects_mixed_and_tampered_secret_pairs",
+      "validation_rejects_bounded_malformed_and_noncanonical_secrets",
+      "validation_returns_principal_and_enforces_credential_binding",
+      "absolute_idle_and_renewal_boundaries_preserve_secret_digests",
+      "backdated_session_transitions_fail_without_mutation",
+      "malformed_persisted_timestamps_are_rejected_without_mutation",
+      "extreme_time_options_are_checked_without_overflow",
+      "rotation_prevents_fixation_and_logout_revoke_are_terminal",
+   ):
+      if token not in session_tests:
+         errors.append(f"tests/auth/session_tests.cpp: session regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_session_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.session.exceptions;", "import forge.auth.session.session;", "validate_issuance",
+                 "verify_csrf_secret"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_session_component/main.cpp: direct session package import is missing ({token})")
+
+   tests_cmake = (root / "tests" / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("test_forge_auth_session", "package_auth_session_component", "forge_auth_session"):
+      if token not in tests_cmake:
+         errors.append(f"tests/CMakeLists.txt: auth_session test registration is incomplete ({token})")
+
+
+def check_auth_http_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "auth"
+   leaf = family / "http"
+   required = (
+      leaf / "CMakeLists.txt",
+      leaf / "policy.cpp",
+      leaf / "README.md",
+      leaf / "include" / "forge" / "auth" / "http" / "exceptions.cppm",
+      leaf / "include" / "forge" / "auth" / "http" / "types.cppm",
+      leaf / "include" / "forge" / "auth" / "http" / "policy.cppm",
+      root / "tests" / "auth" / "http_auth_tests.cpp",
+      root / "tests" / "package_auth_http_component" / "CMakeLists.txt",
+      root / "tests" / "package_auth_http_component" / "main.cpp",
+   )
+   for path in required:
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: forge_auth_http ownership file is required")
+
+   family_cmake = (family / "CMakeLists.txt").read_text(errors="ignore")
+   if "add_subdirectory(http)" not in family_cmake:
+      errors.append("libraries/auth/CMakeLists.txt: auth family must register http leaf")
+   if re.search(r"add_library\s*\(\s*forge_auth\s", family_cmake):
+      errors.append("libraries/auth/CMakeLists.txt: empty auth family root must not define forge_auth aggregate")
+
+   leaf_cmake = (leaf / "CMakeLists.txt").read_text(errors="ignore")
+   for token in (
+      "add_library(forge_auth_http STATIC policy.cpp)",
+      "forge_target_modules_at(forge_auth_http auth/http)",
+      "forge_exceptions",
+      "forge_crypto_core",
+      "forge_auth_session",
+      "forge_net_http",
+   ):
+      if token not in leaf_cmake:
+         errors.append(f"libraries/auth/http/CMakeLists.txt: HTTP auth target is missing {token}")
+   if "forge_auth_pairing" in leaf_cmake or "forge_plugins" in leaf_cmake:
+      errors.append("libraries/auth/http/CMakeLists.txt: HTTP auth must not bypass its session and HTTP leaf boundaries")
+
+   exceptions_module = (leaf / "include" / "forge" / "auth" / "http" / "exceptions.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.exceptions",
+      "malformed_evidence",
+      "duplicate_evidence",
+      "origin_mismatch",
+      "csrf_mismatch",
+      "scope_denied",
+   ):
+      if token not in exceptions_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/exceptions.cppm: HTTP auth exception is missing {token}")
+
+   types_module = (leaf / "include" / "forge" / "auth" / "http" / "types.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.types",
+      "cookie_policy",
+      "origin_policy",
+      "browser_request_evidence",
+      "session_evidence",
+      "authorization_options",
+      "security_header_options",
+   ):
+      if token not in types_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/types.cppm: HTTP auth value is missing {token}")
+
+   policy_module = (leaf / "include" / "forge" / "auth" / "http" / "policy.cppm").read_text(errors="ignore")
+   for token in (
+      "export module forge.auth.http.policy",
+      "make_origin_policy",
+      "extract_session_evidence",
+      "authorize",
+      "append_pre_session_cookie",
+      "append_approved_session_cookies",
+      "append_rotated_session_cookies",
+      "append_logout_cookies",
+      "apply_security_headers",
+   ):
+      if token not in policy_module:
+         errors.append(f"libraries/auth/http/include/forge/auth/http/policy.cppm: HTTP auth policy is missing {token}")
+
+   policy_source = (leaf / "policy.cpp").read_text(errors="ignore")
+   for token in (
+      "parse_cookie_header",
+      "append_set_cookie",
+      "identify_session_token",
+      "validate_session",
+      "verify_csrf_secret",
+      "constant_time_equal",
+      "take_cookie_value",
+      "std::move(found->value)",
+      "secure_erase(found->value)",
+      "validate_issuance(issuance)",
+      "auto staged = response",
+      "response = std::move(staged)",
+      "boost::urls::parse_uri",
+      "canonical.normalize",
+      "remove_port",
+      "__Host-",
+      "same_site::strict",
+      "Content-Security-Policy",
+      "frame-ancestors 'none'",
+   ):
+      if token not in policy_source:
+         errors.append(f"libraries/auth/http/policy.cpp: HTTP auth security invariant is missing {token}")
+   for forbidden in ("forge.db", "forge.plugins", "objectdb", "mdbx", "router", "rate_limit", "audit"):
+      if forbidden in policy_source or forbidden in policy_module or forbidden in types_module:
+         errors.append(f"libraries/auth/http: product or transport ownership is forbidden ({forbidden})")
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("forge_auth_http", "auth_http", "libraries/auth/http/include/forge"):
+      if token not in root_cmake:
+         errors.append(f"CMakeLists.txt: forge_auth_http registration is incomplete ({token})")
+
+   root_readme = (root / "README.md").read_text(errors="ignore")
+   if "[auth/http](libraries/auth/http/README.md)" not in root_readme or "`forge_auth_http`" not in root_readme:
+      errors.append("README.md: forge_auth_http library registry entry is missing")
+
+   package_config = (root / "cmake" / "ForgeConfig.cmake.in").read_text(errors="ignore")
+   if ('elseif("${component}" STREQUAL "auth_http")\n         _forge_add_component(exceptions)\n         _forge_add_component(crypto_core)\n         _forge_add_component(auth_session)\n         _forge_add_component(net_http)' not in package_config or
+       "auth_http" not in package_config):
+      errors.append("cmake/ForgeConfig.cmake.in: auth_http package registration is incomplete")
+
+   http_tests = (root / "tests" / "auth" / "http_auth_tests.cpp").read_text(errors="ignore")
+   for token in (
+      "authorization_enforces_safe_and_mutating_origin_matrix",
+      "extraction_rejects_missing_duplicate_and_malformed_browser_evidence",
+      "origin_policy_requires_canonical_browser_origins",
+      "authorization_propagates_session_binding_and_rejects_csrf_or_scope_escalation",
+      "cookie_policy_preserves_repeated_set_cookie_and_clears_browser_state",
+      "cookie_issuance_validates_session_integrity_before_atomic_response_update",
+      "security_headers_are_strict_without_global_asset_no_store",
+   ):
+      if token not in http_tests:
+         errors.append(f"tests/auth/http_auth_tests.cpp: HTTP auth regression is missing ({token})")
+
+   package_consumer = (root / "tests" / "package_auth_http_component" / "main.cpp").read_text(errors="ignore")
+   for token in ("import forge.auth.http.exceptions;", "import forge.auth.http.policy;", "make_session_cookie",
+                 "identify_session_token", "validate_issuance"):
+      if token not in package_consumer:
+         errors.append(f"tests/package_auth_http_component/main.cpp: direct HTTP auth package import is missing ({token})")
+
+   tests_cmake = (root / "tests" / "CMakeLists.txt").read_text(errors="ignore")
+   for token in ("test_forge_auth_http", "package_auth_http_component", "forge_auth_http"):
+      if token not in tests_cmake:
+         errors.append(f"tests/CMakeLists.txt: auth_http test registration is incomplete ({token})")
+
+
 def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
    text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
    in_macro = False
@@ -170,16 +1211,33 @@ def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
       )
 
 
-def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
-   component = root / "libraries" / "vm" / "wasm"
+def check_vm_wasm_interpret_boundaries(root: Path, errors: list[str]) -> None:
+   family = root / "libraries" / "vm" / "wasm"
+   if not family.exists():
+      return
+
+   root_cmake = root / "CMakeLists.txt"
+   stale_include_registration = f"{family.relative_to(root).as_posix()}/include"
+   if root_cmake.is_file() and stale_include_registration in root_cmake.read_text(errors="ignore"):
+      errors.append(f"CMakeLists.txt: stale {stale_include_registration} registration")
+
+   unexpected_family_entries = {path.name for path in family.iterdir()} - {"interpret"}
+   if unexpected_family_entries:
+      errors.append(
+         f"{family.relative_to(root)}: empty vm::wasm family root contains: "
+         f"{', '.join(sorted(unexpected_family_entries))}"
+      )
+
+   component = family / "interpret"
    if not component.exists():
+      errors.append(f"{component.relative_to(root)}: vm_wasm_interpret leaf is missing")
       return
 
    details = component / "details"
    if details.exists():
-      errors.append(f"{details.relative_to(root)}: vm_wasm must not install or compile private source headers")
+      errors.append(f"{details.relative_to(root)}: vm_wasm_interpret must not install or compile private source headers")
 
-   include = component / "include" / "forge" / "vm" / "wasm"
+   include = component / "include" / "forge" / "vm" / "wasm" / "interpret"
    allowed_headers = {"host_function.hpp", "opcode_macros.hpp"}
    headers = {path.name for path in include.glob("*.hpp")}
    unexpected = headers - allowed_headers
@@ -195,19 +1253,151 @@ def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
 
    for path in sorted(include.glob("*.cppm")):
       relative = path.relative_to(root)
-      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
          included = INCLUDE.match(line)
          if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
             errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
-         if included and "forge/vm/wasm/" in included.group(1) and included.group(1) not in {
-            "<forge/vm/wasm/host_function.hpp>",
-            "<forge/vm/wasm/opcode_macros.hpp>",
+         if included and "forge/vm/wasm/interpret/" in included.group(1) and included.group(1) not in {
+            "<forge/vm/wasm/interpret/host_function.hpp>",
+            "<forge/vm/wasm/interpret/opcode_macros.hpp>",
          }:
             errors.append(f"{relative}:{line_number}: VM components must use module imports")
-         if VM_WASM_EXPORT.search(line):
-            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+         if VM_WASM_INTERPRET_EXPORT.search(line):
+            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_INTERPRET_EXPORT is forbidden")
          if UNQUALIFIED_C_MEMORY.search(line):
             errors.append(f"{relative}:{line_number}: VM modules must qualify C memory functions through std")
+
+
+def check_vm_wasm_interpret_identities(root: Path, files: list[Path], errors: list[str]) -> None:
+   identity_files = set(files)
+   identity_files.update(source_files(root, ("libraries/tooling", "tools")))
+   for path in sorted(identity_files):
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         for expression, description in LEGACY_VM_WASM_SOURCE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+
+   cmake_paths = [
+      root / "CMakeLists.txt",
+      root / "cmake" / "ForgeConfig.cmake.in",
+      root / ".github" / "workflows" / "vm-wasm.yml",
+   ]
+   for base in (root / "libraries", root / "guest", root / "plugins", root / "tests"):
+      if base.exists():
+         cmake_paths.extend(base.rglob("CMakeLists.txt"))
+
+   for path in sorted(set(cmake_paths)):
+      if not path.is_file():
+         continue
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         if relative == Path("tests/CMakeLists.txt") and line.strip() == "add_subdirectory(vm_wasm)":
+            continue
+         for expression, description in LEGACY_VM_WASM_CMAKE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+
+
+def check_contract_tooling_boundaries(root: Path, files: list[Path], errors: list[str]) -> None:
+   family = root / "libraries" / "tooling"
+   expected_family_entries = {"CMakeLists.txt", "README.md", "abi", "attributes", "validation", "manifest", "testing"}
+   if not family.is_dir():
+      errors.append("libraries/tooling: Contract Tooling family root is missing")
+      return
+
+   unexpected_family_entries = {path.name for path in family.iterdir()} - expected_family_entries
+   if unexpected_family_entries:
+      errors.append(
+         "libraries/tooling: empty tooling family root contains: "
+         f"{', '.join(sorted(unexpected_family_entries))}"
+      )
+
+   for leaf in ("abi", "attributes", "validation", "manifest", "testing"):
+      component = family / leaf
+      if not component.is_dir():
+         errors.append(f"{component.relative_to(root)}: Contract Tooling leaf is missing")
+         continue
+      legacy_include = component / "include" / "forge" / "contract" / leaf
+      if legacy_include.exists():
+         errors.append(f"{legacy_include.relative_to(root)}: legacy Contract Tooling include path is forbidden")
+      legacy_component = root / "libraries" / "contract" / leaf
+      if legacy_component.exists():
+         errors.append(f"{legacy_component.relative_to(root)}: legacy Contract Tooling leaf is forbidden")
+
+   family_cmake = family / "CMakeLists.txt"
+   if family_cmake.is_file():
+      source = family_cmake.read_text(errors="ignore")
+      if re.search(r"\badd_library\s*\(", source):
+         errors.append("libraries/tooling/CMakeLists.txt: tooling family root must not define an aggregate target")
+
+   tests_cmake = root / "tests" / "CMakeLists.txt"
+   if tests_cmake.is_file():
+      source = tests_cmake.read_text(errors="ignore")
+      expected_test_paths = (
+         "tooling/contract_tests.cpp",
+         "package_tooling_abi_component",
+         "package_tooling_attributes_component",
+         "package_tooling_validation_component",
+         "package_tooling_manifest_component",
+      )
+      for relative in expected_test_paths:
+         if relative not in source:
+            errors.append(f"tests/CMakeLists.txt: Contract Tooling test path is missing: {relative}")
+         if not (root / "tests" / relative).exists():
+            errors.append(f"tests/{relative}: Contract Tooling test path does not exist")
+      for stale_path in ("contract/contract_tests.cpp", "contract_testing/", "package_contract_"):
+         if stale_path in source:
+            errors.append(f"tests/CMakeLists.txt: stale Contract Tooling test path is forbidden: {stale_path}")
+
+   for path in files:
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         for expression, description in LEGACY_CONTRACT_TOOLING_SOURCE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+         if re.search(r"\bnamespace\s+forge::tooling\s*\{", line):
+            errors.append(f"{relative}:{line_number}: tooling is a grouping namespace; use a leaf namespace")
+         if re.search(r"\bexport\s+module\s+forge\.tooling\s*;", line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate module is forbidden")
+         if re.search(r"\bnamespace\s+\w+\s*=\s*forge::contract::(?:abi|attributes|validation|manifest|testing)", line):
+            errors.append(f"{relative}:{line_number}: legacy Contract Tooling namespace alias is forbidden")
+
+   cmake_paths = [root / "CMakeLists.txt", root / "cmake" / "ForgeConfig.cmake.in"]
+   workflows = root / ".github" / "workflows"
+   if workflows.is_dir():
+      cmake_paths.extend(workflows.glob("*.yml"))
+   for base in (root / "libraries", root / "guest", root / "plugins", root / "tests", root / "tools"):
+      if base.exists():
+         cmake_paths.extend(base.rglob("CMakeLists.txt"))
+
+   for path in sorted(set(cmake_paths)):
+      if not path.is_file():
+         continue
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         for expression, description in LEGACY_CONTRACT_TOOLING_CMAKE_IDENTITIES:
+            if expression.search(line):
+               errors.append(f"{relative}:{line_number}: {description} is forbidden")
+         if re.search(r"\badd_library\s*\(\s*forge_tooling\b", line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate target is forbidden")
+         if re.search(r"\badd_library\s*\(\s*forge_(?:contract_(?:abi|attributes|validation|manifest|testing)|tooling)\s+ALIAS\b", line):
+            errors.append(f"{relative}:{line_number}: Contract Tooling aliases are forbidden")
+         if re.search(r'"\$\{component\}"\s+STREQUAL\s+"tooling"', line):
+            errors.append(f"{relative}:{line_number}: tooling aggregate package component is forbidden")
+      for component in ("contract_abi", "contract_attributes", "contract_validation", "contract_manifest", "contract_testing"):
+         if re.search(
+            rf"\bfind_package\s*\(\s*Forge\b(?:(?!\)).)*\b{component}\b",
+            source,
+            flags=re.IGNORECASE | re.DOTALL,
+         ):
+            errors.append(f"{relative}: legacy Contract Tooling package component {component} is forbidden")
+         if re.search(rf'"\$\{{component\}}"\s+STREQUAL\s+"{component}"', source):
+            errors.append(f"{relative}: legacy Contract Tooling package component {component} is forbidden")
 
 
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
@@ -368,7 +1558,7 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          '      - "libraries/schema/**"',
          '      - "libraries/variant/**"',
          '      - "libraries/vm/wasm/**"',
-         '      - "libraries/contract/**"',
+         '      - "libraries/tooling/**"',
          '      - "guest/**"',
          '      - "tools/**"',
          '      - "vendor/**"',
@@ -660,10 +1850,10 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    for component in (
-      "contract_abi",
-      "contract_attributes",
-      "contract_validation",
-      "contract_manifest",
+      "tooling_abi",
+      "tooling_attributes",
+      "tooling_validation",
+      "tooling_manifest",
    ):
       if developer_profile.count(component) != 2:
          errors.append(
@@ -684,7 +1874,7 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
    if "::forge::contract::dispatch(" not in source:
       errors.append(f"{path.relative_to(root)}: EOSIO dispatcher must delegate to forge.contract.dispatcher")
 
-   generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
+   generator = root / "libraries" / "tooling" / "abi" / "generator.cpp"
    generated_source = generator.read_text(errors="ignore")
    for forbidden in ('output << "   switch (action)',):
       if forbidden in generated_source:
@@ -1077,9 +2267,16 @@ def main() -> int:
 
    check_layout(root, errors)
    check_aggregates(root, errors)
+   check_tls_context_ownership(root, errors)
+   check_http_cookie_asset_boundaries(root, errors)
+   check_auth_pairing_boundaries(root, errors)
+   check_auth_session_boundaries(root, errors)
+   check_auth_http_boundaries(root, errors)
    check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
-   check_vm_wasm_boundaries(root, errors)
+   check_vm_wasm_interpret_boundaries(root, errors)
+   check_vm_wasm_interpret_identities(root, files, errors)
+   check_contract_tooling_boundaries(root, files, errors)
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
    check_bls_value_ownership(root, files, errors)

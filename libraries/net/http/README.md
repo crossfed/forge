@@ -1,8 +1,8 @@
 # forge_net_http
 
 `forge_net_http` is the HTTP substrate: URL parsing, FORGE-owned request/response
-messages, streaming body primitives, routing, middleware, server and
-client/connection primitives. It uses Boost.Beast/URL internally but keeps
+messages, cookie handling, bounded static assets, streaming body primitives,
+routing, middleware, server and client/connection primitives. It uses Boost.Beast/URL internally but keeps
 FORGE-owned public message, route and lifecycle semantics.
 
 Application-level server lifecycle can be owned directly with `forge::net::http::server`
@@ -32,6 +32,10 @@ still owns HTTP mechanics; the plugin owns app lifecycle/config composition.
   stream route types.
 - `forge.net.http.file`, `forge.net.http.range` — file responses, static roots and byte
   range parsing.
+- `forge.net.http.cookie` — strict `Cookie` and `Set-Cookie` parsing, formatting and
+  repeated response header emission.
+- `forge.net.http.assets` — bounded GET/HEAD asset mounts over hardened static-file
+  streaming, MIME allow-listing and SPA fallback.
 - `forge.net.http.negotiation` — generic media type and `Accept` header helpers for
   libraries that choose their own codecs above `forge_net_http`.
 - `forge.net.http.upload` — upload reader, spill-to-disk spool and multipart form-data
@@ -42,8 +46,25 @@ still owns HTTP mechanics; the plugin owns app lifecycle/config composition.
 
 Target: `forge_net_http`.
 
-Dependencies: `forge_asio`, `forge_net_websocket`, `forge_codec_json`, `forge_schema`,
-Boost.Asio, Boost.Beast, Boost.URL, OpenSSL.
+Dependencies: `forge_asio`, `forge_net_tls`, `forge_net_websocket`, `forge_codec_json`,
+`forge_schema`, Boost.Asio, Boost.Beast and Boost.URL.
+
+HTTPS client connections acquire their OpenSSL context from `forge_net_tls`; the
+client keeps that immutable snapshot for the lifetime of its TLS connection.
+The TLS leaf defaults to TLS 1.3 only, while this established HTTPS client
+explicitly keeps OpenSSL's system-default protocol range to preserve its prior
+compatibility behavior. SNI and hostname verification remain separate: the
+client configures both for each HTTPS connection.
+
+`forge::net::http::server` can instead receive a shared
+`forge::net::tls::context_provider`. Listener mode is fixed when the server
+starts: a TLS listener completes a TLS 1.3 server handshake before parsing any
+HTTP bytes, has a positive handshake timeout and a bounded pending-handshake
+count, and never falls back to plaintext. One provider snapshot is acquired for
+each accepted TLS connection and remains alive through HTTP and WebSocket
+upgrade lifetimes; `context_provider::replace()` affects only later accepts.
+Server mTLS uses `peer_verification::require_peer_certificate` with configured
+trust anchors. The library takes PEM material, never plugin Secret IDs.
 
 Boost.Beast remains the runtime donor and backend for parser/serializer/socket
 mechanics, but public HTTP APIs use `forge::net::http::request` and
@@ -82,6 +103,7 @@ auto query = parsed.query_params.front();
 
 import forge.net.http.router;
 import forge.net.http.types;
+import forge.net.http.cookie;
 
 auto router = forge::net::http::router{};
 router.get("/healthz", [](forge::net::http::route_context& ctx)
@@ -108,7 +130,8 @@ boost::asio::awaitable<chunk>
 cache_impl::read(read_request request) {
    auto trace = request.request().header("X-Trace").value_or("");
    request.response().set("Cache-Control", "public, max-age=60");
-   request.response().set_cookie("trace", trace);
+   forge::net::http::append_set_cookie(
+      request.response(), forge::net::http::set_cookie{.name = "trace", .value = std::string{trace}});
    co_return load_chunk(request.ref);
 }
 ```
@@ -220,20 +243,35 @@ before using any uploaded name in a filesystem path.
 
 ### Serve Static Files And Ranges
 
-`static_file_root` serves files through the stream response path, with root path
-normalization, traversal rejection, configurable symlink policy, `HEAD`, byte
-ranges and conditional metadata headers.
+`static_file_root` serves files through the stream response path with
+descriptor-relative opens, opened-file `fstat`, traversal rejection, `HEAD`,
+byte ranges and conditional metadata headers. `file_options::symlinks` defaults
+to `symlink_policy::reject`; `follow` is an explicit legacy/general file-serving
+mode, remains contained under a `static_file_root`, and must not be used for
+untrusted browser assets. Request-time path resolution, descriptor opens,
+`fstat`, and body `pread` calls run on a caller-owned bounded
+`forge::asio::compute::pool`; the HTTP runtime worker only awaits completion.
+The pool owner must outlive every root and path-backed response that uses its
+executor, then stop or drain the pool as part of application shutdown.
 
 ```cpp
+import forge.asio.compute;
 import forge.net.http.file;
 import forge.net.http.router;
 import forge.net.http.stream;
 
+auto file_reads = forge::asio::compute::pool{forge::asio::compute::pool::options{
+   .worker_threads = 2,
+   .max_pending_tasks = 64,
+   .max_waiting_submissions = 64,
+   .thread_name = "forge-http-file",
+}};
 auto files = std::make_shared<forge::net::http::static_file_root>(
    "/srv/public",
+   file_reads.get_executor(),
    forge::net::http::file_options{
       .content_type = "application/octet-stream",
-      .symlinks = forge::net::http::symlink_policy::reject,
+      .max_file_bytes = 64 * 1024 * 1024,
    });
 
 router.get_stream("/files/:name", [files](forge::net::http::stream_request& req)
@@ -250,6 +288,44 @@ router.head_stream("/files/:name", [files](forge::net::http::stream_request& req
 This is a file-serving foundation, not a storage product. Object metadata,
 authorization, placement and compatibility-specific error shapes belong above
 `forge_net_http`.
+
+### Mount Browser Assets
+
+`asset_bundle` is the browser-facing owner above `static_file_root`. It only
+serves `GET` and `HEAD`, rejects raw or percent-decoded traversal, separators,
+NUL and control bytes, permits a small MIME set, and preserves file streaming,
+ranges and ETags. Fingerprinted names receive immutable caching while
+`index.html` stays `no-cache`. It always uses `symlink_policy::reject`. SPA
+fallback applies only to extensionless asset paths after a static miss.
+The low-level router takes the caller-owned compute executor explicitly; one
+bounded pool may be shared across a bounded set of mounts.
+
+```cpp
+import forge.asio.compute;
+import forge.net.http.assets;
+import forge.net.http.router;
+
+auto asset_reads = forge::asio::compute::pool{forge::asio::compute::pool::options{
+   .worker_threads = 2,
+   .max_pending_tasks = 64,
+   .max_waiting_submissions = 64,
+   .thread_name = "forge-http-assets",
+}};
+auto router = forge::net::http::router{};
+router.mount_assets(
+   forge::net::http::asset_mount{
+      .path = "/admin",
+      .root = "/srv/admin-ui",
+      .index = "index.html",
+      .spa_fallback = true,
+      .max_file_bytes = 16 * 1024 * 1024,
+   },
+   asset_reads.get_executor());
+```
+
+Asset mounts cannot overlap each other or a reserved typed API prefix. A normal
+route always wins over an asset request, and a reserved API miss remains a 404
+rather than falling through to the SPA.
 
 ### Mount API Bindings
 

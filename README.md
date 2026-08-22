@@ -150,12 +150,12 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [chain/savanna/values](libraries/chain/savanna/values/README.md) | `forge_chain_savanna_values` | Canonical guest-safe finalizer and finalizer-policy values. | `forge_crypto_bls`, `forge_raw`, `forge_variant`. |
 | [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_chain_savanna_values`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
 | [chain/api](libraries/chain/api/README.md) | `forge_chain_api` | Transport-neutral chain contracts, HTTP/P2P clients and verified audited reads. | `forge_api_core`, `forge_api_http`, `forge_chain_protocol`, `forge_db_authenticated`, `forge_net_http`. |
-| [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
-| [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
-| [contract/attributes](libraries/contract/attributes/README.md) | `forge_contract_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
-| [contract/validation](libraries/contract/validation/README.md) | `forge_contract_validation` | Optional contract ABI, WASM, import and export validation. | `forge_vm_wasm`, `forge_chain_protocol`, `forge_codec_json`. |
-| [contract/manifest](libraries/contract/manifest/README.md) | `forge_contract_manifest` | Optional deterministic contract build manifests. | `forge_vm_wasm`, `forge_crypto_digest`, `forge_codec_json`. |
-| [contract/testing](libraries/contract/testing/README.md) | `forge_contract_testing` | Optional deterministic VM/ObjectDB host for contract tests. | `forge_vm_wasm`, `forge_db_object`, contract-visible Forge crypto. |
+| [vm/wasm/interpret](libraries/vm/wasm/interpret/README.md) | `forge_vm_wasm_interpret` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
+| [tooling/abi](libraries/tooling/abi/README.md) | `forge_tooling_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
+| [tooling/attributes](libraries/tooling/attributes/README.md) | `forge_tooling_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
+| [tooling/validation](libraries/tooling/validation/README.md) | `forge_tooling_validation` | Optional contract ABI, WASM, import and export validation. | `forge_vm_wasm_interpret`, `forge_chain_protocol`, `forge_codec_json`. |
+| [tooling/manifest](libraries/tooling/manifest/README.md) | `forge_tooling_manifest` | Optional deterministic contract build manifests. | `forge_vm_wasm_interpret`, `forge_crypto_digest`, `forge_codec_json`. |
+| [tooling/testing](libraries/tooling/testing/README.md) | `forge_tooling_testing` | Optional deterministic VM/ObjectDB host for contract tests. | `forge_vm_wasm_interpret`, `forge_db_object`, contract-visible Forge crypto. |
 | [codec/base32](libraries/codec/base32/README.md) | `forge_codec_base32` | Base32 byte/text encoding. | `forge_exceptions`. |
 | [json](libraries/codec/json/README.md) | `forge_codec_json` | JSON typed/value/document codec over Glaze. | Glaze privately, `forge_variant`, `forge_config_core`, `forge_schema`. |
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
@@ -183,11 +183,15 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config_core`. |
-| [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
-| [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
+| [auth/pairing](libraries/auth/pairing/README.md) | `forge_auth_pairing` | Product-neutral bootstrap, pairing and credential state transitions. | `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`. |
+| [auth/session](libraries/auth/session/README.md) | `forge_auth_session` | Product-neutral digest-only session, CSRF and credential-binding transitions. | `forge_auth_pairing`, `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`. |
+| [auth/http](libraries/auth/http/README.md) | `forge_auth_http` | Browser session evidence, exact Origin/CSRF policy, cookie emission and security headers. | `forge_auth_session`, `forge_net_http`. |
+| [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, strict cookies, hardened streamed assets, router, middleware, client/server with optional fixed-mode TLS listener. | `forge_net_tls`, `forge_net_websocket`, Boost.Beast/URL/Asio. |
+| [net/tls](libraries/net/tls/README.md) | `forge_net_tls` | Immutable TLS context snapshots, trust loading and peer verification. | `forge_exceptions`, `forge_crypto_pki`, Boost.Asio SSL, Boost.Beast, OpenSSL. |
+| [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | `forge_net_tls`, Boost.Beast/Asio, OpenSSL. |
 | [net/transport](libraries/net/transport/README.md) | `forge_net_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
 | [net/tcp](libraries/net/tcp/README.md) | `forge_net_tcp` | TCP transport adapter over `forge_net_transport`. | Boost.Asio, `forge_net_transport`. |
-| [net/stcp](libraries/net/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto_pki`, `forge_net_transport`. |
+| [net/stcp](libraries/net/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_net_tls`, `forge_crypto_pki`, `forge_net_transport`. |
 | [net/yamux](libraries/net/yamux/README.md) | `forge_net_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_net_transport`, Boost.Asio. |
 | [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_codec_base32`, `forge_codec_base58`, `forge_crypto_digest`, `forge_exceptions`. |
@@ -221,9 +225,9 @@ Experimental dual-target contract libraries use ordinary CMake targets in
 independent native and wasm32 configurations. Products share physical sources
 with `add_subdirectory()`; Forge adds guest compile settings, ABI generation and
 the runtime artifact manifest without defining a second build graph or source
-package format. Host applications may request the optional `contract_*`
-components above without installing the guest sysroot; only `contract_abi` and
-`contract_attributes` require a compatible Clang package.
+package format. Host applications may request the optional `tooling_*`
+components above without installing the guest sysroot; only `tooling_abi` and
+`tooling_attributes` require a compatible Clang package.
 
 ## Архитектурные Документы
 

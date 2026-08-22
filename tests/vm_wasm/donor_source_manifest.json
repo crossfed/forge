@@ -4,279 +4,279 @@
       "component": "allocator",
       "donor": "include/eosio/vm/allocator.hpp",
       "donor_sha256": "037e148dbbd91f00d7d277829036685bdcccdc01e63e7e63eb40802b938b0bd5",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/allocator.cppm",
-      "module": "forge.vm.wasm.allocator",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/allocator.cppm",
+      "module": "forge.vm.wasm.interpret.allocator",
       "status": "ported"
     },
     {
       "component": "argument_proxy",
       "donor": "include/eosio/vm/argument_proxy.hpp",
       "donor_sha256": "4bfd82e2970af2620e7dab0b5101050bfb67b786274b25813c9acb8025ad3483",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/argument_proxy.cppm",
-      "module": "forge.vm.wasm.argument_proxy",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/argument_proxy.cppm",
+      "module": "forge.vm.wasm.interpret.argument_proxy",
       "status": "ported"
     },
     {
       "component": "backend",
       "donor": "include/eosio/vm/backend.hpp",
       "donor_sha256": "124001cf11fc8ad9bb5e4bdea6bfd57d695879dcdbbd66d84628e404e9e987bb",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/backend.cppm",
-      "module": "forge.vm.wasm.backend",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/backend.cppm",
+      "module": "forge.vm.wasm.interpret.backend",
       "status": "ported"
     },
     {
       "component": "base_visitor",
       "donor": "include/eosio/vm/base_visitor.hpp",
       "donor_sha256": "0387590b1f2c4b67f2084cbd8d54a5251d876058815ab9753a797e645556b688",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/base_visitor.cppm",
-      "module": "forge.vm.wasm.backend:base_visitor",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/base_visitor.cppm",
+      "module": "forge.vm.wasm.interpret.backend:base_visitor",
       "status": "ported"
     },
     {
       "component": "bitcode_writer",
       "donor": "include/eosio/vm/bitcode_writer.hpp",
       "donor_sha256": "fa4297184b0e483f96bd00c941fafe3e741ecdfdff0b6b4b75d9808f5b5257ce",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/bitcode_writer.cppm",
-      "module": "forge.vm.wasm.backend:bitcode_writer",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/bitcode_writer.cppm",
+      "module": "forge.vm.wasm.interpret.backend:bitcode_writer",
       "status": "ported"
     },
     {
       "component": "config",
       "donor": "include/eosio/vm/config.hpp",
       "donor_sha256": "60c1384ccb07694e1a89d55276ae88c24bfcf9efe932395f87439cafe17db2e3",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/config.cppm",
-      "module": "forge.vm.wasm.backend:config",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/config.cppm",
+      "module": "forge.vm.wasm.interpret.backend:config",
       "status": "ported"
     },
     {
       "component": "constants",
       "donor": "include/eosio/vm/constants.hpp",
       "donor_sha256": "2e7354b50e60149b63e65ceeccee6afc0285e9e1adb8a72d7ec0569f5c345f77",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/constants.cppm",
-      "module": "forge.vm.wasm.constants",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/constants.cppm",
+      "module": "forge.vm.wasm.interpret.constants",
       "status": "ported"
     },
     {
       "component": "debug_info",
       "donor": "include/eosio/vm/debug_info.hpp",
       "donor_sha256": "5ec7f13aeee505a1ec4b008a97d8a5186745ab66f6d3dc7b59818f55f6ab984c",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/debug_info.cppm",
-      "module": "forge.vm.wasm.debug_info",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/debug_info.cppm",
+      "module": "forge.vm.wasm.interpret.debug_info",
       "status": "ported"
     },
     {
       "component": "debug_visitor",
       "donor": "include/eosio/vm/debug_visitor.hpp",
       "donor_sha256": "1a448830538b8859e182deb2523ad9ccecf87ff556b1b91c0c598438dd7294af",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/debug_visitor.cppm",
-      "module": "forge.vm.wasm.backend:debug_visitor",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/debug_visitor.cppm",
+      "module": "forge.vm.wasm.interpret.backend:debug_visitor",
       "status": "ported"
     },
     {
       "component": "exceptions",
       "donor": "include/eosio/vm/exceptions.hpp",
       "donor_sha256": "0fdcb82b5ed09b3669171d310a2a05c23f87a44704df9347fb682e8d89713eeb",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/exceptions.cppm",
-      "module": "forge.vm.wasm.exceptions",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/exceptions.cppm",
+      "module": "forge.vm.wasm.interpret.exceptions",
       "status": "ported"
     },
     {
       "component": "execution_context",
       "donor": "include/eosio/vm/execution_context.hpp",
       "donor_sha256": "61a86ba8b621ccb9fc9977fa4f5c28ebd7b0d502777ae688f3e4dda71cb774f3",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/execution_context.cppm",
-      "module": "forge.vm.wasm.backend:execution_context",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/execution_context.cppm",
+      "module": "forge.vm.wasm.interpret.backend:execution_context",
       "status": "ported"
     },
     {
       "component": "execution_interface",
       "donor": "include/eosio/vm/execution_interface.hpp",
       "donor_sha256": "360139977e1724b920ad35699e3df45bee850bbc8f701afcb3b93f77ceb6e3fd",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/execution_interface.cppm",
-      "module": "forge.vm.wasm.execution_interface",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/execution_interface.cppm",
+      "module": "forge.vm.wasm.interpret.execution_interface",
       "status": "ported"
     },
     {
       "component": "function_traits",
       "donor": "include/eosio/vm/function_traits.hpp",
       "donor_sha256": "a380dc0ac0224f475eafb0442be5dff687393a5e32ff592f24ea2c38e97e7285",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/function_traits.cppm",
-      "module": "forge.vm.wasm.host_function:function_traits",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/function_traits.cppm",
+      "module": "forge.vm.wasm.interpret.host_function:function_traits",
       "status": "ported"
     },
     {
       "component": "guarded_ptr",
       "donor": "include/eosio/vm/guarded_ptr.hpp",
       "donor_sha256": "569ffb9562f50fb6cbea93a881654a5b25b7d287f547cf0baeed5b31d1abe624",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/guarded_ptr.cppm",
-      "module": "forge.vm.wasm.guarded_ptr",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/guarded_ptr.cppm",
+      "module": "forge.vm.wasm.interpret.guarded_ptr",
       "status": "ported"
     },
     {
       "component": "host_function",
       "donor": "include/eosio/vm/host_function.hpp",
       "donor_sha256": "1e50e42446613e39c2a0f45275e2e35b48be891e0573ebfa2f718bd83b5b1eb3",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/host_function.cppm",
-      "module": "forge.vm.wasm.host_function",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/host_function.cppm",
+      "module": "forge.vm.wasm.interpret.host_function",
       "status": "ported"
     },
     {
       "component": "interpret_visitor",
       "donor": "include/eosio/vm/interpret_visitor.hpp",
       "donor_sha256": "c81e80fc6ba88cb2159f8195bc938f7f7bd196fcfa875847ecc450bb68935065",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/interpret_visitor.cppm",
-      "module": "forge.vm.wasm.backend:interpret_visitor",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/interpret_visitor.cppm",
+      "module": "forge.vm.wasm.interpret.backend:interpret_visitor",
       "status": "ported"
     },
     {
       "component": "leb128",
       "donor": "include/eosio/vm/leb128.hpp",
       "donor_sha256": "3cfc8413b98ae6ec9c4783504718cc7e0515a9a956a7bc73e266d5877be77aae",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/leb128.cppm",
-      "module": "forge.vm.wasm.backend:leb128",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/leb128.cppm",
+      "module": "forge.vm.wasm.interpret.backend:leb128",
       "status": "ported"
     },
     {
       "component": "null_writer",
       "donor": "include/eosio/vm/null_writer.hpp",
       "donor_sha256": "8847dc3bb253d6df90ca7d104ebed3ce17709a6d8a8ff64cf0d7acdbf41cc9f1",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/null_writer.cppm",
-      "module": "forge.vm.wasm.backend:null_writer",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/null_writer.cppm",
+      "module": "forge.vm.wasm.interpret.backend:null_writer",
       "status": "ported"
     },
     {
       "component": "opcodes",
       "donor": "include/eosio/vm/opcodes.hpp",
       "donor_sha256": "73a92702decb3b750bb10ed75d275824d15c0b7c2b68abf4ee2400a3dd9d09a8",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/opcodes.cppm",
-      "module": "forge.vm.wasm.opcodes",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/opcodes.cppm",
+      "module": "forge.vm.wasm.interpret.opcodes",
       "status": "ported"
     },
     {
       "component": "options",
       "donor": "include/eosio/vm/options.hpp",
       "donor_sha256": "cf4803f5e8ae203408e8a1168dd491b36328179065bd9679cfcfa825582b48f7",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/options.cppm",
-      "module": "forge.vm.wasm.options",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/options.cppm",
+      "module": "forge.vm.wasm.interpret.options",
       "status": "ported"
     },
     {
       "component": "parser",
       "donor": "include/eosio/vm/parser.hpp",
       "donor_sha256": "b91f791f0cc66dc3b31a7e0900bb87816c00468e93c7375281270855331cff55",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/parser.cppm",
-      "module": "forge.vm.wasm.backend:parser",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/parser.cppm",
+      "module": "forge.vm.wasm.interpret.backend:parser",
       "status": "ported"
     },
     {
       "component": "scope_guard",
       "donor": "include/eosio/vm/utils.hpp",
       "donor_sha256": "9eac21c38bddfb2b3a677f0fe21bc8cb678ae3713b430ec155152b62584e3f22",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/scope_guard.cppm",
-      "module": "forge.vm.wasm.scope_guard",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/scope_guard.cppm",
+      "module": "forge.vm.wasm.interpret.scope_guard",
       "status": "ported"
     },
     {
       "component": "sections",
       "donor": "include/eosio/vm/sections.hpp",
       "donor_sha256": "b74d6720f632780719ee858ae9b08c484a090b5e32cd9d5f06737eb014862aa0",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/sections.cppm",
-      "module": "forge.vm.wasm.backend:sections",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/sections.cppm",
+      "module": "forge.vm.wasm.interpret.backend:sections",
       "status": "ported"
     },
     {
       "component": "signals",
       "donor": "include/eosio/vm/signals.hpp",
       "donor_sha256": "38b891f1614d110b662f83d251a46507dd27820c58c8e9676fbe1bcce9246672",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/signals.cppm",
-      "module": "forge.vm.wasm.backend:signals",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/signals.cppm",
+      "module": "forge.vm.wasm.interpret.backend:signals",
       "status": "ported"
     },
     {
       "component": "softfloat",
       "donor": "include/eosio/vm/softfloat.hpp",
       "donor_sha256": "40f5662ea0e0e3b1525c1f8b0d7576078ff8e46a0748dc6e859857e66d7f94b3",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/softfloat.cppm",
-      "module": "forge.vm.wasm.backend:softfloat",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/softfloat.cppm",
+      "module": "forge.vm.wasm.interpret.backend:softfloat",
       "status": "ported"
     },
     {
       "component": "span",
       "donor": "include/eosio/vm/span.hpp",
       "donor_sha256": "60fc80cfeada6f278a0f421e73bb1e145eede2dffbee11cdd8c9af5b592426a6",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/span.cppm",
-      "module": "forge.vm.wasm.span",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/span.cppm",
+      "module": "forge.vm.wasm.interpret.span",
       "status": "ported"
     },
     {
       "component": "stack_elem",
       "donor": "include/eosio/vm/stack_elem.hpp",
       "donor_sha256": "ce2d71edf909914ea334bd07ef9e597879026e1512da584e9cb10893185732b3",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/stack_elem.cppm",
-      "module": "forge.vm.wasm.stack_elem",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/stack_elem.cppm",
+      "module": "forge.vm.wasm.interpret.stack_elem",
       "status": "ported"
     },
     {
       "component": "types",
       "donor": "include/eosio/vm/types.hpp",
       "donor_sha256": "232f88d9be7fd6fc5fd17343cba151d6ceba532745a53863a0d2f53fcc03b0ce",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/types.cppm",
-      "module": "forge.vm.wasm.types",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/types.cppm",
+      "module": "forge.vm.wasm.interpret.types",
       "status": "ported"
     },
     {
       "component": "utils",
       "donor": "include/eosio/vm/utils.hpp",
       "donor_sha256": "9eac21c38bddfb2b3a677f0fe21bc8cb678ae3713b430ec155152b62584e3f22",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/utils.cppm",
-      "module": "forge.vm.wasm.utils",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/utils.cppm",
+      "module": "forge.vm.wasm.interpret.utils",
       "status": "ported"
     },
     {
       "component": "variant",
       "donor": "include/eosio/vm/variant.hpp",
       "donor_sha256": "57e282f34b89fb18f97b44881628ba36932b28c9fb37b1712d183d014caad97c",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/variant.cppm",
-      "module": "forge.vm.wasm.variant",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/variant.cppm",
+      "module": "forge.vm.wasm.interpret.variant",
       "status": "ported"
     },
     {
       "component": "vector",
       "donor": "include/eosio/vm/vector.hpp",
       "donor_sha256": "004590c2988b8647eb4a57a82ef3b098ccdcb98c69f265ad755e4dbc237a521a",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/vector.cppm",
-      "module": "forge.vm.wasm.vector",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/vector.cppm",
+      "module": "forge.vm.wasm.interpret.vector",
       "status": "ported"
     },
     {
       "component": "wasm_stack",
       "donor": "include/eosio/vm/wasm_stack.hpp",
       "donor_sha256": "49c1ec79adb635324c83b2599f28ddd7f33894789c79b7f64c0f7bf584b28173",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/wasm_stack.cppm",
-      "module": "forge.vm.wasm.wasm_stack",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/wasm_stack.cppm",
+      "module": "forge.vm.wasm.interpret.wasm_stack",
       "status": "ported"
     },
     {
       "component": "watchdog",
       "donor": "include/eosio/vm/watchdog.hpp",
       "donor_sha256": "dba5dd98eedc5fe3bd0298d6c94151193300e2da1eaa325e3ca17692342d22e2",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/watchdog.cppm",
-      "module": "forge.vm.wasm.watchdog",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/watchdog.cppm",
+      "module": "forge.vm.wasm.interpret.watchdog",
       "status": "ported"
     },
     {
       "component": "x86_64",
       "donor": "include/eosio/vm/x86_64.hpp",
       "donor_sha256": "7f1a14685f74253f4e180cd27a88a50b14bd08fa147069782b1d3e5564c46d77",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/x86_64.cppm",
-      "module": "forge.vm.wasm.backend:x86_64",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/x86_64.cppm",
+      "module": "forge.vm.wasm.interpret.backend:x86_64",
       "status": "ported"
     },
     {
       "component": "error_codes",
       "donor": "include/eosio/vm/error_codes.hpp",
       "donor_sha256": "4e51a998e6e89decd210170cee2b73e90be266cc4a3a06b1324bfcb9b89c23de",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/exceptions.cppm",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/exceptions.cppm",
       "reason": "merged into typed Forge exceptions",
       "status": "adapted"
     },
@@ -284,7 +284,7 @@
       "component": "error_codes_def",
       "donor": "include/eosio/vm/error_codes_def.hpp",
       "donor_sha256": "5ec9288ca03431658522535d13e60f1d073f9495dc04650958475d5b7c9a917e",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/exceptions.cppm",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/exceptions.cppm",
       "reason": "merged into typed Forge exceptions",
       "status": "adapted"
     },
@@ -292,7 +292,7 @@
       "component": "error_codes_pp",
       "donor": "include/eosio/vm/error_codes_pp.hpp",
       "donor_sha256": "8e1e07d90417270459f2477f7794475a3a6014a2c9063fac9f051fb5f14aad42",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/exceptions.cppm",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/exceptions.cppm",
       "reason": "merged into typed Forge exceptions",
       "status": "adapted"
     },
@@ -300,7 +300,7 @@
       "component": "opcode_macros",
       "donor": "include/eosio/vm/opcodes_def.hpp",
       "donor_sha256": "0936e99ebb898b03d13208f75c8ded11ec39f3ed6e793018c916ad9ec438794a",
-      "forge": "libraries/vm/wasm/include/forge/vm/wasm/opcode_macros.hpp",
+      "forge": "libraries/vm/wasm/interpret/include/forge/vm/wasm/interpret/opcode_macros.hpp",
       "reason": "macro-only opcode table",
       "status": "adapted"
     },

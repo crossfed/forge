@@ -16,11 +16,13 @@ class exceptions {
       invalid_config = 1,
       publication_closed = 2,
       startup_failed = 3,
+      tls_reload_failed = 4,
    };
 
    using invalid_config = forge::exceptions::coded_exception<code, code::invalid_config>;
    using publication_closed = forge::exceptions::coded_exception<code, code::publication_closed>;
    using startup_failed = forge::exceptions::coded_exception<code, code::startup_failed>;
+   using tls_reload_failed = forge::exceptions::coded_exception<code, code::tls_reload_failed>;
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(exceptions::code, "forge.plugins.http.server")

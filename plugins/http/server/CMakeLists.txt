@@ -5,6 +5,7 @@ add_library(
    config.cpp
    plugin.cpp
    plugin_impl.cpp
+   tls_secret_material.cpp
 )
 forge_target_modules_at(forge_plugins_http_server plugins/http/server)
 
@@ -25,7 +26,11 @@ target_link_libraries(
       forge_net_http
       forge_api_http
       forge_asio
+      forge_crypto_core
       forge_crypto_digest
       forge_exceptions
       Boost::asio
+   PRIVATE
+      forge_net_tls
+      forge_plugins_crypto_secrets
 )

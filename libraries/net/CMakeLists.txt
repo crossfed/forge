@@ -1,5 +1,6 @@
 add_subdirectory(transport)
 add_subdirectory(tcp)
+add_subdirectory(tls)
 add_subdirectory(stcp)
 add_subdirectory(yamux)
 add_subdirectory(websocket)

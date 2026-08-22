@@ -110,10 +110,10 @@ def main() -> None:
         "modern contract modules",
     )
 
-    attribute_source = args.source_root / "libraries/contract/attributes/registry.cpp"
+    attribute_source = args.source_root / "libraries/tooling/attributes/registry.cpp"
     require_tokens(attribute_source, [f'"{name}"' for name in surface["attributes"]], "contract attributes")
 
-    abi_source = args.source_root / "libraries/contract/abi/generator.cpp"
+    abi_source = args.source_root / "libraries/tooling/abi/generator.cpp"
     require_tokens(abi_source, [f'"{name}"' for name in surface["abi_types"]], "ABI type vocabulary")
 
     contract_module_root = args.source_root / "guest/libraries/contract/include/forge/contract"

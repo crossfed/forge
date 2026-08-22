@@ -43,15 +43,15 @@ for host and guest targets. They are not duplicated inside the SDK.
 
 ### Native EOS VM Port
 
-`libraries/vm/wasm` is a source-derived C++23 module port of
+`libraries/vm/wasm/interpret` is a source-derived C++23 module port of
 AntelopeIO/eos-vm commit `e5b1fc79c4b8d78f32749afa94a8d4c4d071f67f`.
 The port preserves the donor parser, validation, interpreter, host-function
 conversion, guarded allocator, watchdog, deterministic SoftFloat behavior and
 x86_64 JIT implementation while renaming the public API to
-`forge::vm::wasm` and mapping failures to Forge exceptions.
+`forge::vm::wasm::interpret` and mapping failures to Forge exceptions.
 
 The derived library is distributed under EOS VM License V1.0, preserved in
-`libraries/vm/wasm/LICENSE.eos-vm`. Donor tests are mapped mechanically to
+`libraries/vm/wasm/interpret/LICENSE.eos-vm`. Donor tests are mapped mechanically to
 Boost.Test and verified against source and fixture hashes. Test fixtures come
 from EOSIO/eos-vm-test-wasms commit
 `ffbbb552e6020623d8ae148d81a152c8ef700325`.

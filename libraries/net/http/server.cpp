@@ -5,6 +5,7 @@ module;
 #include <atomic>
 #include <cctype>
 #include <condition_variable>
+#include <concepts>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -28,12 +29,18 @@ module;
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/dispatch.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/ssl/stream_base.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
+#include <openssl/ssl.h>
 
 module forge.net.http.server;
 
@@ -44,6 +51,7 @@ import forge.net.http.exceptions;
 import forge.net.http.negotiation;
 import forge.net.http.route_context;
 import forge.net.http.stream;
+import forge.net.tls.context;
 import forge.net.websocket.connection;
 
 namespace forge::net::http {
@@ -156,6 +164,69 @@ std::size_t request_buffer_limit(const server_config& config) noexcept {
    const auto body_limit = std::min(config.max_request_body_bytes, size_limit);
    const auto header_limit = std::min(config.max_header_bytes, size_limit - body_limit);
    return static_cast<std::size_t>(std::max<std::uint64_t>(1, body_limit + header_limit));
+}
+
+template <typename Stream> beast::tcp_stream& lowest_stream(Stream& stream) {
+   return beast::get_lowest_layer(stream);
+}
+
+template <typename Stream> tcp::socket& stream_socket(Stream& stream) {
+   return lowest_stream(stream).socket();
+}
+
+template <typename Stream> void expire_stream(Stream& stream, std::chrono::milliseconds timeout) {
+   lowest_stream(stream).expires_after(timeout);
+}
+
+template <typename Stream> void disarm_stream_expiry(Stream& stream) {
+   lowest_stream(stream).expires_never();
+}
+
+template <typename Stream>
+[[nodiscard]] bool received_clean_peer_close(Stream& stream, const boost::system::error_code& error) {
+   if (error == asio::error::eof) {
+      return true;
+   }
+   if (error != beast_http::error::end_of_stream) {
+      return false;
+   }
+   if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
+      return (SSL_get_shutdown(stream.native_handle()) & SSL_RECEIVED_SHUTDOWN) != 0;
+   }
+   return true;
+}
+
+constexpr auto tls_close_notify_timeout = std::chrono::seconds{5};
+
+template <typename Stream> awaitable<void> run_tls_shutdown(Stream& stream) {
+   auto [error] = co_await stream.async_shutdown(asio::as_tuple(use_awaitable));
+   static_cast<void>(error);
+}
+
+template <typename Stream>
+awaitable<void> cancel_tls_shutdown_at_deadline(Stream& stream, asio::steady_timer& deadline) {
+   auto [error] = co_await deadline.async_wait(asio::as_tuple(use_awaitable));
+   if (!error) {
+      auto ignored = boost::system::error_code{};
+      stream_socket(stream).cancel(ignored);
+   }
+}
+
+template <typename Stream> awaitable<void> close_after_response(Stream& stream) {
+   if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
+      auto deadline = asio::steady_timer{stream.get_executor()};
+      deadline.expires_after(tls_close_notify_timeout);
+      using namespace asio::experimental::awaitable_operators;
+      static_cast<void>(co_await (run_tls_shutdown(stream) || cancel_tls_shutdown_at_deadline(stream, deadline)));
+
+      auto ignored = boost::system::error_code{};
+      stream_socket(stream).shutdown(tcp::socket::shutdown_both, ignored);
+      stream_socket(stream).close(ignored);
+      co_return;
+   }
+
+   auto ignored = boost::system::error_code{};
+   stream_socket(stream).shutdown(tcp::socket::shutdown_send, ignored);
 }
 
 class request_read_ownership {
@@ -312,9 +383,9 @@ class monitor_read_scope {
    std::shared_ptr<request_read_ownership> ownership_;
 };
 
-class beast_body_reader_source final : public body_reader::source {
+template <typename Stream> class beast_body_reader_source final : public body_reader::source {
  public:
-   beast_body_reader_source(beast::tcp_stream& stream, beast::flat_buffer& buffer,
+   beast_body_reader_source(Stream& stream, beast::flat_buffer& buffer,
                             beast_http::request_parser<beast_http::buffer_body>& parser, stream_limits limits,
                             bool send_continue, std::shared_ptr<request_read_ownership> read_ownership = {})
        : stream_(stream), buffer_(buffer), parser_(parser), limits_(limits), send_continue_(send_continue),
@@ -334,7 +405,7 @@ class beast_body_reader_source final : public body_reader::source {
             body.data = storage.data();
             body.size = storage.size();
 
-            stream_.expires_after(limits_.read_timeout);
+            expire_stream(stream_, limits_.read_timeout);
             if (read_ownership_) {
                co_await read_ownership_->begin_body_read();
             }
@@ -409,7 +480,7 @@ class beast_body_reader_source final : public body_reader::source {
          auto reply =
              beast_http::response<beast_http::empty_body>{beast_http::status::continue_, parser_.get().version()};
          reply.keep_alive(true);
-         stream_.expires_after(limits_.write_timeout);
+         expire_stream(stream_, limits_.write_timeout);
          auto [write_error, written] = co_await beast_http::async_write(stream_, reply, asio::as_tuple(use_awaitable));
          static_cast<void>(written);
          if (write_error) {
@@ -420,6 +491,7 @@ class beast_body_reader_source final : public body_reader::source {
             FORGE_THROW_EXCEPTION(exceptions::internal, "HTTP continue response failed",
                                   forge::exceptions::ctx("reason", write_error.message()));
          }
+         disarm_stream_expiry(stream_);
       } catch (const forge::exceptions::base&) {
          throw;
       } catch (const boost::system::system_error& error) {
@@ -434,7 +506,7 @@ class beast_body_reader_source final : public body_reader::source {
    }
 
  private:
-   beast::tcp_stream& stream_;
+   Stream& stream_;
    beast::flat_buffer& buffer_;
    beast_http::request_parser<beast_http::buffer_body>& parser_;
    stream_limits limits_;
@@ -443,26 +515,35 @@ class beast_body_reader_source final : public body_reader::source {
    std::shared_ptr<request_read_ownership> read_ownership_;
 };
 
-class server_session : public std::enable_shared_from_this<server_session> {
+class server_session_base {
  public:
-   server_session(forge::asio::runtime& runtime, beast::tcp_stream stream, server_config config, server_handler handler,
-                  std::shared_ptr<router> router_value)
+   virtual ~server_session_base() = default;
+   virtual void cancel() = 0;
+   virtual void cancel_after_runtime_stopped() = 0;
+   virtual awaitable<void> async_cancel() = 0;
+};
+
+template <typename Stream>
+class server_session final : public server_session_base, public std::enable_shared_from_this<server_session<Stream>> {
+ public:
+   server_session(forge::asio::runtime& runtime, Stream stream, server_config config, server_handler handler,
+                  std::shared_ptr<router> router_value, forge::net::tls::context_snapshot_ptr tls_snapshot = {})
        : runtime_{runtime}, stream_(std::move(stream)), config_(std::move(config)),
          buffer_(request_buffer_limit(config_)),
          run_completion_(stream_.get_executor(), (std::chrono::steady_clock::time_point::max)()),
-         handler_(std::move(handler)), router_(std::move(router_value)) {}
+         handler_(std::move(handler)), router_(std::move(router_value)), tls_snapshot_(std::move(tls_snapshot)) {}
 
-   void cancel() {
-      auto self = shared_from_this();
+   void cancel() override {
+      auto self = this->shared_from_this();
       asio::dispatch(stream_.get_executor(), [self] { self->cancel_on_executor(); });
    }
 
-   void cancel_after_runtime_stopped() {
+   void cancel_after_runtime_stopped() override {
       cancel_on_executor();
    }
 
-   awaitable<void> async_cancel() {
-      auto self = shared_from_this();
+   awaitable<void> async_cancel() override {
+      auto self = this->shared_from_this();
       static_cast<void>(self);
       co_await asio::dispatch(stream_.get_executor(), use_awaitable);
       cancel_on_executor();
@@ -475,7 +556,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
    }
 
    awaitable<void> run() {
-      auto self = shared_from_this();
+      auto self = this->shared_from_this();
       static_cast<void>(self);
 
       try {
@@ -485,6 +566,10 @@ class server_session : public std::enable_shared_from_this<server_session> {
          throw;
       }
       complete_run();
+   }
+
+   [[nodiscard]] asio::any_io_executor executor() noexcept {
+      return stream_.get_executor();
    }
 
  private:
@@ -506,12 +591,17 @@ class server_session : public std::enable_shared_from_this<server_session> {
          parser.body_limit(config_.max_request_body_bytes);
          parser.header_limit(static_cast<std::uint32_t>(
              std::min<std::uint64_t>(config_.max_header_bytes, std::numeric_limits<std::uint32_t>::max())));
-         stream_.expires_after(first_request ? config_.read_timeout : config_.idle_timeout);
+         expire_stream(stream_, first_request ? config_.read_timeout : config_.idle_timeout);
          auto [read_error, bytes] =
              co_await beast_http::async_read_header(stream_, buffer_, parser, asio::as_tuple(use_awaitable));
          static_cast<void>(bytes);
 
-         if (read_error == asio::error::eof) {
+         if (received_clean_peer_close(stream_, read_error)) {
+            if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
+               co_await close_after_response(stream_);
+            } else if (!first_request) {
+               co_await close_after_response(stream_);
+            }
             co_return;
          }
          if (read_error == beast_http::error::header_limit) {
@@ -575,15 +665,15 @@ class server_session : public std::enable_shared_from_this<server_session> {
          const auto stream_capable = router_ && router_->can_handle_stream(context);
          auto read_ownership = stream_capable ? std::make_shared<request_read_ownership>(stream_.get_executor())
                                               : std::shared_ptr<request_read_ownership>{};
-         auto body_source = std::make_shared<beast_body_reader_source>(stream_, buffer_, parser, limits_from(config_),
-                                                                       expects_continue(request_value), read_ownership);
+         auto body_source = std::make_shared<beast_body_reader_source<Stream>>(
+             stream_, buffer_, parser, limits_from(config_), expects_continue(request_value), read_ownership);
          auto request_body_marker = std::make_shared<int>(0);
          auto request_body =
              detail::stream_server_access::mark_request_body(body_reader{body_source}, request_body_marker);
          if (stream_capable) {
             auto stream_request_value =
                 detail::stream_server_access::make_request(context, std::move(request_body), request_body_marker);
-            stream_.expires_after(config_.idle_timeout);
+            expire_stream(stream_, config_.idle_timeout);
             auto keep_alive = co_await handle_owned_operation(
                 handle_and_write_stream(std::move(stream_request_value), body_source, request_body_marker,
                                         read_ownership, request_value.version(), request_value.keep_alive()),
@@ -614,7 +704,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
          context_storage.emplace(make_context(request_value));
          auto& buffered_context = *context_storage;
 
-         stream_.expires_after(config_.idle_timeout);
+         expire_stream(stream_, config_.idle_timeout);
          read_ownership = std::make_shared<request_read_ownership>(stream_.get_executor());
          auto response_value = co_await handle_owned_operation(handle_http(buffered_context), read_ownership);
          if (!response_value.has_value()) {
@@ -630,8 +720,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
          }
       }
 
-      auto ignored = boost::system::error_code{};
-      stream_.socket().shutdown(tcp::socket::shutdown_send, ignored);
+      co_await close_after_response(stream_);
    }
 
  private:
@@ -719,7 +808,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
             } else {
                const auto read_size = std::min<std::size_t>(remaining, 64U * 1024U);
                auto destination = buffer_.prepare(read_size);
-               auto [operation_error, transferred] = co_await stream_.socket().async_read_some(
+               auto [operation_error, transferred] = co_await stream_.async_read_some(
                    destination, asio::bind_cancellation_slot(state->read_ownership->monitor_cancellation_slot(),
                                                              asio::as_tuple(use_awaitable)));
                read_error = operation_error;
@@ -758,8 +847,11 @@ class server_session : public std::enable_shared_from_this<server_session> {
    awaitable<std::optional<Result>> handle_owned_operation(awaitable<Result> operation,
                                                            std::shared_ptr<request_read_ownership> read_ownership) {
       auto state = std::make_shared<owner_handler_state<Result>>(stream_.get_executor(), std::move(read_ownership));
-      auto self = shared_from_this();
+      auto self = this->shared_from_this();
       try {
+         // The outer-stream monitor observes disconnects while user work runs; it must not inherit a socket I/O
+         // deadline.
+         disarm_stream_expiry(stream_);
          asio::co_spawn(stream_.get_executor(), monitor_owner_disconnect(state),
                         [self = std::move(self), state](std::exception_ptr error) mutable {
                            state->complete_monitor(std::move(error));
@@ -803,7 +895,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
    }
 
    awaitable<bool> handle_and_write_stream(stream_request request_value,
-                                           const std::shared_ptr<beast_body_reader_source>& body_source,
+                                           const std::shared_ptr<beast_body_reader_source<Stream>>& body_source,
                                            const std::shared_ptr<int>& request_body_marker,
                                            const std::shared_ptr<request_read_ownership>& read_ownership,
                                            unsigned version, bool request_keep_alive) {
@@ -823,13 +915,14 @@ class server_session : public std::enable_shared_from_this<server_session> {
 
    awaitable<void> write_response(response& response_value) {
       auto beast_response = to_beast_response(response_value);
-      stream_.expires_after(config_.idle_timeout);
+      expire_stream(stream_, config_.idle_timeout);
       auto [write_error, written] =
           co_await beast_http::async_write(stream_, beast_response, asio::as_tuple(use_awaitable));
       static_cast<void>(written);
       if (write_error) {
          throw boost::system::system_error{write_error};
       }
+      disarm_stream_expiry(stream_);
    }
 
    awaitable<void> write_stream_response(stream_response& response_value) {
@@ -848,13 +941,14 @@ class server_session : public std::enable_shared_from_this<server_session> {
 
       auto serializer = beast_http::response_serializer<beast_http::buffer_body>{message};
       serializer.split(true);
-      stream_.expires_after(config_.idle_timeout);
+      expire_stream(stream_, config_.idle_timeout);
       auto [header_error, header_bytes] =
           co_await beast_http::async_write_header(stream_, serializer, asio::as_tuple(use_awaitable));
       static_cast<void>(header_bytes);
       if (header_error) {
          throw boost::system::system_error{header_error};
       }
+      disarm_stream_expiry(stream_);
 
       while (auto chunk = co_await response_value.body()) {
          auto& body = message.body();
@@ -862,26 +956,28 @@ class server_session : public std::enable_shared_from_this<server_session> {
          body.size = chunk->bytes.size();
          body.more = true;
 
-         stream_.expires_after(config_.idle_timeout);
+         expire_stream(stream_, config_.idle_timeout);
          auto [body_error, body_bytes] =
              co_await beast_http::async_write(stream_, serializer, asio::as_tuple(use_awaitable));
          static_cast<void>(body_bytes);
          if (body_error && body_error != beast_http::error::need_buffer) {
             throw boost::system::system_error{body_error};
          }
+         disarm_stream_expiry(stream_);
       }
 
       auto& body = message.body();
       body.data = nullptr;
       body.size = 0;
       body.more = false;
-      stream_.expires_after(config_.idle_timeout);
+      expire_stream(stream_, config_.idle_timeout);
       auto [final_error, final_bytes] =
           co_await beast_http::async_write(stream_, serializer, asio::as_tuple(use_awaitable));
       static_cast<void>(final_bytes);
       if (final_error && final_error != beast_http::error::need_buffer) {
          throw boost::system::system_error{final_error};
       }
+      disarm_stream_expiry(stream_);
    }
 
    route_context make_context(const request& request_value) const {
@@ -923,7 +1019,12 @@ class server_session : public std::enable_shared_from_this<server_session> {
          co_return false;
       }
 
-      auto connection = forge::net::websocket::connection::create(std::move(stream_));
+      auto connection = forge::net::websocket::connection::ptr{};
+      if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
+         connection = forge::net::websocket::connection::create(std::move(stream_), std::move(tls_snapshot_));
+      } else {
+         connection = forge::net::websocket::connection::create(std::move(stream_));
+      }
       auto websocket_request = to_websocket_request(request_value);
       co_await connection->accept(websocket_request);
       (*handler)(connection);
@@ -934,18 +1035,19 @@ class server_session : public std::enable_shared_from_this<server_session> {
    void cancel_on_executor() {
       stopping_ = true;
       auto ignored = boost::system::error_code{};
-      stream_.socket().cancel(ignored);
-      stream_.socket().shutdown(tcp::socket::shutdown_both, ignored);
-      stream_.socket().close(ignored);
+      stream_socket(stream_).cancel(ignored);
+      stream_socket(stream_).shutdown(tcp::socket::shutdown_both, ignored);
+      stream_socket(stream_).close(ignored);
    }
 
    forge::asio::runtime& runtime_;
-   beast::tcp_stream stream_;
+   Stream stream_;
    server_config config_;
    beast::flat_buffer buffer_;
    asio::steady_timer run_completion_;
    server_handler handler_;
    std::shared_ptr<router> router_;
+   forge::net::tls::context_snapshot_ptr tls_snapshot_;
    bool run_completed_ = false;
    bool stopping_ = false;
 };
@@ -965,7 +1067,9 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
          router_value(std::move(router_value)), acceptor_executor(asio::make_strand(runtime.context())),
          acceptor(acceptor_executor),
          accept_loop_completion(acceptor_executor, (std::chrono::steady_clock::time_point::max)()),
-         stop_completion(acceptor_executor, (std::chrono::steady_clock::time_point::max)()) {}
+         stop_completion(acceptor_executor, (std::chrono::steady_clock::time_point::max)()),
+         tls_handshake_completion(acceptor_executor, (std::chrono::steady_clock::time_point::max)()),
+         tls_enabled(static_cast<bool>(config.tls_context_provider)) {}
 
    awaitable<void> accept_loop() {
       for (;;) {
@@ -984,18 +1088,87 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
             co_return;
          }
 
-         auto client = std::make_shared<detail::server_session>(runtime, beast::tcp_stream{std::move(socket)}, config,
-                                                                handler, router_value);
-         remember_session(client);
-         asio::co_spawn(session_strand, client->run(), [client](std::exception_ptr error) {
-            if (error) {
-               try {
-                  std::rethrow_exception(error);
-               } catch (const std::exception&) {
+         if (!tls_enabled) {
+            auto client = std::make_shared<detail::server_session<beast::tcp_stream>>(
+                runtime, beast::tcp_stream{std::move(socket)}, config, handler, router_value);
+            remember_session(client);
+            asio::co_spawn(session_strand, client->run(), [client](std::exception_ptr error) {
+               if (error) {
+                  try {
+                     std::rethrow_exception(error);
+                  } catch (const std::exception&) {
+                  }
                }
-            }
-         });
+            });
+            continue;
+         }
+
+         if (!reserve_tls_handshake()) {
+            auto ignored = boost::system::error_code{};
+            socket.close(ignored);
+            continue;
+         }
+
+         // A connection owns precisely this snapshot through its HTTP or WebSocket lifetime.
+         auto snapshot = config.tls_context_provider->snapshot();
+         if (!snapshot) {
+            release_tls_handshake();
+            auto ignored = boost::system::error_code{};
+            socket.close(ignored);
+            continue;
+         }
+         try {
+            auto tls_stream = forge::net::tls::make_beast_stream(snapshot, beast::tcp_stream{std::move(socket)});
+            remember_pending_tls_handshake(tls_stream);
+            auto self = shared_from_this();
+            asio::co_spawn(session_strand, complete_tls_handshake(tls_stream, std::move(snapshot)),
+                           [self](std::exception_ptr error, std::shared_ptr<detail::server_session_base> session) {
+                              asio::dispatch(self->acceptor_executor,
+                                             [self, error = std::move(error), session = std::move(session)]() mutable {
+                                                self->release_tls_handshake();
+                                                if (session) {
+                                                   self->remember_session(session);
+                                                }
+                                                if (error) {
+                                                   try {
+                                                      std::rethrow_exception(error);
+                                                   } catch (const std::exception&) {
+                                                   }
+                                                }
+                                             });
+                           });
+         } catch (...) {
+            release_tls_handshake();
+            throw;
+         }
       }
+   }
+
+   awaitable<std::shared_ptr<detail::server_session_base>>
+   complete_tls_handshake(std::shared_ptr<forge::net::tls::beast_tls_stream> stream,
+                          forge::net::tls::context_snapshot_ptr snapshot) {
+      detail::expire_stream(*stream, config.handshake_timeout);
+      auto [error] = co_await stream->async_handshake(asio::ssl::stream_base::server, asio::as_tuple(use_awaitable));
+      if (error) {
+         auto ignored = boost::system::error_code{};
+         detail::stream_socket(*stream).cancel(ignored);
+         detail::stream_socket(*stream).shutdown(tcp::socket::shutdown_both, ignored);
+         detail::stream_socket(*stream).close(ignored);
+         co_return nullptr;
+      }
+
+      detail::lowest_stream(*stream).expires_never();
+      auto client = std::make_shared<detail::server_session<forge::net::tls::beast_tls_stream>>(
+          runtime, std::move(*stream), config, handler, router_value, std::move(snapshot));
+      asio::co_spawn(client->executor(), client->run(), [client](std::exception_ptr run_error) {
+         if (run_error) {
+            try {
+               std::rethrow_exception(run_error);
+            } catch (const std::exception&) {
+            }
+         }
+      });
+      co_return client;
    }
 
    forge::asio::runtime& runtime;
@@ -1006,26 +1179,30 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
    tcp::acceptor acceptor;
    asio::steady_timer accept_loop_completion;
    asio::steady_timer stop_completion;
-   std::vector<std::weak_ptr<detail::server_session>> sessions;
+   asio::steady_timer tls_handshake_completion;
+   std::vector<std::weak_ptr<detail::server_session_base>> sessions;
+   std::vector<std::weak_ptr<forge::net::tls::beast_tls_stream>> pending_tls_handshakes;
    std::atomic_bool stopped = true;
    bool started = false;
    bool stopping = false;
    bool accept_loop_completed = true;
+   bool tls_enabled = false;
+   std::uint64_t pending_tls_handshake_count = 0;
 
    void prune_sessions() {
       sessions.erase(
           std::remove_if(sessions.begin(), sessions.end(),
-                         [](const std::weak_ptr<detail::server_session>& session) { return session.expired(); }),
+                         [](const std::weak_ptr<detail::server_session_base>& session) { return session.expired(); }),
           sessions.end());
    }
 
-   void remember_session(const std::shared_ptr<detail::server_session>& session) {
+   void remember_session(const std::shared_ptr<detail::server_session_base>& session) {
       prune_sessions();
       sessions.push_back(session);
    }
 
-   std::vector<std::shared_ptr<detail::server_session>> active_sessions() {
-      auto active = std::vector<std::shared_ptr<detail::server_session>>{};
+   std::vector<std::shared_ptr<detail::server_session_base>> active_sessions() {
+      auto active = std::vector<std::shared_ptr<detail::server_session_base>>{};
       for (const auto& session : sessions) {
          if (auto locked = session.lock()) {
             active.push_back(std::move(locked));
@@ -1037,6 +1214,68 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
          sessions.push_back(session);
       }
       return active;
+   }
+
+   bool reserve_tls_handshake() {
+      if (pending_tls_handshake_count >= config.max_pending_tls_handshakes) {
+         return false;
+      }
+      ++pending_tls_handshake_count;
+      return true;
+   }
+
+   void remember_pending_tls_handshake(const std::shared_ptr<forge::net::tls::beast_tls_stream>& stream) {
+      pending_tls_handshakes.erase(std::remove_if(pending_tls_handshakes.begin(), pending_tls_handshakes.end(),
+                                                  [](const std::weak_ptr<forge::net::tls::beast_tls_stream>& pending) {
+                                                     return pending.expired();
+                                                  }),
+                                   pending_tls_handshakes.end());
+      pending_tls_handshakes.push_back(stream);
+   }
+
+   void release_tls_handshake() noexcept {
+      if (pending_tls_handshake_count != 0U) {
+         --pending_tls_handshake_count;
+      }
+      try {
+         tls_handshake_completion.cancel();
+      } catch (...) {
+      }
+   }
+
+   void cancel_pending_tls_handshakes() {
+      for (const auto& pending : pending_tls_handshakes) {
+         if (auto stream = pending.lock()) {
+            asio::dispatch(stream->get_executor(), [stream = std::move(stream)] {
+               auto ignored = boost::system::error_code{};
+               detail::stream_socket(*stream).cancel(ignored);
+               detail::stream_socket(*stream).shutdown(tcp::socket::shutdown_both, ignored);
+               detail::stream_socket(*stream).close(ignored);
+            });
+         }
+      }
+   }
+
+   void cancel_pending_tls_handshakes_after_runtime_stopped() {
+      for (const auto& pending : pending_tls_handshakes) {
+         if (auto stream = pending.lock()) {
+            auto ignored = boost::system::error_code{};
+            detail::stream_socket(*stream).cancel(ignored);
+            detail::stream_socket(*stream).shutdown(tcp::socket::shutdown_both, ignored);
+            detail::stream_socket(*stream).close(ignored);
+         }
+      }
+      pending_tls_handshakes.clear();
+      pending_tls_handshake_count = 0;
+   }
+
+   awaitable<void> wait_until_tls_handshakes_complete() {
+      while (pending_tls_handshake_count != 0U) {
+         auto [error] = co_await tls_handshake_completion.async_wait(asio::as_tuple(use_awaitable));
+         if (error && error != asio::error::operation_aborted) {
+            throw boost::system::system_error{error};
+         }
+      }
    }
 
    void cancel_sessions_after_runtime_stopped() {
@@ -1110,12 +1349,23 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
       const auto address = asio::ip::make_address(config.bind_address);
       auto endpoint = tcp::endpoint{address, config.port};
 
+      if (tls_enabled && config.handshake_timeout <= std::chrono::milliseconds::zero()) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "HTTP TLS handshake timeout must be positive");
+      }
+      if (tls_enabled && config.max_pending_tls_handshakes == 0U) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "HTTP TLS pending-handshake bound must be positive");
+      }
+      if (tls_enabled && !config.tls_context_provider->snapshot()) {
+         FORGE_THROW_EXCEPTION(exceptions::internal, "HTTP TLS context provider has no active snapshot");
+      }
+
       acceptor.open(endpoint.protocol());
       acceptor.set_option(asio::socket_base::reuse_address(true));
       acceptor.bind(endpoint);
       acceptor.listen(asio::socket_base::max_listen_connections);
       accept_loop_completion.expires_at((std::chrono::steady_clock::time_point::max)());
       stop_completion.expires_at((std::chrono::steady_clock::time_point::max)());
+      tls_handshake_completion.expires_at((std::chrono::steady_clock::time_point::max)());
       accept_loop_completed = false;
       started = true;
       stopped.store(false, std::memory_order_release);
@@ -1153,6 +1403,7 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
       auto ignored = boost::system::error_code{};
       acceptor.cancel(ignored);
       acceptor.close(ignored);
+      cancel_pending_tls_handshakes_after_runtime_stopped();
       cancel_sessions_after_runtime_stopped();
       complete_accept_loop();
       complete_stop();
@@ -1173,8 +1424,10 @@ struct server::impl : std::enable_shared_from_this<server::impl> {
       acceptor.close(ignored);
       started = false;
       try {
+         cancel_pending_tls_handshakes();
          begin_cancel_sessions();
          co_await wait_until_accept_loop_completed();
+         co_await wait_until_tls_handshakes_complete();
          co_await async_cancel_sessions();
       } catch (...) {
          complete_stop();

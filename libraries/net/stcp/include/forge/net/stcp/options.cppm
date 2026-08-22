@@ -1,26 +1,20 @@
 module;
 
 #include <cstddef>
-#include <cstdint>
-#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
 export module forge.net.stcp.options;
 
+export import forge.net.tls.options;
+
 export namespace forge::net::stcp {
 
-struct peer_certificate {
-   std::vector<std::uint8_t> der;
-   std::string sha256_fingerprint;
-};
-
-struct certificate_chain {
-   std::vector<peer_certificate> certificates;
-};
-
-using peer_verifier = std::function<bool(const certificate_chain&)>;
+using peer_certificate = tls::peer_certificate;
+using certificate_chain = tls::certificate_chain;
+using peer_verifier = tls::peer_verifier;
+using sni_policy = tls::sni_policy;
 
 struct security_options {
    bool verify_peer = true;
@@ -28,12 +22,6 @@ struct security_options {
    std::string trusted_ca_pem;
    std::optional<std::string> expected_sha256_fingerprint;
    peer_verifier verifier;
-};
-
-enum class sni_policy : std::uint8_t {
-   endpoint_host,
-   explicit_name,
-   disabled,
 };
 
 struct client_options {

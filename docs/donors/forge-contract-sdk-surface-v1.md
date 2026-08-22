@@ -42,9 +42,9 @@ interfaces for each header.
 
 ## Executable Oracle
 
-`libraries/contract/testing` registers every intrinsic directly from the
+`libraries/tooling/testing` registers every intrinsic directly from the
 canonical macro registry and is exported as
-`Forge::forge_contract_testing`. Database behavior uses Forge ObjectDB.
+`Forge::forge_tooling_testing`. Database behavior uses Forge ObjectDB.
 Hashing, recovery, BN254 and BLS use Forge crypto. The remaining capability
 families use explicit, deterministic invocation state. Successful execution
 commits; assertion, VM or host failure restores both ObjectDB and all

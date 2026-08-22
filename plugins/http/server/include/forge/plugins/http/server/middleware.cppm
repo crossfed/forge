@@ -55,8 +55,7 @@ struct middleware_request {
 
 class middleware_response {
  public:
-   [[nodiscard]] static middleware_response text(forge::net::http::status status_value,
-                                                 std::string body_value,
+   [[nodiscard]] static middleware_response text(forge::net::http::status status_value, std::string body_value,
                                                  std::string content_type_value = "text/plain") {
       auto result = middleware_response{};
       result.status_ = status_value;
@@ -89,6 +88,10 @@ class middleware_response {
             return;
          }
       }
+      headers_.push_back(header_entry{.name = std::move(name), .value = std::move(value)});
+   }
+
+   void append_header(std::string name, std::string value) {
       headers_.push_back(header_entry{.name = std::move(name), .value = std::move(value)});
    }
 
@@ -140,8 +143,7 @@ struct middleware_bridge_access {
       value.content_type_ = std::move(content_type);
    }
 
-   [[nodiscard]] static const std::optional<std::string>& content_type(
-      const middleware_response& value) noexcept {
+   [[nodiscard]] static const std::optional<std::string>& content_type(const middleware_response& value) noexcept {
       return value.content_type_;
    }
 
@@ -153,8 +155,8 @@ struct middleware_bridge_access {
       value.stream_state_ = std::move(state);
    }
 
-   [[nodiscard]] static const forge::net::http::stream_pass_through_state& stream_state(
-      const middleware_response& value) noexcept {
+   [[nodiscard]] static const forge::net::http::stream_pass_through_state&
+   stream_state(const middleware_response& value) noexcept {
       return value.stream_state_;
    }
 };
@@ -163,7 +165,7 @@ struct middleware_bridge_access {
 
 using middleware_next = std::function<boost::asio::awaitable<middleware_response>()>;
 using middleware_handler =
-   std::function<boost::asio::awaitable<middleware_response>(const middleware_request&, middleware_next)>;
+    std::function<boost::asio::awaitable<middleware_response>(const middleware_request&, middleware_next)>;
 
 struct middleware_descriptor {
    std::string id;

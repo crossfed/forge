@@ -10,7 +10,7 @@ contract-manifest --wasm hello.wasm --abi hello.abi --imports intrinsics.json \
 ```
 
 Exit code `0` writes the manifest; `1` reports an error from
-`forge_contract_manifest`. The program contains no manifest domain model.
+`forge_tooling_manifest`. The program contains no manifest domain model.
 
 Inputs are the validated WASM/ABI pair, approved imports and explicit toolchain
 identity. The only output is the deterministic `*.contract.json` sidecar.

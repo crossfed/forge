@@ -1,5 +1,5 @@
-import forge.contract.abi.command;
+import forge.tooling.abi.command;
 
 int main(int argc, const char** argv) {
-   return forge::contract::abi::command::run(argc, argv);
+   return forge::tooling::abi::command::run(argc, argv);
 }

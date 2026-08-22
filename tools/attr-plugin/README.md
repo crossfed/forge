@@ -2,8 +2,8 @@
 
 `attr-plugin` is the loadable Clang entry point for Forge/EOSIO contract
 attributes. Loading the module calls
-`forge::contract::attributes::register_all()`; all parsing and annotation logic
-lives in `forge_contract_attributes`.
+`forge::tooling::attributes::register_all()`; all parsing and annotation logic
+lives in `forge_tooling_attributes`.
 
 ```bash
 clang++ -fplugin=./attr-plugin contract.cpp

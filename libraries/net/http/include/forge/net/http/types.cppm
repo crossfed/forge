@@ -26,6 +26,7 @@ enum class field {
    host,
    if_modified_since,
    if_none_match,
+   if_range,
    last_modified,
    range,
    retry_after,
@@ -196,7 +197,6 @@ class response {
    void insert(std::string_view name, std::string_view value);
    void erase(field name);
    void erase(std::string_view name);
-   void set_cookie(std::string_view name, std::string_view value);
 
    [[nodiscard]] header_iterator find(field name) const;
    [[nodiscard]] header_iterator find(std::string_view name) const;
@@ -240,7 +240,8 @@ struct endpoint_state_access {
                                                              forge::net::http::response response_value);
    static void attach(endpoint_request& target, std::shared_ptr<endpoint_state> state);
    [[nodiscard]] static forge::net::http::response& response(std::shared_ptr<endpoint_state>& state) noexcept;
-   [[nodiscard]] static const forge::net::http::response& response(const std::shared_ptr<endpoint_state>& state) noexcept;
+   [[nodiscard]] static const forge::net::http::response&
+   response(const std::shared_ptr<endpoint_state>& state) noexcept;
 };
 
 [[nodiscard]] response make_text_response(const request& source, status result, std::string body,

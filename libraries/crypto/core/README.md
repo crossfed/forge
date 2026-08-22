@@ -11,6 +11,8 @@ libraries. Package component: `crypto_core`. Public namespace:
 - `forge.crypto.core.secret_string`: copyable secret text with explicit scrubbed
   copy/move assignment and destruction.
 - `forge.crypto.core.random`: cryptographically secure random bytes.
+- `forge.crypto.core.constant_time`: constant-time equality for equal-length
+  byte sequences at authentication boundaries.
 
 ```cpp
 import forge.crypto.core.random;
@@ -22,5 +24,5 @@ auto secret = forge::crypto::core::secret_bytes{
 
 The target depends on `forge_exceptions` and OpenSSL Crypto. It does not own
 hash, cipher, key or certificate algorithms. `test_forge_crypto_core` covers
-secret lifetime and random byte contracts; the package test verifies installed
-module consumption.
+secret lifetime, random byte and constant-time comparison contracts; the
+package test verifies installed module consumption.

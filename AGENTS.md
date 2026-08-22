@@ -199,9 +199,9 @@ class service_node {
 
 ## VM Library Boundary
 
-- `forge::vm` is an empty family root; public symbols live in VM leaf
-  libraries such as `forge::vm::wasm`.
-- `forge::vm::wasm` owns neutral WebAssembly parsing, validation, execution,
+- `forge::vm` and its WASM child are empty family roots; public symbols live
+  in VM leaves such as `forge::vm::wasm::interpret`.
+- `forge::vm::wasm::interpret` owns neutral WebAssembly parsing, validation, execution,
   host-function mechanics, guarded memory, deterministic floating point,
   watchdog behavior and supported execution backends.
 - VM libraries must not contain blockchain controller behavior, state access,
@@ -213,16 +213,16 @@ class service_node {
 
 ## Contract Build Boundary
 
-- `libraries/contract` is an empty host-library family. It has no aggregate
+- `libraries/tooling` is an empty host-library family. It has no aggregate
   target or module. ABI generation, attributes, validation, manifests and the
   deterministic contract test host are independent optional package
   components.
-- Host contract libraries are enabled by `FORGE_ENABLE_CONTRACT_TOOLING`.
+- Host contract libraries are enabled by `FORGE_ENABLE_TOOLING`.
   Only ABI and attribute components may depend on Clang/LLVM.
 - `guest/` owns wasm32 code, the sysroot, contract examples and guest tests.
   Normal Forge configuration must not enter this project or build LLVM.
 - `tools/` owns thin host programs. Programs may parse no domain model and
-  must delegate to a matching `libraries/contract/*` command API.
+  must delegate to a matching `libraries/tooling/*` command API.
 - `guest/libraries/eosio` is a compatibility veneer over
   `guest/libraries/contract`. It may expose imports, targeted aliases and
   compatibility macros, but owns no allocator, serialization, dispatcher or

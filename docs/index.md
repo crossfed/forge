@@ -38,6 +38,7 @@ Documents below explain cross-library architecture decisions.
 | [releases/8.3.0.md](releases/8.3.0.md) | Forge 8.3.0 changes, Preview API status and source migration notes. |
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
 | [runtime/asio-app.md](runtime/asio-app.md) | Runtime ownership, bounded scheduler, plugin lifecycle and rollback. |
+| [iterations/forge-native-admin-foundation-v1.md](iterations/forge-native-admin-foundation-v1.md) | Planned native HTTP server TLS, pairing, browser sessions, HTTP security and static-asset mounting for administration backends. |
 | [iterations/forge-application-connect-services-v1.md](iterations/forge-application-connect-services-v1.md) | Accepted application connect phase and bounded publication of process-local runtime clients before plugin startup. |
 | [donors/forge-application-connect-services-v1.md](donors/forge-application-connect-services-v1.md) | Forge lifecycle, .NET Generic Host and gRPC Channel donor boundaries for connected application services. |
 | [runtime/compute-and-snapshots.md](runtime/compute-and-snapshots.md) | Separate CPU execution domain, snapshot readers with an ordered writer, and the boundary for future speculative execution. |
@@ -53,6 +54,8 @@ Documents below explain cross-library architecture decisions.
 | [security/authenticated-state-production-gate.md](security/authenticated-state-production-gate.md) | Mandatory independent review gate before production activation of authenticated state roots. |
 | [iterations/forge-db-mdbx-v1.md](iterations/forge-db-mdbx-v1.md) | Production design for a libmdbx DB Core backend, including thread affinity, snapshot cloning, durability, geometry and parity requirements. |
 | [iterations/forge-contract-sdk-toolchain-v1.md](iterations/forge-contract-sdk-toolchain-v1.md) | Accepted baseline for the wasm32 contract SDK, vanilla Clang toolchain, legacy EOSIO compatibility and modern C++23 contract surface. |
+| [iterations/forge-contract-tooling-family-v1.md](iterations/forge-contract-tooling-family-v1.md) | Accepted clean-breaking move of host ABI, validation, manifest and testing libraries from `forge.contract.*` to the empty `forge.tooling.*` family. |
+| [iterations/forge-vm-wasm-backend-family-v1.md](iterations/forge-vm-wasm-backend-family-v1.md) | Accepted clean-breaking target/module/namespace split between the current EOS VM interpret lane and the future EOS VM OC optimizing backend. |
 | [donors/forge-contract-dual-target-graph-v1.md](donors/forge-contract-dual-target-graph-v1.md) | Bazel, Cargo, CDT and CMake donor boundaries for immutable dual-target contract-library descriptors. |
 | [iterations/forge-chain-remote-state-v1.md](iterations/forge-chain-remote-state-v1.md) | Accepted direction for transport-neutral typed contract-state reads and chain transaction submission over Forge API. |
 | [donors/forge-chain-remote-state-v1.md](donors/forge-chain-remote-state-v1.md) | Spring/CDT donor boundaries for guest tables, remote state reads and transaction submission. |
@@ -117,6 +120,7 @@ Each library guide must be useful without reading source first:
 - [asio](../libraries/asio/README.md)
 - [app](../libraries/app/README.md)
 - [net/http](../libraries/net/http/README.md)
+- [net/tls](../libraries/net/tls/README.md)
 - [net/websocket](../libraries/net/websocket/README.md)
 - [net/transport](../libraries/net/transport/README.md)
 - [net/tcp](../libraries/net/tcp/README.md)
