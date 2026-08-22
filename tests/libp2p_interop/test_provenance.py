@@ -254,13 +254,29 @@ class InteropFixtureContractTest(unittest.TestCase):
         invalid = (
             {**valid_dcutr, "status": "failed"},
             {**valid_dcutr, "hole_punch_status": 4},
+            {**valid_dcutr, "hole_punch_status": 3.0},
+            {**valid_dcutr, "hole_punch_status": True},
             {**valid_dcutr, "relay_echo": False},
             {**valid_dcutr, "source_hole_punch_successes": 0},
+            {**valid_dcutr, "source_hole_punch_successes": True},
+            {**valid_dcutr, "source_hole_punch_successes": 1.0},
             {**valid_dcutr, "relay_bytes": 0},
+            {**valid_dcutr, "relay_bytes": True},
+            {**valid_dcutr, "relay_bytes": 1.0},
         )
         for result in invalid:
             with self.subTest(result=result), self.assertRaises(RuntimeError):
                 require_local_topology_evidence(result, "dcutr_relay_topology")
+
+        for result in (
+            {"status": "ok", "relay_echo": True, "relay_bytes": True},
+            {"status": "ok", "relay_echo": True, "relay_bytes": 1.0},
+        ):
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                require_local_topology_evidence(result, "relay_echo_topology")
+
+        with self.assertRaises(RuntimeError):
+            require_local_topology_evidence({"status": "ok"}, "unknown_topology")
 
 
 if __name__ == "__main__":

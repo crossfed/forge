@@ -962,17 +962,26 @@ def require_local_topology_evidence(result: dict, scenario: str) -> None:
     if result.get("status") != "ok":
         raise RuntimeError(f"Forge topology fixture reported non-success: {result}")
     if scenario == "relay_echo_topology":
-        if result.get("relay_echo") is not True or result.get("relay_bytes", 0) <= 0:
+        relay_bytes = result.get("relay_bytes")
+        if result.get("relay_echo") is not True or type(relay_bytes) is not int or relay_bytes <= 0:
             raise RuntimeError(f"Forge relay topology lacks successful relay evidence: {result}")
         return
     if scenario == "dcutr_relay_topology":
+        hole_punch_status = result.get("hole_punch_status")
+        hole_punch_successes = result.get("source_hole_punch_successes")
+        relay_bytes = result.get("relay_bytes")
         if (
-            result.get("hole_punch_status") != 3
+            type(hole_punch_status) is not int
+            or hole_punch_status != 3
             or result.get("relay_echo") is not True
-            or result.get("source_hole_punch_successes", 0) <= 0
-            or result.get("relay_bytes", 0) <= 0
+            or type(hole_punch_successes) is not int
+            or hole_punch_successes <= 0
+            or type(relay_bytes) is not int
+            or relay_bytes <= 0
         ):
             raise RuntimeError(f"Forge DCUtR topology lacks successful hole-punch and direct-echo evidence: {result}")
+        return
+    raise RuntimeError(f"unknown Forge topology evidence scenario: {scenario}")
 
 
 def run_topology(binary: Path, implementation: str, scenario: str, root: Path) -> dict:
