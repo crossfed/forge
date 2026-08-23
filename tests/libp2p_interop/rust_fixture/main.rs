@@ -469,6 +469,51 @@ struct DhtFindPeerEvidence {
     failures: u32,
 }
 
+async fn wait_dht_remote_ready(
+    swarm: &mut libp2p::Swarm<Behaviour>,
+    remote_peer: PeerId,
+) -> Result<(), Box<dyn Error>> {
+    let mut routing_admitted = false;
+    let mut amino_advertised = false;
+    let deadline = tokio::time::sleep(Duration::from_secs(20));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => {
+                return Err(format!(
+                    "timed out waiting for Kademlia readiness: routing_admitted={routing_admitted}, \
+                     amino_advertised={amino_advertised}"
+                ).into());
+            }
+            event = swarm.select_next_some() => {
+                match event {
+                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::RoutingUpdated {
+                        peer,
+                        ..
+                    })) if peer == remote_peer => {
+                        routing_admitted = true;
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
+                        peer_id,
+                        info,
+                        ..
+                    })) if peer_id == remote_peer => {
+                        amino_advertised = info
+                            .protocols
+                            .iter()
+                            .any(|protocol| protocol.as_ref() == "/ipfs/kad/1.0.0");
+                    }
+                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
+                    _ => {}
+                }
+                if routing_admitted && amino_advertised {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 async fn wait_dht_find_peer(
     swarm: &mut libp2p::Swarm<Behaviour>,
     remote_peer: PeerId,
@@ -1549,6 +1594,12 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
     }
     if !connected {
         return Err("connection was not established".into());
+    }
+    if matches!(
+        opts.scenario.as_str(),
+        "dht_provide_find_provider" | "dht_pk_put_get" | "dht_ipns_put_get"
+    ) {
+        wait_dht_remote_ready(&mut swarm, remote_peer).await?;
     }
     match opts.scenario.as_str() {
         "ping" if !ping_ok => return Err("ping did not complete".into()),
