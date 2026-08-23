@@ -6,7 +6,9 @@ add_library(
       api_impl.cpp
       managed_api_impl.cpp
       managed_remote_invoker.cpp
+      managed_remote_state.cpp
       details/cache_record.hxx
+      details/managed_remote_state.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
 
