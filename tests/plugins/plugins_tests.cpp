@@ -3661,6 +3661,23 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_static_topology_starts_without_autonomous_d
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_normalizes_managed_topology_to_hard_session_capacity) {
+   auto config = test_p2p_config(test_peer(94));
+   config.set("plugins.p2p.node.max-sessions", std::uint64_t{1});
+   auto app = p2p_only_application{};
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   const auto diagnostics = app.apis().get<forge::plugins::p2p::node::diagnostics_source>(
+       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 1, .min_revision = 0});
+   const auto topology = diagnostics->snapshot().topology;
+   BOOST_TEST(topology.low_watermark == 1U);
+   BOOST_TEST(topology.target_watermark == 1U);
+   BOOST_TEST(topology.high_watermark == 192U);
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_config_preserves_legacy_positional_prefix) {
    const auto value = forge::plugins::p2p::node::config{{}, {}, {"/ip4/127.0.0.1/tcp/4001"}};
    BOOST_REQUIRE_EQUAL(value.advertised_endpoints.size(), 1U);

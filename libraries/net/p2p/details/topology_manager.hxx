@@ -93,6 +93,7 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       std::function<void()> before_refresh_completion;
       std::function<void()> before_parent_completion;
       std::function<void()> before_dial_join_wait;
+      std::function<void()> before_dial_worker_completion;
    };
 
    struct status {
@@ -167,7 +168,9 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
       std::size_t next = 0;
       std::size_t remaining_workers = 0;
       std::size_t successes = 0;
+      std::size_t in_flight = 0;
       std::size_t required = 0;
+      bool admission_closed = false;
       bool launches_complete = false;
       bool completion_notified = false;
       std::exception_ptr failure;
@@ -205,7 +208,7 @@ class topology_manager : public std::enable_shared_from_this<topology_manager> {
    boost::asio::awaitable<void> async_unregister_rendezvous();
    void merge_observations(const std::vector<discovery::result>& results);
    [[nodiscard]] std::vector<discovery::result> candidates_for_dial(const connection_manager::snapshot& sessions);
-   void note_dial_result(const discovery::result& result, bool succeeded);
+   void note_dial_result(const discovery::result& result, bool succeeded) noexcept;
    [[nodiscard]] std::chrono::milliseconds retry_delay(const observation_key& key, std::size_t failures) const;
    [[nodiscard]] std::chrono::milliseconds retry_delay(const rendezvous_key& key, std::size_t failures) const;
    void note_rendezvous_failure(const rendezvous_key& key) noexcept;

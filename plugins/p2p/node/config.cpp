@@ -265,10 +265,6 @@ void apply_config(plugin::impl& state, const config& config) {
                             "server-only P2P rendezvous cannot configure client discovery points");
    }
    state.options.limits.rendezvous.operating_role = parse_rendezvous_role(config.rendezvous_role);
-   if (config.topology_high > config.max_sessions) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                            "P2P topology high watermark cannot exceed the hard session limit");
-   }
    try {
       forge::net::p2p::validate(state.options.limits.topology);
    } catch (const forge::plugins::p2p::node::exceptions::invalid_config&) {

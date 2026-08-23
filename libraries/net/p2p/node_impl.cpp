@@ -350,6 +350,15 @@ void normalize_legacy_discovery(node::options& options) {
    }
 }
 
+void normalize_topology_capacity(node::options& options) noexcept {
+   auto& policy = options.limits.topology;
+   if (policy.operating_mode == topology::mode::static_only) {
+      return;
+   }
+   policy.peers.target = std::min(policy.peers.target, options.limits.max_sessions);
+   policy.peers.low = std::min(policy.peers.low, policy.peers.target);
+}
+
 void validate(const node::options& options) {
    const auto relay_duration = std::chrono::duration_cast<std::chrono::seconds>(options.limits.relay.max_duration);
    validate(options.limits.topology);

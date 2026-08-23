@@ -62,6 +62,7 @@ attempt_timeout(std::chrono::milliseconds remaining, std::chrono::milliseconds c
 [[noreturn]] void throw_operation_timeout(std::string_view operation);
 [[nodiscard]] resource_manager::limits resource_limits_for(const node::limits& limits);
 void normalize_legacy_discovery(node::options& options);
+void normalize_topology_capacity(node::options& options) noexcept;
 void validate(const node::options& options);
 
 struct node::impl : std::enable_shared_from_this<impl> {

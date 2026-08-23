@@ -527,23 +527,26 @@ void topology_manager::note_rendezvous_success(const rendezvous_key& key, std::v
    }
 }
 
-void topology_manager::note_dial_result(const discovery::result& result, bool succeeded) {
-   const auto key = observation_key{.peer = result.peer, .source = result.discovered_by};
-   const auto now = clocks_.steady_now();
-   const auto lock = std::scoped_lock{mutex_};
-   const auto found = observations_.find(key);
-   if (found == observations_.end()) {
-      return;
+void topology_manager::note_dial_result(const discovery::result& result, bool succeeded) noexcept {
+   try {
+      const auto key = observation_key{.peer = result.peer, .source = result.discovered_by};
+      const auto now = clocks_.steady_now();
+      const auto lock = std::scoped_lock{mutex_};
+      const auto found = observations_.find(key);
+      if (found == observations_.end()) {
+         return;
+      }
+      if (succeeded) {
+         found->second.failures = 0;
+         found->second.retry_after = {};
+         return;
+      }
+      if (found->second.failures < (std::numeric_limits<std::size_t>::max)()) {
+         ++found->second.failures;
+      }
+      found->second.retry_after = bounded_retry_deadline(now, retry_delay(key, found->second.failures));
+   } catch (...) {
    }
-   if (succeeded) {
-      found->second.failures = 0;
-      found->second.retry_after = {};
-      return;
-   }
-   if (found->second.failures < (std::numeric_limits<std::size_t>::max)()) {
-      ++found->second.failures;
-   }
-   found->second.retry_after = bounded_retry_deadline(now, retry_delay(key, found->second.failures));
 }
 
 } // namespace forge::net::p2p::detail

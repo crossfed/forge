@@ -109,17 +109,22 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
              [self, batch, operation](std::exception_ptr error) noexcept {
                 auto notify = false;
                 auto drained = false;
+                const auto cancel_batch = static_cast<bool>(error);
                 {
                    const auto lock = std::scoped_lock{batch->mutex};
                    if (error && !batch->failure) {
                       batch->failure = error;
                    }
+                   batch->admission_closed = batch->admission_closed || cancel_batch;
                    if (batch->remaining_workers != 0) {
                       --batch->remaining_workers;
                    }
                    notify = batch->launches_complete && batch->remaining_workers == 0 &&
                             !std::exchange(batch->completion_notified, true);
                    drained = batch->launches_complete && batch->remaining_workers == 0;
+                }
+                if (cancel_batch) {
+                   batch->cancellation->request_stop();
                 }
                 if (notify) {
                    batch->completed->notify();
@@ -133,6 +138,7 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
          launch_failure = std::current_exception();
          {
             const auto lock = std::scoped_lock{batch->mutex};
+            batch->admission_closed = true;
             if (worker_reserved && batch->remaining_workers != 0) {
                --batch->remaining_workers;
             }
@@ -175,6 +181,10 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
          if (!join_failure) {
             join_failure = std::current_exception();
          }
+         {
+            const auto lock = std::scoped_lock{batch->mutex};
+            batch->admission_closed = true;
+         }
          batch->cancellation->request_stop();
       }
    }
@@ -201,34 +211,95 @@ boost::asio::awaitable<void> topology_manager::async_dial_candidates(std::vector
 boost::asio::awaitable<void> topology_manager::async_dial_worker(const std::shared_ptr<dial_batch>& batch) {
    while (!stopping() && !batch->cancellation->stop_requested()) {
       auto candidate = std::optional<discovery::result>{};
-      {
-         const auto lock = std::scoped_lock{batch->mutex};
-         if (batch->successes >= batch->required || batch->next >= batch->candidates.size()) {
-            co_return;
-         }
-         candidate = batch->candidates[batch->next++];
-      }
-      auto cancellation = std::make_shared<cancellation_latch>();
-      auto root_subscription = cancellation_latch::subscribe(batch->cancellation, [cancellation] noexcept {
-         cancellation->request_stop();
-      });
-      static_cast<void>(root_subscription);
-      add_cancellation(cancellation);
+      auto claimed = false;
+      auto settled = false;
       auto succeeded = false;
-      try {
-         succeeded = co_await callbacks_.dial(*candidate, cancellation);
-      } catch (...) {
-         if (!stopping()) {
-            forge::exceptions::capture_and_log("P2P topology dial failed");
+      auto dial_failure = std::exception_ptr{};
+      auto cancellation = std::shared_ptr<cancellation_latch>{};
+      auto root_subscription = cancellation_latch::subscription{};
+      auto registered = false;
+
+      const auto settle = [&](bool success) noexcept {
+         if (!claimed || settled) {
+            return;
          }
-      }
-      static_cast<void>(cancellation->finish());
-      remove_cancellation(cancellation);
-      note_dial_result(*candidate, succeeded);
-      if (succeeded) {
          const auto lock = std::scoped_lock{batch->mutex};
-         ++batch->successes;
+         --batch->in_flight;
+         if (success) {
+            ++batch->successes;
+         }
+         settled = true;
+      };
+      const auto fail = [&](const std::exception_ptr& failure) noexcept {
+         const auto lock = std::scoped_lock{batch->mutex};
+         if (claimed && !settled) {
+            --batch->in_flight;
+            settled = true;
+         }
+         batch->admission_closed = true;
+         if (!batch->failure) {
+            batch->failure = failure;
+         }
+      };
+      const auto cleanup = [&]() noexcept {
+         if (cancellation) {
+            static_cast<void>(cancellation->finish());
+         }
+         if (registered) {
+            remove_cancellation(cancellation);
+            registered = false;
+         }
+         root_subscription.reset();
+      };
+
+      try {
+         {
+            const auto lock = std::scoped_lock{batch->mutex};
+            if (batch->admission_closed || batch->successes >= batch->required ||
+                batch->in_flight >= batch->required - batch->successes ||
+                batch->next >= batch->candidates.size()) {
+               break;
+            }
+            candidate.emplace(std::move(batch->candidates[batch->next]));
+            ++batch->next;
+            ++batch->in_flight;
+            claimed = true;
+         }
+         cancellation = std::make_shared<cancellation_latch>();
+         root_subscription = cancellation_latch::subscribe(batch->cancellation, [cancellation] noexcept {
+            cancellation->request_stop();
+         });
+         add_cancellation(cancellation);
+         registered = true;
+         auto dial = callbacks_.dial(*candidate, cancellation);
+         try {
+            succeeded = co_await std::move(dial);
+         } catch (...) {
+            dial_failure = std::current_exception();
+         }
+         settle(succeeded);
+         cleanup();
+         if (dial_failure && !stopping()) {
+            try {
+               std::rethrow_exception(dial_failure);
+            } catch (...) {
+               try {
+                  forge::exceptions::capture_and_log("P2P topology dial failed");
+               } catch (...) {
+               }
+            }
+         }
+         note_dial_result(*candidate, succeeded);
+      } catch (...) {
+         const auto failure = std::current_exception();
+         fail(failure);
+         cleanup();
+         batch->cancellation->request_stop();
+         std::rethrow_exception(failure);
       }
+   }
+   if (clocks_.before_dial_worker_completion) {
+      clocks_.before_dial_worker_completion();
    }
 }
 

@@ -408,6 +408,7 @@ node::impl::exchange_rendezvous(const peer_id& peer, rendezvous::message request
 node::node(forge::asio::runtime& runtime, node::options options) {
    normalize_legacy_discovery(options);
    validate(options);
+   normalize_topology_capacity(options);
    impl_ = std::make_shared<impl>(runtime, std::move(options));
    impl_->validate_local_identify_document();
    impl_->initialize_dht_provider_registry();

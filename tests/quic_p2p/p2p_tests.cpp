@@ -7393,6 +7393,10 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_low_hard_session_limit_is_independen
    auto first = node{runtime, options_for(peer(244))};
    auto second = node{runtime, options_for(peer(245))};
    auto client = node{runtime, std::move(client_options)};
+   const auto effective_topology = client.diagnostics().topology;
+   BOOST_TEST(effective_topology.low_watermark == 1U);
+   BOOST_TEST(effective_topology.target_watermark == 1U);
+   BOOST_TEST(effective_topology.high_watermark > effective_topology.target_watermark);
    register_echo(first);
 
    const auto first_endpoint = listen(first, runtime);
