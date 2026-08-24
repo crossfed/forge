@@ -1761,22 +1761,24 @@ class binding_builder {
                                    forge::api::core::method_kind::server_stream) {
                         auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
                            request_value, options, *method_descriptor);
-                        payload = forge::api::core::detail::pack_fixed_proxy_arguments<Method>(
-                           arguments, std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
+                        payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
+                           *method_descriptor, arguments,
+                           std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
                      } else {
                         auto arguments = make_positional_arguments_from_http<argument_tuple>(
                            request_value.context, options, *method_descriptor);
-                        payload = forge::api::core::detail::pack_fixed_proxy_arguments<Method>(
-                           arguments, std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
+                        payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
+                           *method_descriptor, arguments,
+                           std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
                      }
                   } else {
                      if constexpr (forge::api::core::method_kind_v<Method> ==
                                    forge::api::core::method_kind::server_stream) {
                         auto request = co_await make_request_from_stream<Request>(request_value, options);
-                        payload = forge::api::core::pack_body(request);
+                        payload = method_descriptor->request_encoder(&request);
                      } else {
                         auto request = make_request_from_http<Request>(request_value.context, options);
-                        payload = forge::api::core::pack_body(request);
+                        payload = method_descriptor->request_encoder(&request);
                      }
                   }
 

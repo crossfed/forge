@@ -89,12 +89,15 @@ class remote_invoker {
 
    template <typename Request, typename Response>
    boost::asio::awaitable<Response> call(const descriptor& contract, api_ref api, std::string method, Request value) {
-      reset_server_supplied(value);
+      const auto* method_value = find_method(contract, method);
+      if (method_value == nullptr || !method_value->request_encoder) {
+         throw exceptions::protocol_error{"API method has no request encoder"};
+      }
       auto outbound = request{
           .api = std::move(api),
           .method = std::move(method),
           .codec = {.value = "forge.raw"},
-          .body = pack_body(value),
+          .body = method_value->request_encoder(&value),
       };
       auto inbound = co_await async_call(std::move(outbound));
       if (inbound.error) {
@@ -107,9 +110,13 @@ class remote_invoker {
    boost::asio::awaitable<Response> call_arguments(const descriptor& contract, api_ref api, std::string method,
                                                    Args&&... args) {
       using argument_tuple = std::tuple<std::remove_cvref_t<Args>...>;
+      const auto* method_value = find_method(contract, method);
+      if (method_value == nullptr || !method_value->request_encoder) {
+         throw exceptions::protocol_error{"API method has no request encoder"};
+      }
       if (supports_typed_arguments()) {
          auto arguments = argument_tuple{std::forward<Args>(args)...};
-         reset_server_supplied(arguments);
+         method_value->server_fields.reset_fixed(&arguments);
          auto output = std::optional<Response>{};
          auto outbound = request{
              .api = std::move(api),
@@ -131,11 +138,12 @@ class remote_invoker {
           .codec = {.value = "forge.raw"},
       };
       auto arguments = argument_tuple{std::forward<Args>(args)...};
-      reset_server_supplied(arguments);
-      if constexpr (sizeof...(Args) == 1U) {
-         outbound.body = pack_body(std::get<0>(arguments));
+      if constexpr (sizeof...(Args) == 0U) {
+         outbound.body = {};
+      } else if constexpr (sizeof...(Args) == 1U) {
+         outbound.body = method_value->request_encoder(&std::get<0>(arguments));
       } else {
-         outbound.body = pack_body(std::move(arguments));
+         outbound.body = method_value->request_encoder(&arguments);
       }
       auto inbound = co_await async_call(std::move(outbound));
       if (inbound.error) {
@@ -148,20 +156,18 @@ class remote_invoker {
 namespace detail {
 
 template <auto Method, typename Tuple, std::size_t... Index>
-[[nodiscard]] bytes pack_fixed_proxy_arguments(const Tuple& arguments, std::index_sequence<Index...>) {
+[[nodiscard]] bytes encode_fixed_proxy_arguments(const method_descriptor& descriptor,
+                                                  const Tuple& arguments,
+                                                  std::index_sequence<Index...>) {
    constexpr auto count = sizeof...(Index);
    if constexpr (count == 0) {
       return {};
    } else if constexpr (count == 1) {
-      return pack_body(std::get<0>(arguments));
+      return descriptor.request_encoder(&std::get<0>(arguments));
    } else {
-      return pack_body(std::tuple{std::get<Index>(arguments)...});
+      auto fixed = std::tuple{std::get<Index>(arguments)...};
+      return descriptor.request_encoder(&fixed);
    }
-}
-
-template <typename Interface, typename Tuple, std::size_t... Index>
-void reset_fixed_proxy_arguments(Tuple& arguments, std::index_sequence<Index...>) {
-   (reset_api_server_supplied<Interface>(std::get<Index>(arguments)), ...);
 }
 
 template <typename Interface, typename Request, typename Response>
@@ -179,15 +185,9 @@ template <typename Interface, typename Response, typename... Args>
 boost::asio::awaitable<Response> proxy_call_arguments(std::shared_ptr<remote_invoker> invoker, api_ref selected_api,
                                                       std::string method, Args&&... args) {
    if constexpr (remote_interface<Interface>) {
-      auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
-      reset_api_server_supplied<Interface>(arguments);
-      co_return co_await std::apply(
-         [&](auto&&... values) {
-            return invoker->template call_arguments<Response>(
-               api_traits<Interface>::describe(), std::move(selected_api), std::move(method),
-               std::move(values)...);
-         },
-         std::move(arguments));
+      co_return co_await invoker->template call_arguments<Response>(
+         api_traits<Interface>::describe(), std::move(selected_api), std::move(method),
+         std::forward<Args>(args)...);
    } else {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "local-only API does not support remote invocation");
    }
@@ -206,8 +206,11 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
           std::move(invoker), std::move(selected_api), std::move(method), std::forward<Args>(args)...);
    } else {
       auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
-      reset_fixed_proxy_arguments<Interface>(arguments,
-                                             std::make_index_sequence<fixed_argument_count_v<Method>>{});
+      auto contract = api_traits<Interface>::describe();
+      const auto* method_value = find_method(contract, method);
+      if (method_value == nullptr || !method_value->request_encoder) {
+         throw exceptions::protocol_error{"API method has no request encoder"};
+      }
       auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
       auto input = std::shared_ptr<stream_endpoint>{};
       auto output = std::shared_ptr<stream_endpoint>{};
@@ -224,13 +227,14 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
           .api = std::move(selected_api),
           .method = std::move(method),
           .codec = {.value = "forge.raw"},
-          .body =
-              pack_fixed_proxy_arguments<Method>(arguments, std::make_index_sequence<fixed_argument_count_v<Method>>{}),
+          .body = encode_fixed_proxy_arguments<Method>(
+             *method_value, arguments,
+             std::make_index_sequence<fixed_argument_count_v<Method>>{}),
       };
       auto inbound = co_await invoker->async_stream_call(std::move(outbound), method_kind_v<Method>, std::move(input),
                                                          std::move(output));
       if (inbound.error) {
-         raise_remote_error(*inbound.error, find_method(api_traits<Interface>::describe(), inbound.method));
+         raise_remote_error(*inbound.error, find_method(contract, inbound.method));
       }
       if constexpr (std::same_as<method_response_t<Method>, void>) {
          co_return;

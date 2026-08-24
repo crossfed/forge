@@ -105,16 +105,6 @@ inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argumen
 
 namespace detail {
 
-template <typename Interface, typename Value>
-void reset_api_server_supplied(Value& value) {
-   api_traits<Interface>::reset_server_fields(value);
-}
-
-template <typename Interface, typename Value>
-void apply_api_server_supplied(Value& value, const trusted_invocation& trusted) {
-   api_traits<Interface>::apply_server_fields(value, trusted);
-}
-
 struct missing_proxy_argument final {};
 
 template <auto Method, std::size_t Index,
@@ -162,6 +152,27 @@ using method_fixed_argument_tuple_t =
 
 template <auto Method>
 using method_fixed_request_t = typename method_payload<method_fixed_argument_tuple_t<Method>>::type;
+
+struct server_field_operations {
+   std::function<void(void*)> reset_wire;
+   std::function<void(void*, const trusted_invocation&)> apply_wire;
+   std::function<void(void*)> reset_fixed;
+   std::function<void(void*, const trusted_invocation&)> apply_fixed;
+};
+
+template <typename Wire, typename Fixed>
+server_field_operations make_server_field_operations() {
+   return {
+      .reset_wire = [](void* value) { reset_server_supplied(*static_cast<Wire*>(value)); },
+      .apply_wire = [](void* value, const trusted_invocation& trusted) {
+         apply_server_supplied(*static_cast<Wire*>(value), trusted);
+      },
+      .reset_fixed = [](void* value) { reset_server_supplied(*static_cast<Fixed*>(value)); },
+      .apply_fixed = [](void* value, const trusted_invocation& trusted) {
+         apply_server_supplied(*static_cast<Fixed*>(value), trusted);
+      },
+   };
+}
 
 template <auto Method>
 inline constexpr method_kind inferred_method_kind_v = [] {
@@ -345,11 +356,12 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
 
 template <auto Method, typename Interface>
 boost::asio::awaitable<bytes>
-invoke_contextual_raw(std::shared_ptr<void> implementation, bytes payload, const trusted_invocation& trusted) {
+invoke_contextual_raw(std::shared_ptr<void> implementation, bytes payload, const trusted_invocation& trusted,
+                      const server_field_operations& fields) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(payload);
-   reset_api_server_supplied<Interface>(arguments);
-   apply_api_server_supplied<Interface>(arguments, trusted);
+   fields.reset_fixed(&arguments);
+   fields.apply_fixed(&arguments, trusted);
    if constexpr (std::same_as<method_response_t<Method>, void>) {
       co_await invoke_fixed<Method>(*typed, std::move(arguments),
                                     std::make_index_sequence<method_argument_count_v<Method>>{});
@@ -366,11 +378,12 @@ boost::asio::awaitable<bytes>
 invoke_contextual_stream(std::shared_ptr<void> implementation, bytes fixed_payload,
                          std::shared_ptr<stream_endpoint> input,
                          std::shared_ptr<stream_endpoint> output,
-                         const trusted_invocation& trusted) {
+                         const trusted_invocation& trusted,
+                         const server_field_operations& fields) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
-   reset_api_server_supplied<Interface>(arguments);
-   apply_api_server_supplied<Interface>(arguments, trusted);
+   fields.reset_fixed(&arguments);
+   fields.apply_fixed(&arguments, trusted);
    try {
       if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream) {
          if (!output) {
@@ -468,6 +481,7 @@ struct method_descriptor {
    std::vector<std::string> argument_names;
    std::vector<std::type_index> response_traits;
    std::vector<error_descriptor> errors;
+   detail::server_field_operations server_fields;
    std::function<bytes(const void*)> request_encoder;
    std::function<bytes(const void*)> response_encoder;
    std::function<void(const bytes&, forge::raw::unpack_limits)> request_decoder;
@@ -526,19 +540,50 @@ template <typename Interface, bool EnableRaw> class contract_builder {
    explicit contract_builder(descriptor value) : descriptor_(std::move(value)) {}
 
    template <auto Method> method_builder<Interface, EnableRaw> method(std::string name) {
-      return add_deduced_method<Method>(std::move(name), {});
+      using wire = detail::method_fixed_request_t<Method>;
+      using fixed = detail::method_fixed_argument_tuple_t<Method>;
+      return add_deduced_method<Method>(std::move(name), {},
+                                        detail::make_server_field_operations<wire, fixed>());
    }
 
    template <auto Method>
    method_builder<Interface, EnableRaw> method(std::string name, std::vector<std::string> argument_names) {
-      return add_deduced_method<Method>(std::move(name), std::move(argument_names));
+      using wire = detail::method_fixed_request_t<Method>;
+      using fixed = detail::method_fixed_argument_tuple_t<Method>;
+      return add_deduced_method<Method>(std::move(name), std::move(argument_names),
+                                        detail::make_server_field_operations<wire, fixed>());
+   }
+
+   template <auto Method>
+   method_builder<Interface, EnableRaw> method(std::string name,
+                                                detail::server_field_operations fields) {
+      return add_deduced_method<Method>(std::move(name), {}, std::move(fields));
+   }
+
+   template <auto Method>
+   method_builder<Interface, EnableRaw> method(std::string name,
+                                                std::vector<std::string> argument_names,
+                                                detail::server_field_operations fields) {
+      return add_deduced_method<Method>(std::move(name), std::move(argument_names),
+                                        std::move(fields));
    }
 
    template <auto Method, typename Request, typename Response>
    method_builder<Interface, EnableRaw> method(std::string name) {
       static_assert(method_kind_v<Method> == method_kind::unary,
                     "explicit request/response API registration is unary only");
-      return add_explicit_unary_method<Method, Request, Response>(std::move(name));
+      using fixed = detail::method_fixed_argument_tuple_t<Method>;
+      return add_explicit_unary_method<Method, Request, Response>(
+         std::move(name), detail::make_server_field_operations<Request, fixed>());
+   }
+
+   template <auto Method, typename Request, typename Response>
+   method_builder<Interface, EnableRaw> method(std::string name,
+                                                detail::server_field_operations fields) {
+      static_assert(method_kind_v<Method> == method_kind::unary,
+                    "explicit request/response API registration is unary only");
+      return add_explicit_unary_method<Method, Request, Response>(std::move(name),
+                                                                  std::move(fields));
    }
 
    [[nodiscard]] descriptor build() {
@@ -557,7 +602,9 @@ template <typename Interface, bool EnableRaw> class contract_builder {
 
  private:
    template <auto Method>
-   method_builder<Interface, EnableRaw> add_deduced_method(std::string name, std::vector<std::string> argument_names) {
+   method_builder<Interface, EnableRaw>
+   add_deduced_method(std::string name, std::vector<std::string> argument_names,
+                      detail::server_field_operations fields) {
       detail::validate_method_signature<Method>();
       constexpr auto kind = method_kind_v<Method>;
       constexpr auto argument_count = method_argument_count_v<Method>;
@@ -586,6 +633,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .fixed_arguments_type = typeid(detail::method_fixed_argument_tuple_t<Method>),
           .result_type = typeid(method_response_t<Method>),
           .argument_names = std::move(argument_names),
+          .server_fields = fields,
       };
 
       if constexpr (kind == method_kind::server_stream) {
@@ -602,9 +650,9 @@ template <typename Interface, bool EnableRaw> class contract_builder {
 
       if constexpr (EnableRaw) {
          using wire_request = detail::method_fixed_request_t<Method>;
-         value.request_encoder = [](const void* request) {
+         value.request_encoder = [reset = fields.reset_wire](const void* request) {
             auto wire_copy = *static_cast<const wire_request*>(request);
-            detail::reset_api_server_supplied<Interface>(wire_copy);
+            reset(&wire_copy);
             return pack_body(wire_copy);
          };
          value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
@@ -664,10 +712,23 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                   co_return pack_body(response);
                }
             };
-            value.contextual_raw_invoker = detail::invoke_contextual_raw<Method, Interface>;
+            value.contextual_raw_invoker =
+               [fields](std::shared_ptr<void> implementation, bytes payload,
+                        const trusted_invocation& trusted) {
+                  return detail::invoke_contextual_raw<Method, Interface>(
+                     std::move(implementation), std::move(payload), trusted, fields);
+               };
          } else {
             value.stream_invoker = detail::invoke_raw_stream<Method, Interface>;
-            value.contextual_stream_invoker = detail::invoke_contextual_stream<Method, Interface>;
+            value.contextual_stream_invoker =
+               [fields](std::shared_ptr<void> implementation, bytes payload,
+                        std::shared_ptr<detail::stream_endpoint> input,
+                        std::shared_ptr<detail::stream_endpoint> output,
+                        const trusted_invocation& trusted) {
+                  return detail::invoke_contextual_stream<Method, Interface>(
+                     std::move(implementation), std::move(payload), std::move(input),
+                     std::move(output), trusted, fields);
+               };
          }
       }
 
@@ -676,7 +737,8 @@ template <typename Interface, bool EnableRaw> class contract_builder {
    }
 
    template <auto Method, typename Request, typename Response>
-   method_builder<Interface, EnableRaw> add_explicit_unary_method(std::string name) {
+   method_builder<Interface, EnableRaw>
+   add_explicit_unary_method(std::string name, detail::server_field_operations fields) {
       reject_duplicate(name);
       auto value = method_descriptor{
           .name = std::move(name),
@@ -685,11 +747,12 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .response_type = typeid(Response),
           .fixed_arguments_type = typeid(Request),
           .result_type = typeid(Response),
+          .server_fields = fields,
       };
       if constexpr (EnableRaw) {
-         value.request_encoder = [](const void* request) {
+         value.request_encoder = [reset = fields.reset_wire](const void* request) {
             auto wire_copy = *static_cast<const Request*>(request);
-            detail::reset_api_server_supplied<Interface>(wire_copy);
+            reset(&wire_copy);
             return pack_body(wire_copy);
          };
          value.response_encoder = [](const void* response) {
@@ -707,12 +770,13 @@ template <typename Interface, bool EnableRaw> class contract_builder {
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };
-         value.contextual_raw_invoker = [](std::shared_ptr<void> implementation, bytes payload,
-                                           const trusted_invocation& trusted) -> boost::asio::awaitable<bytes> {
+         value.contextual_raw_invoker = [fields](std::shared_ptr<void> implementation, bytes payload,
+                                                  const trusted_invocation& trusted)
+            -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
-            detail::reset_api_server_supplied<Interface>(request);
-            detail::apply_api_server_supplied<Interface>(request, trusted);
+            fields.reset_wire(&request);
+            fields.apply_wire(&request, trusted);
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };
