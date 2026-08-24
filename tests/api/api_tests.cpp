@@ -310,7 +310,7 @@ class move_only_api : public forge::api::core::contract<move_only_api, forge::ap
 };
 
 FORGE_API(move_only_api, FORGE_API_CONTRACT("move.only", 1, 0), FORGE_API_METHOD(unary),
-          FORGE_API_METHOD(stream_values))
+          FORGE_API_METHOD(stream_values, request))
 
 class local_only_api : public forge::api::core::contract<local_only_api> {
  public:
