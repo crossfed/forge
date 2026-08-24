@@ -1891,8 +1891,8 @@ BOOST_AUTO_TEST_CASE(remote_wire_copies_are_reset_but_direct_local_calls_are_unc
 BOOST_AUTO_TEST_CASE(contextual_dispatch_falls_back_to_custom_legacy_invokers) {
    auto runtime = forge::asio::runtime{};
    auto descriptor = trusted_api::describe();
-   auto* method = forge::api::core::find_method(descriptor, "unary");
-   BOOST_REQUIRE(method != nullptr);
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
    method->contextual_raw_invoker = {};
 
    auto registry = forge::api::core::registry{};
@@ -1910,8 +1910,8 @@ BOOST_AUTO_TEST_CASE(binding_skips_payload_and_metadata_context_when_no_intercep
    auto runtime = forge::asio::runtime{};
    auto registry = forge::api::core::registry{};
    auto descriptor = cache_api::describe();
-   auto* method = forge::api::core::find_method(descriptor, "read");
-   BOOST_REQUIRE(method != nullptr);
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "read"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
    const auto observed = std::make_shared<const std::uint8_t*>(nullptr);
    method->raw_invoker = [observed](std::shared_ptr<void>, forge::api::core::bytes payload)
       -> boost::asio::awaitable<forge::api::core::bytes> {
