@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <typeindex>
@@ -128,6 +129,8 @@ struct move_only_request {
    move_only_request& operator=(const move_only_request&) = delete;
 };
 
+struct throwing_request {};
+
 template <typename Stream> Stream& operator<<(Stream& stream, const move_only_request& value) {
    forge::raw::pack(stream, *value.value);
    return stream;
@@ -137,6 +140,14 @@ template <typename Stream> Stream& operator>>(Stream& stream, move_only_request&
    auto decoded = std::string{};
    forge::raw::unpack(stream, decoded);
    value.value = std::make_unique<std::string>(std::move(decoded));
+   return stream;
+}
+
+template <typename Stream> Stream& operator<<(Stream&, const throwing_request&) {
+   throw std::runtime_error{"request encoding failed"};
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, throwing_request&) {
    return stream;
 }
 
@@ -311,6 +322,19 @@ class move_only_api : public forge::api::core::contract<move_only_api, forge::ap
 };
 
 FORGE_API(move_only_api, FORGE_API_CONTRACT("move.only", 1, 0), FORGE_API_METHOD(unary),
+          FORGE_API_METHOD(stream_values, request))
+
+class throwing_stream_api
+    : public forge::api::core::contract<throwing_stream_api, forge::api::core::surface::remote> {
+ public:
+   virtual ~throwing_stream_api() = default;
+
+   virtual boost::asio::awaitable<void>
+   stream_values(protocol::throwing_request request,
+                 forge::api::core::stream_writer<protocol::chunk> output) = 0;
+};
+
+FORGE_API(throwing_stream_api, FORGE_API_CONTRACT("throwing.stream", 1, 0),
           FORGE_API_METHOD(stream_values, request))
 
 class local_only_api : public forge::api::core::contract<local_only_api> {
@@ -927,8 +951,9 @@ class move_only_invoker final : public forge::api::core::remote_invoker {
    boost::asio::awaitable<forge::api::core::response>
    async_stream_call(forge::api::core::request value, forge::api::core::method_kind,
                      std::shared_ptr<forge::api::core::detail::stream_endpoint>,
-                     std::shared_ptr<forge::api::core::detail::stream_endpoint>) override {
+                     std::shared_ptr<forge::api::core::detail::stream_endpoint> output_value) override {
       stream = *forge::api::core::unpack_body<protocol::move_only_request>(value.body).value;
+      output = std::move(output_value);
       co_return forge::api::core::response{
          .api = value.api,
          .method = value.method,
@@ -938,6 +963,7 @@ class move_only_invoker final : public forge::api::core::remote_invoker {
 
    std::string unary;
    std::string stream;
+   std::shared_ptr<forge::api::core::detail::stream_endpoint> output;
 };
 
 BOOST_AUTO_TEST_CASE(generated_api_descriptor_records_contract_and_method_metadata) {
@@ -2169,6 +2195,125 @@ BOOST_AUTO_TEST_CASE(remote_proxy_encodes_move_only_unary_and_stream_fixed_argum
    auto output = forge::api::core::detail::writer_access::make<protocol::chunk>(stream_output.writer);
    forge::asio::blocking::run(runtime, proxy->stream_values(protocol::move_only_request{"stream"}, std::move(output)));
    BOOST_TEST(remote->stream == "stream");
+   BOOST_REQUIRE(remote->output);
+   forge::asio::blocking::run(
+      runtime, remote->output->async_write(forge::api::core::pack_body(protocol::chunk{.bytes = "after-return"})));
+   remote->output->close();
+   const auto delivered = forge::asio::blocking::run(runtime, stream_output.reader->async_read());
+   BOOST_REQUIRE(delivered.has_value());
+   BOOST_TEST(forge::api::core::unpack_body<protocol::chunk>(*delivered).bytes == "after-return");
+}
+
+BOOST_AUTO_TEST_CASE(remote_proxy_transfers_server_and_bidirectional_writer_ownership) {
+   class invoker final : public forge::api::core::remote_invoker {
+    public:
+      boost::asio::awaitable<forge::api::core::response>
+      async_call(forge::api::core::request value) override {
+         co_return forge::api::core::response{
+            .api = value.api,
+            .method = value.method,
+            .codec = value.codec,
+         };
+      }
+
+      boost::asio::awaitable<forge::api::core::response>
+      async_stream_call(
+         forge::api::core::request value, forge::api::core::method_kind,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint> input_value,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint> output_value) override {
+         input = std::move(input_value);
+         output = std::move(output_value);
+         co_return forge::api::core::response{
+            .api = value.api,
+            .method = value.method,
+            .codec = value.codec,
+         };
+      }
+
+      std::shared_ptr<forge::api::core::detail::stream_endpoint> input;
+      std::shared_ptr<forge::api::core::detail::stream_endpoint> output;
+   };
+
+   auto runtime = forge::asio::runtime{};
+   auto remote = std::make_shared<invoker>();
+   auto proxy = forge::api::core::handle<trusted_api>{
+      std::make_shared<forge::api::core::proxy<trusted_api>>(remote)};
+
+   auto server_output = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   auto server_writer = forge::api::core::detail::writer_access::make<protocol::chunk>(server_output.writer);
+   forge::asio::blocking::run(
+      runtime, proxy->server_stream(spoofed_trusted_request(), std::move(server_writer)));
+   BOOST_REQUIRE(remote->output);
+   forge::asio::blocking::run(
+      runtime, remote->output->async_write(forge::api::core::pack_body(protocol::chunk{.bytes = "server"})));
+   remote->output->close();
+   const auto server_item = forge::asio::blocking::run(runtime, server_output.reader->async_read());
+   BOOST_REQUIRE(server_item.has_value());
+   BOOST_TEST(forge::api::core::unpack_body<protocol::chunk>(*server_item).bytes == "server");
+
+   auto bidirectional_input = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   auto bidirectional_output = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   auto stream = forge::api::core::duplex_stream<trusted_protocol::request, protocol::chunk>{
+      forge::api::core::detail::reader_access::make<trusted_protocol::request>(bidirectional_input.reader),
+      forge::api::core::detail::writer_access::make<protocol::chunk>(bidirectional_output.writer)};
+   forge::asio::blocking::run(
+      runtime, proxy->bidirectional_stream(spoofed_trusted_request(), std::move(stream)));
+   BOOST_REQUIRE(remote->input);
+   BOOST_REQUIRE(remote->output);
+   forge::asio::blocking::run(
+      runtime, remote->output->async_write(forge::api::core::pack_body(protocol::chunk{.bytes = "bidirectional"})));
+   remote->output->close();
+   const auto bidirectional_item =
+      forge::asio::blocking::run(runtime, bidirectional_output.reader->async_read());
+   BOOST_REQUIRE(bidirectional_item.has_value());
+   BOOST_TEST(forge::api::core::unpack_body<protocol::chunk>(*bidirectional_item).bytes == "bidirectional");
+}
+
+BOOST_AUTO_TEST_CASE(remote_proxy_closes_writer_when_fixed_argument_encoding_fails) {
+   class invoker final : public forge::api::core::remote_invoker {
+    public:
+      boost::asio::awaitable<forge::api::core::response>
+      async_call(forge::api::core::request value) override {
+         co_return forge::api::core::response{
+            .api = value.api,
+            .method = value.method,
+            .codec = value.codec,
+         };
+      }
+
+      boost::asio::awaitable<forge::api::core::response>
+      async_stream_call(
+         forge::api::core::request value, forge::api::core::method_kind,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint>,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint>) override {
+         ++calls;
+         co_return forge::api::core::response{
+            .api = value.api,
+            .method = value.method,
+            .codec = value.codec,
+         };
+      }
+
+      std::size_t calls = 0;
+   };
+
+   auto runtime = forge::asio::runtime{};
+   auto remote = std::make_shared<invoker>();
+   auto proxy = forge::api::core::handle<throwing_stream_api>{
+      std::make_shared<forge::api::core::proxy<throwing_stream_api>>(remote)};
+   auto stream_output = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   auto writer = forge::api::core::detail::writer_access::make<protocol::chunk>(stream_output.writer);
+
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime, proxy->stream_values(protocol::throwing_request{}, std::move(writer))),
+      std::runtime_error);
+   BOOST_TEST(remote->calls == 0U);
+   BOOST_TEST(!(forge::asio::blocking::run(runtime, stream_output.reader->async_read())).has_value());
 }
 
 BOOST_AUTO_TEST_CASE(contextual_dispatch_rejects_legacy_fallback_when_server_fields_are_active) {

@@ -2008,6 +2008,24 @@ class delayed_body_source final : public body_reader::source {
    std::uint64_t bytes_read_ = 0;
 };
 
+class cancellable_body_source final : public body_reader::source {
+ public:
+   boost::asio::awaitable<std::optional<body_chunk>> async_read() override {
+      started.store(true, std::memory_order_release);
+      auto timer = boost::asio::steady_timer{
+         co_await boost::asio::this_coro::executor,
+         (std::chrono::steady_clock::time_point::max)()};
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      co_return std::nullopt;
+   }
+
+   [[nodiscard]] std::uint64_t bytes_read() const noexcept override {
+      return 0;
+   }
+
+   std::atomic_bool started = false;
+};
+
 class failing_body_source final : public body_reader::source {
  public:
    enum class failure {
@@ -3259,6 +3277,40 @@ BOOST_AUTO_TEST_CASE(http_connection_streaming_upload_uses_one_absolute_deadline
                                                        request_options{.timeout = std::chrono::milliseconds{40}})),
        forge::net::http::exceptions::gateway_timeout);
 
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(http_connection_cancellation_interrupts_streaming_request_body_read) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto router = forge::net::http::router{};
+   router.post_stream("/upload", [](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+      static_cast<void>(co_await request_value.body.async_read_all());
+      co_return stream_response::buffered(response{status::ok, request_value.context.request.version()});
+   });
+
+   auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
+   server.start();
+   auto connection = forge::net::http::connection{
+      runtime, parse_base_url("http://127.0.0.1:" + std::to_string(wait_for_port(server)))};
+   auto source = std::make_shared<cancellable_body_source>();
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto pending = boost::asio::co_spawn(
+      runtime.context(),
+      connection.async_streaming_request(
+         make_request(method::post, "/upload"), body_reader{source},
+         request_options{.timeout = std::chrono::seconds{10}}),
+      boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+
+   const auto start_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+   while (!source->started.load(std::memory_order_acquire) &&
+          std::chrono::steady_clock::now() < start_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE(source->started.load(std::memory_order_acquire));
+
+   cancellation.emit(boost::asio::cancellation_type::all);
+   BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(pending.get()), forge::asio::exceptions::canceled);
    server.stop();
 }
 

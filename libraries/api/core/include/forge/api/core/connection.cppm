@@ -5,6 +5,7 @@ module;
 
 #include <concepts>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
@@ -230,18 +231,6 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
       if (method_value == nullptr) {
          throw exceptions::protocol_error{"API method is not available"};
       }
-      auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
-      auto input = std::shared_ptr<stream_endpoint>{};
-      auto output = std::shared_ptr<stream_endpoint>{};
-      if constexpr (method_kind_v<Method> == method_kind::server_stream) {
-         output = writer_access::endpoint(endpoint);
-      } else if constexpr (method_kind_v<Method> == method_kind::client_stream) {
-         input = reader_access::endpoint(endpoint);
-      } else {
-         input = reader_access::endpoint(endpoint.input());
-         output = writer_access::endpoint(endpoint.output());
-      }
-
       auto outbound = request{
           .api = std::move(selected_api),
           .method = std::move(method),
@@ -250,15 +239,41 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
              *method_value, arguments,
              std::make_index_sequence<fixed_argument_count_v<Method>>{}),
       };
-      auto inbound = co_await invoker->async_stream_call(std::move(outbound), method_kind_v<Method>, std::move(input),
-                                                         std::move(output));
-      if (inbound.error) {
-         raise_remote_error(*inbound.error, find_method(contract, inbound.method));
-      }
-      if constexpr (std::same_as<method_response_t<Method>, void>) {
-         co_return;
+      auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
+      auto input = std::shared_ptr<stream_endpoint>{};
+      auto output = std::shared_ptr<stream_endpoint>{};
+      if constexpr (method_kind_v<Method> == method_kind::server_stream) {
+         output = writer_access::take_endpoint(endpoint);
+      } else if constexpr (method_kind_v<Method> == method_kind::client_stream) {
+         input = reader_access::endpoint(endpoint);
       } else {
-         co_return unpack_body<method_response_t<Method>>(inbound.body);
+         input = reader_access::endpoint(endpoint.input());
+         output = writer_access::take_endpoint(endpoint.output());
+      }
+      auto input_owner = input;
+      auto output_owner = output;
+      try {
+         auto inbound = co_await invoker->async_stream_call(
+            std::move(outbound), method_kind_v<Method>, std::move(input),
+            std::move(output));
+         if (inbound.error) {
+            raise_remote_error(*inbound.error,
+                               find_method(contract, inbound.method));
+         }
+         if constexpr (std::same_as<method_response_t<Method>, void>) {
+            co_return;
+         } else {
+            co_return unpack_body<method_response_t<Method>>(inbound.body);
+         }
+      } catch (...) {
+         auto error = std::current_exception();
+         if (input_owner) {
+            input_owner->fail(error);
+         }
+         if (output_owner) {
+            output_owner->fail(error);
+         }
+         throw;
       }
    }
 }

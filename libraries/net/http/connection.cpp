@@ -10,6 +10,7 @@ module;
 #include <optional>
 #include <mutex>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <forge/exceptions/macros.hpp>
@@ -17,13 +18,13 @@ module;
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancel_at.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/connect.hpp>
 #include <boost/asio/dispatch.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/strand.hpp>
@@ -282,17 +283,40 @@ class beast_response_body_source final : public body_reader::source,
    std::atomic_bool cancelled_ = false;
 };
 
+awaitable<bool> cancel_body_at_deadline(body_reader& body, transport_deadline deadline) {
+   auto timer = asio::steady_timer{co_await asio::this_coro::executor, deadline};
+   auto [error] = co_await timer.async_wait(asio::as_tuple(use_awaitable));
+   if (!error) {
+      body.cancel();
+      co_return true;
+   }
+   if (error == asio::error::operation_aborted) {
+      co_return false;
+   }
+   throw boost::system::system_error{error};
+}
+
 awaitable<std::optional<body_chunk>> read_body_until(body_reader& body, transport_deadline deadline) {
    require_deadline(deadline);
    const auto executor = co_await asio::this_coro::executor;
-   auto [error, chunk] =
-       co_await asio::co_spawn(executor, body.async_read(), asio::cancel_at(deadline, asio::as_tuple(use_awaitable)));
+   using namespace asio::experimental::awaitable_operators;
+   auto outcome = co_await (
+      asio::co_spawn(executor, body.async_read(), asio::as_tuple(use_awaitable)) ||
+      cancel_body_at_deadline(body, deadline));
+   if (outcome.index() != 0U) {
+      if (std::get<1>(outcome)) {
+         raise_deadline();
+      }
+      throw forge::asio::exceptions::canceled{"HTTP request body read was canceled"};
+   }
+   auto [error, chunk] = std::get<0>(std::move(outcome));
    if (error) {
       if (deadline_expired(deadline)) {
          raise_deadline();
       }
       std::rethrow_exception(error);
    }
+   require_deadline(deadline);
    co_return std::move(chunk);
 }
 
@@ -440,14 +464,27 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    awaitable<tcp::resolver::results_type> resolve(transport_deadline deadline) {
       require_deadline(deadline);
       auto request_resolver = tcp::resolver{strand};
-      auto [error, results] = co_await request_resolver.async_resolve(
-          endpoint.host, endpoint.port, asio::cancel_at(deadline, asio::as_tuple(use_awaitable)));
+      auto timer = asio::steady_timer{strand, deadline};
+      using namespace asio::experimental::awaitable_operators;
+      auto outcome = co_await (
+         request_resolver.async_resolve(endpoint.host, endpoint.port,
+                                        asio::as_tuple(use_awaitable)) ||
+         timer.async_wait(asio::as_tuple(use_awaitable)));
+      if (outcome.index() != 0U) {
+         const auto [timer_error] = std::get<1>(outcome);
+         if (!timer_error) {
+            raise_deadline();
+         }
+         throw boost::system::system_error{timer_error};
+      }
+      auto [error, results] = std::get<0>(std::move(outcome));
       if (error) {
          if (deadline_expired(deadline)) {
             raise_deadline();
          }
          throw boost::system::system_error{error};
       }
+      require_deadline(deadline);
       co_return results;
    }
 
