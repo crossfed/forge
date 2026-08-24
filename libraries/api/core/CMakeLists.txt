@@ -11,7 +11,6 @@ add_library(
    stream_reader.cpp
    stream_state.cpp
    trusted_invocation.cpp
-   trusted_invocation_state.cpp
 )
 forge_target_modules_at(forge_api_core api/core)
 

@@ -1,5 +1,7 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
@@ -17,11 +19,15 @@ trusted_invocation::trusted_invocation(std::shared_ptr<const detail::trusted_inv
 trusted_invocation::~trusted_invocation() = default;
 
 bool trusted_invocation::empty() const noexcept {
-   return !state_ || state_->empty();
+   return !state_ || state_->values_.empty();
 }
 
 const void* trusted_invocation::find_exact(std::type_index type) const noexcept {
-   return state_ ? state_->find_exact(type) : nullptr;
+   if (!state_) {
+      return nullptr;
+   }
+   const auto iterator = state_->values_.find(type);
+   return iterator == state_->values_.end() ? nullptr : iterator->second.get();
 }
 
 trusted_invocation_builder::trusted_invocation_builder()
@@ -36,7 +42,9 @@ void trusted_invocation_builder::insert(std::type_index type, std::shared_ptr<co
    if (!state_) {
       state_ = std::make_unique<detail::trusted_invocation_state>();
    }
-   state_->insert(type, std::move(value));
+   if (!state_->values_.emplace(type, std::move(value)).second) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "duplicate trusted invocation value");
+   }
 }
 
 trusted_invocation trusted_invocation_builder::build() && {
