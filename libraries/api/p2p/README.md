@@ -22,6 +22,9 @@ places that value in core trusted invocation context for typed request
 enrichment, and also preserves the legacy `forge.p2p.remote_peer` trusted
 metadata injection for interceptors. The metadata value is not an authority
 source, so a client-supplied `forge.p2p.remote_peer` cannot impersonate a peer.
+`authenticated_peer` is a trusted source type, not a wire field: product DTOs
+specialize `server_supplied<Field>` and read it with
+`trusted_invocation::find<authenticated_peer>()`.
 The P2P session has already authenticated `remote_peer` through its negotiated
 security channel before `api_binding::make_session(...)` constructs the typed
 context; that factory exposes the configured stream session when the caller owns
