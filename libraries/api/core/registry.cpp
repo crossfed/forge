@@ -105,12 +105,12 @@ boost::asio::awaitable<frame> registry::dispatch(frame request) const {
 }
 
 boost::asio::awaitable<frame>
-registry::dispatch(frame request, const trusted_invocation& trusted) const {
-   return dispatch_contextual(std::move(request), trusted);
+registry::dispatch(frame request, trusted_invocation trusted) const {
+   return dispatch_contextual(std::move(request), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
-registry::dispatch_contextual(frame request, const trusted_invocation& trusted) const {
+registry::dispatch_contextual(frame request, trusted_invocation trusted) const {
    if (request.kind != frame_kind::request) {
       co_return make_protocol_error(request, "API dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
@@ -137,7 +137,7 @@ registry::dispatch_contextual(frame request, const trusted_invocation& trusted) 
       auto request_payload = method->response_validator ? request.payload : bytes{};
       if (method->contextual_raw_invoker) {
          response.payload = co_await method->contextual_raw_invoker(
-            entry->implementation, std::move(request.payload), trusted);
+            entry->implementation, std::move(request.payload), std::move(trusted));
       } else {
          response.payload = co_await method->raw_invoker(entry->implementation, std::move(request.payload));
       }
@@ -159,14 +159,15 @@ boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shar
 boost::asio::awaitable<frame>
 registry::dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                           std::shared_ptr<detail::stream_endpoint> output,
-                          const trusted_invocation& trusted) const {
-   return dispatch_stream_contextual(std::move(request), std::move(input), std::move(output), trusted);
+                          trusted_invocation trusted) const {
+   return dispatch_stream_contextual(
+      std::move(request), std::move(input), std::move(output), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
 registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                      std::shared_ptr<detail::stream_endpoint> output,
-                                     const trusted_invocation& trusted) const {
+                                     trusted_invocation trusted) const {
    if (request.kind != frame_kind::request) {
       fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream dispatch requires a request frame", status::invalid_argument,
@@ -208,7 +209,7 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
       auto request_payload = method->response_validator ? request.payload : bytes{};
       if (method->contextual_stream_invoker) {
          response.payload = co_await method->contextual_stream_invoker(
-            entry->implementation, std::move(request.payload), input, output, trusted);
+            entry->implementation, std::move(request.payload), input, output, std::move(trusted));
       } else {
          response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload),
                                                               input, output);

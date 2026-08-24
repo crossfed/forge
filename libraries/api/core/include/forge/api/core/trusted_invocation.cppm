@@ -36,12 +36,12 @@ class trusted_invocation {
    }
 
  private:
-   struct impl;
+   struct state;
 
-   explicit trusted_invocation(std::shared_ptr<const impl> value) noexcept;
+   explicit trusted_invocation(std::shared_ptr<const state> value) noexcept;
    [[nodiscard]] const void* find_exact(std::type_index type) const noexcept;
 
-   std::shared_ptr<const impl> impl_;
+   std::shared_ptr<const state> state_;
 
    friend class trusted_invocation_builder;
 };
@@ -73,7 +73,7 @@ class trusted_invocation_builder {
  private:
    void insert(std::type_index type, std::shared_ptr<const void> value);
 
-   std::unique_ptr<trusted_invocation::impl> impl_;
+   std::unique_ptr<trusted_invocation::state> state_;
 };
 
 } // namespace forge::api::core

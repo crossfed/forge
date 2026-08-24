@@ -1765,6 +1765,37 @@ BOOST_AUTO_TEST_CASE(contextual_dispatch_resets_and_applies_nested_server_suppli
    BOOST_TEST(implementation->last_fixed.optional_member->value == "optional-not-traversed");
 }
 
+BOOST_AUTO_TEST_CASE(contextual_dispatch_owns_temporary_trusted_invocation_before_lazy_start) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<trusted_impl>();
+   registry.install<trusted_api>(trusted_api::describe(), implementation);
+
+   auto unary = registry.dispatch_contextual(
+      trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request())), trusted_authority());
+   const auto unary_response = forge::asio::blocking::run(runtime, std::move(unary));
+   BOOST_CHECK(unary_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(unary_response.payload).bytes == "authenticated");
+
+   const auto plan = forge::api::core::binding().serve(registry).build();
+   auto bound_unary = plan.dispatch_contextual(
+      trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request())), trusted_authority());
+   const auto bound_unary_response = forge::asio::blocking::run(runtime, std::move(bound_unary));
+   BOOST_CHECK(bound_unary_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(bound_unary_response.payload).bytes == "authenticated");
+
+   auto output = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   auto stream = registry.dispatch_stream_contextual(
+      trusted_request_frame("server_stream", pack_api_payload(spoofed_trusted_request())), {}, output.writer,
+      trusted_authority());
+   const auto stream_response = forge::asio::blocking::run(runtime, std::move(stream));
+   BOOST_CHECK(stream_response.kind == forge::api::core::frame_kind::response);
+   const auto item = forge::asio::blocking::run(runtime, output.reader->async_read());
+   BOOST_REQUIRE(item.has_value());
+   BOOST_TEST(forge::api::core::unpack_body<protocol::chunk>(*item).bytes == "authenticated");
+}
+
 BOOST_AUTO_TEST_CASE(contextual_dispatch_rejects_missing_required_and_keeps_optional_missing) {
    auto runtime = forge::asio::runtime{};
    auto registry = forge::api::core::registry{};
