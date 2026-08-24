@@ -30,6 +30,7 @@ module;
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -8849,6 +8850,12 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
                             .set(forge::api::p2p::authenticated_peer{.id = authenticated})
                             .build();
    auto value = forge::api::p2p::authenticated_peer{.id = spoofed};
+
+   auto traversed = std::tuple{value};
+   forge::api::core::reset_server_supplied(traversed);
+   BOOST_TEST(std::get<0>(traversed).id.value.empty());
+   forge::api::core::apply_server_supplied(traversed, trusted);
+   BOOST_TEST(std::get<0>(traversed).id.value == authenticated.value);
 
    forge::api::core::server_supplied<forge::api::p2p::authenticated_peer>::reset(value);
    BOOST_REQUIRE(forge::api::core::server_supplied<forge::api::p2p::authenticated_peer>::apply(value, trusted));

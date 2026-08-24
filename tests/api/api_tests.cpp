@@ -142,14 +142,12 @@ struct request {
    std::optional<authority> optional_member;
 };
 
-} // namespace trusted_protocol
+BOOST_DESCRIBE_STRUCT(authority, (), (value))
+BOOST_DESCRIBE_STRUCT(optional_authority, (), (value))
+BOOST_DESCRIBE_STRUCT(nested_request, (), (peer))
+BOOST_DESCRIBE_STRUCT(request, (), (value, claimed_peer, claimed_optional, nested, optional_member))
 
-BOOST_DESCRIBE_STRUCT(trusted_protocol::authority, (), (value))
-BOOST_DESCRIBE_STRUCT(trusted_protocol::optional_authority, (), (value))
-BOOST_DESCRIBE_STRUCT(trusted_protocol::nested_request, (), (peer))
-BOOST_DESCRIBE_STRUCT(trusted_protocol::request, (), (value, claimed_peer, claimed_optional, nested, optional_member))
-
-namespace trusted_protocol {
+static_assert(forge::reflect::is_described_object_v<request>);
 
 template <typename Stream> Stream& operator<<(Stream& stream, const authority& value) {
    forge::raw::pack(stream, value.value);
