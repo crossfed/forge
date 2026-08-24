@@ -156,24 +156,29 @@ make_before_interceptor_hook(const binding_plan& plan) {
    }
    return [&plan](frame& request, request_view typed_request,
                   const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
+      auto canonical_payload = encode();
       auto context = call_context{
          .id = request.id,
          .api = request.api,
          .method = request.method,
-         .meta = std::move(request.meta),
-         .payload = encode(),
+         .payload = std::move(canonical_payload),
          .codec = request.codec,
          .kind = request.kind,
          .request = typed_request,
       };
-      for (const auto& step : plan.interceptors) {
-         if (step.handler && step.phase <= interceptor_phase::before_call) {
-            co_await step.handler(context);
-            if (context.payload != encode()) {
-               request.meta = std::move(context.meta);
-               throw exceptions::protocol_error{"API interceptor must not mutate the canonical request payload"};
+      context.meta = std::move(request.meta);
+      try {
+         for (const auto& step : plan.interceptors) {
+            if (step.handler && step.phase <= interceptor_phase::before_call) {
+               co_await step.handler(context);
+               if (context.payload != encode()) {
+                  throw exceptions::protocol_error{"API interceptor must not mutate the canonical request payload"};
+               }
             }
          }
+      } catch (...) {
+         request.meta = std::move(context.meta);
+         throw;
       }
       request.meta = std::move(context.meta);
    };

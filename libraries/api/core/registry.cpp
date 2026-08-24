@@ -2,6 +2,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <memory>
@@ -90,36 +91,35 @@ void fail_stream_endpoints(
    return make_error_response(request, make_internal_error_payload());
 }
 
-[[nodiscard]] contextual_before_handler
-make_contextual_before_handler(const method_descriptor& method, contextual_dispatch_hook before, frame& frame,
-                               std::shared_ptr<bytes> response_request) {
-   if (!method.request_validator && !method.response_validator) {
-      if (!before) {
-         return {};
-      }
-      return [before = std::move(before), &frame](request_view request,
-                                                   const canonical_request_encoder& encode)
-         -> boost::asio::awaitable<void> {
-         co_await before(frame, request, encode);
-      };
-   }
+[[nodiscard]] contextual_handler_gate
+make_contextual_handler_gate(const method_descriptor& method, contextual_dispatch_hook before, frame& frame,
+                             std::shared_ptr<bytes> response_request, std::shared_ptr<void> implementation,
+                             std::shared_ptr<std::atomic_size_t> calls) {
    return [request_validator = method.request_validator,
            response_validator = method.response_validator,
            before = std::move(before),
            &frame,
-           response_request = std::move(response_request)](
-              request_view request, const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
-      // Existing byte validators must observe the canonical typed request, never client wire bytes.
-      auto canonical_payload = encode();
-      if (request_validator) {
-         request_validator(canonical_payload);
-      }
-      if (response_validator) {
-         *response_request = std::move(canonical_payload);
+           response_request = std::move(response_request),
+           implementation = std::move(implementation),
+           calls = std::move(calls)](request_view request,
+                                     const canonical_request_encoder& encode) -> boost::asio::awaitable<std::shared_ptr<void>> {
+      if (calls->fetch_add(1U, std::memory_order_relaxed) != 0U) {
+         throw exceptions::protocol_error{"contextual API invoker acquired the handler gate more than once"};
       }
       if (before) {
          co_await before(frame, request, encode);
       }
+      if (request_validator || response_validator) {
+         // Existing byte validators observe the canonical typed request only after authorization succeeds.
+         auto canonical_payload = encode();
+         if (request_validator) {
+            request_validator(canonical_payload);
+         }
+         if (response_validator) {
+            *response_request = std::move(canonical_payload);
+         }
+      }
+      co_return implementation;
    };
 }
 
@@ -171,19 +171,24 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted, context
    try {
       if (method->contextual_raw_invoker) {
          auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
-         auto before_handler = make_contextual_before_handler(*method, std::move(before), request, canonical_request);
+         auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
+         auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
+                                                  entry->implementation, gate_calls);
          response.payload = co_await method->contextual_raw_invoker(
-            entry->implementation, std::move(request.payload), std::move(trusted), std::move(before_handler));
+            std::move(request.payload), std::move(trusted), std::move(gate));
+         if (gate_calls->load(std::memory_order_relaxed) != 1U) {
+            throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};
+         }
          if (method->response_validator) {
             method->response_validator(*canonical_request, response.payload);
          }
       } else {
-         if (method->request_validator) {
-            method->request_validator(request.payload);
-         }
          if (before) {
             const auto canonical_payload = [&request] { return request.payload; };
             co_await before(request, request_view{}, canonical_payload);
+         }
+         if (method->request_validator) {
+            method->request_validator(request.payload);
          }
          auto request_payload = method->response_validator ? request.payload : bytes{};
          response.payload = co_await method->raw_invoker(entry->implementation, std::move(request.payload));
@@ -261,20 +266,24 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
    try {
       if (method->contextual_stream_invoker) {
          auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
-         auto before_handler = make_contextual_before_handler(*method, std::move(before), request, canonical_request);
+         auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
+         auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
+                                                  entry->implementation, gate_calls);
          response.payload = co_await method->contextual_stream_invoker(
-            entry->implementation, std::move(request.payload), input, output, std::move(trusted),
-            std::move(before_handler));
+            std::move(request.payload), input, output, std::move(trusted), std::move(gate));
+         if (gate_calls->load(std::memory_order_relaxed) != 1U) {
+            throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};
+         }
          if (method->response_validator) {
             method->response_validator(*canonical_request, response.payload);
          }
       } else {
-         if (method->request_validator) {
-            method->request_validator(request.payload);
-         }
          if (before) {
             const auto canonical_payload = [&request] { return request.payload; };
             co_await before(request, request_view{}, canonical_payload);
+         }
+         if (method->request_validator) {
+            method->request_validator(request.payload);
          }
          auto request_payload = method->response_validator ? request.payload : bytes{};
          response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload),
