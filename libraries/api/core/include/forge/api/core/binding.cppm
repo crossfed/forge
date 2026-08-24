@@ -16,7 +16,6 @@ export module forge.api.core.binding;
 
 export import forge.api.core.context;
 export import forge.api.core.registry;
-export import forge.api.core.server_supplied;
 
 export namespace forge::api::core {
 
@@ -59,13 +58,8 @@ struct binding_plan {
    std::vector<interceptor_step> interceptors;
 
    boost::asio::awaitable<frame> dispatch(frame request) const;
-   boost::asio::awaitable<frame> dispatch(frame request, const trusted_invocation& trusted) const;
    boost::asio::awaitable<frame>
    dispatch_stream(frame request,
-                   std::shared_ptr<detail::stream_endpoint> input,
-                   std::shared_ptr<detail::stream_endpoint> output) const;
-   boost::asio::awaitable<frame>
-   dispatch_stream(frame request, const trusted_invocation& trusted,
                    std::shared_ptr<detail::stream_endpoint> input,
                    std::shared_ptr<detail::stream_endpoint> output) const;
 };
