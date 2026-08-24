@@ -143,23 +143,40 @@ void validate_interceptors(
    }
 }
 
-boost::asio::awaitable<void>
-run_before_interceptors(const binding_plan& plan, frame& request) {
-   const auto matched = std::any_of(plan.interceptors.begin(), plan.interceptors.end(),
-                                    [](const auto& step) {
-                                       return step.handler && step.phase <= interceptor_phase::before_call;
-                                    });
-   if (!matched) {
-      co_return;
+[[nodiscard]] bool has_before_interceptors(const binding_plan& plan) {
+   return std::any_of(plan.interceptors.begin(), plan.interceptors.end(), [](const auto& step) {
+      return step.handler && step.phase <= interceptor_phase::before_call;
+   });
+}
+
+[[nodiscard]] contextual_dispatch_hook
+make_before_interceptor_hook(const binding_plan& plan) {
+   if (!has_before_interceptors(plan)) {
+      return {};
    }
-   auto context = make_context(request);
-   for (const auto& step : plan.interceptors) {
-      if (step.handler && step.phase <= interceptor_phase::before_call) {
-         co_await step.handler(context);
+   return [&plan](frame& request, request_view typed_request,
+                  const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
+      auto context = call_context{
+         .id = request.id,
+         .api = request.api,
+         .method = request.method,
+         .meta = std::move(request.meta),
+         .payload = encode(),
+         .codec = request.codec,
+         .kind = request.kind,
+         .request = typed_request,
+      };
+      for (const auto& step : plan.interceptors) {
+         if (step.handler && step.phase <= interceptor_phase::before_call) {
+            co_await step.handler(context);
+            if (context.payload != encode()) {
+               request.meta = std::move(context.meta);
+               throw exceptions::protocol_error{"API interceptor must not mutate the canonical request payload"};
+            }
+         }
       }
-   }
-   request.meta = std::move(context.meta);
-   request.payload = std::move(context.payload);
+      request.meta = std::move(context.meta);
+   };
 }
 
 boost::asio::awaitable<void>
@@ -230,8 +247,9 @@ boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
       co_return make_api_not_exported_response(request);
    }
 
-   co_await run_before_interceptors(*this, request);
-   auto response = co_await local->dispatch(std::move(request));
+   auto before = make_before_interceptor_hook(*this);
+   auto response = co_await local->dispatch_contextual(
+      std::move(request), trusted_invocation{}, std::move(before));
    co_await run_terminal_interceptors(*this, response);
    co_return response;
 }
@@ -252,8 +270,9 @@ binding_plan::dispatch_contextual(frame request, trusted_invocation trusted) con
       co_return make_api_not_exported_response(request);
    }
 
-   co_await run_before_interceptors(*this, request);
-   auto response = co_await local->dispatch_contextual(std::move(request), std::move(trusted));
+   auto before = make_before_interceptor_hook(*this);
+   auto response = co_await local->dispatch_contextual(
+      std::move(request), std::move(trusted), std::move(before));
    co_await run_terminal_interceptors(*this, response);
    co_return response;
 }
@@ -274,9 +293,9 @@ binding_plan::dispatch_stream(
    }
 
    try {
-      co_await run_before_interceptors(*this, request);
-      auto response = co_await local->dispatch_stream(
-         std::move(request), input, output);
+      auto before = make_before_interceptor_hook(*this);
+      auto response = co_await local->dispatch_stream_contextual(
+         std::move(request), input, output, trusted_invocation{}, std::move(before));
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {
          fail_stream_endpoints(input, output);
@@ -314,9 +333,9 @@ binding_plan::dispatch_stream_contextual(
    }
 
    try {
-      co_await run_before_interceptors(*this, request);
+      auto before = make_before_interceptor_hook(*this);
       auto response = co_await local->dispatch_stream_contextual(
-         std::move(request), input, output, std::move(trusted));
+         std::move(request), input, output, std::move(trusted), std::move(before));
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {
          fail_stream_endpoints(input, output);

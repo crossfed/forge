@@ -90,6 +90,39 @@ void fail_stream_endpoints(
    return make_error_response(request, make_internal_error_payload());
 }
 
+[[nodiscard]] contextual_before_handler
+make_contextual_before_handler(const method_descriptor& method, contextual_dispatch_hook before, frame& frame,
+                               std::shared_ptr<bytes> response_request) {
+   if (!method.request_validator && !method.response_validator) {
+      if (!before) {
+         return {};
+      }
+      return [before = std::move(before), &frame](request_view request,
+                                                   const canonical_request_encoder& encode)
+         -> boost::asio::awaitable<void> {
+         co_await before(frame, request, encode);
+      };
+   }
+   return [request_validator = method.request_validator,
+           response_validator = method.response_validator,
+           before = std::move(before),
+           &frame,
+           response_request = std::move(response_request)](
+              request_view request, const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
+      // Existing byte validators must observe the canonical typed request, never client wire bytes.
+      auto canonical_payload = encode();
+      if (request_validator) {
+         request_validator(canonical_payload);
+      }
+      if (response_validator) {
+         *response_request = std::move(canonical_payload);
+      }
+      if (before) {
+         co_await before(frame, request, encode);
+      }
+   };
+}
+
 } // namespace
 
 registry::registry() = default;
@@ -111,6 +144,11 @@ registry::dispatch(frame request, trusted_invocation trusted) const {
 
 boost::asio::awaitable<frame>
 registry::dispatch_contextual(frame request, trusted_invocation trusted) const {
+   return dispatch_contextual(std::move(request), std::move(trusted), {});
+}
+
+boost::asio::awaitable<frame>
+registry::dispatch_contextual(frame request, trusted_invocation trusted, contextual_dispatch_hook before) const {
    if (request.kind != frame_kind::request) {
       co_return make_protocol_error(request, "API dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
@@ -131,19 +169,29 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted) const {
 
    auto response = make_response_base(request);
    try {
-      if (method->request_validator) {
-         method->request_validator(request.payload);
-      }
-      auto request_payload = method->response_validator ? request.payload : bytes{};
       if (method->contextual_raw_invoker) {
+         auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
+         auto before_handler = make_contextual_before_handler(*method, std::move(before), request, canonical_request);
          response.payload = co_await method->contextual_raw_invoker(
-            entry->implementation, std::move(request.payload), std::move(trusted));
+            entry->implementation, std::move(request.payload), std::move(trusted), std::move(before_handler));
+         if (method->response_validator) {
+            method->response_validator(*canonical_request, response.payload);
+         }
       } else {
+         if (method->request_validator) {
+            method->request_validator(request.payload);
+         }
+         if (before) {
+            const auto canonical_payload = [&request] { return request.payload; };
+            co_await before(request, request_view{}, canonical_payload);
+         }
+         auto request_payload = method->response_validator ? request.payload : bytes{};
          response.payload = co_await method->raw_invoker(entry->implementation, std::move(request.payload));
+         if (method->response_validator) {
+            method->response_validator(request_payload, response.payload);
+         }
       }
-      if (method->response_validator) {
-         method->response_validator(request_payload, response.payload);
-      }
+      response.meta = request.meta;
       co_return response;
    } catch (...) {
       co_return project_failure(request, *method, std::current_exception());
@@ -168,6 +216,14 @@ boost::asio::awaitable<frame>
 registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                      std::shared_ptr<detail::stream_endpoint> output,
                                      trusted_invocation trusted) const {
+   return dispatch_stream_contextual(
+      std::move(request), std::move(input), std::move(output), std::move(trusted), {});
+}
+
+boost::asio::awaitable<frame>
+registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                                     std::shared_ptr<detail::stream_endpoint> output,
+                                     trusted_invocation trusted, contextual_dispatch_hook before) const {
    if (request.kind != frame_kind::request) {
       fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream dispatch requires a request frame", status::invalid_argument,
@@ -203,20 +259,31 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
 
    auto response = make_response_base(request);
    try {
-      if (method->request_validator) {
-         method->request_validator(request.payload);
-      }
-      auto request_payload = method->response_validator ? request.payload : bytes{};
       if (method->contextual_stream_invoker) {
+         auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
+         auto before_handler = make_contextual_before_handler(*method, std::move(before), request, canonical_request);
          response.payload = co_await method->contextual_stream_invoker(
-            entry->implementation, std::move(request.payload), input, output, std::move(trusted));
+            entry->implementation, std::move(request.payload), input, output, std::move(trusted),
+            std::move(before_handler));
+         if (method->response_validator) {
+            method->response_validator(*canonical_request, response.payload);
+         }
       } else {
+         if (method->request_validator) {
+            method->request_validator(request.payload);
+         }
+         if (before) {
+            const auto canonical_payload = [&request] { return request.payload; };
+            co_await before(request, request_view{}, canonical_payload);
+         }
+         auto request_payload = method->response_validator ? request.payload : bytes{};
          response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload),
                                                               input, output);
+         if (method->response_validator) {
+            method->response_validator(request_payload, response.payload);
+         }
       }
-      if (method->response_validator) {
-         method->response_validator(request_payload, response.payload);
-      }
+      response.meta = request.meta;
       co_return response;
    } catch (...) {
       fail_stream_endpoints(input, output);

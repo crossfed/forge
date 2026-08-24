@@ -21,6 +21,7 @@ export module forge.api.core.descriptor;
 
 export import forge.api.core.duplex_stream;
 export import forge.api.core.exceptions;
+export import forge.api.core.context;
 export import forge.api.core.server_supplied;
 export import forge.api.core.types;
 export import forge.exceptions;
@@ -102,6 +103,12 @@ using method_argument_t = std::tuple_element_t<Index, method_argument_tuple_t<Me
 
 template <auto Method>
 inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argument_tuple_t<Method>>;
+
+using canonical_request_encoder = std::function<bytes()>;
+using contextual_before_handler = std::function<boost::asio::awaitable<void>(
+    request_view, const canonical_request_encoder&)>;
+using contextual_dispatch_hook = std::function<boost::asio::awaitable<void>(
+    frame&, request_view, const canonical_request_encoder&)>;
 
 namespace detail {
 
@@ -297,6 +304,27 @@ template <auto Method>
    return unpack_fixed_arguments<Method>(payload, std::make_index_sequence<detail::fixed_argument_count_v<Method>>{});
 }
 
+template <auto Method>
+[[nodiscard]] bytes pack_fixed_arguments(const method_fixed_argument_tuple_t<Method>& arguments) {
+   constexpr auto count = fixed_argument_count_v<Method>;
+   if constexpr (count == 0) {
+      return pack_body(std::tuple<>{});
+   } else if constexpr (count == 1) {
+      return pack_body(std::get<0>(arguments));
+   } else {
+      return pack_body(arguments);
+   }
+}
+
+template <auto Method>
+[[nodiscard]] request_view fixed_request_view(const method_fixed_argument_tuple_t<Method>& arguments) {
+   if constexpr (fixed_argument_count_v<Method> == 1) {
+      return request_view::borrow(std::get<0>(arguments));
+   } else {
+      return request_view::borrow(arguments);
+   }
+}
+
 template <auto Method> [[nodiscard]] bytes pack_terminal_result(const method_response_t<Method>& value) {
    return pack_body(value);
 }
@@ -365,11 +393,15 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
 template <auto Method, typename Interface>
 boost::asio::awaitable<bytes>
 invoke_contextual_raw(std::shared_ptr<void> implementation, bytes payload, trusted_invocation trusted,
-                      const server_field_operations& fields) {
+                      const server_field_operations& fields, contextual_before_handler before) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(payload);
    fields.reset_fixed(&arguments);
    fields.apply_fixed(&arguments, trusted);
+   if (before) {
+      const auto canonical_payload = [&arguments] { return pack_fixed_arguments<Method>(arguments); };
+      co_await before(fixed_request_view<Method>(arguments), canonical_payload);
+   }
    if constexpr (std::same_as<method_response_t<Method>, void>) {
       co_await invoke_fixed<Method>(*typed, std::move(arguments),
                                     std::make_index_sequence<method_argument_count_v<Method>>{});
@@ -387,11 +419,16 @@ invoke_contextual_stream(std::shared_ptr<void> implementation, bytes fixed_paylo
                          std::shared_ptr<stream_endpoint> input,
                          std::shared_ptr<stream_endpoint> output,
                          trusted_invocation trusted,
-                         const server_field_operations& fields) {
+                         const server_field_operations& fields,
+                         contextual_before_handler before) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
    fields.reset_fixed(&arguments);
    fields.apply_fixed(&arguments, trusted);
+   if (before) {
+      const auto canonical_payload = [&arguments] { return pack_fixed_arguments<Method>(arguments); };
+      co_await before(fixed_request_view<Method>(arguments), canonical_payload);
+   }
    try {
       if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream) {
          if (!output) {
@@ -469,10 +506,10 @@ struct error_descriptor {
 using raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
     std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>)>;
 using contextual_raw_invoker = std::function<boost::asio::awaitable<bytes>(
-    std::shared_ptr<void>, bytes, trusted_invocation)>;
+    std::shared_ptr<void>, bytes, trusted_invocation, contextual_before_handler)>;
 using contextual_raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
     std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>,
-    trusted_invocation)>;
+    trusted_invocation, contextual_before_handler)>;
 
 class mutable_request_encoder {
  public:
@@ -772,9 +809,9 @@ template <typename Interface, bool EnableRaw> class contract_builder {
             };
             value.contextual_raw_invoker =
                [fields](std::shared_ptr<void> implementation, bytes payload,
-                        trusted_invocation trusted) {
+                        trusted_invocation trusted, contextual_before_handler before) {
                   return detail::invoke_contextual_raw<Method, Interface>(
-                     std::move(implementation), std::move(payload), std::move(trusted), fields);
+                     std::move(implementation), std::move(payload), std::move(trusted), fields, std::move(before));
                };
          } else {
             value.stream_invoker = detail::invoke_raw_stream<Method, Interface>;
@@ -782,10 +819,10 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                [fields](std::shared_ptr<void> implementation, bytes payload,
                         std::shared_ptr<detail::stream_endpoint> input,
                         std::shared_ptr<detail::stream_endpoint> output,
-                        trusted_invocation trusted) {
+                        trusted_invocation trusted, contextual_before_handler before) {
                   return detail::invoke_contextual_stream<Method, Interface>(
                      std::move(implementation), std::move(payload), std::move(input),
-                     std::move(output), std::move(trusted), fields);
+                     std::move(output), std::move(trusted), fields, std::move(before));
                };
          }
       }
@@ -843,12 +880,16 @@ template <typename Interface, bool EnableRaw> class contract_builder {
             co_return pack_body(response);
          };
          value.contextual_raw_invoker = [fields](std::shared_ptr<void> implementation, bytes payload,
-                                                  trusted_invocation trusted)
+                                                  trusted_invocation trusted, contextual_before_handler before)
             -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
             fields.reset_wire(&request);
             fields.apply_wire(&request, trusted);
+            if (before) {
+               const auto canonical_payload = [&request] { return pack_body(request); };
+               co_await before(request_view::borrow(request), canonical_payload);
+            }
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };
