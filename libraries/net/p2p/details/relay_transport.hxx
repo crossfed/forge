@@ -1,10 +1,9 @@
 #pragma once
 
-#include "stream_upgrade.hxx"
-
 namespace forge::net::p2p {
 
 struct libp2p_identity_material;
+struct upgraded_session;
 
 class relay_secure_io;
 
