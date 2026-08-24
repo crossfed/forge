@@ -1955,6 +1955,7 @@ BOOST_AUTO_TEST_CASE(binding_skips_payload_and_metadata_context_when_no_intercep
          *observed = payload.data();
          co_return forge::api::core::pack_body(protocol::chunk{.bytes = "ok"});
       };
+   method->contextual_raw_invoker = {};
    registry.install<cache_api>(std::move(descriptor), std::make_shared<cache_impl>());
    const auto plan = forge::api::core::binding().serve(registry).build();
    auto request = forge::api::core::frame{
