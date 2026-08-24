@@ -21,6 +21,7 @@ export module forge.api.core.descriptor;
 
 export import forge.api.core.duplex_stream;
 export import forge.api.core.exceptions;
+export import forge.api.core.server_supplied;
 export import forge.api.core.types;
 export import forge.exceptions;
 export import forge.raw.datastream;
@@ -270,11 +271,41 @@ template <auto Method> [[nodiscard]] bytes pack_terminal_result(const method_res
 }
 
 template <auto Method, typename Interface>
-boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementation, bytes fixed_payload,
-                                                std::shared_ptr<stream_endpoint> input,
-                                                std::shared_ptr<stream_endpoint> output) {
+boost::asio::awaitable<bytes> invoke_decoded_unary(std::shared_ptr<void> implementation,
+                                                    method_fixed_argument_tuple_t<Method> arguments) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-   auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
+   constexpr auto argument_count = method_argument_count_v<Method>;
+   if constexpr (std::same_as<method_response_t<Method>, void>) {
+      co_await invoke_fixed<Method>(*typed, std::move(arguments), std::make_index_sequence<argument_count>{});
+      co_return bytes{};
+   } else {
+      auto response = co_await invoke_fixed<Method>(*typed, std::move(arguments),
+                                                    std::make_index_sequence<argument_count>{});
+      co_return pack_body(response);
+   }
+}
+
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes> invoke_raw_unary(std::shared_ptr<void> implementation, bytes payload) {
+   auto arguments = unpack_fixed_arguments<Method>(payload);
+   co_return co_await invoke_decoded_unary<Method, Interface>(std::move(implementation), std::move(arguments));
+}
+
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes> invoke_trusted_raw_unary(std::shared_ptr<void> implementation, bytes payload,
+                                                        const trusted_invocation& trusted) {
+   auto arguments = unpack_fixed_arguments<Method>(payload);
+   reset_server_supplied(arguments);
+   apply_server_supplied(arguments, trusted);
+   co_return co_await invoke_decoded_unary<Method, Interface>(std::move(implementation), std::move(arguments));
+}
+
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes> invoke_decoded_stream(std::shared_ptr<void> implementation,
+                                                     method_fixed_argument_tuple_t<Method> arguments,
+                                                     std::shared_ptr<stream_endpoint> input,
+                                                     std::shared_ptr<stream_endpoint> output) {
+   auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    try {
       if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream) {
          if (!output) {
@@ -330,6 +361,27 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
    }
 }
 
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementation, bytes fixed_payload,
+                                                std::shared_ptr<stream_endpoint> input,
+                                                std::shared_ptr<stream_endpoint> output) {
+   auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
+   co_return co_await invoke_decoded_stream<Method, Interface>(std::move(implementation), std::move(arguments),
+                                                                 std::move(input), std::move(output));
+}
+
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes> invoke_trusted_raw_stream(std::shared_ptr<void> implementation, bytes fixed_payload,
+                                                         const trusted_invocation& trusted,
+                                                         std::shared_ptr<stream_endpoint> input,
+                                                         std::shared_ptr<stream_endpoint> output) {
+   auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
+   reset_server_supplied(arguments);
+   apply_server_supplied(arguments, trusted);
+   co_return co_await invoke_decoded_stream<Method, Interface>(std::move(implementation), std::move(arguments),
+                                                                 std::move(input), std::move(output));
+}
+
 } // namespace detail
 
 template <auto Method> inline constexpr method_kind method_kind_v = detail::inferred_method_kind_v<Method>;
@@ -351,6 +403,13 @@ struct error_descriptor {
 
 using raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
     std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>)>;
+
+using trusted_raw_invoker = std::function<boost::asio::awaitable<bytes>(
+    std::shared_ptr<void>, bytes, const trusted_invocation&)>;
+
+using trusted_raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
+    std::shared_ptr<void>, bytes, const trusted_invocation&, std::shared_ptr<detail::stream_endpoint>,
+    std::shared_ptr<detail::stream_endpoint>)>;
 
 struct method_descriptor {
    std::string name;
@@ -377,6 +436,8 @@ struct method_descriptor {
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    raw_stream_invoker stream_invoker;
+   trusted_raw_invoker trusted_raw_invoker;
+   trusted_raw_stream_invoker trusted_stream_invoker;
 
    template <typename Trait> [[nodiscard]] bool has_response_trait() const noexcept {
       for (const auto& value : response_traits) {
@@ -547,20 +608,20 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          if constexpr (kind == method_kind::unary) {
             value.raw_invoker = [](std::shared_ptr<void> implementation,
                                    bytes payload) -> boost::asio::awaitable<bytes> {
-               auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-               auto arguments = detail::unpack_fixed_arguments<Method>(payload);
-               if constexpr (std::same_as<method_response_t<Method>, void>) {
-                  co_await detail::invoke_fixed<Method>(*typed, std::move(arguments),
-                                                        std::make_index_sequence<argument_count>{});
-                  co_return bytes{};
-               } else {
-                  auto response = co_await detail::invoke_fixed<Method>(*typed, std::move(arguments),
-                                                                        std::make_index_sequence<argument_count>{});
-                  co_return pack_body(response);
-               }
+               co_return co_await detail::invoke_trusted_raw_unary<Method, Interface>(
+                   std::move(implementation), std::move(payload), trusted_invocation{});
             };
+            value.trusted_raw_invoker = detail::invoke_trusted_raw_unary<Method, Interface>;
          } else {
-            value.stream_invoker = detail::invoke_raw_stream<Method, Interface>;
+            value.stream_invoker = [](std::shared_ptr<void> implementation, bytes payload,
+                                      std::shared_ptr<detail::stream_endpoint> input,
+                                      std::shared_ptr<detail::stream_endpoint> output)
+                -> boost::asio::awaitable<bytes> {
+               co_return co_await detail::invoke_trusted_raw_stream<Method, Interface>(
+                   std::move(implementation), std::move(payload), trusted_invocation{}, std::move(input),
+                   std::move(output));
+            };
+            value.trusted_stream_invoker = detail::invoke_trusted_raw_stream<Method, Interface>;
          }
       }
 
@@ -590,9 +651,21 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          value.response_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
             static_cast<void>(forge::raw::unpack_exact<Response>(payload, limits));
          };
-         value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
+         value.raw_invoker = [](std::shared_ptr<void> implementation,
+                                bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
+            reset_server_supplied(request);
+            apply_server_supplied(request, trusted_invocation{});
+            auto response = co_await std::invoke(Method, *typed, std::move(request));
+            co_return pack_body(response);
+         };
+         value.trusted_raw_invoker = [](std::shared_ptr<void> implementation, bytes payload,
+                                         const trusted_invocation& trusted) -> boost::asio::awaitable<bytes> {
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto request = unpack_body<Request>(payload);
+            reset_server_supplied(request);
+            apply_server_supplied(request, trusted);
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };

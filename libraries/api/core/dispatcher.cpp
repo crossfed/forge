@@ -17,17 +17,13 @@ namespace {
    return key.starts_with(trusted_metadata_prefix);
 }
 
-void apply_remote_metadata_boundary(frame& value,
-                                    const metadata& trusted) {
+void apply_remote_metadata_boundary(frame& value) {
    auto merged = metadata{};
-   merged.reserve(value.meta.size() + trusted.size());
+   merged.reserve(value.meta.size());
    for (auto& entry : value.meta) {
       if (!reserved_metadata_key(entry.key)) {
          merged.push_back(std::move(entry));
       }
-   }
-   for (const auto& entry : trusted) {
-      merged.push_back(entry);
    }
    value.meta = std::move(merged);
 }
@@ -73,8 +69,9 @@ boost::asio::awaitable<frame> frame_dispatcher::dispatch(frame value) {
                             "invalid API frame dispatcher");
    }
    validate_request(value, impl_->options);
-   apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   co_return co_await impl_->plan.dispatch(std::move(value));
+   apply_remote_metadata_boundary(value);
+   co_return co_await impl_->plan.dispatch(
+      std::move(value), trusted_invocation{.metadata = impl_->options.trusted_metadata});
 }
 
 boost::asio::awaitable<frame>
@@ -86,9 +83,10 @@ frame_dispatcher::dispatch_stream(
                             "invalid API frame dispatcher");
    }
    validate_request(value, impl_->options);
-   apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
+   apply_remote_metadata_boundary(value);
    co_return co_await impl_->plan.dispatch_stream(
-      std::move(value), std::move(input), std::move(output));
+      std::move(value), trusted_invocation{.metadata = impl_->options.trusted_metadata}, std::move(input),
+      std::move(output));
 }
 
 const dispatch_options& frame_dispatcher::options() const noexcept {

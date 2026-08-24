@@ -220,6 +220,23 @@ boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
 }
 
 boost::asio::awaitable<frame>
+binding_plan::dispatch(frame request, const trusted_invocation& trusted) const {
+   if (local == nullptr) {
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                            "API binding plan has no local registry");
+   }
+   if (!exports_api(*this, request.api) ||
+       method_hidden_by_export(*this, request.api, request.method)) {
+      co_return make_api_not_exported_response(request);
+   }
+
+   co_await run_before_interceptors(*this, request);
+   auto response = co_await local->dispatch(std::move(request), trusted);
+   co_await run_terminal_interceptors(*this, response);
+   co_return response;
+}
+
+boost::asio::awaitable<frame>
 binding_plan::dispatch_stream(
    frame request, std::shared_ptr<detail::stream_endpoint> input,
    std::shared_ptr<detail::stream_endpoint> output) const {
@@ -238,6 +255,37 @@ binding_plan::dispatch_stream(
       co_await run_before_interceptors(*this, request);
       auto response = co_await local->dispatch_stream(
          std::move(request), input, output);
+      co_await run_terminal_interceptors(*this, response);
+      if (response.kind == frame_kind::error) {
+         fail_stream_endpoints(input, output);
+      }
+      co_return response;
+   } catch (...) {
+      fail_stream_endpoints(input, output);
+      throw;
+   }
+}
+
+boost::asio::awaitable<frame>
+binding_plan::dispatch_stream(
+   frame request, const trusted_invocation& trusted,
+   std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output) const {
+   if (local == nullptr) {
+      fail_stream_endpoints(input, output);
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                            "API binding plan has no local registry");
+   }
+   if (!exports_api(*this, request.api) ||
+       method_hidden_by_export(*this, request.api, request.method)) {
+      fail_stream_endpoints(input, output);
+      co_return make_api_not_exported_response(request);
+   }
+
+   try {
+      co_await run_before_interceptors(*this, request);
+      auto response = co_await local->dispatch_stream(
+         std::move(request), trusted, input, output);
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {
          fail_stream_endpoints(input, output);
