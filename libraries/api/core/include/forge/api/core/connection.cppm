@@ -22,7 +22,6 @@ export import forge.api.core.server_supplied;
 
 export namespace forge::api::core {
 
-template <typename Interface> struct api_traits;
 template <typename Interface> class proxy;
 
 template <typename Interface, surface Surface = surface::local> class contract {
