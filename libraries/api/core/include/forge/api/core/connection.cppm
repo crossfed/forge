@@ -18,7 +18,6 @@ export module forge.api.core.connection;
 export import forge.api.core.descriptor;
 export import forge.api.core.error_projection;
 export import forge.api.core.handle;
-export import forge.api.core.server_supplied;
 
 export namespace forge::api::core {
 
@@ -90,7 +89,6 @@ class remote_invoker {
 
    template <typename Request, typename Response>
    boost::asio::awaitable<Response> call(const descriptor& contract, api_ref api, std::string method, Request value) {
-      reset_server_supplied(value);
       auto outbound = request{
           .api = std::move(api),
           .method = std::move(method),
@@ -108,9 +106,8 @@ class remote_invoker {
    boost::asio::awaitable<Response> call_arguments(const descriptor& contract, api_ref api, std::string method,
                                                    Args&&... args) {
       using argument_tuple = std::tuple<std::remove_cvref_t<Args>...>;
-      auto arguments = argument_tuple{std::forward<Args>(args)...};
-      reset_server_supplied(arguments);
       if (supports_typed_arguments()) {
+         auto arguments = argument_tuple{std::forward<Args>(args)...};
          auto output = std::optional<Response>{};
          auto outbound = request{
              .api = std::move(api),
@@ -132,9 +129,9 @@ class remote_invoker {
           .codec = {.value = "forge.raw"},
       };
       if constexpr (sizeof...(Args) == 1U) {
-         outbound.body = pack_body(std::get<0>(arguments));
+         outbound.body = pack_body((std::forward<Args>(args), ...));
       } else {
-         outbound.body = pack_body(arguments);
+         outbound.body = pack_body(std::make_tuple(std::forward<Args>(args)...));
       }
       auto inbound = co_await async_call(std::move(outbound));
       if (inbound.error) {
@@ -193,7 +190,6 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
           std::move(invoker), std::move(selected_api), std::move(method), std::forward<Args>(args)...);
    } else {
       auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
-      reset_server_supplied(arguments);
       auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
       auto input = std::shared_ptr<stream_endpoint>{};
       auto output = std::shared_ptr<stream_endpoint>{};

@@ -6,9 +6,8 @@ class plugin::api_impl final : public api {
  public:
    explicit api_impl(std::shared_ptr<plugin::impl> impl);
 
-   forge::api::p2p::publication publish_api(forge::api::core::binding_plan plan,
-                                             forge::net::p2p::protocol_id protocol,
-                                             publish_options options) override;
+   void publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+                    publish_options options) override;
    [[nodiscard]] std::vector<entry> local_apis() const override;
    boost::asio::awaitable<std::vector<entry>> peer_apis(forge::net::p2p::peer_id peer,
                                                         resolve_options options) override;

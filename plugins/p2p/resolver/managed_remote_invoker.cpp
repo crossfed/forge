@@ -21,8 +21,6 @@ module;
 #include <coroutine>
 #include <cstdint>
 #include <exception>
-#include <functional>
-#include <list>
 #include <memory>
 #include <map>
 #include <mutex>
@@ -38,13 +36,11 @@ import forge.api.core.connection;
 import forge.api.core.descriptor;
 import forge.api.core.exceptions;
 import forge.api.core.types;
-import forge.api.p2p.publication;
 import forge.api.transport.connection;
 import forge.asio.notification;
 import forge.exceptions;
 import forge.net.p2p.identity;
 import forge.plugins.p2p.resolver.exceptions;
-import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.types;
 import forge.plugins.p2p.node.api;
 

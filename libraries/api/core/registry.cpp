@@ -101,12 +101,6 @@ const descriptor* registry::describe(api_ref requested) const noexcept {
 }
 
 boost::asio::awaitable<frame> registry::dispatch(frame request) const {
-   const auto trusted = trusted_invocation{};
-   co_return co_await dispatch(std::move(request), trusted);
-}
-
-boost::asio::awaitable<frame>
-registry::dispatch(frame request, const trusted_invocation& trusted) const {
    if (request.kind != frame_kind::request) {
       co_return make_protocol_error(request, "API dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
@@ -131,11 +125,7 @@ registry::dispatch(frame request, const trusted_invocation& trusted) const {
          method->request_validator(request.payload);
       }
       auto request_payload = method->response_validator ? request.payload : bytes{};
-      if (method->trusted_raw_invoker) {
-         response.payload = co_await method->trusted_raw_invoker(entry->implementation, std::move(request.payload), trusted);
-      } else {
-         response.payload = co_await method->raw_invoker(entry->implementation, std::move(request.payload));
-      }
+      response.payload = co_await method->raw_invoker(entry->implementation, std::move(request.payload));
       if (method->response_validator) {
          method->response_validator(request_payload, response.payload);
       }
@@ -147,14 +137,6 @@ registry::dispatch(frame request, const trusted_invocation& trusted) const {
 
 boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                                         std::shared_ptr<detail::stream_endpoint> output) const {
-   const auto trusted = trusted_invocation{};
-   co_return co_await dispatch_stream(std::move(request), trusted, std::move(input), std::move(output));
-}
-
-boost::asio::awaitable<frame>
-registry::dispatch_stream(frame request, const trusted_invocation& trusted,
-                          std::shared_ptr<detail::stream_endpoint> input,
-                          std::shared_ptr<detail::stream_endpoint> output) const {
    if (request.kind != frame_kind::request) {
       fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream dispatch requires a request frame", status::invalid_argument,
@@ -194,12 +176,8 @@ registry::dispatch_stream(frame request, const trusted_invocation& trusted,
          method->request_validator(request.payload);
       }
       auto request_payload = method->response_validator ? request.payload : bytes{};
-      if (method->trusted_stream_invoker) {
-         response.payload = co_await method->trusted_stream_invoker(
-            entry->implementation, std::move(request.payload), trusted, input, output);
-      } else {
-         response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload), input, output);
-      }
+      response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload),
+                                                         input, output);
       if (method->response_validator) {
          method->response_validator(request_payload, response.payload);
       }
