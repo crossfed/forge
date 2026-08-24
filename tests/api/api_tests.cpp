@@ -1439,7 +1439,7 @@ BOOST_AUTO_TEST_CASE(remote_request_encoder_resets_only_its_owned_wire_copy) {
    BOOST_TEST(decoded.optional_member->value == "optional-not-traversed");
 }
 
-BOOST_AUTO_TEST_CASE(no_context_dispatch_preserves_legacy_required_field_behavior) {
+BOOST_AUTO_TEST_CASE(remote_dispatch_without_trusted_source_fails_closed) {
    auto runtime = forge::asio::runtime{};
    auto implementation = std::make_shared<trusted_impl>();
    auto registry = forge::api::core::registry{};
@@ -1450,8 +1450,11 @@ BOOST_AUTO_TEST_CASE(no_context_dispatch_preserves_legacy_required_field_behavio
    const auto response = forge::asio::blocking::run(
        runtime, dispatcher.dispatch(trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request()))));
 
-   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
-   BOOST_TEST(implementation->last_fixed.claimed_peer.value == "spoofed");
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::raw::unpack<forge::api::core::error_payload>(response.payload);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+   BOOST_TEST(implementation->last_fixed.claimed_peer.value.empty());
 }
 
 BOOST_AUTO_TEST_CASE(binding_plan_exports_are_enforced_when_declared) {
