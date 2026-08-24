@@ -130,6 +130,7 @@ import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.node;
 import forge.api.p2p.binding;
+import forge.api.p2p.publication;
 import forge.plugins.crypto.signer.types;
 import forge.plugins.crypto.signer.exceptions;
 import forge.plugins.crypto.signer.api;
@@ -244,10 +245,39 @@ struct http_stream_read_request {
    std::string ref;
 };
 
+struct trusted_peer {
+   std::string value;
+};
+
+struct peer_context_request {
+   std::string value;
+   trusted_peer peer;
+};
+
 BOOST_DESCRIBE_STRUCT(http_read_request, (), (ref, offset, limit))
 BOOST_DESCRIBE_STRUCT(http_write_request, (), (ref, bytes))
 BOOST_DESCRIBE_STRUCT(http_chunk, (), (bytes))
 BOOST_DESCRIBE_STRUCT(http_stream_read_request, (), (ref))
+BOOST_DESCRIBE_STRUCT(trusted_peer, (), (value))
+BOOST_DESCRIBE_STRUCT(peer_context_request, (), (value, peer))
+
+template <> struct forge::api::core::server_supplied<trusted_peer> {
+   static constexpr bool required = true;
+
+   static void reset(trusted_peer& value) {
+      value.value.clear();
+   }
+
+   static bool apply(trusted_peer& value, const forge::api::core::trusted_invocation& trusted) {
+      const auto peer = forge::api::core::metadata_value(
+          trusted.metadata, forge::api::core::p2p_remote_peer_metadata_key);
+      if (!peer || peer->empty()) {
+         return false;
+      }
+      value.value = *peer;
+      return true;
+   }
+};
 
 namespace plugin_test_contract {
 
@@ -263,7 +293,7 @@ class peer_context_test_api
                                         forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~peer_context_test_api() = default;
-   virtual boost::asio::awaitable<std::string> remote_peer(std::string request) = 0;
+   virtual boost::asio::awaitable<std::string> remote_peer(peer_context_request request) = 0;
 };
 
 class receipt_test_api : public forge::api::core::contract<receipt_test_api, forge::api::core::surface::local |
@@ -554,8 +584,8 @@ class nonresponding_node_test_api_impl final : public node_test_api {
 
 class peer_context_test_api_impl final : public peer_context_test_api {
  public:
-   boost::asio::awaitable<std::string> remote_peer(std::string request) override {
-      co_return request;
+   boost::asio::awaitable<std::string> remote_peer(peer_context_request request) override {
+      co_return request.peer.value + ":" + request.value;
    }
 };
 
@@ -1211,7 +1241,9 @@ class scripted_resolver_api_impl final : public scripted_resolver_api {
 
 class route_publisher_plugin final : public forge::app::plugin {
  public:
-   explicit route_publisher_plugin(plugin_log& log) : log_{&log} {}
+   explicit route_publisher_plugin(plugin_log& log,
+                                   std::shared_ptr<forge::api::p2p::publication> publication = {})
+       : log_{&log}, external_publication_{std::move(publication)} {}
 
    [[nodiscard]] forge::app::plugin_id id() const override {
       return forge::app::plugin_id{.value = "route-publisher"};
@@ -1223,32 +1255,18 @@ class route_publisher_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
 
       auto plan =
           forge::api::core::binding()
               .serve(context.apis())
               .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
               .export_api<peer_context_test_api>({.id = {"peer-context.test"}, .major = 1, .min_revision = 0})
-              .interceptor(forge::api::core::interceptor()
-                               .id("peer-context")
-                               .phase(forge::api::core::interceptor_phase::authorize)
-                               .handler([](forge::api::core::call_context& value) -> boost::asio::awaitable<void> {
-                                  if (value.api.id.value != "peer-context.test" || value.method != "remote_peer") {
-                                     co_return;
-                                  }
-                                  const auto peer = forge::api::core::metadata_value(
-                                                        value.meta, forge::api::core::p2p_remote_peer_metadata_key)
-                                                        .value_or("missing");
-                                  const auto request = forge::raw::unpack<std::string>(value.payload);
-                                  const auto response = peer + ":" + request;
-                                  value.payload.clear();
-                                  forge::raw::pack<std::string>(value.payload, response);
-                                  co_return;
-                               })
-                               .build())
               .build();
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
+      publication_ = p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
+      if (external_publication_) {
+         *external_publication_ = std::move(publication_);
+      }
       p2p->publish_protocol(
           forge::net::p2p::protocol_id{.value = "/forge/test/blob-transfer/1"},
           [](forge::net::p2p::node::incoming_protocol_stream) -> boost::asio::awaitable<void> { co_return; });
@@ -1268,6 +1286,8 @@ class route_publisher_plugin final : public forge::app::plugin {
 
  private:
    plugin_log* log_ = nullptr;
+   std::shared_ptr<forge::api::p2p::publication> external_publication_;
+   forge::api::p2p::publication publication_;
 };
 
 class duplicate_route_plugin final : public forge::app::plugin {
@@ -1282,7 +1302,7 @@ class duplicate_route_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
       auto handler = [](forge::net::p2p::node::incoming_protocol_stream) -> boost::asio::awaitable<void> { co_return; };
       p2p->publish_protocol(forge::net::p2p::protocol_id{.value = "/forge/test/duplicate/1"}, handler);
       p2p->publish_protocol(forge::net::p2p::protocol_id{.value = "/forge/test/duplicate/1"}, handler);
@@ -1310,13 +1330,13 @@ class resolver_route_publisher_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
 
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                       .build();
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
+      publication_ = resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
       co_return;
    }
 
@@ -1327,6 +1347,9 @@ class resolver_route_publisher_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override {
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 
 class duplicate_resolver_route_plugin final : public forge::app::plugin {
@@ -1341,13 +1364,14 @@ class duplicate_resolver_route_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                       .build();
-      resolver->publish_api(plan, forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test-duplicate/1"});
+      publication_ = resolver->publish_api(plan, forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"});
+      static_cast<void>(resolver->publish_api(
+          std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test-duplicate/1"}));
       co_return;
    }
 
@@ -1358,6 +1382,9 @@ class duplicate_resolver_route_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override {
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 
 class resolver_custom_transport_route_plugin final : public forge::app::plugin {
@@ -1372,20 +1399,21 @@ class resolver_custom_transport_route_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                       .build();
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test-custom/1"},
-                            forge::plugins::p2p::resolver::publish_options{
-                                .transport =
-                                    forge::api::transport::options{
-                                        .codec = {.value = "forge.test.raw"},
-                                        .max_inflight = 7,
-                                        .max_frame_size = 512 * 1024,
-                                    },
-                            });
+      publication_ = resolver->publish_api(
+          std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test-custom/1"},
+          forge::plugins::p2p::resolver::publish_options{
+              .transport =
+                  forge::api::transport::options{
+                      .codec = {.value = "forge.test.raw"},
+                      .max_inflight = 7,
+                      .max_frame_size = 512 * 1024,
+                  },
+          });
       co_return;
    }
 
@@ -1396,6 +1424,9 @@ class resolver_custom_transport_route_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override {
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 
 class receipt_route_publisher_plugin final : public forge::app::plugin {
@@ -1410,13 +1441,13 @@ class receipt_route_publisher_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
 
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<receipt_test_api>({.id = {"receipt.test"}, .major = 1, .min_revision = 0})
                       .build();
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/receipt-test/1"});
+      publication_ = resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/receipt-test/1"});
       co_return;
    }
 
@@ -1427,6 +1458,9 @@ class receipt_route_publisher_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override {
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 
 class resolver_protocol_conflict_plugin final : public forge::app::plugin {
@@ -1441,7 +1475,7 @@ class resolver_protocol_conflict_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
       p2p->publish_protocol(
           forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"},
           [](forge::net::p2p::node::incoming_protocol_stream) -> boost::asio::awaitable<void> { co_return; });
@@ -1469,13 +1503,13 @@ class scripted_resolver_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<scripted_resolver_api>(
                           {.id = {"forge.plugins.p2p.resolver.protocol"}, .major = 1, .min_revision = 0})
                       .build();
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"});
+      publication_ = p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"});
       co_return;
    }
 
@@ -1486,11 +1520,17 @@ class scripted_resolver_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override {
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 
 class p2p_plugin_application final : public forge::app::application_shell {
  public:
-   explicit p2p_plugin_application(plugin_log& log) : log_{&log} {}
+   explicit p2p_plugin_application(
+       plugin_log& log, std::shared_ptr<node_test_api> node_api = std::make_shared<node_test_api_impl>(),
+       std::shared_ptr<forge::api::p2p::publication> publication = {})
+       : log_{&log}, node_api_{std::move(node_api)}, publication_{std::move(publication)} {}
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
@@ -1498,12 +1538,12 @@ class p2p_plugin_application final : public forge::app::application_shell {
       registry.register_plugin(forge::app::plugin_descriptor{
           .id = forge::app::plugin_id{.value = "route-publisher"},
           .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
-          .factory = [this] { return std::make_unique<route_publisher_plugin>(*log_); },
+          .factory = [this] { return std::make_unique<route_publisher_plugin>(*log_, publication_); },
       });
    }
 
    boost::asio::awaitable<void> on_provide(forge::app::application_context& context) override {
-      context.apis().install<node_test_api>(node_test_api::describe(), std::make_shared<node_test_api_impl>());
+      context.apis().install<node_test_api>(node_test_api::describe(), node_api_);
       context.apis().install<peer_context_test_api>(peer_context_test_api::describe(),
                                                     std::make_shared<peer_context_test_api_impl>());
       co_return;
@@ -1511,6 +1551,8 @@ class p2p_plugin_application final : public forge::app::application_shell {
 
  private:
    plugin_log* log_ = nullptr;
+   std::shared_ptr<node_test_api> node_api_;
+   std::shared_ptr<forge::api::p2p::publication> publication_;
 };
 
 class duplicate_p2p_plugin_application final : public forge::app::application_shell {
@@ -3368,7 +3410,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_publishes_safe_local_api_for_route_contribu
    app.configure(test_p2p_config(test_peer(18)));
    forge::asio::blocking::run(app.runtime(), app.startup());
 
-   BOOST_TEST(app.apis().describe({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0}) != nullptr);
+   BOOST_TEST(app.apis().describe({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0}) != nullptr);
    BOOST_TEST(log.entries == (std::vector<std::string>{"routes.published", "routes.startup"}),
               boost::test_tools::per_element());
 
@@ -3393,7 +3435,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_api_rejects_facade_calls_before_initialize) {
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto p2p =
-       apis.get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       apis.get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
 
    BOOST_CHECK_THROW((void)p2p->local_peer(), forge::plugins::p2p::node::exceptions::plugin_not_initialized);
    BOOST_CHECK_THROW((void)p2p->local_endpoint(), forge::plugins::p2p::node::exceptions::plugin_not_initialized);
@@ -3403,6 +3445,39 @@ BOOST_AUTO_TEST_CASE(p2p_node_api_rejects_facade_calls_before_initialize) {
                          runtime, p2p->remote<node_test_api>(
                                       test_peer(10), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"})),
                      forge::plugins::p2p::node::exceptions::plugin_not_initialized);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_api_publication_closes_exact_route_and_survives_move) {
+   auto app = p2p_only_application{};
+   app.configure(test_p2p_config(test_peer(20)));
+   forge::asio::blocking::run(app.runtime(), app.initialize());
+
+   auto p2p = app.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
+   const auto protocol = forge::net::p2p::protocol_id{.value = "/forge/test/publication/1"};
+   const auto make_plan = [&] {
+      return forge::api::core::binding()
+          .serve(app.apis())
+          .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
+          .build();
+   };
+
+   auto first = p2p->publish_api(make_plan(), protocol);
+   BOOST_TEST(first.active());
+   BOOST_CHECK_THROW((void)p2p->publish_api(make_plan(), protocol), forge::plugins::p2p::node::exceptions::route_conflict);
+
+   first.close();
+   BOOST_TEST(!first.active());
+
+   auto second = p2p->publish_api(make_plan(), protocol);
+   auto moved = std::move(second);
+   BOOST_TEST(!second.active());
+   BOOST_TEST(moved.active());
+   first.close();
+   BOOST_TEST(moved.active());
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   BOOST_TEST(!moved.active());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_listens_from_config_and_exposes_local_endpoints) {
@@ -3417,7 +3492,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_listens_from_config_and_exposes_local_endpo
    forge::asio::blocking::run(app.runtime(), app.startup());
 
    const auto p2p = app.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto endpoint = p2p->local_endpoint();
    BOOST_REQUIRE(endpoint.has_value());
    BOOST_CHECK_EQUAL(endpoint->transport.host, "127.0.0.1");
@@ -3461,7 +3536,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -3475,7 +3550,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto client_p2p = client.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    auto remote = forge::asio::blocking::run(
        client.runtime(),
        client_p2p->remote<node_test_api>(server_p2p->local_peer(),
@@ -3487,11 +3562,63 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
        client.runtime(),
        client_p2p->remote<peer_context_test_api>(server_p2p->local_peer(),
                                                  forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"}));
-   const auto observed_peer = forge::asio::blocking::run(client.runtime(), context_remote->remote_peer("probe"));
+   const auto observed_peer = forge::asio::blocking::run(
+       client.runtime(), context_remote->remote_peer({.value = "probe", .peer = {.value = "spoofed"}}));
    BOOST_REQUIRE(observed_peer.ends_with(":probe"));
    const auto observed_peer_id =
        forge::net::p2p::peer_id::from_string(observed_peer.substr(0, observed_peer.size() - 6));
    BOOST_TEST(forge::net::p2p::valid_peer_id(observed_peer_id));
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   forge::asio::blocking::run(server.runtime(), server.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_api_publication_cancels_owned_inflight_stream_sessions) {
+   const auto server_peer = test_peer(32);
+   auto server_config = test_p2p_config(server_peer);
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+
+   auto handler_state = std::make_shared<nonresponding_node_test_state>();
+   auto publication = std::make_shared<forge::api::p2p::publication>();
+   auto log = plugin_log{};
+   auto server = p2p_plugin_application{
+       log, std::make_shared<nonresponding_node_test_api_impl>(handler_state), publication};
+   server.configure(server_config);
+   forge::asio::blocking::run(server.runtime(), server.startup());
+
+   auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
+   const auto server_endpoint = server_p2p->local_endpoint();
+   BOOST_REQUIRE(server_endpoint.has_value());
+
+   auto client_config = test_p2p_config(test_peer(33));
+   client_config.set("plugins.p2p.node.bootstrap",
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
+   auto client = p2p_only_application{};
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+
+   auto client_p2p = client.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
+   auto remote = forge::asio::blocking::run(
+       client.runtime(),
+       client_p2p->remote<node_test_api>(server_p2p->local_peer(),
+                                         forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"}));
+   auto call = boost::asio::co_spawn(client.runtime().context(), remote->ping(41), boost::asio::use_future);
+
+   BOOST_REQUIRE(forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return handler_state->started.load(std::memory_order_acquire); },
+                                std::chrono::seconds{2})));
+
+   publication->close();
+   BOOST_TEST(!publication->active());
+   BOOST_REQUIRE(forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return handler_state->cancelled.load(std::memory_order_acquire); },
+                                std::chrono::seconds{2})));
+   BOOST_CHECK_THROW(call.get(), std::exception);
 
    forge::asio::blocking::run(client.runtime(), client.shutdown());
    forge::asio::blocking::run(server.runtime(), server.shutdown());
@@ -3735,7 +3862,7 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -3749,7 +3876,7 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto client_p2p = client.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    auto diagnostics = client.apis().get<forge::plugins::p2p::diagnostics::api>(
        {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
 
@@ -3788,7 +3915,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_maintains_bootstrap_session_after_peer_rest
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
    BOOST_TEST(server_endpoint->is_direct_tcp());
@@ -3886,7 +4013,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_preserves_stop_requested_before_node_startu
    app.configure(config);
    forge::asio::blocking::run(app.runtime(), app.initialize());
    auto p2p = app.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
 
    auto stop_thread = std::thread{[&] { app.request_stop(); }};
    stop_thread.join();
@@ -3908,7 +4035,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_stop_cannot_race_route_installation) {
    app.configure(test_p2p_config(test_peer(226)));
    forge::asio::blocking::run(app.runtime(), app.initialize());
    auto p2p = app.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
 
    auto gate = std::make_shared<route_install_gate>();
    p2p->publish_protocol(forge::net::p2p::protocol_id{.value = "/forge/test/startup-stop-race/1"},
@@ -3963,7 +4090,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_closes_route_publication_before_startup_sus
    app.configure(config);
    forge::asio::blocking::run(app.runtime(), app.initialize());
    auto p2p = app.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
 
    auto startup_failure = std::exception_ptr{};
    auto startup = std::thread{[&] {
@@ -4011,7 +4138,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_th
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4356,7 +4483,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_publishes_and_subscribes_raw_and_typed_me
    forge::asio::blocking::run(subscriber.runtime(), subscriber.startup());
 
    auto subscriber_p2p = subscriber.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto subscriber_endpoint = subscriber_p2p->local_endpoint();
    BOOST_REQUIRE(subscriber_endpoint.has_value());
 
@@ -4461,7 +4588,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
    forge::asio::blocking::run(subscriber.runtime(), subscriber.startup());
 
    auto subscriber_p2p = subscriber.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto subscriber_endpoint = subscriber_p2p->local_endpoint();
    BOOST_REQUIRE(subscriber_endpoint.has_value());
 
@@ -4673,11 +4800,12 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_facade_calls_before_initialize) {
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto resolver = apis.get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
 
    auto plan = forge::api::core::binding().serve(apis).build();
    BOOST_CHECK_THROW(
-       resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"}),
+       static_cast<void>(resolver->publish_api(
+           std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"})),
        forge::plugins::p2p::resolver::exceptions::plugin_not_initialized);
    BOOST_CHECK_THROW((void)resolver->local_apis(), forge::plugins::p2p::resolver::exceptions::plugin_not_initialized);
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, resolver->peer_apis(test_peer(40))),
@@ -4706,7 +4834,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_publishes_metadata_and_delegates_route_mou
    forge::asio::blocking::run(app.runtime(), app.initialize());
 
    auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    const auto entries = resolver->local_apis();
    BOOST_REQUIRE_EQUAL(entries.size(), 1U);
    BOOST_TEST(entries.front().id.value == "node.test");
@@ -4720,6 +4848,42 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_publishes_metadata_and_delegates_route_mou
               static_cast<int>(forge::api::core::method_kind::unary));
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_api_resolver_publication_closes_exact_catalog_and_survives_move) {
+   auto app = resolver_only_application{};
+   app.configure(test_p2p_config(test_peer(51)));
+   forge::asio::blocking::run(app.runtime(), app.initialize());
+
+   auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
+   const auto protocol = forge::net::p2p::protocol_id{.value = "/forge/api/publication-test/1"};
+   const auto make_plan = [&] {
+      return forge::api::core::binding()
+          .serve(app.apis())
+          .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
+          .build();
+   };
+
+   auto first = resolver->publish_api(make_plan(), protocol);
+   BOOST_TEST(first.active());
+   BOOST_REQUIRE_EQUAL(resolver->local_apis().size(), 1U);
+   BOOST_CHECK_THROW((void)resolver->publish_api(make_plan(), protocol), forge::plugins::p2p::resolver::exceptions::duplicate_api);
+
+   first.close();
+   BOOST_TEST(!first.active());
+   BOOST_TEST(resolver->local_apis().empty());
+
+   auto second = resolver->publish_api(make_plan(), protocol);
+   auto moved = std::move(second);
+   BOOST_TEST(!second.active());
+   BOOST_TEST(moved.active());
+   first.close();
+   BOOST_TEST(moved.active());
+   BOOST_REQUIRE_EQUAL(resolver->local_apis().size(), 1U);
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   BOOST_TEST(!moved.active());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_duplicate_api_and_resolver_protocol_conflict) {
@@ -4749,7 +4913,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_resolves_remote_api_and_opens_typed_remote
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4761,7 +4925,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_resolves_remote_api_and_opens_typed_remote
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    const auto remote_entries = forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer));
    BOOST_REQUIRE_EQUAL(remote_entries.size(), 1U);
    BOOST_TEST(remote_entries.front().protocol == "/forge/api/node-test/1");
@@ -4790,7 +4954,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_applies_request_deadline_when_node_
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4804,7 +4968,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_applies_request_deadline_when_node_
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    auto remote = forge::asio::blocking::run(client.runtime(), resolver->remote<node_test_api>(server_peer));
 
    BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), remote->ping(41)),
@@ -4830,7 +4994,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_honors_advertised_transport_options
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4842,7 +5006,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_honors_advertised_transport_options
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    const auto remote_entries = forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer));
    BOOST_REQUIRE_EQUAL(remote_entries.size(), 1U);
    BOOST_TEST(remote_entries.front().codec.value == "forge.test.raw");
@@ -4869,7 +5033,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_supports_receipt_based_product_api) {
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4881,7 +5045,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_supports_receipt_based_product_api) {
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    const auto resolved = forge::asio::blocking::run(
        client.runtime(), resolver->resolve(server_peer, {.id = {"receipt.test"}, .major = 1, .min_revision = 0}));
    BOOST_TEST(resolved.api.protocol == "/forge/api/receipt-test/1");
@@ -4923,7 +5087,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_enforces_version_compatibility) {
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4935,7 +5099,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_enforces_version_compatibility) {
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    BOOST_CHECK_NO_THROW(forge::asio::blocking::run(
        client.runtime(), resolver->resolve(server_peer, {.id = {"node.test"}, .major = 1, .min_revision = 0})));
    BOOST_CHECK_THROW(
@@ -4966,7 +5130,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_malformed_remote_metadata_without_
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -4978,7 +5142,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_malformed_remote_metadata_without_
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    BOOST_CHECK_THROW(forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer)),
                      forge::plugins::p2p::resolver::exceptions::protocol_error);
    const auto entries = forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer));
@@ -5000,7 +5164,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_cache_ttl_and_force_refresh_are_behavioral
    forge::asio::blocking::run(server.runtime(), server.startup());
 
    auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
-       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    const auto server_endpoint = server_p2p->local_endpoint();
    BOOST_REQUIRE(server_endpoint.has_value());
 
@@ -5013,7 +5177,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_cache_ttl_and_force_refresh_are_behavioral
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
-       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
    BOOST_REQUIRE_EQUAL(forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer)).size(), 1U);
 
    forge::asio::blocking::run(server.runtime(), server.shutdown());

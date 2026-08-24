@@ -174,7 +174,7 @@ low-level `forge_net_p2p` identity options remain source-compatible.
 
 Plugin 3.0 replaces the single DHT capability/configuration surface with
 explicit `dht.profiles` and adds `peer-store.schema-policy` for the recoverable
-private cache. The local plugin API contract remains `1.0`; only Preview
+private cache. The local plugin API contract was `1.0` at that release; only Preview
 configuration and low-level DHT source contracts change.
 
 Plugin 4.0 adds the managed topology configuration shown above. Rendezvous
@@ -182,7 +182,13 @@ client activity is limited to explicitly configured points and namespaces;
 Forge Peer Exchange is a Forge extension and is queried only on identified
 peers that advertise its exact protocol. Set `topology.mode: static-only` to
 disable autonomous discovery, dialing and pruning. The local plugin API
-contract remains `1.0`.
+contract was `1.0` at that release.
+
+The main node API is now `2.0` after a deliberate clean break:
+`publish_api(...)` returns a move-only `forge::api::p2p::publication`. Request
+`forge.plugins.p2p.node` major `2`, retain the handle while the route must stay
+live, and call `close()` to remove it early. Diagnostics and pubsub API
+contracts remain at `1.0`.
 
 ## Dependencies
 
@@ -201,6 +207,7 @@ contract remains `1.0`.
 
 ```cpp
 import forge.api.core.binding;
+import forge.api.p2p.publication;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 
@@ -208,16 +215,20 @@ class catalog_p2p_plugin final : public forge::app::plugin {
  public:
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-         {.id = {"forge.plugins.p2p.node"}, .major = 1});
+         {.id = {"forge.plugins.p2p.node"}, .major = 2});
 
       auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
+      publication_ = p2p->publish_api(
+         std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 ```
 

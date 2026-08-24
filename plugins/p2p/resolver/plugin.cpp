@@ -4,6 +4,9 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <cstdint>
+#include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -16,6 +19,7 @@ module forge.plugins.p2p.resolver.plugin;
 
 import forge.api.core.binding;
 import forge.api.core.registry;
+import forge.api.p2p.publication;
 import forge.api.transport.options;
 import forge.app.plugin;
 import forge.app.plugin_context;
@@ -74,7 +78,7 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
    impl_->p2p =
        context.apis()
-           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0})
            .operator->();
    try {
       impl_->install_protocol();
@@ -93,10 +97,12 @@ boost::asio::awaitable<void> plugin::startup() {
 }
 
 void plugin::request_stop() noexcept {
+   impl_->close_local_publications();
    impl_->request_stop_managed();
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
+   impl_->close_local_publications();
    co_await impl_->shutdown_managed();
    impl_->initialized = false;
    impl_->p2p = nullptr;

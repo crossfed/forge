@@ -47,6 +47,14 @@ contracts it exposes before opening a typed API connection.
 It does not own the P2P node lifecycle; it composes through
 `forge.plugins.p2p.node`.
 
+## Migration
+
+The main resolver API is now `2.0` after a deliberate clean break:
+`publish_api(...)` returns a move-only `forge::api::p2p::publication`. Request
+`forge.plugins.p2p.resolver` major `2`, retain the handle while the catalog
+entry must stay live, and call `close()` to unpublish it early. The resolver
+wire protocol (`forge.plugins.p2p.resolver.protocol`) remains at `1.0`.
+
 ## Config
 
 ```yaml
@@ -71,6 +79,7 @@ plugins:
 
 - `forge_app`
 - `forge_api_core`
+- `forge_api_p2p`
 - `forge_net_p2p`
 - `forge_plugins_p2p_node`
 - `forge_config_core`
@@ -81,6 +90,7 @@ plugins:
 ### Publish And Resolve A Typed API
 
 ```cpp
+import forge.api.p2p.publication;
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.plugin;
 
@@ -88,16 +98,20 @@ class catalog_resolver_plugin final : public forge::app::plugin {
  public:
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-         {.id = {"forge.plugins.p2p.resolver"}, .major = 1});
+         {.id = {"forge.plugins.p2p.resolver"}, .major = 2});
 
       auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
+      publication_ = resolver->publish_api(
+         std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 ```
 

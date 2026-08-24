@@ -6,8 +6,12 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 export module forge.api.p2p.binding;
 
@@ -21,13 +25,61 @@ import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.api.stream.options;
+import forge.api.stream.session;
 import forge.api.stream.server;
+import forge.api.p2p.publication;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.node;
 import forge.net.p2p.protocol;
 import forge.net.p2p.stream;
 
 export namespace forge::api::p2p {
+
+namespace detail {
+
+class publication_state {
+ public:
+   [[nodiscard]] bool active() const noexcept {
+      auto lock = std::scoped_lock{mutex_};
+      return active_;
+   }
+
+   [[nodiscard]] bool track(const std::shared_ptr<forge::api::stream::session>& value) {
+      auto lock = std::scoped_lock{mutex_};
+      if (!active_) {
+         return false;
+      }
+      sessions_.push_back(value);
+      return true;
+   }
+
+   void untrack(const std::shared_ptr<forge::api::stream::session>& value) noexcept {
+      auto lock = std::scoped_lock{mutex_};
+      std::erase(sessions_, value);
+   }
+
+   void close() noexcept {
+      auto sessions = std::vector<std::shared_ptr<forge::api::stream::session>>{};
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (!active_) {
+            return;
+         }
+         active_ = false;
+         sessions = sessions_;
+      }
+      for (const auto& session : sessions) {
+         session->cancel();
+      }
+   }
+
+ private:
+   mutable std::mutex mutex_;
+   bool active_ = true;
+   std::vector<std::shared_ptr<forge::api::stream::session>> sessions_;
+};
+
+} // namespace detail
 
 class api_binding {
  public:
@@ -43,7 +95,8 @@ class api_binding {
                forge::net::p2p::protocol_id protocol, forge::api::stream::options options,
                peer_policy peer_policy_value, discovery_scope discovery_scope_value)
        : owner_{owner}, plan_{std::move(plan)}, protocol_{std::move(protocol)}, options_{std::move(options)},
-         peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)} {}
+         peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)},
+         state_{std::make_shared<detail::publication_state>()} {}
 
    [[nodiscard]] const forge::net::p2p::protocol_id& protocol() const noexcept {
       return protocol_;
@@ -55,6 +108,10 @@ class api_binding {
       };
    }
 
+   [[nodiscard]] forge::api::p2p::publication publication_handle() const {
+      return detail::publication_access::make([state = state_] { state->close(); });
+   }
+
    boost::asio::awaitable<void> accept(forge::net::p2p::node::incoming_protocol_stream stream) const {
       validate_stream(stream);
       auto trusted = forge::api::core::metadata{
@@ -63,8 +120,19 @@ class api_binding {
             .value = stream.session.remote_peer.to_string(),
          },
       };
-      co_await forge::api::stream::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
-                                               std::move(trusted));
+      auto session = std::make_shared<forge::api::stream::session>(
+          std::move(stream.stream).into_transport_stream(), plan_, options_, std::move(trusted));
+      if (!state_->track(session)) {
+         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::closed, "P2P API publication is closed",
+                               forge::exceptions::ctx("protocol", protocol_.value));
+      }
+      try {
+         co_await session->async_serve();
+      } catch (...) {
+         state_->untrack(session);
+         throw;
+      }
+      state_->untrack(session);
    }
 
    boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {
@@ -93,6 +161,10 @@ class api_binding {
 
  private:
    void validate_stream(const forge::net::p2p::node::incoming_protocol_stream& stream) const {
+      if (!state_->active()) {
+         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::closed, "P2P API publication is closed",
+                               forge::exceptions::ctx("protocol", protocol_.value));
+      }
       if (stream.protocol != protocol_) {
          FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::unsupported_protocol, "P2P API binding received wrong protocol",
                              forge::exceptions::ctx("protocol", stream.protocol.value));
@@ -111,6 +183,7 @@ class api_binding {
    forge::api::stream::options options_;
    peer_policy peer_policy_{};
    discovery_scope discovery_scope_{};
+   std::shared_ptr<detail::publication_state> state_;
 };
 
 class api_builder {

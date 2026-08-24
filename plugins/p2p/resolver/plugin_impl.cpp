@@ -13,7 +13,9 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <iterator>
+#include <list>
 #include <limits>
 #include <map>
 #include <memory>
@@ -32,12 +34,14 @@ import forge.api.core.descriptor;
 import forge.api.core.error_projection;
 import forge.api.core.registry;
 import forge.api.core.types;
+import forge.api.p2p.publication;
 import forge.api.transport.connection;
 import forge.api.transport.options;
 import forge.asio.notification;
 import forge.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
+import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
 import forge.plugins.p2p.node.api;
@@ -146,11 +150,15 @@ void plugin::impl::store_peer(const forge::net::p2p::peer_id& peer, std::vector<
 
 std::vector<entry> plugin::impl::local_snapshot() const {
    auto lock = std::scoped_lock{mutex};
-   return local;
+   auto entries = std::vector<entry>{};
+   for (const auto& publication : local) {
+      entries.insert(entries.end(), publication.entries.begin(), publication.entries.end());
+   }
+   return entries;
 }
 
-void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route,
-                             publish_options options) {
+forge::api::p2p::publication plugin::impl::add_local(forge::api::core::binding_plan plan,
+                                                      forge::net::p2p::protocol_id route, publish_options options) {
    auto& p2p_api = require_p2p();
    validate_transport_options(options.transport);
    if (route.value.empty() || route.value.front() != '/' || plan.exports.empty()) {
@@ -167,39 +175,91 @@ void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2
       validate_entry(value, "local");
    }
 
-   {
-      auto lock = std::scoped_lock{mutex};
-      if (local.size() + projected.size() > settings.max_apis_per_peer) {
-         FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver local API limit exceeded");
+   auto ticket = std::make_shared<detail::catalog_ticket>();
+   auto handle = forge::api::p2p::detail::publication_access::make([owner = weak_from_this(), ticket] {
+      if (const auto current = owner.lock()) {
+         current->close_local(*ticket);
       }
-      auto keys = std::set<std::string>{};
-      auto protocols = std::set<std::string>{};
-      for (const auto& value : local) {
+   });
+   const auto close_handle = forge::api::p2p::detail::publication_access::close_callback(handle);
+
+   auto lock = std::scoped_lock{mutex};
+   auto local_count = std::size_t{0};
+   auto keys = std::set<std::string>{};
+   auto protocols = std::set<std::string>{};
+   for (const auto& publication : local) {
+      local_count += publication.entries.size();
+      protocols.insert(publication.protocol.value);
+      for (const auto& value : publication.entries) {
          keys.insert(api_key(value.id, value.version.major));
-         protocols.insert(value.protocol);
       }
-      for (const auto& value : projected) {
-         if (!keys.insert(api_key(value.id, value.version.major)).second) {
-            FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API publication",
-                                  forge::exceptions::ctx("api", value.id.value));
-         }
+   }
+   if (local_count + projected.size() > settings.max_apis_per_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver local API limit exceeded");
+   }
+   for (const auto& value : projected) {
+      if (!keys.insert(api_key(value.id, value.version.major)).second) {
+         FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API publication",
+                               forge::exceptions::ctx("api", value.id.value));
       }
-      if (!protocols.insert(route.value).second) {
-         FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API protocol",
-                               forge::exceptions::ctx("protocol", route.value));
-      }
+   }
+   if (!protocols.insert(route.value).second) {
+      FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "duplicate resolver API protocol",
+                            forge::exceptions::ctx("protocol", route.value));
    }
 
    try {
-      p2p_api.publish_api(std::move(plan), route, options.transport);
+      auto route_publication = p2p_api.publish_api(std::move(plan), route, options.transport);
+      const auto generation = next_local_generation++;
+      *ticket = detail::catalog_ticket{.protocol = route, .generation = generation};
+      local.push_back(detail::catalog_publication{
+          .protocol = std::move(route),
+          .entries = std::move(projected),
+          .route_publication = std::move(route_publication),
+          .close_handle = close_handle,
+          .generation = generation,
+      });
    } catch (const forge::plugins::p2p::node::exceptions::route_conflict& error) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "P2P API route conflicts with resolver publication",
                             forge::exceptions::ctx("protocol", route.value),
                             forge::exceptions::ctx("error", error.message()));
    }
+   return handle;
+}
 
-   auto lock = std::scoped_lock{mutex};
-   local.insert(local.end(), std::make_move_iterator(projected.begin()), std::make_move_iterator(projected.end()));
+void plugin::impl::close_local(detail::catalog_ticket ticket) noexcept {
+   auto route_publication = std::optional<forge::api::p2p::publication>{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      const auto found = std::find_if(local.begin(), local.end(), [&](const auto& publication) {
+         return publication.protocol == ticket.protocol && publication.generation == ticket.generation;
+      });
+      if (found == local.end()) {
+         return;
+      }
+      route_publication.emplace(std::move(found->route_publication));
+      local.erase(found);
+   }
+   route_publication->close();
+}
+
+void plugin::impl::close_local_publications() noexcept {
+   auto publications = std::list<detail::catalog_publication>{};
+   auto resolver_route = std::optional<forge::api::p2p::publication>{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      publications = std::move(local);
+      local.clear();
+      resolver_route = std::move(resolver_publication);
+      resolver_publication.reset();
+   }
+   for (auto& publication : publications) {
+      publication.close_handle();
+      publication.route_publication.close();
+   }
+   if (resolver_route) {
+      resolver_route->close();
+   }
 }
 
 response plugin::impl::query_local(const query& request) const {
@@ -334,7 +394,7 @@ void plugin::impl::install_protocol() {
                    .serve(protocol_registry)
                    .export_api<detail::resolver_protocol>({.id = {resolver_api_id}, .major = 1, .min_revision = 0})
                    .build();
-   p2p->publish_api(std::move(plan), protocol, resolver_transport);
+   resolver_publication.emplace(p2p->publish_api(std::move(plan), protocol, resolver_transport));
 }
 
 boost::asio::awaitable<resolution>

@@ -48,6 +48,7 @@ import forge.exceptions;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
+import forge.api.p2p.publication;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.types;
 import forge.plugins.p2p.node.api;
@@ -208,14 +209,14 @@ class publisher_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
+          {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<test_api>({.id = {"managed.test"}, .major = 1, .min_revision = 0})
                       .build();
       auto options = forge::plugins::p2p::resolver::publish_options{};
       options.transport.max_inflight = max_inflight_;
-      resolver->publish_api(std::move(plan), {.value = "/forge/api/managed-test/1"}, options);
+      publication_ = resolver->publish_api(std::move(plan), {.value = "/forge/api/managed-test/1"}, options);
       co_return;
    }
 
@@ -229,6 +230,7 @@ class publisher_plugin final : public forge::app::plugin {
 
  private:
    std::size_t max_inflight_ = 128;
+   forge::api::p2p::publication publication_;
 };
 
 class test_application final : public forge::app::application_shell {
@@ -292,7 +294,7 @@ class test_application final : public forge::app::application_shell {
 [[nodiscard]] std::string listen_endpoint(test_application& app) {
    const auto endpoint =
        app.apis()
-           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0})
            ->local_endpoint();
    BOOST_REQUIRE(endpoint.has_value());
    return endpoint->to_string();
@@ -301,7 +303,7 @@ class test_application final : public forge::app::application_shell {
 [[nodiscard]] std::string listen_address(test_application& app) {
    const auto endpoint =
        app.apis()
-           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0})
            ->local_endpoint();
    BOOST_REQUIRE(endpoint.has_value());
    auto address = *endpoint;
