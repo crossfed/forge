@@ -1131,6 +1131,15 @@ FORGE_HTTP_API(::forge::net::http::test_api::positional_timeout_api,
 namespace forge::api::core {
 
 template <> struct api_traits<::forge::net::http::test_api::api_cache> {
+   template <typename Value> static void reset_server_fields(Value& value) {
+      reset_server_supplied(value);
+   }
+
+   template <typename Value>
+   static void apply_server_fields(Value& value, const trusted_invocation& trusted) {
+      apply_server_supplied(value, trusted);
+   }
+
    static api_id id() {
       return api_id{.value = "cache"};
    }

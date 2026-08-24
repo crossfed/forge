@@ -107,20 +107,12 @@ namespace detail {
 
 template <typename Interface, typename Value>
 void reset_api_server_supplied(Value& value) {
-   if constexpr (requires { api_traits<Interface>::reset_server_fields(value); }) {
-      api_traits<Interface>::reset_server_fields(value);
-   } else {
-      reset_server_supplied(value);
-   }
+   api_traits<Interface>::reset_server_fields(value);
 }
 
 template <typename Interface, typename Value>
 void apply_api_server_supplied(Value& value, const trusted_invocation& trusted) {
-   if constexpr (requires { api_traits<Interface>::apply_server_fields(value, trusted); }) {
-      api_traits<Interface>::apply_server_fields(value, trusted);
-   } else {
-      apply_server_supplied(value, trusted);
-   }
+   api_traits<Interface>::apply_server_fields(value, trusted);
 }
 
 struct missing_proxy_argument final {};
