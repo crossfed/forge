@@ -67,6 +67,7 @@ import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
 import forge.net.p2p.topology;
+import forge.net.tcp.connection;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.exceptions;
@@ -80,6 +81,7 @@ import forge.net.yamux.session;
 #include "details/relay_discovery.hxx"
 #include "details/relay_pair.hxx"
 #include "details/relay_transport.hxx"
+#include "details/stream_upgrade.hxx"
 
 namespace forge::net::p2p {
 
