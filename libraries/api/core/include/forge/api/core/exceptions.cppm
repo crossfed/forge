@@ -19,7 +19,6 @@ enum class code : std::uint16_t {
    remote_internal = 6,
    protocol_error = 7,
    resource_exhausted = 8,
-   server_supplied_unavailable = 9,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.api")
@@ -32,9 +31,8 @@ using cancelled = forge::exceptions::coded_exception<code, code::cancelled>;
 using remote_internal = forge::exceptions::coded_exception<code, code::remote_internal>;
 using protocol_error = forge::exceptions::coded_exception<code, code::protocol_error>;
 using resource_exhausted = forge::exceptions::coded_exception<code, code::resource_exhausted>;
-using server_supplied_unavailable = forge::exceptions::coded_exception<code, code::server_supplied_unavailable>;
 
 BOOST_DESCRIBE_ENUM(code, method_not_found, incompatible_version, codec_failed, deadline_exceeded, cancelled,
-                    remote_internal, protocol_error, resource_exhausted, server_supplied_unavailable)
+                    remote_internal, protocol_error, resource_exhausted)
 
 } // namespace forge::api::core::exceptions

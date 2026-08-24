@@ -1,8 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -17,22 +15,7 @@
 namespace forge::plugins::p2p::node {
 
 struct plugin::impl {
-   struct route_state {
-      std::atomic_bool active = true;
-   };
-
-   struct route {
-      forge::net::p2p::protocol_id protocol;
-      forge::net::p2p::node::protocol_handler handler;
-      std::shared_ptr<route_state> state;
-      std::function<void()> on_close;
-      std::uint64_t generation = 0;
-   };
-
-   struct route_ticket {
-      forge::net::p2p::protocol_id protocol;
-      std::uint64_t generation = 0;
-   };
+   using route = std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>;
 
    forge::net::p2p::node::options options{
        .allow_insecure_test_mode = false,
@@ -43,7 +26,6 @@ struct plugin::impl {
    };
    parsed_policy policy{};
    std::vector<route> routes;
-   std::uint64_t next_route_generation = 1;
    std::string peer_store_name;
    std::string certificate_secret;
    std::string private_key_secret;
@@ -68,11 +50,7 @@ struct plugin::impl {
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> ensure_node(const std::vector<route>& startup_routes);
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> node_snapshot() const noexcept;
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> require_node() const;
-   [[nodiscard]] route_ticket add_route(forge::net::p2p::protocol_id protocol,
-                                        forge::net::p2p::node::protocol_handler handler,
-                                        std::function<void()> on_close = {});
-   void close_route(route_ticket ticket) noexcept;
-   void close_routes() noexcept;
+   void add_route(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler);
    void enable_pubsub(forge::net::p2p::pubsub::options options);
    [[nodiscard]] forge::net::p2p::node::open_options open_options_for(remote_options value) const;
    [[nodiscard]] forge::api::transport::options api_options_for(const remote_options& value) const;

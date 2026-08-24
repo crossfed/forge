@@ -16,7 +16,6 @@ struct dispatch_options {
    codec_id codec{.value = "forge.raw"};
    std::size_t max_inflight = 128;
    std::chrono::milliseconds deadline{0};
-   // Trusted metadata is supplied by the binding, never by frame metadata.
    metadata trusted_metadata;
 };
 

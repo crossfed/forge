@@ -24,12 +24,7 @@ find_package(
       plugins_p2p_resolver
 )
 
-add_executable(
-   forge_package_chain_api_component
-      main.cpp
-      p2p_e2e.cpp
-      p2p_e2e.hxx
-)
+add_executable(forge_package_chain_api_component main.cpp)
 target_link_libraries(
    forge_package_chain_api_component
    PRIVATE
