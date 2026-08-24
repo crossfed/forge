@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.28.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.27.1 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
