@@ -54,6 +54,21 @@ concept local_interface = supports_surface<T, surface::local>;
 template <typename T>
 concept remote_interface = supports_surface<T, surface::remote>;
 
+namespace detail {
+
+template <typename Request>
+[[nodiscard]] bytes encode_owned_request(const method_descriptor& descriptor, Request& request) {
+   if (descriptor.request_encoder) {
+      return descriptor.request_encoder(&request);
+   }
+   if (descriptor.server_fields.reset_wire) {
+      descriptor.server_fields.reset_wire(&request);
+   }
+   return pack_body(request);
+}
+
+} // namespace detail
+
 class remote_invoker {
  public:
    virtual ~remote_invoker() = default;
@@ -90,14 +105,14 @@ class remote_invoker {
    template <typename Request, typename Response>
    boost::asio::awaitable<Response> call(const descriptor& contract, api_ref api, std::string method, Request value) {
       const auto* method_value = find_method(contract, method);
-      if (method_value == nullptr || !method_value->request_encoder) {
-         throw exceptions::protocol_error{"API method has no request encoder"};
+      if (method_value == nullptr) {
+         throw exceptions::protocol_error{"API method is not available"};
       }
       auto outbound = request{
           .api = std::move(api),
           .method = std::move(method),
           .codec = {.value = "forge.raw"},
-          .body = method_value->request_encoder(&value),
+          .body = detail::encode_owned_request(*method_value, value),
       };
       auto inbound = co_await async_call(std::move(outbound));
       if (inbound.error) {
@@ -111,12 +126,14 @@ class remote_invoker {
                                                    Args&&... args) {
       using argument_tuple = std::tuple<std::remove_cvref_t<Args>...>;
       const auto* method_value = find_method(contract, method);
-      if (method_value == nullptr || !method_value->request_encoder) {
-         throw exceptions::protocol_error{"API method has no request encoder"};
+      if (method_value == nullptr) {
+         throw exceptions::protocol_error{"API method is not available"};
       }
+      auto arguments = argument_tuple{std::forward<Args>(args)...};
       if (supports_typed_arguments()) {
-         auto arguments = argument_tuple{std::forward<Args>(args)...};
-         method_value->server_fields.reset_fixed(&arguments);
+         if (method_value->server_fields.reset_fixed) {
+            method_value->server_fields.reset_fixed(&arguments);
+         }
          auto output = std::optional<Response>{};
          auto outbound = request{
              .api = std::move(api),
@@ -137,13 +154,12 @@ class remote_invoker {
           .method = std::move(method),
           .codec = {.value = "forge.raw"},
       };
-      auto arguments = argument_tuple{std::forward<Args>(args)...};
       if constexpr (sizeof...(Args) == 0U) {
          outbound.body = {};
       } else if constexpr (sizeof...(Args) == 1U) {
-         outbound.body = method_value->request_encoder(&std::get<0>(arguments));
+         outbound.body = detail::encode_owned_request(*method_value, std::get<0>(arguments));
       } else {
-         outbound.body = method_value->request_encoder(&arguments);
+         outbound.body = detail::encode_owned_request(*method_value, arguments);
       }
       auto inbound = co_await async_call(std::move(outbound));
       if (inbound.error) {
@@ -157,16 +173,16 @@ namespace detail {
 
 template <auto Method, typename Tuple, std::size_t... Index>
 [[nodiscard]] bytes encode_fixed_proxy_arguments(const method_descriptor& descriptor,
-                                                  const Tuple& arguments,
+                                                  Tuple& arguments,
                                                   std::index_sequence<Index...>) {
    constexpr auto count = sizeof...(Index);
    if constexpr (count == 0) {
       return {};
    } else if constexpr (count == 1) {
-      return descriptor.request_encoder(&std::get<0>(arguments));
+      return encode_owned_request(descriptor, std::get<0>(arguments));
    } else {
-      auto fixed = std::tuple{std::get<Index>(arguments)...};
-      return descriptor.request_encoder(&fixed);
+      auto fixed = std::tuple{std::move(std::get<Index>(arguments))...};
+      return encode_owned_request(descriptor, fixed);
    }
 }
 
@@ -208,8 +224,8 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
       auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
       auto contract = api_traits<Interface>::describe();
       const auto* method_value = find_method(contract, method);
-      if (method_value == nullptr || !method_value->request_encoder) {
-         throw exceptions::protocol_error{"API method has no request encoder"};
+      if (method_value == nullptr) {
+         throw exceptions::protocol_error{"API method is not available"};
       }
       auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
       auto input = std::shared_ptr<stream_endpoint>{};

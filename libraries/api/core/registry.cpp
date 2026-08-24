@@ -125,7 +125,7 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted) const {
 
    const auto* method = find_method(entry->descriptor, request.method);
    if (method == nullptr || method->since_revision > request.api.min_revision || method->kind != method_kind::unary ||
-       (!method->contextual_raw_invoker && !method->raw_invoker)) {
+       (!method->contextual_raw_invoker && (method->server_fields.active() || !method->raw_invoker))) {
       co_return make_method_not_found_response(request);
    }
 
@@ -185,7 +185,7 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
 
    const auto* method = find_method(entry->descriptor, request.method);
    if (method == nullptr || method->since_revision > request.api.min_revision || method->kind == method_kind::unary ||
-       (!method->contextual_stream_invoker && !method->stream_invoker)) {
+       (!method->contextual_stream_invoker && (method->server_fields.active() || !method->stream_invoker))) {
       fail_stream_endpoints(input, output);
       co_return make_method_not_found_response(request);
    }
