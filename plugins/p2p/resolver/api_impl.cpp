@@ -6,9 +6,6 @@ module;
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,7 +17,6 @@ module;
 module forge.plugins.p2p.resolver.plugin;
 
 import forge.api.core.descriptor;
-import forge.api.p2p.publication;
 import forge.api.transport.connection;
 import forge.exceptions;
 import forge.net.p2p.identity;
@@ -38,10 +34,9 @@ namespace forge::plugins::p2p::resolver {
 
 plugin::api_impl::api_impl(std::shared_ptr<plugin::impl> impl) : impl_{std::move(impl)} {}
 
-forge::api::p2p::publication
-plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                              publish_options options) {
-   return impl_->add_local(std::move(plan), std::move(protocol), std::move(options));
+void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+                                   publish_options options) {
+   impl_->add_local(std::move(plan), std::move(protocol), std::move(options));
 }
 
 std::vector<entry> plugin::api_impl::local_apis() const {

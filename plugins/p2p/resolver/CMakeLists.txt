@@ -8,7 +8,6 @@ add_library(
       managed_remote_invoker.cpp
       managed_remote_state.cpp
       details/cache_record.hxx
-      details/catalog_publication.hxx
       details/managed_remote_state.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
@@ -27,7 +26,6 @@ target_link_libraries(
       forge_asio
       forge_app
       forge_api_core
-      forge_api_p2p
       forge_api_transport
       forge_net_p2p
       forge_config_core

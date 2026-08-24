@@ -31,7 +31,6 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.api.p2p.publication;
 import forge.api.transport.exceptions;
 import forge.api.transport.options;
 import forge.api.transport.client;
@@ -268,7 +267,6 @@ boost::asio::awaitable<void> plugin::startup() {
 void plugin::request_stop() noexcept {
    impl_->stop_requested.store(true, std::memory_order_release);
    impl_->phase.store(lifecycle_phase::stopping, std::memory_order_release);
-   impl_->close_routes();
    if (auto node = impl_->node_snapshot()) {
       try {
          node->request_stop();
