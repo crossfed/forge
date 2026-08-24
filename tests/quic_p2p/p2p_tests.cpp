@@ -8695,7 +8695,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_transport_opens_arbitrary_registered_protocol) {
       source_session = *observed_session;
    }
    BOOST_REQUIRE(source_session.has_value());
-   BOOST_TEST(source_session->remote_peer == source.local_peer());
+   BOOST_TEST(source_session->remote_peer.value == source.local_peer().value);
    BOOST_TEST(static_cast<std::uint8_t>(source_session->authentication) ==
               static_cast<std::uint8_t>(peer_authentication::noise));
 
