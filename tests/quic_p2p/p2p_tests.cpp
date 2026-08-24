@@ -948,12 +948,12 @@ boost::asio::awaitable<void> exercise_live_api(forge::api::transport::connection
 
 void run_live_api_over(endpoint::protocol_kind transport) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto server_options = options_for(peer(242));
-   auto client_options = options_for(peer(241));
-   if (transport == endpoint::protocol_kind::tcp) {
-      server_options = options_for(make_test_identity());
-      client_options = options_for(make_test_identity());
-   }
+   auto server_options = transport == endpoint::protocol_kind::quic_v1
+                            ? options_for(make_test_certificate_identity("api-live-server"))
+                            : options_for(make_test_identity());
+   auto client_options = transport == endpoint::protocol_kind::quic_v1
+                            ? options_for(make_test_certificate_identity("api-live-client"))
+                            : options_for(make_test_identity());
    auto server = node{runtime, std::move(server_options)};
    auto client = node{runtime, std::move(client_options)};
    auto implementation = std::make_shared<live_impl>();
