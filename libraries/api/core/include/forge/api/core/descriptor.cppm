@@ -31,6 +31,8 @@ import forge.raw.exceptions;
 
 export namespace forge::api::core {
 
+template <typename Interface> struct api_traits;
+
 template <typename T>
 [[nodiscard]] T unpack_body(std::span<const std::uint8_t> body) {
    const auto bounded = static_cast<std::uint32_t>(std::min<std::size_t>(
@@ -102,6 +104,24 @@ template <auto Method>
 inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argument_tuple_t<Method>>;
 
 namespace detail {
+
+template <typename Interface, typename Value>
+void reset_api_server_supplied(Value& value) {
+   if constexpr (requires { api_traits<Interface>::reset_server_fields(value); }) {
+      api_traits<Interface>::reset_server_fields(value);
+   } else {
+      reset_server_supplied(value);
+   }
+}
+
+template <typename Interface, typename Value>
+void apply_api_server_supplied(Value& value, const trusted_invocation& trusted) {
+   if constexpr (requires { api_traits<Interface>::apply_server_fields(value, trusted); }) {
+      api_traits<Interface>::apply_server_fields(value, trusted);
+   } else {
+      apply_server_supplied(value, trusted);
+   }
+}
 
 struct missing_proxy_argument final {};
 
@@ -336,8 +356,8 @@ boost::asio::awaitable<bytes>
 invoke_contextual_raw(std::shared_ptr<void> implementation, bytes payload, const trusted_invocation& trusted) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(payload);
-   reset_server_supplied(arguments);
-   apply_server_supplied(arguments, trusted);
+   reset_api_server_supplied<Interface>(arguments);
+   apply_api_server_supplied<Interface>(arguments, trusted);
    if constexpr (std::same_as<method_response_t<Method>, void>) {
       co_await invoke_fixed<Method>(*typed, std::move(arguments),
                                     std::make_index_sequence<method_argument_count_v<Method>>{});
@@ -357,8 +377,8 @@ invoke_contextual_stream(std::shared_ptr<void> implementation, bytes fixed_paylo
                          const trusted_invocation& trusted) {
    auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
    auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
-   reset_server_supplied(arguments);
-   apply_server_supplied(arguments, trusted);
+   reset_api_server_supplied<Interface>(arguments);
+   apply_api_server_supplied<Interface>(arguments, trusted);
    try {
       if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream) {
          if (!output) {
@@ -592,7 +612,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          using wire_request = detail::method_fixed_request_t<Method>;
          value.request_encoder = [](const void* request) {
             auto wire_copy = *static_cast<const wire_request*>(request);
-            reset_server_supplied(wire_copy);
+            detail::reset_api_server_supplied<Interface>(wire_copy);
             return pack_body(wire_copy);
          };
          value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
@@ -677,7 +697,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       if constexpr (EnableRaw) {
          value.request_encoder = [](const void* request) {
             auto wire_copy = *static_cast<const Request*>(request);
-            reset_server_supplied(wire_copy);
+            detail::reset_api_server_supplied<Interface>(wire_copy);
             return pack_body(wire_copy);
          };
          value.response_encoder = [](const void* response) {
@@ -699,8 +719,8 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                                            const trusted_invocation& trusted) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
-            reset_server_supplied(request);
-            apply_server_supplied(request, trusted);
+            detail::reset_api_server_supplied<Interface>(request);
+            detail::apply_api_server_supplied<Interface>(request, trusted);
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };

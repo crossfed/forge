@@ -160,9 +160,9 @@ template <auto Method, typename Tuple, std::size_t... Index>
    }
 }
 
-template <typename Tuple, std::size_t... Index>
+template <typename Interface, typename Tuple, std::size_t... Index>
 void reset_fixed_proxy_arguments(Tuple& arguments, std::index_sequence<Index...>) {
-   (reset_server_supplied(std::get<Index>(arguments)), ...);
+   (reset_api_server_supplied<Interface>(std::get<Index>(arguments)), ...);
 }
 
 template <typename Interface, typename Request, typename Response>
@@ -180,8 +180,15 @@ template <typename Interface, typename Response, typename... Args>
 boost::asio::awaitable<Response> proxy_call_arguments(std::shared_ptr<remote_invoker> invoker, api_ref selected_api,
                                                       std::string method, Args&&... args) {
    if constexpr (remote_interface<Interface>) {
-      co_return co_await invoker->template call_arguments<Response>(
-          api_traits<Interface>::describe(), std::move(selected_api), std::move(method), std::forward<Args>(args)...);
+      auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
+      reset_api_server_supplied<Interface>(arguments);
+      co_return co_await std::apply(
+         [&](auto&&... values) {
+            return invoker->template call_arguments<Response>(
+               api_traits<Interface>::describe(), std::move(selected_api), std::move(method),
+               std::move(values)...);
+         },
+         std::move(arguments));
    } else {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "local-only API does not support remote invocation");
    }
@@ -200,7 +207,8 @@ proxy_method(std::shared_ptr<remote_invoker> invoker, api_ref selected_api, std:
           std::move(invoker), std::move(selected_api), std::move(method), std::forward<Args>(args)...);
    } else {
       auto arguments = std::tuple<std::remove_cvref_t<Args>...>{std::forward<Args>(args)...};
-      reset_fixed_proxy_arguments(arguments, std::make_index_sequence<fixed_argument_count_v<Method>>{});
+      reset_fixed_proxy_arguments<Interface>(arguments,
+                                             std::make_index_sequence<fixed_argument_count_v<Method>>{});
       auto& endpoint = std::get<method_argument_count_v<Method> - 1>(arguments);
       auto input = std::shared_ptr<stream_endpoint>{};
       auto output = std::shared_ptr<stream_endpoint>{};

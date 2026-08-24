@@ -277,6 +277,13 @@
          const auto value = version();                                                                                 \
          return api_ref{.id = id(), .major = value.major, .min_revision = min_revision};                               \
       }                                                                                                                \
+      template <typename Value> static void reset_server_fields(Value& value) {                                       \
+         ::forge::api::core::reset_server_supplied(value);                                                            \
+      }                                                                                                                \
+      template <typename Value>                                                                                        \
+      static void apply_server_fields(Value& value, const ::forge::api::core::trusted_invocation& trusted) {          \
+         ::forge::api::core::apply_server_supplied(value, trusted);                                                   \
+      }                                                                                                                \
       static descriptor describe() {                                                                                   \
          auto builder =                                                                                                \
              ::forge::api::core::define<INTERFACE, ::forge::api::core::supports(INTERFACE::api_surface,                \
