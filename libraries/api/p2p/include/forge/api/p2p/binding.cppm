@@ -70,9 +70,18 @@ class api_binding {
             .value = stream.session.remote_peer.to_string(),
          },
       };
-      auto invocation = forge::api::core::trusted_invocation_builder{}
-                            .set(authenticated_peer{.id = stream.session.remote_peer})
-                            .build();
+      auto invocation = forge::api::core::trusted_invocation{};
+      switch (stream.session.authentication) {
+      case forge::net::p2p::peer_authentication::quic_tls:
+      case forge::net::p2p::peer_authentication::libp2p_tls:
+      case forge::net::p2p::peer_authentication::noise:
+         invocation = forge::api::core::trusted_invocation_builder{}
+                          .set(authenticated_peer{.id = stream.session.remote_peer})
+                          .build();
+         break;
+      case forge::net::p2p::peer_authentication::unverified:
+         break;
+      }
       return forge::api::stream::session{
          std::move(stream.stream).into_transport_stream(), plan_, options_,
          forge::api::core::dispatch_options{

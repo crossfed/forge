@@ -76,6 +76,7 @@ import forge.asio.runtime;
 import forge.api.core.binding;
 import forge.api.core.connection;
 import forge.api.core.duplex_stream;
+import forge.api.core.exceptions;
 import forge.api.core.registry;
 import forge.api.core.server_supplied;
 import forge.api.core.trusted_invocation;
@@ -232,6 +233,7 @@ class live_impl final : public live_api {
    boost::asio::awaitable<void>
    exchange(p2p_live_types::caller_peer authenticated,
             forge::api::core::duplex_stream<std::uint32_t, std::uint32_t> stream) override {
+      calls.fetch_add(1U, std::memory_order_release);
       caller = std::move(authenticated.id);
       while (const auto value = co_await stream.async_read()) {
          co_await stream.async_write(*value * 2U);
@@ -240,6 +242,7 @@ class live_impl final : public live_api {
    }
 
    peer_id caller;
+   std::atomic_size_t calls{0};
 };
 
 struct product_announce {
@@ -946,6 +949,19 @@ boost::asio::awaitable<void> exercise_live_api(forge::api::transport::connection
    co_await connection.async_close();
 }
 
+boost::asio::awaitable<void> exercise_unverified_live_api(forge::api::transport::connection& connection) {
+   auto remote = co_await connection.get_remote_api<live_api>();
+   auto call = co_await remote.async_open<&live_api::exchange>(p2p_live_types::caller_peer{.id = peer(244)});
+   auto rejected = false;
+   try {
+      co_await call.async_finish();
+   } catch (const forge::api::core::exceptions::server_supplied_unavailable&) {
+      rejected = true;
+   }
+   BOOST_TEST(rejected);
+   co_await connection.async_close();
+}
+
 void run_live_api_over(endpoint::protocol_kind transport) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server_options = transport == endpoint::protocol_kind::quic_v1
@@ -954,6 +970,12 @@ void run_live_api_over(endpoint::protocol_kind transport) {
    auto client_options = transport == endpoint::protocol_kind::quic_v1
                             ? options_for(make_test_certificate_identity("api-live-client"))
                             : options_for(make_test_identity());
+   if (transport == endpoint::protocol_kind::quic_v1) {
+      server_options.allow_insecure_test_mode = false;
+      client_options.allow_insecure_test_mode = false;
+      server_options.peer_state.persistence = peer_store::make_memory_persistence();
+      client_options.peer_state.persistence = peer_store::make_memory_persistence();
+   }
    auto server = node{runtime, std::move(server_options)};
    auto client = node{runtime, std::move(client_options)};
    auto implementation = std::make_shared<live_impl>();
@@ -971,6 +993,11 @@ void run_live_api_over(endpoint::protocol_kind transport) {
                                                           .allow_relay = false,
                                                       }));
    BOOST_TEST(session.remote_peer.value == server.local_peer().value);
+   const auto expected_authentication = transport == endpoint::protocol_kind::quic_v1
+                                            ? peer_authentication::quic_tls
+                                            : peer_authentication::libp2p_tls;
+   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
+              static_cast<std::uint8_t>(expected_authentication));
    auto stream =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), binding.protocol(),
                                                                              node::open_options{.allow_relay = false}));
@@ -4070,6 +4097,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames) {
    const auto session = forge::asio::blocking::run(
        runtime, client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()}));
    BOOST_TEST(session.remote_peer.value == server.local_peer().value);
+   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
+              static_cast<std::uint8_t>(peer_authentication::libp2p_tls));
 
    auto stream =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo));
@@ -8617,7 +8646,21 @@ BOOST_AUTO_TEST_CASE(p2p_relay_transport_opens_arbitrary_registered_protocol) {
    auto source = node{runtime, options_for(source_identity, capability_set{.bits = capabilities::direct_quic})};
    auto target = node{runtime, options_for(target_identity, capability_set{.bits = capabilities::direct_quic |
                                                                                    capabilities::relay_reservation})};
-   register_echo(target, protocol);
+   auto observed_session = std::make_shared<std::optional<node::session_info>>();
+   auto observed_session_mutex = std::make_shared<std::mutex>();
+   target.register_protocol_handler(
+       protocol, [observed_session, observed_session_mutex](node::incoming_protocol_stream incoming)
+                     -> boost::asio::awaitable<void> {
+          {
+             auto lock = std::scoped_lock{*observed_session_mutex};
+             if (!observed_session->has_value()) {
+                observed_session->emplace(incoming.session);
+             }
+          }
+          auto payload = co_await incoming.stream.async_read_frame();
+          co_await incoming.stream.async_write_frame(payload);
+          co_await incoming.stream.async_close();
+       });
 
    const auto relay_endpoint = listen(relay_node, runtime);
    (void)listen(target, runtime);
@@ -8646,6 +8689,15 @@ BOOST_AUTO_TEST_CASE(p2p_relay_transport_opens_arbitrary_registered_protocol) {
    BOOST_TEST(reply == payload, boost::test_tools::per_element());
    BOOST_TEST(relay_node.metrics().relays_opened >= 1U);
    BOOST_TEST(source.metrics().path_relay_opens >= 1U);
+   auto source_session = std::optional<node::session_info>{};
+   {
+      auto lock = std::scoped_lock{*observed_session_mutex};
+      source_session = *observed_session;
+   }
+   BOOST_REQUIRE(source_session.has_value());
+   BOOST_TEST(source_session->remote_peer == source.local_peer());
+   BOOST_TEST(static_cast<std::uint8_t>(source_session->authentication) ==
+              static_cast<std::uint8_t>(peer_authentication::noise));
 
    const auto relay_session_count = [](const node& value, const peer_id& remote, const peer_id& relay,
                                        diagnostics::session_direction direction, bool require_identified) {
@@ -8867,6 +8919,35 @@ BOOST_AUTO_TEST_CASE(p2p_api_wire_v2_duplex_streams_over_direct_quic) {
 
 BOOST_AUTO_TEST_CASE(p2p_api_wire_v2_duplex_streams_over_tcp_yamux) {
    run_live_api_over(endpoint::protocol_kind::tcp);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_api_binding_rejects_unverified_quic_peer) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = node{runtime, options_for(make_test_certificate_identity("api-unverified-server"))};
+   auto client = node{runtime, options_for(make_test_certificate_identity("api-unverified-client"))};
+   auto implementation = std::make_shared<live_impl>();
+   auto registry = forge::api::core::registry{};
+   registry.install<live_api>(live_api::describe(), implementation);
+   auto binding = forge::api::p2p::api(server).use(forge::api::core::binding().serve(registry).build()).build();
+   server.register_protocol_handler(binding.protocol(), binding.handler());
+
+   const auto server_endpoint = listen(server, runtime);
+   const auto session = forge::asio::blocking::run(
+       runtime, client.async_connect(server_endpoint, node::connect_options{
+                                                      .expected_peer = server.local_peer(),
+                                                      .allow_relay = false,
+                                                  }));
+   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
+              static_cast<std::uint8_t>(peer_authentication::unverified));
+   auto stream =
+       forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), binding.protocol(),
+                                                                             node::open_options{.allow_relay = false}));
+   auto connection = forge::api::transport::connection{std::move(stream).into_transport_stream(), binding.options()};
+   forge::asio::blocking::run(runtime, exercise_unverified_live_api(connection));
+   BOOST_TEST(implementation->calls.load(std::memory_order_acquire) == 0U);
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {

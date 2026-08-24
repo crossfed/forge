@@ -738,7 +738,11 @@ boost::asio::awaitable<upgraded_session> finish_noise_outbound(forge::net::p2p::
    auto yamux = std::make_shared<forge::net::yamux::session>(std::move(muxer_stream),
                                                              forge::net::yamux::side::initiator);
    set_cancel(deadline, [yamux] { yamux->cancel(); });
-   co_return upgraded_session{.peer = std::move(secure.peer), .session = std::move(yamux)};
+   co_return upgraded_session{
+       .peer = std::move(secure.peer),
+       .session = std::move(yamux),
+       .authentication = peer_authentication::noise,
+   };
 }
 
 boost::asio::awaitable<upgraded_session> finish_noise_inbound(forge::net::p2p::stream stream,
@@ -759,7 +763,11 @@ boost::asio::awaitable<upgraded_session> finish_noise_inbound(forge::net::p2p::s
    auto yamux = std::make_shared<forge::net::yamux::session>(std::move(muxer_stream),
                                                              forge::net::yamux::side::responder);
    set_cancel(deadline, [yamux] { yamux->cancel(); });
-   co_return upgraded_session{.peer = std::move(secure.peer), .session = std::move(yamux)};
+   co_return upgraded_session{
+       .peer = std::move(secure.peer),
+       .session = std::move(yamux),
+       .authentication = peer_authentication::noise,
+   };
 }
 
 boost::asio::awaitable<upgraded_session> finish_tls_outbound(forge::net::tcp::connection connection,
@@ -793,7 +801,11 @@ boost::asio::awaitable<upgraded_session> finish_tls_outbound(forge::net::tcp::co
       auto yamux =
           std::make_shared<forge::net::yamux::session>(std::move(stream.stream), forge::net::yamux::side::initiator);
       set_cancel(deadline, [yamux] { yamux->cancel(); });
-      co_return upgraded_session{.peer = peer, .session = std::move(yamux)};
+      co_return upgraded_session{
+          .peer = peer,
+          .session = std::move(yamux),
+          .authentication = peer_authentication::libp2p_tls,
+      };
    } catch (const forge::exceptions::base& error) {
       rethrow_stcp_as_p2p(error);
    }
@@ -830,7 +842,11 @@ boost::asio::awaitable<upgraded_session> finish_tls_inbound(forge::net::tcp::con
       auto yamux =
           std::make_shared<forge::net::yamux::session>(std::move(stream.stream), forge::net::yamux::side::responder);
       set_cancel(deadline, [yamux] { yamux->cancel(); });
-      co_return upgraded_session{.peer = peer, .session = std::move(yamux)};
+      co_return upgraded_session{
+          .peer = peer,
+          .session = std::move(yamux),
+          .authentication = peer_authentication::libp2p_tls,
+      };
    } catch (const forge::exceptions::base& error) {
       rethrow_stcp_as_p2p(error);
    }

@@ -583,7 +583,7 @@ void node::impl::launch_relay_discovery_maintenance() {
    }
 }
 
-boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+boost::asio::awaitable<upgraded_session>
 node::impl::open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std::chrono::milliseconds timeout) {
    const auto started = std::chrono::steady_clock::now();
    record_path_attempt(path::kind::relay);
@@ -630,14 +630,15 @@ node::impl::ensure_relay_session(const peer_id& peer, const peer_id& relay_peer,
       ++metrics_value.connection_rejections;
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P pending outbound relay session limit reached");
    }
-   auto yamux = co_await open_relay_yamux(peer, relay_peer, timeout);
+   auto upgraded = co_await open_relay_yamux(peer, relay_peer, timeout);
    auto session = std::make_shared<session_state>();
    session->info = node::session_info{
-       .remote_peer = peer,
+       .remote_peer = std::move(upgraded.peer),
        .path = path::kind::relay,
        .relay_peer = relay_peer,
+       .authentication = upgraded.authentication,
    };
-   session->connection = std::move(*yamux).as_transport();
+   session->connection = std::move(*upgraded.session).as_transport();
    session->resource = std::move(*reservation);
    co_await remember_session(session, connection_manager::direction::outbound);
    launch_session_accept_loop(session);
@@ -719,14 +720,15 @@ boost::asio::awaitable<void> node::impl::handle_relay_stop(std::shared_ptr<node:
        .status = relay::status::ok,
    }));
    stream = detail::stream_access::with_buffer(std::move(stream), std::move(relay_buffer));
-   auto yamux = co_await upgrade_relay_inbound_session(std::move(stream), options, identity, request.source->id);
+   auto upgraded = co_await upgrade_relay_inbound_session(std::move(stream), options, identity, request.source->id);
    auto relayed_session = std::make_shared<session_state>();
    relayed_session->info = node::session_info{
-       .remote_peer = request.source->id,
+       .remote_peer = std::move(upgraded.peer),
        .path = path::kind::relay,
        .relay_peer = session->info.remote_peer,
+       .authentication = upgraded.authentication,
    };
-   relayed_session->connection = std::move(*yamux).as_transport();
+   relayed_session->connection = std::move(*upgraded.session).as_transport();
    relayed_session->resource = std::move(*reservation);
    co_await remember_session(relayed_session, connection_manager::direction::inbound);
    launch_session_accept_loop(relayed_session);

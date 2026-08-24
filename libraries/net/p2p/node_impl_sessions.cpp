@@ -442,6 +442,7 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
       session->info = node::session_info{
           .remote_peer = result.peer,
           .path = path::kind::direct,
+          .authentication = result.authentication,
       };
       session->connection = std::move(result.session);
       session->resource = std::move(*reservation);
@@ -613,6 +614,7 @@ boost::asio::awaitable<void> node::impl::handle_inbound_connection(direct::conne
       session->info = node::session_info{
           .remote_peer = remote,
           .path = path::kind::direct,
+          .authentication = connection.authentication,
       };
       session->connection = std::move(connection.session);
       session->resource = std::move(reservation);

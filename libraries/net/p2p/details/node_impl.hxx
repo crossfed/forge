@@ -567,7 +567,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void launch_relay_discovery_maintenance();
 
-   boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+   boost::asio::awaitable<upgraded_session>
    open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<std::shared_ptr<session_state>>

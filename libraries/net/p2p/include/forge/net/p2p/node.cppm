@@ -42,6 +42,13 @@ import forge.net.transport.limits;
 
 export namespace forge::net::p2p {
 
+enum class peer_authentication : std::uint8_t {
+   unverified = 0,
+   quic_tls = 1,
+   libp2p_tls = 2,
+   noise = 3,
+};
+
 class node {
  public:
    struct limits {
@@ -119,6 +126,7 @@ class node {
       path::kind path = path::kind::direct;
       std::optional<peer_id> relay_peer;
       identify::state identify_state = identify::state::unknown;
+      peer_authentication authentication = peer_authentication::unverified;
    };
 
    struct incoming_protocol_stream {
