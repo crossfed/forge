@@ -20,5 +20,6 @@ target_link_libraries(
    forge_api_core PUBLIC
       forge_exceptions
       forge_raw
+      forge_reflect
       Boost::headers
 )

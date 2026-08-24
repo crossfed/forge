@@ -1,8 +1,5 @@
 module;
 
-#include <boost/describe.hpp>
-#include <boost/mp11.hpp>
-
 #include <concepts>
 #include <tuple>
 #include <type_traits>
@@ -12,6 +9,8 @@ export module forge.api.core.server_supplied;
 
 export import forge.api.core.exceptions;
 export import forge.api.core.trusted_invocation;
+
+import forge.reflect.reflect;
 
 export namespace forge::api::core {
 
@@ -67,11 +66,9 @@ void reset_server_supplied_impl(T& value) {
       server_supplied<value_type>::reset(value);
    } else if constexpr (tuple_like_value<value_type>) {
       std::apply([](auto&... items) { (reset_server_supplied_impl(items), ...); }, value);
-   } else if constexpr (boost::describe::has_describe_members<value_type>::value) {
-      using members = boost::describe::describe_members<
-         value_type, boost::describe::mod_any_access | boost::describe::mod_inherited>;
-      boost::mp11::mp_for_each<members>([&](auto member) {
-         reset_server_supplied_impl(value.*member.pointer);
+   } else if constexpr (forge::reflect::is_described_object_v<value_type>) {
+      forge::reflect::for_each_member<value_type>([&](const char*, auto member) {
+         reset_server_supplied_impl(value.*member);
       });
    }
 }
@@ -83,11 +80,9 @@ void apply_server_supplied_impl(T& value, const trusted_invocation& trusted) {
       apply_exact_server_supplied<value_type>(value, trusted);
    } else if constexpr (tuple_like_value<value_type>) {
       std::apply([&](auto&... items) { (apply_server_supplied_impl(items, trusted), ...); }, value);
-   } else if constexpr (boost::describe::has_describe_members<value_type>::value) {
-      using members = boost::describe::describe_members<
-         value_type, boost::describe::mod_any_access | boost::describe::mod_inherited>;
-      boost::mp11::mp_for_each<members>([&](auto member) {
-         apply_server_supplied_impl(value.*member.pointer, trusted);
+   } else if constexpr (forge::reflect::is_described_object_v<value_type>) {
+      forge::reflect::for_each_member<value_type>([&](const char*, auto member) {
+         apply_server_supplied_impl(value.*member, trusted);
       });
    }
 }
