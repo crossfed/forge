@@ -1795,10 +1795,10 @@ class binding_builder {
                      if constexpr (forge::api::core::method_kind_v<Method> ==
                                    forge::api::core::method_kind::server_stream) {
                         auto request = co_await make_request_from_stream<Request>(request_value, options);
-                        payload = method_descriptor->request_encoder(&request);
+                        payload = forge::api::core::detail::encode_owned_request(*method_descriptor, request);
                      } else {
                         auto request = make_request_from_http<Request>(request_value.context, options);
-                        payload = method_descriptor->request_encoder(&request);
+                        payload = forge::api::core::detail::encode_owned_request(*method_descriptor, request);
                      }
                   }
 

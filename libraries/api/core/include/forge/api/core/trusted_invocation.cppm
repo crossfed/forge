@@ -9,6 +9,10 @@ export module forge.api.core.trusted_invocation;
 
 export import forge.api.core.exceptions;
 
+namespace forge::api::core::detail {
+class trusted_invocation_state;
+}
+
 export namespace forge::api::core {
 
 class trusted_invocation_builder;
@@ -36,12 +40,10 @@ class trusted_invocation {
    }
 
  private:
-   struct state;
-
-   explicit trusted_invocation(std::shared_ptr<const state> value) noexcept;
+   explicit trusted_invocation(std::shared_ptr<const detail::trusted_invocation_state> value) noexcept;
    [[nodiscard]] const void* find_exact(std::type_index type) const noexcept;
 
-   std::shared_ptr<const state> state_;
+   std::shared_ptr<const detail::trusted_invocation_state> state_;
 
    friend class trusted_invocation_builder;
 };
@@ -73,7 +75,7 @@ class trusted_invocation_builder {
  private:
    void insert(std::type_index type, std::shared_ptr<const void> value);
 
-   std::unique_ptr<trusted_invocation::state> state_;
+   std::unique_ptr<detail::trusted_invocation_state> state_;
 };
 
 } // namespace forge::api::core

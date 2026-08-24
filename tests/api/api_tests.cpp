@@ -16,6 +16,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -423,6 +424,15 @@ static_assert(!forge::api::core::local_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<overloaded_api>);
 static_assert(forge::api::core::remote_interface<const_exact_api>);
+
+template <typename T>
+concept request_view_borrowable = requires(T&& value) {
+   forge::api::core::request_view::borrow(std::forward<T>(value));
+};
+
+static_assert(request_view_borrowable<protocol::read_chunk&>);
+static_assert(request_view_borrowable<const protocol::read_chunk&>);
+static_assert(!request_view_borrowable<protocol::read_chunk>);
 
 class positional_api : public forge::api::core::contract<positional_api, forge::api::core::surface::local |
                                                                              forge::api::core::surface::remote> {
@@ -949,6 +959,38 @@ BOOST_AUTO_TEST_CASE(generated_api_descriptor_records_contract_and_method_metada
    BOOST_TEST(read_old->deprecated);
    BOOST_TEST(read_old->deprecation_reason == "use read");
    BOOST_TEST(watch->since_revision == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(method_descriptor_preserves_legacy_positional_request_encoder) {
+   auto encoded = false;
+   auto legacy = forge::api::core::method_descriptor{
+       "legacy",
+       forge::api::core::method_kind::unary,
+       0,
+       false,
+       {},
+       typeid(protocol::read_chunk),
+       typeid(protocol::chunk),
+       typeid(std::tuple<protocol::read_chunk>),
+       typeid(void),
+       typeid(void),
+       typeid(protocol::chunk),
+       {},
+       {},
+       {},
+       std::function<forge::api::core::bytes(const void*)>{},
+   };
+   static_assert(std::same_as<decltype(legacy.request_encoder), std::function<forge::api::core::bytes(const void*)>>);
+   legacy.request_encoder = [&encoded](const void* value) {
+      encoded = true;
+      return forge::api::core::pack_body(*static_cast<const protocol::read_chunk*>(value));
+   };
+
+   const auto request = protocol::read_chunk{.ref = "legacy"};
+   const auto payload = legacy.request_encoder(&request);
+
+   BOOST_TEST(encoded);
+   BOOST_TEST(forge::api::core::unpack_body<protocol::read_chunk>(payload).ref == "legacy");
 }
 
 BOOST_AUTO_TEST_CASE(generated_api_descriptor_supports_typed_overload_methods) {
@@ -1483,14 +1525,22 @@ BOOST_AUTO_TEST_CASE(api_dispatcher_injects_trusted_metadata_after_scrub) {
    BOOST_TEST(*observed == "trusted");
 }
 
-BOOST_AUTO_TEST_CASE(remote_request_encoder_resets_its_mutable_owned_wire_request) {
+BOOST_AUTO_TEST_CASE(remote_owned_wire_request_encoder_resets_only_owned_storage) {
    const auto descriptor = trusted_api::describe();
    const auto* method = forge::api::core::find_method(descriptor, "unary");
    BOOST_REQUIRE(method != nullptr);
    BOOST_REQUIRE(static_cast<bool>(method->request_encoder));
+   BOOST_REQUIRE(static_cast<bool>(method->owned_wire_request_encoder));
+
+   const auto caller_request = spoofed_trusted_request();
+   const auto caller_wire = method->request_encoder(&caller_request);
+   const auto caller_decoded = forge::api::core::unpack_body<trusted_protocol::request>(caller_wire);
+
+   BOOST_TEST(caller_request.claimed_peer.value == "spoofed");
+   BOOST_TEST(caller_decoded.claimed_peer.value == "spoofed");
 
    auto owned_wire_request = spoofed_trusted_request();
-   const auto wire = method->request_encoder(&owned_wire_request);
+   const auto wire = method->owned_wire_request_encoder(&owned_wire_request);
    const auto decoded = forge::api::core::unpack_body<trusted_protocol::request>(wire);
 
    BOOST_TEST(owned_wire_request.claimed_peer.value.empty());
@@ -1503,6 +1553,19 @@ BOOST_AUTO_TEST_CASE(remote_request_encoder_resets_its_mutable_owned_wire_reques
    BOOST_TEST(decoded.nested.peer.value.empty());
    BOOST_REQUIRE(decoded.optional_member.has_value());
    BOOST_TEST(decoded.optional_member->value == "optional-not-traversed");
+}
+
+BOOST_AUTO_TEST_CASE(const_request_encoder_supports_move_only_local_validation) {
+   const auto descriptor = move_only_api::describe();
+   const auto* method = forge::api::core::find_method(descriptor, "unary");
+   BOOST_REQUIRE(method != nullptr);
+   BOOST_REQUIRE(static_cast<bool>(method->request_encoder));
+
+   const auto request = protocol::move_only_request{"validator"};
+   const auto payload = method->request_encoder(&request);
+
+   BOOST_TEST(*request.value == "validator");
+   BOOST_TEST(*forge::api::core::unpack_body<protocol::move_only_request>(payload).value == "validator");
 }
 
 BOOST_AUTO_TEST_CASE(remote_dispatch_without_trusted_source_fails_closed) {
@@ -2060,7 +2123,7 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    auto descriptor = remote_only_api::describe();
    auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "read"; });
    BOOST_REQUIRE(method != descriptor.methods.end());
-   method->request_encoder = {};
+   method->owned_wire_request_encoder = {};
    method->server_fields = {};
 
    auto runtime = forge::asio::runtime{};
@@ -2081,7 +2144,7 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    auto stream_method = std::ranges::find_if(
       stream_descriptor.methods, [](const auto& value) { return value.name == "stream_values"; });
    BOOST_REQUIRE(stream_method != stream_descriptor.methods.end());
-   stream_method->request_encoder = {};
+   stream_method->owned_wire_request_encoder = {};
    stream_method->server_fields = {};
    auto fixed_arguments = std::tuple{protocol::move_only_request{"legacy-stream"}};
    const auto stream_wire = forge::api::core::detail::encode_fixed_proxy_arguments<&move_only_api::stream_values>(

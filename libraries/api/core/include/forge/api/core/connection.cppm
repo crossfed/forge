@@ -58,11 +58,14 @@ namespace detail {
 
 template <typename Request>
 [[nodiscard]] bytes encode_owned_request(const method_descriptor& descriptor, Request& request) {
-   if (descriptor.request_encoder) {
-      return descriptor.request_encoder(&request);
+   if (descriptor.owned_wire_request_encoder) {
+      return descriptor.owned_wire_request_encoder(&request);
    }
    if (descriptor.server_fields.reset_wire) {
       descriptor.server_fields.reset_wire(&request);
+   }
+   if (descriptor.request_encoder) {
+      return descriptor.request_encoder(&request);
    }
    return pack_body(request);
 }

@@ -511,42 +511,6 @@ using contextual_raw_stream_invoker = std::function<boost::asio::awaitable<bytes
     std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>,
     trusted_invocation, contextual_before_handler)>;
 
-class mutable_request_encoder {
- public:
-   using mutable_callback = std::function<bytes(void*)>;
-   using readonly_callback = std::function<bytes(const void*)>;
-
-   mutable_request_encoder() = default;
-
-   template <typename Callback>
-   mutable_request_encoder(Callback callback) : mutable_{std::move(callback)} {}
-
-   mutable_request_encoder(mutable_callback mutable_value, readonly_callback readonly_value)
-       : mutable_{std::move(mutable_value)}, readonly_{std::move(readonly_value)} {}
-
-   [[nodiscard]] explicit operator bool() const noexcept {
-      return static_cast<bool>(mutable_);
-   }
-
-   [[nodiscard]] bytes operator()(void* value) const {
-      if (!mutable_) {
-         throw exceptions::protocol_error{"API method has no request encoder"};
-      }
-      return mutable_(value);
-   }
-
-   [[nodiscard]] bytes operator()(const void* value) const {
-      if (!readonly_) {
-         throw exceptions::protocol_error{"API method request encoder requires mutable owned storage"};
-      }
-      return readonly_(value);
-   }
-
- private:
-   mutable_callback mutable_;
-   readonly_callback readonly_;
-};
-
 struct method_descriptor {
    std::string name;
    method_kind kind = method_kind::unary;
@@ -562,8 +526,7 @@ struct method_descriptor {
    std::vector<std::string> argument_names;
    std::vector<std::type_index> response_traits;
    std::vector<error_descriptor> errors;
-   detail::server_field_operations server_fields;
-   mutable_request_encoder request_encoder;
+   std::function<bytes(const void*)> request_encoder;
    std::function<bytes(const void*)> response_encoder;
    std::function<void(const bytes&, forge::raw::unpack_limits)> request_decoder;
    std::function<void(const bytes&, forge::raw::unpack_limits)> response_decoder;
@@ -573,6 +536,8 @@ struct method_descriptor {
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    raw_stream_invoker stream_invoker;
+   detail::server_field_operations server_fields;
+   std::function<bytes(void*)> owned_wire_request_encoder;
    contextual_raw_invoker contextual_raw_invoker;
    contextual_raw_stream_invoker contextual_stream_invoker;
 
@@ -731,25 +696,15 @@ template <typename Interface, bool EnableRaw> class contract_builder {
 
       if constexpr (EnableRaw) {
          using wire_request = detail::method_fixed_request_t<Method>;
-         auto mutable_encoder = [reset = fields.reset_wire](void* request) {
+         value.request_encoder = [](const void* request) {
+            return pack_body(*static_cast<const wire_request*>(request));
+         };
+         value.owned_wire_request_encoder = [reset = fields.reset_wire](void* request) {
             if (reset) {
                reset(request);
             }
             return pack_body(*static_cast<wire_request*>(request));
          };
-         if constexpr (std::is_copy_constructible_v<wire_request>) {
-            value.request_encoder = mutable_request_encoder{
-               mutable_request_encoder::mutable_callback{std::move(mutable_encoder)},
-               [reset = fields.reset_wire](const void* request) {
-                  auto wire_copy = *static_cast<const wire_request*>(request);
-                  if (reset) {
-                     reset(&wire_copy);
-                  }
-                  return pack_body(wire_copy);
-               }};
-         } else {
-            value.request_encoder = mutable_request_encoder{std::move(mutable_encoder)};
-         }
          value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
             static_cast<void>(forge::raw::unpack_exact<wire_request>(payload, limits));
          };
@@ -845,25 +800,15 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .server_fields = fields,
       };
       if constexpr (EnableRaw) {
-         auto mutable_encoder = [reset = fields.reset_wire](void* request) {
+         value.request_encoder = [](const void* request) {
+            return pack_body(*static_cast<const Request*>(request));
+         };
+         value.owned_wire_request_encoder = [reset = fields.reset_wire](void* request) {
             if (reset) {
                reset(request);
             }
             return pack_body(*static_cast<Request*>(request));
          };
-         if constexpr (std::is_copy_constructible_v<Request>) {
-            value.request_encoder = mutable_request_encoder{
-               mutable_request_encoder::mutable_callback{std::move(mutable_encoder)},
-               [reset = fields.reset_wire](const void* request) {
-                  auto wire_copy = *static_cast<const Request*>(request);
-                  if (reset) {
-                     reset(&wire_copy);
-                  }
-                  return pack_body(wire_copy);
-               }};
-         } else {
-            value.request_encoder = mutable_request_encoder{std::move(mutable_encoder)};
-         }
          value.response_encoder = [](const void* response) {
             return pack_body(*static_cast<const Response*>(response));
          };

@@ -18,7 +18,9 @@ class request_view {
  public:
    request_view() = default;
 
-   template <typename T> [[nodiscard]] static request_view borrow(const T& value) noexcept {
+   template <typename T>
+   [[nodiscard]] static request_view borrow(T&& value) noexcept
+      requires std::is_lvalue_reference_v<T&&> {
       using value_type = std::remove_cvref_t<T>;
       return request_view{std::addressof(value), typeid(value_type)};
    }
