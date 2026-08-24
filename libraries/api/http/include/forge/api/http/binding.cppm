@@ -1630,6 +1630,16 @@ class binding_builder {
    template <auto Method, typename Interface, typename Request, typename Response>
    static boost::asio::awaitable<Response> invoke_local(const forge::api::core::binding_plan& plan,
                                                         std::string_view name, Request request) {
+      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                               "HTTP API method is not installed in the local registry");
+      }
+      if (method->server_fields.reset_wire && method->server_fields.apply_wire) {
+         method->server_fields.reset_wire(&request);
+         method->server_fields.apply_wire(&request, forge::api::core::trusted_invocation{});
+      }
       auto request_payload = validate_local_request<Interface>(plan, name, request);
       auto implementation = plan.local->get<Interface>(Interface::ref());
       auto response = co_await std::invoke(Method, *implementation.shared(), std::move(request));
@@ -1640,6 +1650,16 @@ class binding_builder {
    template <auto Method, typename Interface, typename Tuple, typename Response>
    static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::binding_plan& plan,
                                                                   std::string_view name, Tuple arguments) {
+      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                               "HTTP API method is not installed in the local registry");
+      }
+      if (method->server_fields.reset_fixed && method->server_fields.apply_fixed) {
+         method->server_fields.reset_fixed(&arguments);
+         method->server_fields.apply_fixed(&arguments, forge::api::core::trusted_invocation{});
+      }
       auto request_payload = validate_local_request<Interface>(plan, name, arguments);
       auto implementation = plan.local->get<Interface>(Interface::ref());
       auto response = co_await std::apply(

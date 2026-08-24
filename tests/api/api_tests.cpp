@@ -10,6 +10,7 @@
 #include <forge/api/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <concepts>
@@ -1727,6 +1728,20 @@ BOOST_AUTO_TEST_CASE(trusted_invocation_uses_immutable_exact_type_values) {
    BOOST_TEST(!trusted.contains<trusted_protocol::optional_authority>());
 }
 
+BOOST_AUTO_TEST_CASE(server_supplied_traversal_does_not_enter_ranges_or_pairs) {
+   auto array = std::array<trusted_protocol::authority, 1>{
+      trusted_protocol::authority{.value = "array-spoof"}};
+   auto pair = std::pair{trusted_protocol::authority{.value = "pair-spoof"}, 7U};
+
+   forge::api::core::reset_server_supplied(array);
+   forge::api::core::reset_server_supplied(pair);
+   forge::api::core::apply_server_supplied(array, trusted_authority());
+   forge::api::core::apply_server_supplied(pair, trusted_authority());
+
+   BOOST_TEST(array.front().value == "array-spoof");
+   BOOST_TEST(pair.first.value == "pair-spoof");
+}
+
 BOOST_AUTO_TEST_CASE(contextual_dispatch_resets_and_applies_nested_server_supplied_members) {
    auto runtime = forge::asio::runtime{};
    auto registry = forge::api::core::registry{};
@@ -1759,6 +1774,27 @@ BOOST_AUTO_TEST_CASE(contextual_dispatch_rejects_missing_required_and_keeps_opti
    const auto required_error = forge::raw::unpack<forge::api::core::error_payload>(required_response.payload);
    BOOST_CHECK(required_response.kind == forge::api::core::frame_kind::error);
    BOOST_TEST(required_error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+
+   const auto implicit_empty_response = forge::asio::blocking::run(
+      runtime, registry.dispatch(
+                  trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request()))));
+   const auto implicit_empty_error =
+      forge::raw::unpack<forge::api::core::error_payload>(implicit_empty_response.payload);
+   BOOST_CHECK(implicit_empty_response.kind == forge::api::core::frame_kind::error);
+   BOOST_TEST(implicit_empty_error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+
+   auto output = forge::api::core::detail::make_local_stream_pair(
+      runtime.context().get_executor(), 4096, 2, 8192);
+   const auto implicit_empty_stream = forge::asio::blocking::run(
+      runtime, registry.dispatch_stream(
+                  trusted_request_frame("server_stream", pack_api_payload(spoofed_trusted_request())), {},
+                  output.writer));
+   const auto implicit_empty_stream_error =
+      forge::raw::unpack<forge::api::core::error_payload>(implicit_empty_stream.payload);
+   BOOST_CHECK(implicit_empty_stream.kind == forge::api::core::frame_kind::error);
+   BOOST_TEST(implicit_empty_stream_error.identity.code ==
               static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
 
    auto optional_only = forge::api::core::trusted_invocation_builder{}

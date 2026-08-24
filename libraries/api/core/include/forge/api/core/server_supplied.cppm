@@ -36,10 +36,14 @@ concept valid_server_supplied = requires(T& value, const trusted_invocation& tru
    { server_supplied<T>::apply(value, trusted) } -> std::same_as<bool>;
 };
 
+template <typename T> struct is_fixed_argument_tuple : std::false_type {};
+
+template <typename... T>
+struct is_fixed_argument_tuple<std::tuple<T...>> : std::true_type {};
+
 template <typename T>
-concept tuple_like_value = requires {
-   typename std::tuple_size<T>::type;
-};
+inline constexpr bool is_fixed_argument_tuple_v =
+   is_fixed_argument_tuple<T>::value;
 
 template <typename T> void reset_server_supplied_impl(T& value);
 template <typename T> void apply_server_supplied_impl(T& value, const trusted_invocation& trusted);
@@ -64,7 +68,7 @@ void reset_server_supplied_impl(T& value) {
    if constexpr (declared_server_supplied<value_type>) {
       validate_server_supplied<value_type>();
       server_supplied<value_type>::reset(value);
-   } else if constexpr (tuple_like_value<value_type>) {
+   } else if constexpr (is_fixed_argument_tuple_v<value_type>) {
       std::apply([](auto&... items) { (reset_server_supplied_impl(items), ...); }, value);
    } else if constexpr (forge::reflect::is_described_object_v<value_type>) {
       forge::reflect::for_each_member<value_type>([&](const char*, auto member) {
@@ -78,7 +82,7 @@ void apply_server_supplied_impl(T& value, const trusted_invocation& trusted) {
    using value_type = server_supplied_type<T>;
    if constexpr (declared_server_supplied<value_type>) {
       apply_exact_server_supplied<value_type>(value, trusted);
-   } else if constexpr (tuple_like_value<value_type>) {
+   } else if constexpr (is_fixed_argument_tuple_v<value_type>) {
       std::apply([&](auto&... items) { (apply_server_supplied_impl(items, trusted), ...); }, value);
    } else if constexpr (forge::reflect::is_described_object_v<value_type>) {
       forge::reflect::for_each_member<value_type>([&](const char*, auto member) {
