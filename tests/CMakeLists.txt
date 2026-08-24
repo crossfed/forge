@@ -1,6 +1,6 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(FORGE_VM_WASM_DONOR_ROOT "" CACHE PATH "Pinned EOS VM checkout used to verify the native test port")
+set(FORGE_VM_WASM_INTERPRET_DONOR_ROOT "" CACHE PATH "Pinned EOS VM checkout used to verify the native interpreter test port")
 add_subdirectory(vm_wasm)
 
 set(FORGE_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/structure/check_structure.py)
@@ -341,21 +341,21 @@ target_link_libraries(
 )
 add_test(NAME test_forge_chain_savanna COMMAND test_forge_chain_savanna WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    add_executable(
-      test_forge_contract
+      test_forge_tooling
       unit/main.cpp
-      contract/contract_tests.cpp
+      tooling/contract_tests.cpp
    )
    target_link_libraries(
-      test_forge_contract
-      forge_contract_abi
-      forge_contract_attributes
-      forge_contract_validation
-      forge_contract_manifest
+      test_forge_tooling
+      forge_tooling_abi
+      forge_tooling_attributes
+      forge_tooling_validation
+      forge_tooling_manifest
       Boost::included_unit_test_framework
    )
-   add_test(NAME test_forge_contract COMMAND test_forge_contract WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+   add_test(NAME test_forge_tooling COMMAND test_forge_tooling WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
 add_executable(
@@ -392,6 +392,7 @@ if(FORGE_HAS_MDBX)
       db_mdbx/mdbx_crash_tests.cpp
       db_mdbx/mdbx_tests.cpp
       db_mdbx/mdbx_layers_tests.cpp
+      auth/auth_mdbx_integration_tests.cpp
    )
    add_executable(
       forge_db_mdbx_crash_helper
@@ -410,6 +411,7 @@ if(FORGE_HAS_MDBX)
       forge_db_object
       forge_db_blob
       forge_db_revision
+      forge_auth_pairing
       Boost::included_unit_test_framework
    )
    add_test(NAME test_forge_db_mdbx COMMAND test_forge_db_mdbx WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -605,6 +607,18 @@ add_executable(test_forge_crypto_core unit/main.cpp crypto/test_core.cpp)
 target_link_libraries(test_forge_crypto_core forge_crypto_core Boost::included_unit_test_framework)
 add_test(NAME test_forge_crypto_core COMMAND test_forge_crypto_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_auth_pairing unit/main.cpp auth/pairing_tests.cpp)
+target_link_libraries(test_forge_auth_pairing forge_auth_pairing Boost::included_unit_test_framework)
+add_test(NAME test_forge_auth_pairing COMMAND test_forge_auth_pairing WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_auth_session unit/main.cpp auth/session_tests.cpp)
+target_link_libraries(test_forge_auth_session forge_auth_session Boost::included_unit_test_framework)
+add_test(NAME test_forge_auth_session COMMAND test_forge_auth_session WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_auth_http unit/main.cpp auth/http_auth_tests.cpp)
+target_link_libraries(test_forge_auth_http forge_auth_http Boost::included_unit_test_framework)
+add_test(NAME test_forge_auth_http COMMAND test_forge_auth_http WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
 target_link_libraries(
    test_forge_crypto_signer
@@ -776,6 +790,15 @@ target_link_libraries(test_forge_stcp forge Boost::included_unit_test_framework 
 add_test(NAME test_forge_stcp COMMAND test_forge_stcp WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_tls
+   unit/main.cpp
+   tls/tls_tests.cpp
+   tls/http_server_tests.cpp
+)
+target_link_libraries(test_forge_tls forge Boost::included_unit_test_framework OpenSSL::Crypto)
+add_test(NAME test_forge_tls COMMAND test_forge_tls WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
    test_forge_yamux
    unit/main.cpp
    yamux/yamux_tests.cpp
@@ -883,20 +906,68 @@ add_executable(
    test_forge_quic_p2p
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
+   quic_p2p/dht_record_store_fixture.cpp
+   quic_p2p/dht_record_store_tests.cpp
+   quic_p2p/dht_profile_tests.cpp
+   quic_p2p/dht_provider_registry_tests.cpp
+   quic_p2p/dht_query_tests.cpp
+   quic_p2p/dht_routing_refresh_tests.cpp
+   quic_p2p/dht_time_tests.cpp
+   quic_p2p/ipns_tests.cpp
    quic_p2p/quic_tests.cpp
    quic_p2p/p2p_lifecycle_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
+   quic_p2p/topology_tests.cpp
+)
+target_sources(
+   test_forge_quic_p2p
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES quic_p2p/dht_record_store_fixture.cppm
 )
 target_link_libraries(test_forge_quic_p2p forge Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 add_test(NAME test_forge_quic_p2p COMMAND test_forge_quic_p2p WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 set_tests_properties(test_forge_quic_p2p PROPERTIES TIMEOUT 300)
 
+set(FORGE_INTEROP_PROVENANCE ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/provenance.py)
+set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)
+get_property(_forge_interop_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_forge_interop_multi_config)
+   set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${FORGE_INTEROP_ARTIFACT_DIRECTORY}/$<CONFIG>)
+   set(FORGE_INTEROP_BUILD_PROFILE "$<CONFIG>")
+elseif(CMAKE_BUILD_TYPE)
+   set(FORGE_INTEROP_BUILD_PROFILE "${CMAKE_BUILD_TYPE}")
+else()
+   set(FORGE_INTEROP_BUILD_PROFILE "default")
+endif()
+set(FORGE_INTEROP_BUILD_INFO_DIRECTORY ${FORGE_INTEROP_ARTIFACT_DIRECTORY})
+set(FORGE_INTEROP_BUILD_INFO_HEADER ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.hxx)
+set(FORGE_INTEROP_BUILD_INFO_STAMP ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}/forge_interop_build_info.json)
+add_custom_target(
+   forge_interop_fixture_build_info
+   COMMAND ${CMAKE_COMMAND} -E make_directory ${FORGE_INTEROP_BUILD_INFO_DIRECTORY}
+   COMMAND ${Python3_EXECUTABLE}
+      ${FORGE_INTEROP_PROVENANCE}
+      emit-build-info
+      --forge-root ${CMAKE_SOURCE_DIR}
+      --output-header ${FORGE_INTEROP_BUILD_INFO_HEADER}
+      --output-stamp ${FORGE_INTEROP_BUILD_INFO_STAMP}
+      --compiler-path ${CMAKE_CXX_COMPILER}
+      --compiler-id ${CMAKE_CXX_COMPILER_ID}
+      --compiler-version ${CMAKE_CXX_COMPILER_VERSION}
+      --build-profile ${FORGE_INTEROP_BUILD_PROFILE}
+   BYPRODUCTS ${FORGE_INTEROP_BUILD_INFO_HEADER} ${FORGE_INTEROP_BUILD_INFO_STAMP}
+   DEPENDS ${FORGE_INTEROP_PROVENANCE}
+   VERBATIM
+)
 add_executable(
    forge_interop_fixture
    libp2p_interop/forge_interop_fixture.cpp
 )
+add_dependencies(forge_interop_fixture forge_interop_fixture_build_info)
+target_include_directories(forge_interop_fixture PRIVATE ${FORGE_INTEROP_BUILD_INFO_DIRECTORY})
 target_link_libraries(forge_interop_fixture forge)
 
 set(_forge_libp2p_interop_enabled 0)
@@ -911,7 +982,8 @@ add_custom_target(
       --enabled ${_forge_libp2p_interop_enabled}
       --forge-fixture $<TARGET_FILE:forge_interop_fixture>
       --source-dir ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
-      --build-dir ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop
+      --build-dir ${FORGE_INTEROP_ARTIFACT_DIRECTORY}
+      --forge-root ${CMAKE_SOURCE_DIR}
       --donors-root ${FORGE_LIBP2P_DONORS_ROOT}
    DEPENDS forge_interop_fixture
 )
@@ -922,10 +994,29 @@ add_test(
       --enabled ${_forge_libp2p_interop_enabled}
       --forge-fixture $<TARGET_FILE:forge_interop_fixture>
       --source-dir ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
-      --build-dir ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop
+      --build-dir ${FORGE_INTEROP_ARTIFACT_DIRECTORY}
+      --forge-root ${CMAKE_SOURCE_DIR}
       --donors-root ${FORGE_LIBP2P_DONORS_ROOT}
 )
 set_tests_properties(test_forge_libp2p_interop PROPERTIES SKIP_REGULAR_EXPRESSION "^SKIP:")
+
+add_test(
+   NAME test_forge_libp2p_fixture_provenance
+   COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/runner.py
+      --enabled ${_forge_libp2p_interop_enabled}
+      --provenance-only
+      --forge-fixture $<TARGET_FILE:forge_interop_fixture>
+      --source-dir ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+      --build-dir ${FORGE_INTEROP_ARTIFACT_DIRECTORY}
+      --forge-root ${CMAKE_SOURCE_DIR}
+      --donors-root ${FORGE_LIBP2P_DONORS_ROOT}
+)
+
+add_test(
+   NAME test_forge_libp2p_worktree_fingerprint
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/test_provenance.py
+)
 
 add_test(
    NAME test_forge_libp2p_donor_matrix
@@ -981,6 +1072,7 @@ target_link_libraries(
    forge_asio
    Boost::included_unit_test_framework
 )
+target_include_directories(test_forge_p2p_managed_remote PRIVATE ${CMAKE_SOURCE_DIR}/plugins/p2p/resolver)
 add_test(
    NAME test_forge_p2p_managed_remote
    COMMAND test_forge_p2p_managed_remote
@@ -1262,6 +1354,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_net_tls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tls_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tls_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_net_stcp_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1426,6 +1529,39 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_crypto_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_auth_pairing_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_pairing_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-pairing-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_pairing_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_auth_session_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_session_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-session-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_session_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_auth_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_http_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1653,19 +1789,20 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_vm_wasm_component
+   test_forge_package_vm_wasm_interpret_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
       -DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-relocated
-      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component
-      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-component
+      -DFORGE_PACKAGE_TEST_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
+      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-relocated
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-component
       -DFORGE_PACKAGE_TEST_SOURCE_ROOT=${PROJECT_SOURCE_DIR}
       -DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}
       -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component/verify_relocation.cmake
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component/verify_relocation.cmake
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2140,6 +2277,17 @@ add_test(
 )
 set_tests_properties(test_forge_package_net_tcp_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
+   NAME test_forge_package_net_tls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tls_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tls_component
+)
+set_tests_properties(test_forge_package_net_tls_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
    NAME test_forge_package_net_stcp_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2306,6 +2454,39 @@ add_test(
       --test-command forge_package_crypto_core_component
 )
 set_tests_properties(test_forge_package_crypto_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_auth_pairing_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_pairing_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-pairing-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_pairing_component
+)
+set_tests_properties(test_forge_package_auth_pairing_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_auth_session_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_session_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-session-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_session_component
+)
+set_tests_properties(test_forge_package_auth_session_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_auth_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-auth-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_auth_http_component
+)
+set_tests_properties(test_forge_package_auth_http_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_crypto_digest_component
    COMMAND ${CMAKE_CTEST_COMMAND}
@@ -2530,75 +2711,76 @@ add_test(
       --test-command forge_package_chain_savanna_component
 )
 set_tests_properties(test_forge_package_chain_savanna_component PROPERTIES DEPENDS test_forge_package_install)
-if(FORGE_ENABLE_CONTRACT_TOOLING)
+if(FORGE_ENABLE_TOOLING)
    add_test(
-      NAME test_forge_package_contract_abi_component
+      NAME test_forge_package_tooling_abi_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_abi_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-abi-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_abi_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-abi-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options
             ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
             -DClang_DIR=${Clang_DIR}
             -DLLVM_DIR=${LLVM_DIR}
-         --test-command forge_package_contract_abi_component
+         --test-command forge_package_tooling_abi_component
    )
-   set_tests_properties(test_forge_package_contract_abi_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_abi_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_attributes_component
+      NAME test_forge_package_tooling_attributes_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_attributes_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-attributes-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_attributes_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-attributes-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options
             ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
             -DClang_DIR=${Clang_DIR}
             -DLLVM_DIR=${LLVM_DIR}
             -DCMAKE_DISABLE_FIND_PACKAGE_Boost=TRUE
-         --test-command forge_package_contract_attributes_component
+         --test-command forge_package_tooling_attributes_component
    )
-   set_tests_properties(test_forge_package_contract_attributes_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_attributes_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_validation_component
+      NAME test_forge_package_tooling_validation_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_validation_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-validation-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_validation_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-validation-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_contract_validation_component
+         --test-command forge_package_tooling_validation_component
    )
-   set_tests_properties(test_forge_package_contract_validation_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_validation_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
-      NAME test_forge_package_contract_manifest_component
+      NAME test_forge_package_tooling_manifest_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_manifest_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-manifest-component
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_tooling_manifest_component
+         ${CMAKE_BINARY_DIR}/forge-package-tooling-manifest-component
          --build-generator ${CMAKE_GENERATOR}
          --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_contract_manifest_component
+         --test-command forge_package_tooling_manifest_component
    )
-   set_tests_properties(test_forge_package_contract_manifest_component PROPERTIES DEPENDS test_forge_package_install)
+   set_tests_properties(test_forge_package_tooling_manifest_component PROPERTIES DEPENDS test_forge_package_install)
 endif()
 add_test(
-   NAME test_forge_package_vm_wasm_component
+   NAME test_forge_package_vm_wasm_interpret_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
       -DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-relocated
-      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component
-      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-component
+      -DFORGE_PACKAGE_TEST_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
+      -DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-relocated
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-vm-wasm-interpret-component
       -DFORGE_PACKAGE_TEST_SOURCE_ROOT=${PROJECT_SOURCE_DIR}
       -DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}
       -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_component/verify_relocation.cmake
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_vm_wasm_interpret_component/verify_relocation.cmake
 )
-set_tests_properties(test_forge_package_vm_wasm_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_vm_wasm_interpret_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_db_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}

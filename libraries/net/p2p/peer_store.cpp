@@ -54,8 +54,7 @@ void peer_store::upsert_relay_reservation(relay_record value) {
    impl_->upsert_relay_reservation(std::move(value));
 }
 
-bool peer_store::mark_discovery_failure(const peer_id& peer,
-                                        std::chrono::system_clock::time_point backoff_until) {
+bool peer_store::mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until) {
    return impl_->mark_discovery_failure(peer, backoff_until);
 }
 
@@ -91,47 +90,47 @@ void peer_store::mark_endpoint_failure(const peer_id& peer, const forge::net::p2
    impl_->mark_endpoint_failure(peer, endpoint, kind, backoff_until);
 }
 
-void peer_store::upsert_routing_peer(dht::peer value, discovery::source source,
+void peer_store::upsert_routing_peer(protocol_id protocol, dht::peer value, discovery::source source,
                                      std::chrono::system_clock::time_point expires_at) {
-   impl_->upsert_routing_peer(std::move(value), source, expires_at);
-}
-
-boost::asio::awaitable<void> peer_store::async_upsert_provider(provider_record value) {
-   co_await impl_->async_upsert_provider(std::move(value));
+   impl_->upsert_routing_peer(std::move(protocol), std::move(value), source, expires_at);
 }
 
 boost::asio::awaitable<void> peer_store::async_upsert_rendezvous(rendezvous::registration value) {
-   co_await impl_->async_upsert_rendezvous(std::move(value));
+   return impl::async_upsert_rendezvous_owned(impl_, std::move(value));
 }
 
 boost::asio::awaitable<void> peer_store::async_register_rendezvous(rendezvous::registration value,
                                                                    std::size_t max_registrations_per_peer) {
-   co_await impl_->async_register_rendezvous(std::move(value), max_registrations_per_peer);
+   return impl::async_register_rendezvous_owned(impl_, std::move(value), max_registrations_per_peer);
 }
 
 boost::asio::awaitable<void> peer_store::async_remove_rendezvous(peer_id peer, std::string namespace_name) {
-   co_await impl_->async_remove_rendezvous(std::move(peer), std::move(namespace_name));
+   return impl::async_remove_rendezvous_owned(impl_, std::move(peer), std::move(namespace_name));
 }
 
 boost::asio::awaitable<void> peer_store::async_hydrate() {
-   co_await impl_->async_hydrate();
+   return impl::async_hydrate_owned(impl_);
 }
 
 boost::asio::awaitable<peer_store::prune_result>
 peer_store::async_prune_expired(std::chrono::system_clock::time_point now) {
-   co_return co_await impl_->async_prune_expired(now);
+   return impl::async_prune_expired_owned(impl_, now);
 }
 
 boost::asio::awaitable<void> peer_store::async_flush() {
-   co_await impl_->async_flush();
+   return impl::async_flush_owned(impl_);
 }
 
 boost::asio::awaitable<void> peer_store::async_close() {
-   co_await impl_->async_close();
+   return impl::async_close_owned(impl_);
 }
 
 std::optional<peer_store::record> peer_store::find(const peer_id& peer) const {
    return impl_->find(peer);
+}
+
+std::optional<public_key> peer_store::find_public_key(const peer_id& peer) const {
+   return impl_->find_public_key(peer);
 }
 
 std::vector<peer_store::record> peer_store::snapshot(std::size_t limit) const {
@@ -142,8 +141,12 @@ std::vector<peer_store::record> peer_store::candidates(std::uint64_t capability,
    return impl_->candidates(capability, limit);
 }
 
-std::vector<peer_store::provider_record> peer_store::find_providers(const dht::key& key, std::size_t limit) const {
-   return impl_->find_providers(key, limit);
+std::vector<peer_store::record> peer_store::scored_candidates(std::size_t limit) const {
+   return impl_->scored_candidates(limit);
+}
+
+std::vector<peer_store::record> peer_store::scored_candidates(discovery::source source, std::size_t limit) const {
+   return impl_->scored_candidates(source, limit);
 }
 
 std::vector<rendezvous::registration> peer_store::discover_rendezvous(std::string_view namespace_name,

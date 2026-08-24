@@ -1,14 +1,14 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.backend;
-#define FORGE_VM_WASM_TEST_USES_BACKEND
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.backend;
+#define FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE reentry_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE reentry_tests
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 /*
 (module
@@ -52,8 +52,8 @@ static wasm_code reentry_wasm = {
 
 BACKEND_TEST_CASE("test reentry", "[reentry]") {
    struct test_runner;
-   using rhf_t = forge::vm::wasm::registered_host_functions<test_runner>;
-   using backend_t = forge::vm::wasm::backend<rhf_t, TestType>;
+   using rhf_t = forge::vm::wasm::interpret::registered_host_functions<test_runner>;
+   using backend_t = forge::vm::wasm::interpret::backend<rhf_t, TestType>;
    struct test_runner {
       backend_t* bkend;
       uint32_t test_func_0(uint32_t val) {

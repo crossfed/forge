@@ -11,6 +11,7 @@
     "go-libp2p": "9cfe2cc00be5b20a0be737f002c99f81b92255c5",
     "rust-libp2p": "22fb4c784fc55ad8b15d05fdc9f98d663107d4cb",
     "go-libp2p-kad-dht": "d40b14b5b2cc713f78173f411b8eec4c1827552f",
+    "boxo": "23c380b039db74aab1a9c91288aca62b572c64fa",
     "go-libp2p-pubsub": "0ed6f6fdad7eb820486892336bed3081f8fa7f25"
   },
   "cases": [
@@ -226,7 +227,7 @@
         "test_forge_quic_p2p p2p_node_peer_protection_api_is_tagged_and_additive",
         "test_forge_quic_p2p p2p_connection_manager_prunes_unprotected_sessions_and_keeps_protected_peer",
         "test_forge_quic_p2p p2p_connection_manager_rejects_when_all_sessions_are_protected",
-        "test_forge_quic_p2p p2p_connection_manager_enforces_outbound_session_limit",
+        "test_forge_quic_p2p p2p_connection_manager_low_hard_session_limit_is_independent_of_topology_watermarks",
         "test_forge_quic_p2p p2p_connection_manager_allows_bounded_parallel_sessions_per_peer",
         "test_forge_quic_p2p p2p_connection_manager_enforces_sessions_per_peer_limit",
         "test_forge_quic_p2p p2p_connection_manager_rejects_pending_outbound_limit_without_killing_first_attempt",
@@ -343,8 +344,10 @@
         "Identify over TCP"
       ],
       "mapping_state": "mapped",
-      "forge_tests":
-          [ "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify", "test_forge_libp2p_interop echo" ],
+      "forge_tests": [
+        "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop echo", "test_forge_libp2p_interop echo_large"
+      ],
       "forge_live_scenario": [
         {
           "profile": "tcp_noise",
@@ -357,6 +360,10 @@
         {
           "profile": "tcp_noise",
           "scenario": "echo"
+        },
+        {
+          "profile": "tcp_noise",
+          "scenario": "echo_large"
         }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
@@ -496,7 +503,11 @@
       "forge_tests": [
         "test_forge_quic_p2p p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed",
         "test_forge_quic_p2p p2p_dht_node_finds_peer_and_provider_over_negotiated_stream",
-        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_provider_and_sequence_state"
+        "test_forge_quic_p2p p2p_dht_large_non_put_key_uses_bounded_response_and_preserves_stream",
+        "test_forge_quic_p2p p2p_dht_large_stored_value_is_omitted_without_resetting_stream",
+        "test_forge_quic_p2p p2p_dht_oversized_put_echo_is_rejected_before_durable_mutation",
+        "test_forge_quic_p2p p2p_dht_provider_response_incrementally_truncates_to_wire_budget",
+        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_and_sequence_state"
       ],
       "known_gap":
           "Codec and persistence negative cases are component-only; only provider publication/discovery is credited as current live DHT evidence."
@@ -519,6 +530,25 @@
       "known_gap": "Live many-peer DHT topology artifacts remain limited by current fixture support"
     },
     {
+      "id": "dht.validated_pk_ipns_values",
+      "protocol": "Kademlia DHT/IPNS",
+      "source": "docs/donors/fcl-p2p-dht-rendezvous-v1.md",
+      "donor": "go-libp2p-kad-dht validated record flow and Boxo IPNS v1/v2 record contract",
+      "donor_file": [
+        "donors/go-libp2p-kad-dht/records.go", "donors/go-libp2p-kad-dht/handlers.go",
+        "donors/boxo/ipns/record.go", "donors/boxo/ipns/validation.go", "donors/boxo/ipns/pb/record.proto"
+      ],
+      "donor_case": [ "validate/select before storage", "/pk", "/ipns", "sequence and EOL selection" ],
+      "mapping_state": "mapped",
+      "forge_tests": [
+        "test_forge_quic_p2p dht_record_store_validates_and_selects_before_durable_publication",
+        "test_forge_quic_p2p p2p_ipns_create_matches_pinned_boxo_v1_v2_golden",
+        "test_forge_quic_p2p p2p_dht_get_value_reports_remaining_record_ttl",
+        "test_forge_quic_p2p p2p_dht_positive_wire_ttl_caps_pk_ipns_and_custom_value_expiry"
+      ],
+      "known_gap": "Product-specific value namespaces require a distinct custom profile and product-owned validator/selector."
+    },
+    {
       "id": "rendezvous.register_discover_ttl_cookie",
       "protocol": "Rendezvous",
       "source": "donors/libp2p-specs/rendezvous/README.md",
@@ -532,7 +562,7 @@
       "forge_tests": [
         "test_forge_quic_p2p p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status",
         "test_forge_quic_p2p p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream",
-        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_provider_and_sequence_state"
+        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_and_sequence_state"
       ],
       "known_gap":
           "Component-level protocol and persistence proof; live Rust register/discover proof is tracked by interop.live_rendezvous_register_discover."
@@ -578,6 +608,45 @@
           "dht_find_peer currently connects directly to the searched peer, so local peer-store lookup can satisfy it without an outbound DHT exchange; it is not credited as live FindPeer evidence."
     },
     {
+      "id": "interop.live_dht_hidden_find_peer",
+      "protocol": "Kademlia DHT",
+      "source": "donors/libp2p-specs/kad-dht/README.md",
+      "donor": "go-libp2p-kad-dht IpfsDHT.FindPeer query events and rust-libp2p kad::Behaviour GetClosestPeers",
+      "donor_file": [
+        "donors/go-libp2p-kad-dht/routing.go", "donors/go-libp2p-kad-dht/lookup.go",
+        "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
+      ],
+      "donor_case": [ "three-process hidden peer", "authenticated routing seed", "FindPeer", "/ipfs/kad/1.0.0" ],
+      "mapping_state": "mapped",
+      "forge_tests": [ "test_forge_libp2p_interop dht_hidden_find_peer" ],
+      "forge_live_scenario": [
+        { "profile": "quic_dht_hidden", "scenario": "dht_hidden_find_peer" }
+      ],
+      "known_gap":
+          "The registered runner covers exactly three mixed one-hop topologies and requires a fresh seeker artifact to show no target record before the query. Coordinator live artifacts are required before it is credited as evidence; broader churn and multi-hop convergence remain unclaimed."
+    },
+    {
+      "id": "interop.live_dht_pk_ipns_values",
+      "protocol": "Kademlia DHT/IPNS",
+      "source": "docs/donors/fcl-p2p-dht-rendezvous-v1.md",
+      "donor": "go-libp2p-kad-dht and rust-libp2p Kademlia value exchange with Boxo-compatible IPNS bytes",
+      "donor_file": [
+        "donors/go-libp2p-kad-dht/handlers.go", "donors/rust-libp2p/protocols/kad/src/behaviour.rs",
+        "donors/boxo/ipns/record.go", "donors/boxo/ipns/validation.go"
+      ],
+      "donor_case": [ "PUT_VALUE", "GET_VALUE", "/pk", "/ipns" ],
+      "mapping_state": "mapped",
+      "forge_tests": [
+        "test_forge_libp2p_interop dht_pk_put_get", "test_forge_libp2p_interop dht_ipns_put_get"
+      ],
+      "forge_live_scenario": [
+        { "profile": "quic_dht", "scenario": "dht_pk_put_get" },
+        { "profile": "quic_dht", "scenario": "dht_ipns_put_get" }
+      ],
+      "known_gap":
+          "The matrix proves writer-only PUT, listener persistence confirmation and reader-only GET from a distinct fresh process with a reset local store. Product-owned custom protocol semantics remain out of scope."
+    },
+    {
       "id": "interop.live_rendezvous_register_discover",
       "protocol": "Rendezvous",
       "source": "donors/libp2p-specs/rendezvous/README.md",
@@ -597,7 +666,25 @@
         }
       ],
       "known_gap":
-          "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
+          "Only Forge-Rust directions are registered. The runner rejects an artifact unless it proves one wire registration, a validated/matching signed legacy PeerRecord, a positive sequence/address count, donor-default 7200-second register/discover TTLs and a non-empty cookie. Forge additionally proves third-party loopback filtering. Coordinator live artifacts are still required before this is credited as executed evidence; Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present."
+    },
+    {
+      "id": "interop.live_rendezvous_lifecycle",
+      "protocol": "Rendezvous",
+      "source": "donors/libp2p-specs/rendezvous/README.md",
+      "donor": "rust-libp2p rendezvous client/server lifecycle with legacy routing-state PeerRecord",
+      "donor_file": [
+        "donors/rust-libp2p/core/src/peer_record.rs", "donors/rust-libp2p/protocols/rendezvous/src/client.rs",
+        "donors/rust-libp2p/protocols/rendezvous/src/server.rs", "donors/rust-libp2p/protocols/rendezvous/tests/rendezvous.rs"
+      ],
+      "donor_case": [ "legacy signed PeerRecord", "cookie delta", "renewal visibility after original expiry", "expiry", "unregister" ],
+      "mapping_state": "mapped",
+      "forge_tests": [ "test_forge_libp2p_interop rendezvous_lifecycle" ],
+      "forge_live_scenario": [
+        { "profile": "quic_rendezvous", "scenario": "rendezvous_lifecycle" }
+      ],
+      "known_gap":
+          "Only Forge-to-Rust and Rust-to-Forge lifecycle directions are registered. Coordinator live artifacts must prove initial/update visibility and cookie change, renewed visibility after the original expiry but before renewed expiry, post-renewal absence, a visible pre-unregister record and final empty discovery before this is credited; Go rendezvous remains unclaimed because this workspace has no official Go rendezvous behaviour donor."
     },
     {
       "id": "gossipsub.protocol_ids_v11_v10",

@@ -23,7 +23,11 @@ WebSocket share routing, TLS and lifecycle boundaries.
 
 Target: `forge_net_websocket`.
 
-Dependencies: `forge_asio`, Boost.Asio, Boost.Beast, OpenSSL.
+Dependencies: `forge_asio`, `forge_net_tls`, Boost.Asio, Boost.Beast, OpenSSL.
+
+When a TLS WebSocket is upgraded by `forge_net_http`, the connection retains the
+accepted `forge_net_tls` snapshot for its full lifetime. Rotating the HTTP
+server's provider therefore affects only later TLS connections.
 
 ## Examples
 

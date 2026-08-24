@@ -24,7 +24,7 @@ on:
       - "libraries/schema/**"
       - "libraries/variant/**"
       - "libraries/vm/wasm/**"
-      - "libraries/contract/**"
+      - "libraries/tooling/**"
       - "guest/**"
       - "tools/**"
       - "vendor/**"
@@ -144,7 +144,7 @@ jobs:
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
-          cmake --build build/forge --target forge_contract_testing_check -j 4
+          cmake --build build/forge --target forge_tooling_testing_check -j 4
           cmake --install build/forge --component dev
 
       - name: Build developer SDK and relocatable archive
@@ -322,7 +322,7 @@ jobs:
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
-          cmake --build build/forge --target forge_contract_testing_check -j 4
+          cmake --build build/forge --target forge_tooling_testing_check -j 4
           cmake --install build/forge --component dev
 
       - name: Build exact LLVM SDK archive and relocation gate

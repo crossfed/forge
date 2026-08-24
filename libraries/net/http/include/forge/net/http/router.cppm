@@ -16,7 +16,10 @@ struct router_server_access;
 
 export module forge.net.http.router;
 
+export import forge.asio.compute;
+
 import forge.net.http.middleware;
+import forge.net.http.assets;
 import forge.net.http.route_context;
 import forge.net.http.stream;
 import forge.net.http.target;
@@ -47,6 +50,9 @@ class router {
    void patch_stream(std::string path, stream_route_handler handler);
    void del_stream(std::string path, stream_route_handler handler);
    void websocket(std::string path, websocket_route_handler handler);
+   void mount_assets(asset_mount value, forge::asio::compute::executor read_executor);
+   void mount_assets(asset_bundle value);
+   void reserve_path_prefix(std::string path);
 
    template <typename Binding> void mount(const Binding& binding) {
       binding.mount(*this);
@@ -95,6 +101,8 @@ class router {
    std::vector<route_entry> routes_;
    std::vector<websocket_route_entry> websocket_routes_;
    std::vector<stream_route_entry> stream_routes_;
+   std::vector<asset_bundle> asset_mounts_;
+   std::vector<std::string> reserved_path_prefixes_;
    std::vector<middleware_entry> middlewares_;
    std::uint64_t anonymous_middleware_id_ = 0;
 };

@@ -85,17 +85,17 @@ EXCEPTION_RENAMES = {
 }
 
 VM_HEADER_MODULES = {
-    "allocator": "forge.vm.wasm.allocator",
-    "argument_proxy": "forge.vm.wasm.argument_proxy",
-    "backend": "forge.vm.wasm.backend",
-    "guarded_ptr": "forge.vm.wasm.guarded_ptr",
-    "host_function": "forge.vm.wasm.host_function",
-    "stack_elem": "forge.vm.wasm.stack_elem",
-    "types": "forge.vm.wasm.types",
-    "utils": "forge.vm.wasm.utils",
-    "variant": "forge.vm.wasm.variant",
-    "vector": "forge.vm.wasm.vector",
-    "watchdog": "forge.vm.wasm.watchdog",
+    "allocator": "forge.vm.wasm.interpret.allocator",
+    "argument_proxy": "forge.vm.wasm.interpret.argument_proxy",
+    "backend": "forge.vm.wasm.interpret.backend",
+    "guarded_ptr": "forge.vm.wasm.interpret.guarded_ptr",
+    "host_function": "forge.vm.wasm.interpret.host_function",
+    "stack_elem": "forge.vm.wasm.interpret.stack_elem",
+    "types": "forge.vm.wasm.interpret.types",
+    "utils": "forge.vm.wasm.interpret.utils",
+    "variant": "forge.vm.wasm.interpret.variant",
+    "vector": "forge.vm.wasm.interpret.vector",
+    "watchdog": "forge.vm.wasm.interpret.watchdog",
 }
 
 VM_HEADER_PARTITIONS = {
@@ -104,9 +104,9 @@ VM_HEADER_PARTITIONS = {
 }
 
 TEST_SUPPORT_MODULES = (
-    "forge.vm.wasm.allocator",
-    "forge.vm.wasm.stack_elem",
-    "forge.vm.wasm.utils",
+    "forge.vm.wasm.interpret.allocator",
+    "forge.vm.wasm.interpret.stack_elem",
+    "forge.vm.wasm.interpret.utils",
 )
 
 
@@ -271,16 +271,16 @@ def replace_live_symbols(text: str) -> str:
     text = re.sub(r"^\s*#\s*include\s*[<\"]catch2/catch\.hpp[>\"]\s*$", "", text, flags=re.M)
     text = re.sub(r"^\s*#\s*include\s*[<\"]eosio/vm/[^>\"]+[>\"]\s*$", "", text, flags=re.M)
     text = re.sub(r"^\s*#\s*include\s*[<\"](?:utils|wasm_config)\.hpp[>\"]\s*$", "", text, flags=re.M)
-    text = text.replace("using namespace eosio::vm;", "using namespace forge::vm::wasm;")
+    text = text.replace("using namespace eosio::vm;", "using namespace forge::vm::wasm::interpret;")
     text = text.replace("using namespace eosio;", "")
-    text = text.replace("eosio::vm::", "forge::vm::wasm::")
+    text = text.replace("eosio::vm::", "forge::vm::wasm::interpret::")
     text = text.replace("eosio_options", "compatibility_options")
     text = text.replace("eosio_max_nested_structures", "max_legacy_nested_structures")
-    text = text.replace("EOS_VM_FROM_WASM", "FORGE_VM_WASM_FROM_WASM")
-    text = text.replace("EOS_VM_PRECONDITION", "FORGE_VM_WASM_PRECONDITION")
-    text = text.replace("EOS_VM_INVOKE_ON_ALL", "FORGE_VM_WASM_INVOKE_ON_ALL")
-    text = text.replace("EOS_VM_INVOKE_ONCE", "FORGE_VM_WASM_INVOKE_ONCE")
-    text = text.replace("EOS_VM_INVOKE_ON", "FORGE_VM_WASM_INVOKE_ON")
+    text = text.replace("EOS_VM_FROM_WASM", "FORGE_VM_WASM_INTERPRET_FROM_WASM")
+    text = text.replace("EOS_VM_PRECONDITION", "FORGE_VM_WASM_INTERPRET_PRECONDITION")
+    text = text.replace("EOS_VM_INVOKE_ON_ALL", "FORGE_VM_WASM_INTERPRET_INVOKE_ON_ALL")
+    text = text.replace("EOS_VM_INVOKE_ONCE", "FORGE_VM_WASM_INTERPRET_INVOKE_ONCE")
+    text = text.replace("EOS_VM_INVOKE_ON", "FORGE_VM_WASM_INTERPRET_INVOKE_ON")
     for old, new in EXCEPTION_RENAMES.items():
         text = re.sub(rf"\b{old}\b", new, text)
     text = re.sub(r"\bCHECK_THROWS_AS\s*\(", "BOOST_CHECK_THROW(", text)
@@ -322,22 +322,22 @@ def transform_text(text: str, relative: pathlib.Path) -> str:
             "module;\n\n"
             f'#include "test_prelude.hpp"\n'
             + "\n".join(includes)
-            + "\n\nmodule forge.vm.wasm.backend;\n\n"
+            + "\n\nmodule forge.vm.wasm.interpret.backend;\n\n"
             + "\n".join(f"import {name};" for name in partitions + modules)
             + "\n\n"
-            "#define FORGE_VM_WASM_INTERNAL_TESTS\n"
+            "#define FORGE_VM_WASM_INTERPRET_INTERNAL_TESTS\n"
             f'#include "test_support.hpp"\n\n'
-            f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
+            f"#define FORGE_VM_WASM_INTERPRET_TEST_FILE {prefix}\n\n"
         )
     else:
-        backend_marker = "#define FORGE_VM_WASM_TEST_USES_BACKEND\n" if uses_backend else ""
+        backend_marker = "#define FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND\n" if uses_backend else ""
         heading = (
             f'#include "test_prelude.hpp"\n'
             + "\n".join(f"import {name};" for name in modules)
             + "\n"
             + backend_marker
             + f'#include "test_support.hpp"\n\n'
-            f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
+            f"#define FORGE_VM_WASM_INTERPRET_TEST_FILE {prefix}\n\n"
         )
     transformed = heading + text.lstrip()
     lines = [line.rstrip() for line in transformed.splitlines()]
@@ -369,17 +369,17 @@ def write_port(donor: pathlib.Path, output: pathlib.Path) -> None:
 
     regular_units = [name for name in UNIT_SOURCES if name not in {"varint_tests.cpp", "signals_tests.cpp"}]
     source_lines = ["# Generated by port_donor_tests.py. Do not edit.", ""]
-    source_lines.append("set(FORGE_VM_WASM_DONOR_UNIT_SOURCES")
+    source_lines.append("set(FORGE_VM_WASM_INTERPRET_DONOR_UNIT_SOURCES")
     source_lines.extend(f"   ${{CMAKE_CURRENT_LIST_DIR}}/unit/{name}" for name in regular_units)
     source_lines.append(")")
     source_lines.append("")
-    source_lines.append("set(FORGE_VM_WASM_DONOR_INTERNAL_SOURCES")
+    source_lines.append("set(FORGE_VM_WASM_INTERPRET_DONOR_INTERNAL_SOURCES")
     source_lines.extend(
         f"   ${{CMAKE_CURRENT_LIST_DIR}}/unit/{name}" for name in ("varint_tests.cpp", "signals_tests.cpp")
     )
     source_lines.append(")")
     source_lines.append("")
-    source_lines.append("set(FORGE_VM_WASM_DONOR_SPEC_SOURCES")
+    source_lines.append("set(FORGE_VM_WASM_INTERPRET_DONOR_SPEC_SOURCES")
     source_lines.extend(f"   ${{CMAKE_CURRENT_LIST_DIR}}/spec/{name}_tests.cpp" for name in SPEC_SOURCES)
     source_lines.append(")")
     source_lines.append("")

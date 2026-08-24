@@ -60,6 +60,17 @@ template <typename Range> [[nodiscard]] std::vector<std::uint8_t> bytes_from_ran
 
 } // namespace
 
+void validate_public_key(const public_key& key) {
+   static_cast<void>(crypto_public_key(key));
+}
+
+void validate_public_key(const public_key& key, const peer_id& expected_peer) {
+   validate_public_key(key);
+   if (make_peer_id(key) != expected_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "libp2p public key does not match the expected Peer ID");
+   }
+}
+
 } // namespace forge::net::p2p
 
 extern "C++" {
@@ -143,13 +154,15 @@ bool verify_identity_signature(const public_key& key, std::span<const std::uint8
          return forge::crypto::asymmetric::ed25519::public_key{ed25519_public_key_data(key)}.verify(message, value);
       }
       case public_key::type::rsa:
-         return forge::crypto::asymmetric::rsa::public_key{key.data}.verify(message, {signature.begin(), signature.end()});
+         return forge::crypto::asymmetric::rsa::public_key{key.data}.verify(message,
+                                                                            {signature.begin(), signature.end()});
       case public_key::type::secp256k1:
          return forge::crypto::asymmetric::secp256k1::verify_der(
              forge::crypto::asymmetric::secp256k1::public_key{secp256k1_public_key_data(key)}, message, signature);
       case public_key::type::ecdsa: {
          const auto parsed = std::get<forge::crypto::asymmetric::r1_public_key>(crypto_public_key(key));
-         return forge::crypto::asymmetric::p256::verify_der(forge::crypto::asymmetric::p256::public_key{parsed.data}, message, signature);
+         return forge::crypto::asymmetric::p256::verify_der(forge::crypto::asymmetric::p256::public_key{parsed.data},
+                                                            message, signature);
       }
       }
    } catch (const forge::exceptions::base& error) {

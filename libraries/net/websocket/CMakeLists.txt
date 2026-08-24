@@ -11,6 +11,7 @@ target_link_libraries(
    forge_net_websocket PUBLIC
       forge_exceptions
       forge_asio
+      forge_net_tls
       Boost::asio
       Boost::beast
       OpenSSL::SSL

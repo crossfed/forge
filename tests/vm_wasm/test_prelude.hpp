@@ -14,4 +14,4 @@
 #include <thread>
 #include <vector>
 
-#include <forge/vm/wasm/host_function.hpp>
+#include <forge/vm/wasm/interpret/host_function.hpp>

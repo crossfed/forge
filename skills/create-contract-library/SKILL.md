@@ -138,6 +138,6 @@ sets; do not install BMI or PCM files.
 3. Prove identical `forge::raw` bytes for representative values.
 4. Prove named-action ABI fields are direct and guest dispatch receives the
    same DTO.
-5. Exercise persisted state through `Forge::forge_contract_testing`.
+5. Exercise persisted state through `Forge::forge_tooling_testing`.
 6. Verify direct guest and optional launcher builds produce identical WASM,
    ABI and runtime manifest artifacts.

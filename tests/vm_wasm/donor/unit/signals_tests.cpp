@@ -6,24 +6,24 @@ module;
 #include <thread>
 #include <iostream>
 
-module forge.vm.wasm.backend;
+module forge.vm.wasm.interpret.backend;
 
 import :signals;
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
 
-#define FORGE_VM_WASM_INTERNAL_TESTS
+#define FORGE_VM_WASM_INTERPRET_INTERNAL_TESTS
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE signals_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE signals_tests
 
 struct test_exception {};
 
 TEST_CASE("Testing signals", "[invoke_with_signal_handler]") {
    bool okay = false;
    try {
-      forge::vm::wasm::invoke_with_signal_handler([]() {
+      forge::vm::wasm::interpret::invoke_with_signal_handler([]() {
          std::raise(SIGSEGV);
       }, [](int sig) {
          throw test_exception{};
@@ -35,9 +35,9 @@ TEST_CASE("Testing signals", "[invoke_with_signal_handler]") {
 }
 
 TEST_CASE("Testing throw", "[signal_handler_throw]") {
-   BOOST_CHECK_THROW(forge::vm::wasm::invoke_with_signal_handler([](){
-      forge::vm::wasm::throw_<forge::vm::wasm::exceptions::exit>( "Exiting" );
-   }, [](int){}, {}, {}), forge::vm::wasm::exceptions::exit);
+   BOOST_CHECK_THROW(forge::vm::wasm::interpret::invoke_with_signal_handler([](){
+      forge::vm::wasm::interpret::throw_<forge::vm::wasm::interpret::exceptions::exit>( "Exiting" );
+   }, [](int){}, {}, {}), forge::vm::wasm::interpret::exceptions::exit);
 }
 
 static volatile sig_atomic_t sig_handled;
@@ -52,17 +52,17 @@ static void handle_signal_sigaction(int sig, siginfo_t* info, void* uap) {
 
 TEST_CASE("Test signal handler forwarding", "[signal_handler_forward]") {
    // reset backup signal handlers
-   auto guard = forge::vm::wasm::scope_guard{[]{
+   auto guard = forge::vm::wasm::interpret::scope_guard{[]{
       std::signal(SIGSEGV, SIG_DFL);
       std::signal(SIGBUS, SIG_DFL);
       std::signal(SIGFPE, SIG_DFL);
-      forge::vm::wasm::setup_signal_handler_impl(); // This is normally only called once
+      forge::vm::wasm::interpret::setup_signal_handler_impl(); // This is normally only called once
    }};
    {
       std::signal(SIGSEGV, &handle_signal);
       std::signal(SIGBUS, &handle_signal);
       std::signal(SIGFPE, &handle_signal);
-      forge::vm::wasm::setup_signal_handler_impl();
+      forge::vm::wasm::interpret::setup_signal_handler_impl();
       sig_handled = 0;
       std::raise(SIGSEGV);
       BOOST_TEST(static_cast<bool>(sig_handled == 42 + SIGSEGV));
@@ -83,7 +83,7 @@ TEST_CASE("Test signal handler forwarding", "[signal_handler_forward]") {
       sigaction(SIGSEGV, &sa, nullptr);
       sigaction(SIGBUS, &sa, nullptr);
       sigaction(SIGFPE, &sa, nullptr);
-      forge::vm::wasm::setup_signal_handler_impl();
+      forge::vm::wasm::interpret::setup_signal_handler_impl();
       sig_handled = 0;
       std::raise(SIGSEGV);
       BOOST_TEST(static_cast<bool>(sig_handled == 142 + SIGSEGV));

@@ -2,20 +2,20 @@ module;
 
 #include "test_prelude.hpp"
 
-module forge.vm.wasm.backend;
+module forge.vm.wasm.interpret.backend;
 
 import :execution_context;
 import :parser;
 import :x86_64;
-import forge.vm.wasm.utils;
+import forge.vm.wasm.interpret.utils;
 
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE x86_64_regression_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE x86_64_regression_tests
 
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
-namespace forge::vm::wasm {
+namespace forge::vm::wasm::interpret {
 
 struct no_popcnt_cpu_features {
    static bool has_tzcnt() {
@@ -35,7 +35,7 @@ struct portable_popcnt_jit {
    static constexpr bool is_jit = true;
 };
 
-} // namespace forge::vm::wasm
+} // namespace forge::vm::wasm::interpret
 
 TEST_CASE("jit executes integer popcount without the popcnt CPU feature", "[x86_64]") {
    using backend = wasm::backend<wasm::standalone_function_t, wasm::portable_popcnt_jit>;

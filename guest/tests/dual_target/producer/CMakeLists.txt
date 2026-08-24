@@ -10,7 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol chain_savanna_values contract_testing crypto_digest raw vm_wasm
+   COMPONENTS chain_protocol chain_savanna_values tooling_testing crypto_digest raw vm_wasm_interpret
 )
 if(PRODUCT_FORGE_SOURCE_ROOT)
    include(
@@ -54,7 +54,7 @@ target_link_libraries(
       product_chain_protocol
       Forge::forge_chain_protocol
       Forge::forge_chain_savanna_values
-      Forge::forge_contract_testing
+      Forge::forge_tooling_testing
       Forge::forge_raw
 )
 add_dependencies(product_protocol_vm_tests product_guest)

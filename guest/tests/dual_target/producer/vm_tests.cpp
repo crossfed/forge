@@ -7,7 +7,7 @@
 
 import forge.chain.protocol.values;
 import forge.chain.savanna.values;
-import forge.contract.testing.host;
+import forge.tooling.testing.host;
 import forge.raw.codec;
 import product.chain.protocol;
 
@@ -42,7 +42,7 @@ int main() {
        .size = 4096,
    };
    const auto account = protocol::make_name("product").value;
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    constexpr auto begin_revision_name = product::chain::begin_revision::get_name();
    host.invoke(code, account, account, begin_revision_name.value, forge::raw::pack(request));
 

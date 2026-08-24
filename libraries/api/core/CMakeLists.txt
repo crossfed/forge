@@ -18,6 +18,7 @@ target_include_directories(forge_api_core PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_api_core PUBLIC
       forge_exceptions
+      forge_reflect
       forge_raw
       Boost::headers
 )

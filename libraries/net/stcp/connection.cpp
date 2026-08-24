@@ -2,28 +2,26 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/error.hpp>
-#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -33,16 +31,14 @@ module;
 #include <boost/asio/write.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
-#include <openssl/x509v3.h>
-
 #include "details/handshake_deadline.hxx"
 
 module forge.net.stcp.connection;
 
 import forge.asio.gate;
-import forge.crypto.pki.x509;
+import forge.asio.notification;
+import forge.net.tls.context;
+import forge.net.tls.exceptions;
 import forge.net.transport.stream;
 
 namespace forge::net::stcp {
@@ -59,14 +55,6 @@ enum class connection_state : std::uint8_t {
    handed_off,
    closed,
 };
-
-struct x509_deleter {
-   void operator()(X509* value) const noexcept {
-      X509_free(value);
-   }
-};
-
-using x509_ptr = std::unique_ptr<X509, x509_deleter>;
 
 [[nodiscard]] std::int64_t next_stream_id() noexcept {
    static auto next = std::atomic<std::int64_t>{1};
@@ -111,145 +99,65 @@ using x509_ptr = std::unique_ptr<X509, x509_deleter>;
    throw_io_error("stcp connection I/O failed", error);
 }
 
-[[nodiscard]] std::string normalize_fingerprint(std::string_view value) {
-   auto out = std::string{};
-   out.reserve(value.size());
-   for (const auto ch : value) {
-      if (ch == ':' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-         continue;
-      }
-      out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-   }
-   return out;
-}
-
-[[nodiscard]] std::vector<unsigned char> encode_alpn(const std::vector<std::string>& protocols) {
-   auto out = std::vector<unsigned char>{};
-   for (const auto& protocol : protocols) {
-      if (protocol.empty() || protocol.size() > 255) {
-         throw_invalid_options("stcp ALPN protocol length must be 1..255 bytes");
-      }
-      out.push_back(static_cast<unsigned char>(protocol.size()));
-      out.insert(out.end(), protocol.begin(), protocol.end());
-   }
-   return out;
-}
-
-int select_alpn(SSL*, const unsigned char** out, unsigned char* outlen, const unsigned char* in, unsigned int inlen,
-                void* arg) {
-   const auto* supported = static_cast<const std::vector<std::string>*>(arg);
-   auto offset = unsigned{0};
-   while (offset < inlen) {
-      const auto length = static_cast<unsigned>(in[offset]);
-      ++offset;
-      if (length == 0 || offset + length > inlen) {
-         return SSL_TLSEXT_ERR_NOACK;
-      }
-      const auto value = std::string_view{reinterpret_cast<const char*>(in + offset), length};
-      if (std::find(supported->begin(), supported->end(), value) != supported->end()) {
-         *out = in + offset;
-         *outlen = static_cast<unsigned char>(length);
-         return SSL_TLSEXT_ERR_OK;
-      }
-      offset += length;
-   }
-   return SSL_TLSEXT_ERR_NOACK;
-}
-
-void validate_identity_pair(std::string_view certificate_pem, std::string_view private_key_pem) {
-   if (certificate_pem.empty() != private_key_pem.empty()) {
-      throw_invalid_options("stcp certificate and private key must be configured together");
-   }
-}
-
-void validate_common(std::size_t read_chunk_size, const std::vector<std::string>& alpn_protocols) {
+void validate_common(std::size_t read_chunk_size) {
    if (read_chunk_size == 0) {
       throw_invalid_options("stcp read_chunk_size must be greater than zero");
    }
-   (void)encode_alpn(alpn_protocols);
 }
 
-void configure_tls_version(asio::ssl::context& context, bool tls13_only) {
-   if (!tls13_only) {
-      return;
+[[nodiscard]] tls::context_options make_tls_options(const client_options& options) {
+   auto out = tls::context_options{};
+   out.role = tls::endpoint_role::client;
+   out.protocols = options.tls13_only ? tls::protocol_policy::tls13_only : tls::protocol_policy::system_default;
+   out.verification = options.security.verify_peer ? tls::peer_verification::verify_peer : tls::peer_verification::none;
+   out.certificate_chain_pem = options.certificate_pem;
+   out.private_key_pem = options.private_key_pem;
+   out.alpn_protocols = options.alpn_protocols;
+   if (!options.security.trusted_ca_pem.empty()) {
+      out.trust_anchors_pem.push_back(options.security.trusted_ca_pem);
+      out.use_default_verify_paths = false;
    }
-   if (SSL_CTX_set_min_proto_version(context.native_handle(), TLS1_3_VERSION) != 1 ||
-       SSL_CTX_set_max_proto_version(context.native_handle(), TLS1_3_VERSION) != 1) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp TLS 1.3 only mode");
-   }
+   return out;
 }
 
-void load_identity(asio::ssl::context& context, std::string_view certificate_pem, std::string_view private_key_pem) {
-   if (certificate_pem.empty() && private_key_pem.empty()) {
-      return;
+[[nodiscard]] tls::context_options make_tls_options(const server_options& options) {
+   auto out = tls::context_options{};
+   out.role = tls::endpoint_role::server;
+   out.protocols = options.tls13_only ? tls::protocol_policy::tls13_only : tls::protocol_policy::system_default;
+   if (options.security.verify_peer) {
+      out.verification = tls::peer_verification::require_peer_certificate;
+   } else if (options.security.require_peer_certificate) {
+      out.verification = tls::peer_verification::require_peer_certificate_for_application_verification;
+   } else {
+      out.verification = tls::peer_verification::none;
    }
+   out.certificate_chain_pem = options.certificate_pem;
+   out.private_key_pem = options.private_key_pem;
+   out.alpn_protocols = options.alpn_protocols;
+   out.use_default_verify_paths = options.security.verify_peer;
+   if (!options.security.trusted_ca_pem.empty()) {
+      out.trust_anchors_pem.push_back(options.security.trusted_ca_pem);
+      out.use_default_verify_paths = false;
+   }
+   return out;
+}
+
+[[nodiscard]] tls::context_snapshot_ptr make_client_context(const client_options& options) {
+   validate_common(options.read_chunk_size);
    try {
-      context.use_certificate_chain(asio::buffer(certificate_pem.data(), certificate_pem.size()));
-      context.use_private_key(asio::buffer(private_key_pem.data(), private_key_pem.size()), asio::ssl::context::pem);
-   } catch (const boost::system::system_error& error) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp certificate or private key",
-                            forge::exceptions::ctx("reason", error.code().message()));
+      return tls::make_context(make_tls_options(options));
+   } catch (const forge::exceptions::base& error) {
+      throw_invalid_options("invalid stcp TLS client options: " + error.message());
    }
 }
 
-void load_trust(asio::ssl::context& context, const security_options& security) {
-   if (!security.trusted_ca_pem.empty()) {
-      try {
-         context.add_certificate_authority(
-             asio::buffer(security.trusted_ca_pem.data(), security.trusted_ca_pem.size()));
-      } catch (const boost::system::system_error& error) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp trusted CA",
-                               forge::exceptions::ctx("reason", error.code().message()));
-      }
-      return;
+[[nodiscard]] tls::context_snapshot_ptr make_server_context(const server_options& options) {
+   validate_common(options.read_chunk_size);
+   try {
+      return tls::make_context(make_tls_options(options));
+   } catch (const forge::exceptions::base& error) {
+      throw_invalid_options("invalid stcp TLS server options: " + error.message());
    }
-   if (security.verify_peer) {
-      auto error = boost::system::error_code{};
-      context.set_default_verify_paths(error);
-      if (error) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load default TLS verify paths",
-                               forge::exceptions::ctx("reason", error.message()));
-      }
-   }
-}
-
-[[nodiscard]] std::shared_ptr<asio::ssl::context> make_client_context(const client_options& options) {
-   validate_identity_pair(options.certificate_pem, options.private_key_pem);
-   validate_common(options.read_chunk_size, options.alpn_protocols);
-   auto context = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_client);
-   context->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-                        asio::ssl::context::no_sslv3);
-   configure_tls_version(*context, options.tls13_only);
-   load_identity(*context, options.certificate_pem, options.private_key_pem);
-   load_trust(*context, options.security);
-   context->set_verify_mode(options.security.verify_peer ? asio::ssl::verify_peer : asio::ssl::verify_none);
-   return context;
-}
-
-[[nodiscard]] std::shared_ptr<asio::ssl::context> make_server_context(const server_options& options) {
-   if (options.certificate_pem.empty() || options.private_key_pem.empty()) {
-      throw_invalid_options("stcp server requires certificate and private key");
-   }
-   validate_common(options.read_chunk_size, options.alpn_protocols);
-   auto context = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_server);
-   context->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-                        asio::ssl::context::no_sslv3);
-   configure_tls_version(*context, options.tls13_only);
-   load_identity(*context, options.certificate_pem, options.private_key_pem);
-   load_trust(*context, options.security);
-   auto mode = asio::ssl::verify_none;
-   if (options.security.verify_peer || options.security.require_peer_certificate) {
-      mode = asio::ssl::verify_peer;
-      if (options.security.verify_peer || options.security.require_peer_certificate) {
-         mode |= asio::ssl::verify_fail_if_no_peer_cert;
-      }
-   }
-   context->set_verify_mode(mode);
-   if (options.security.require_peer_certificate && !options.security.verify_peer) {
-      SSL_CTX_set_verify(context->native_handle(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                         [](int, X509_STORE_CTX*) { return 1; });
-   }
-   return context;
 }
 
 [[nodiscard]] transport::endpoint from_asio_endpoint(const asio_tcp::endpoint& endpoint) {
@@ -261,158 +169,44 @@ void load_trust(asio::ssl::context& context, const security_options& security) {
                               .port = endpoint.port()};
 }
 
-[[nodiscard]] std::vector<std::uint8_t> certificate_der(X509* certificate) {
-   const auto length = i2d_X509(certificate, nullptr);
-   if (length <= 0) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "failed to size peer certificate DER");
-   }
-   auto out = std::vector<std::uint8_t>(static_cast<std::size_t>(length));
-   auto* cursor = out.data();
-   if (i2d_X509(certificate, &cursor) != length) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "failed to write peer certificate DER");
-   }
-   return out;
-}
-
-[[nodiscard]] std::optional<peer_certificate> read_peer_certificate(native_stream& stream) {
-   auto certificate = x509_ptr{SSL_get1_peer_certificate(stream.native_handle())};
-   if (!certificate) {
-      return std::nullopt;
-   }
-   auto der = certificate_der(certificate.get());
-   auto parsed = crypto::pki::x509::certificate::from_der(der);
-   return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
-}
-
-[[nodiscard]] peer_certificate peer_certificate_from_x509(X509* certificate) {
-   auto der = certificate_der(certificate);
-   auto parsed = crypto::pki::x509::certificate::from_der(der);
-   return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
-}
-
-[[nodiscard]] bool same_der(std::span<const std::uint8_t> left, std::span<const std::uint8_t> right) {
-   return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
-}
-
-[[nodiscard]] certificate_chain read_peer_certificate_chain(native_stream& stream) {
-   auto out = certificate_chain{};
-   if (auto leaf = read_peer_certificate(stream)) {
-      out.certificates.push_back(std::move(*leaf));
-   }
-   auto* chain = SSL_get_peer_cert_chain(stream.native_handle());
-   if (chain == nullptr) {
-      return out;
-   }
-   const auto count = sk_X509_num(chain);
-   for (auto index = 0; index < count; ++index) {
-      auto* certificate = sk_X509_value(chain, index);
-      if (certificate == nullptr) {
-         continue;
+void configure_tls_client_stream(native_stream& stream, const client_options& options, std::string_view remote_host,
+                                 const tls::context_snapshot& context) {
+   try {
+      tls::configure_client_stream(
+          stream.native_handle(), context,
+          {.sni = options.sni, .endpoint_host = std::string{remote_host}, .server_name = options.server_name});
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_invalid_options("invalid stcp TLS client stream options: " + error.message());
       }
-      auto next = peer_certificate_from_x509(certificate);
-      const auto duplicate_leaf = !out.certificates.empty() && same_der(out.certificates.front().der, next.der);
-      if (!duplicate_leaf) {
-         out.certificates.push_back(std::move(next));
-      }
-   }
-   return out;
-}
-
-void verify_host_name(const peer_certificate& certificate, std::string_view host) {
-   if (host.empty()) {
-      return;
-   }
-   const auto* cursor = certificate.der.data();
-   auto parsed = x509_ptr{d2i_X509(nullptr, &cursor, static_cast<long>(certificate.der.size()))};
-   if (!parsed) {
-      throw_verification_failed("failed to parse peer certificate for host verification");
-   }
-
-   auto address_error = boost::system::error_code{};
-   (void)boost::asio::ip::make_address(std::string{host}, address_error);
-   const auto ok = address_error ? X509_check_host(parsed.get(), host.data(), host.size(), 0, nullptr)
-                                 : X509_check_ip_asc(parsed.get(), std::string{host}.c_str(), 0);
-   if (ok != 1) {
-      FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate host mismatch",
-                            forge::exceptions::ctx("host", std::string{host}));
+      throw;
    }
 }
 
-void verify_peer(native_stream& stream, const security_options& security, std::string_view expected_host) {
-   if (!security.verify_peer && !security.expected_sha256_fingerprint && !security.verifier) {
-      return;
-   }
-   auto chain = read_peer_certificate_chain(stream);
-   if (chain.certificates.empty()) {
-      throw_verification_failed("stcp peer did not present certificate");
-   }
-   const auto& certificate = chain.certificates.front();
-   if (security.verify_peer) {
-      verify_host_name(certificate, expected_host);
-   }
-   if (security.expected_sha256_fingerprint) {
-      const auto actual = normalize_fingerprint(certificate.sha256_fingerprint);
-      const auto expected = normalize_fingerprint(*security.expected_sha256_fingerprint);
-      if (actual != expected) {
-         FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate fingerprint mismatch",
-                               forge::exceptions::ctx("actual", actual));
+void classify_tls_handshake_failure(native_stream& stream, const tls::context_snapshot& context) {
+   try {
+      tls::classify_handshake_failure(stream.native_handle(), context);
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_verification_failed("stcp TLS peer verification failed: " + error.message());
       }
-   }
-   if (security.verifier && !security.verifier(chain)) {
-      throw_verification_failed("stcp peer verifier rejected certificate");
+      throw;
    }
 }
 
-[[nodiscard]] std::optional<std::string> sni_host(const client_options& options, std::string_view remote_host) {
-   switch (options.sni) {
-   case sni_policy::endpoint_host:
-      if (!options.server_name.empty()) {
-         return options.server_name;
+void validate_tls_peer(native_stream& stream, const tls::context_snapshot& context, const security_options& security,
+                       std::string_view expected_host) {
+   try {
+      tls::validate_peer(stream.native_handle(), context,
+                         {.expected_host = security.verify_peer ? std::string{expected_host} : std::string{},
+                          .expected_sha256_fingerprint = security.expected_sha256_fingerprint,
+                          .verifier = security.verifier});
+   } catch (const forge::exceptions::base& error) {
+      if (tls::exceptions::code_of(error)) {
+         throw_verification_failed("stcp TLS peer verification failed: " + error.message());
       }
-      if (!remote_host.empty()) {
-         return std::string{remote_host};
-      }
-      return std::nullopt;
-   case sni_policy::explicit_name:
-      if (options.server_name.empty()) {
-         throw_invalid_options("stcp explicit SNI requires server_name");
-      }
-      return options.server_name;
-   case sni_policy::disabled:
-      return std::nullopt;
+      throw;
    }
-   throw_invalid_options("unknown stcp SNI policy");
-}
-
-void configure_client_stream(native_stream& stream, const client_options& options, std::string_view remote_host) {
-   const auto host = sni_host(options, remote_host);
-   if (host && !host->empty()) {
-      if (SSL_set_tlsext_host_name(stream.native_handle(), host->c_str()) != 1) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp SNI");
-      }
-   }
-   const auto alpn = encode_alpn(options.alpn_protocols);
-   if (!alpn.empty() &&
-       SSL_set_alpn_protos(stream.native_handle(), alpn.data(), static_cast<unsigned>(alpn.size())) != 0) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp ALPN");
-   }
-}
-
-void configure_server_context(asio::ssl::context& context, const server_options& options) {
-   if (!options.alpn_protocols.empty()) {
-      SSL_CTX_set_alpn_select_cb(context.native_handle(), select_alpn,
-                                 const_cast<std::vector<std::string>*>(&options.alpn_protocols));
-   }
-}
-
-[[nodiscard]] std::string selected_alpn(native_stream& stream) {
-   const auto* data = static_cast<const unsigned char*>(nullptr);
-   auto length = unsigned{};
-   SSL_get0_alpn_selected(stream.native_handle(), &data, &length);
-   if (data == nullptr || length == 0) {
-      return {};
-   }
-   return std::string{reinterpret_cast<const char*>(data), length};
 }
 
 void validate_handshake_timeout(std::chrono::milliseconds timeout) {
@@ -426,6 +220,13 @@ void cancel_stream(native_stream& stream) noexcept {
    stream.lowest_layer().cancel(ignored);
    stream.lowest_layer().shutdown(asio_tcp::socket::shutdown_both, ignored);
    stream.lowest_layer().close(ignored);
+}
+
+void cancel_timer_noexcept(asio::steady_timer& timer) noexcept {
+   try {
+      timer.cancel();
+   } catch (...) {
+   }
 }
 
 enum class handshake_cancellation_state : std::uint8_t {
@@ -456,6 +257,7 @@ struct io_gates {
       reason.compare_exchange_strong(expected, value, std::memory_order_release, std::memory_order_relaxed);
       read.close();
       write.close();
+      terminal_requested.notify();
    }
 
    [[nodiscard]] bool stopped() const noexcept {
@@ -471,6 +273,7 @@ struct io_gates {
 
    forge::asio::gate read;
    forge::asio::gate write;
+   forge::asio::notification terminal_requested;
    std::atomic<io_stop_reason> reason{io_stop_reason::none};
 };
 
@@ -494,8 +297,7 @@ struct io_gates {
 
 boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stream,
                                              asio::ssl::stream_base::handshake_type type,
-                                             std::optional<std::chrono::milliseconds> timeout,
-                                             std::stop_token stop) {
+                                             std::optional<std::chrono::milliseconds> timeout, std::stop_token stop) {
    auto strand = asio::make_strand(stream->lowest_layer().get_executor());
    co_await asio::co_spawn(
        strand,
@@ -504,47 +306,100 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
              FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp handshake canceled");
           }
 
-          auto cancellation = std::make_shared<handshake_cancellation_state>(handshake_cancellation_state::active);
-          auto post_cancel = [stream, strand, cancellation]() noexcept {
-             try {
-                asio::post(strand, [stream, cancellation] {
-                   if (*cancellation != handshake_cancellation_state::active) {
-                      return;
-                   }
-                   *cancellation = handshake_cancellation_state::canceled;
-                   cancel_stream(*stream);
-                });
-             } catch (...) {
-                // Never fall back to cross-strand socket access.
+          auto cancellation = std::make_shared<std::atomic<handshake_cancellation_state>>(
+              handshake_cancellation_state::active);
+          auto cancel_requested = std::make_shared<forge::asio::notification>();
+          auto cancel_completed = std::make_shared<forge::asio::notification>();
+          auto cancel_worker_error = std::make_shared<std::exception_ptr>();
+          asio::co_spawn(
+              strand,
+              [stream, cancellation, cancel_requested]() -> asio::awaitable<void> {
+                 static_cast<void>(co_await cancel_requested->async_wait(0));
+                 if (cancellation->load(std::memory_order_acquire) == handshake_cancellation_state::canceled) {
+                    cancel_stream(*stream);
+                 }
+              },
+              [cancel_completed, cancel_worker_error](std::exception_ptr error) noexcept {
+                 *cancel_worker_error = std::move(error);
+                 cancel_completed->notify();
+              });
+          auto request_cancel = [cancellation, cancel_requested]() noexcept {
+             auto expected = handshake_cancellation_state::active;
+             if (cancellation->compare_exchange_strong(expected, handshake_cancellation_state::canceled,
+                                                       std::memory_order_acq_rel, std::memory_order_acquire)) {
+                cancel_requested->notify();
              }
           };
-          auto cancel_on_stop = std::stop_callback{stop, std::move(post_cancel)};
+          using stop_callback_type = std::stop_callback<decltype(request_cancel)>;
+          auto cancel_on_stop = std::optional<stop_callback_type>{};
           auto timer = std::shared_ptr<asio::steady_timer>{};
           auto terminal = std::shared_ptr<detail::handshake_deadline_state>{};
-          if (timeout) {
-             validate_handshake_timeout(*timeout);
-             timer = std::make_shared<asio::steady_timer>(co_await asio::this_coro::executor);
-             terminal = std::make_shared<detail::handshake_deadline_state>();
-             timer->expires_after(*timeout);
-             timer->async_wait([stream, terminal](const boost::system::error_code& error) {
-                if (error) {
-                   return;
-                }
-                if (!terminal->try_timeout()) {
-                   return;
-                }
-                cancel_stream(*stream);
-             });
+          auto error = boost::system::error_code{};
+          auto primary_error = std::exception_ptr{};
+          try {
+             cancel_on_stop.emplace(stop, std::move(request_cancel));
+             if (timeout) {
+                validate_handshake_timeout(*timeout);
+                timer = std::make_shared<asio::steady_timer>(co_await asio::this_coro::executor);
+                terminal = std::make_shared<detail::handshake_deadline_state>();
+                timer->expires_after(*timeout);
+                timer->async_wait([stream, terminal](const boost::system::error_code& timer_error) {
+                   if (timer_error) {
+                      return;
+                   }
+                   if (!terminal->try_timeout()) {
+                      return;
+                   }
+                   cancel_stream(*stream);
+                });
+             }
+
+             co_await stream->async_handshake(type, asio::redirect_error(asio::use_awaitable, error));
+          } catch (...) {
+             primary_error = std::current_exception();
           }
 
-          auto error = boost::system::error_code{};
-          co_await stream->async_handshake(type, asio::redirect_error(asio::use_awaitable, error));
-          const auto canceled = *cancellation == handshake_cancellation_state::canceled || stop.stop_requested();
-          *cancellation = handshake_cancellation_state::terminal;
+          auto expected = handshake_cancellation_state::active;
+          const auto completed = cancellation->compare_exchange_strong(
+              expected, handshake_cancellation_state::terminal, std::memory_order_acq_rel, std::memory_order_acquire);
+          const auto canceled = !completed && expected == handshake_cancellation_state::canceled;
+          cancel_on_stop.reset();
+          if (timer && primary_error) {
+             cancel_timer_noexcept(*timer);
+          }
+
+          // From worker publication onward every exit joins it. Parent coroutine
+          // cancellation must not interrupt this terminal cleanup.
+          co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+          cancel_requested->notify();
+          auto join_error = std::exception_ptr{};
+          while (cancel_completed->epoch() == 0) {
+             try {
+                // Completion is sticky; retry only a failed waiter setup and do
+                // not expose the primary operation error before the worker exits.
+                static_cast<void>(co_await cancel_completed->async_wait(0));
+             } catch (...) {
+                if (!join_error) {
+                   join_error = std::current_exception();
+                }
+             }
+          }
+          if (!primary_error && join_error) {
+             primary_error = std::move(join_error);
+          }
+          if (primary_error || *cancel_worker_error) {
+             if (timer) {
+                cancel_timer_noexcept(*timer);
+             }
+             if (primary_error) {
+                std::rethrow_exception(primary_error);
+             }
+             std::rethrow_exception(*cancel_worker_error);
+          }
           if (timer) {
-             const auto completed = terminal->try_complete();
-             timer->cancel();
-             if (!completed) {
+             const auto completed_before_timeout = terminal->try_complete();
+             cancel_timer_noexcept(*timer);
+             if (!completed_before_timeout) {
                 throw_handshake_timeout(type == asio::ssl::stream_base::client ? "stcp client handshake timed out"
                                                                                : "stcp server handshake timed out");
              }
@@ -563,11 +418,16 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
 
 class stream_model final : public transport::detail::stream_concept {
  public:
-   stream_model(std::shared_ptr<native_stream> stream, std::shared_ptr<asio::ssl::context> context,
-                asio::strand<asio::any_io_executor> strand, std::shared_ptr<io_gates> gates,
-                std::size_t read_chunk_size, std::int64_t id)
-       : stream_(std::move(stream)), context_(std::move(context)), strand_(std::move(strand)), gates_(std::move(gates)),
-         read_chunk_size_(read_chunk_size), id_(id) {}
+   stream_model(tls::context_snapshot_ptr context, asio::strand<asio::any_io_executor> strand,
+                std::shared_ptr<io_gates> gates,
+                std::shared_ptr<forge::asio::notification> terminal_completed, std::size_t read_chunk_size,
+                std::int64_t id)
+       : context_(std::move(context)), strand_(std::move(strand)), gates_(std::move(gates)),
+         read_chunk_size_(read_chunk_size), id_(id), terminal_completed_(std::move(terminal_completed)) {}
+
+   ~stream_model() override {
+      request_cancel();
+   }
 
    [[nodiscard]] bool valid() const noexcept override {
       return stream_ && !gates_->stopped();
@@ -575,6 +435,10 @@ class stream_model final : public transport::detail::stream_concept {
 
    [[nodiscard]] std::int64_t id() const noexcept override {
       return id_;
+   }
+
+   void attach(std::shared_ptr<native_stream> stream) noexcept {
+      stream_ = std::move(stream);
    }
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes) override {
@@ -659,41 +523,39 @@ class stream_model final : public transport::detail::stream_concept {
          co_return;
       }
       gates_->stop(io_stop_reason::closed);
-      auto stream = stream_;
-      co_await asio::co_spawn(
-          strand_,
-          [stream = std::move(stream)]() -> asio::awaitable<void> {
-             cancel_stream(*stream);
-             co_return;
-          },
-          asio::use_awaitable);
+      static_cast<void>(co_await terminal_completed_->async_wait(0));
    }
 
    void cancel() override {
+      request_cancel();
+   }
+
+   void request_cancel() noexcept {
       if (stream_) {
          gates_->stop(io_stop_reason::canceled);
-         asio::dispatch(strand_, [stream = stream_] { cancel_stream(*stream); });
       }
    }
 
  private:
    std::shared_ptr<native_stream> stream_;
-   std::shared_ptr<asio::ssl::context> context_;
+   tls::context_snapshot_ptr context_;
    asio::strand<asio::any_io_executor> strand_;
    std::shared_ptr<io_gates> gates_;
    std::size_t read_chunk_size_ = 64 * 1024;
    transport::buffer_pool pool_;
    std::int64_t id_ = -1;
+   std::shared_ptr<forge::asio::notification> terminal_completed_;
 };
 
 } // namespace
 
 struct connection::impl final : std::enable_shared_from_this<connection::impl> {
-   impl(std::shared_ptr<native_stream> stream_value, std::shared_ptr<asio::ssl::context> context_value,
+   impl(std::shared_ptr<native_stream> stream_value, tls::context_snapshot_ptr context_value,
         std::size_t read_chunk_size_value)
        : stream(std::move(stream_value)), context(std::move(context_value)),
          strand(asio::make_strand(stream->lowest_layer().get_executor())), gates(std::make_shared<io_gates>()),
-         read_chunk_size(read_chunk_size_value), id(next_stream_id()) {
+         terminal_completed(std::make_shared<forge::asio::notification>()), read_chunk_size(read_chunk_size_value),
+         id(next_stream_id()) {
       auto error = boost::system::error_code{};
       local_value = from_asio_endpoint(stream->lowest_layer().local_endpoint(error));
       if (error) {
@@ -703,11 +565,31 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       if (error) {
          throw_io_error("failed to read stcp remote endpoint", error);
       }
-      chain_value = read_peer_certificate_chain(*stream);
+      chain_value = tls::extract_peer_certificate_chain(stream->native_handle());
       if (!chain_value.certificates.empty()) {
          certificate_value = chain_value.certificates.front();
       }
-      alpn_value = ::forge::net::stcp::selected_alpn(*stream);
+      alpn_value = tls::selected_alpn(stream->native_handle());
+   }
+
+   void start_terminal_worker() {
+      // This operation is created while the connection is published. It owns the
+      // native stream across a later transport handoff and turns foreign-thread
+      // cancellation into owner-strand socket access without allocating in cancel().
+      auto current = stream;
+      auto current_gates = gates;
+      auto completed = terminal_completed;
+      asio::co_spawn(
+          strand,
+          [current = std::move(current), current_gates = std::move(current_gates)]() -> asio::awaitable<void> {
+             try {
+                static_cast<void>(co_await current_gates->terminal_requested.async_wait(0));
+             } catch (...) {
+                current_gates->stop(io_stop_reason::canceled);
+             }
+             cancel_stream(*current);
+          },
+          [completed = std::move(completed)](std::exception_ptr) noexcept { completed->notify(); });
    }
 
    [[nodiscard]] bool valid() const noexcept {
@@ -832,31 +714,31 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       if (request_terminal(connection_state::close_requested)) {
          gates->stop(io_stop_reason::closed);
       }
-      auto self = shared_from_this();
-      co_await asio::co_spawn(
-          strand,
-          [self = std::move(self)]() -> asio::awaitable<void> {
-             self->close_on_owner();
-             co_return;
-          },
-          asio::use_awaitable);
+      static_cast<void>(co_await terminal_completed->async_wait(0));
    }
 
-   void cancel() {
+   void cancel() noexcept {
       if (request_terminal(connection_state::cancel_requested)) {
          gates->stop(io_stop_reason::canceled);
-         auto self = shared_from_this();
-         asio::post(strand, [self = std::move(self)] { self->close_on_owner(); });
       }
    }
 
    [[nodiscard]] transport::stream_connection into_transport_stream() {
-      auto current = detach_stream();
-      auto transport_stream = transport::detail::stream_access::make(
-          std::make_shared<stream_model>(std::move(current), context, strand, gates, read_chunk_size, id));
-      return transport::stream_connection{.local_endpoint = local_value,
-                                          .remote_endpoint = remote_value,
-                                          .stream = std::move(transport_stream)};
+      static_assert(std::is_nothrow_move_constructible_v<transport::stream_connection>);
+      auto model = std::make_shared<stream_model>(context, strand, gates, terminal_completed, read_chunk_size, id);
+      auto weak = std::weak_ptr<stream_model>{model};
+      auto result = transport::stream_connection{
+          .local_endpoint = local_value,
+          .remote_endpoint = remote_value,
+          .stream = transport::detail::stream_access::make_cancelable(
+              model, [weak = std::move(weak)]() noexcept {
+                 if (auto value = weak.lock()) {
+                    value->request_cancel();
+                 }
+              }),
+      };
+      commit_handoff(model);
+      return result;
    }
 
    [[nodiscard]] bool request_terminal(connection_state requested) noexcept {
@@ -868,21 +750,6 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       return true;
    }
 
-   void close_on_owner() noexcept {
-      auto current = std::shared_ptr<native_stream>{};
-      {
-         const auto lock = std::scoped_lock{state_mutex};
-         if (state != connection_state::cancel_requested && state != connection_state::close_requested) {
-            return;
-         }
-         state = connection_state::closed;
-         current = stream;
-      }
-      if (current) {
-         cancel_stream(*current);
-      }
-   }
-
    void mark_closed_from_io() noexcept {
       const auto lock = std::scoped_lock{state_mutex};
       if (state == connection_state::active || state == connection_state::cancel_requested ||
@@ -891,7 +758,7 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       }
    }
 
-   [[nodiscard]] std::shared_ptr<native_stream> detach_stream() {
+   void commit_handoff(const std::shared_ptr<stream_model>& model) {
       const auto lock = std::scoped_lock{state_mutex};
       if (state != connection_state::active) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "stcp connection cannot hand off a terminal stream");
@@ -899,8 +766,10 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
       if (active_operations != 0) {
          FORGE_THROW_EXCEPTION(exceptions::io_error, "stcp connection cannot hand off while I/O is active");
       }
+      // Model, cancel callback, and result endpoints are fully allocated. The
+      // remaining shared_ptr move and state commit are non-throwing.
+      model->attach(std::move(stream));
       state = connection_state::handed_off;
-      return std::move(stream);
    }
 
    void claim_operation() {
@@ -920,9 +789,10 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
    }
 
    std::shared_ptr<native_stream> stream;
-   std::shared_ptr<asio::ssl::context> context;
+   tls::context_snapshot_ptr context;
    asio::strand<asio::any_io_executor> strand;
    std::shared_ptr<io_gates> gates;
+   std::shared_ptr<forge::asio::notification> terminal_completed;
    std::size_t read_chunk_size = 64 * 1024;
    std::int64_t id = -1;
    transport::endpoint local_value;
@@ -936,12 +806,26 @@ struct connection::impl final : std::enable_shared_from_this<connection::impl> {
 };
 
 connection::connection() = default;
-connection::connection(native_token, std::shared_ptr<native_stream> stream,
-                       std::shared_ptr<boost::asio::ssl::context> context, std::size_t read_chunk_size)
-    : impl_(std::make_shared<impl>(std::move(stream), std::move(context), read_chunk_size)) {}
-connection::~connection() = default;
+connection::connection(native_token, std::shared_ptr<native_stream> stream, tls::context_snapshot_ptr context,
+                       std::size_t read_chunk_size)
+    : impl_(std::make_shared<impl>(std::move(stream), std::move(context), read_chunk_size)) {
+   impl_->start_terminal_worker();
+}
+connection::~connection() {
+   if (impl_) {
+      impl_->cancel();
+   }
+}
 connection::connection(connection&&) noexcept = default;
-connection& connection::operator=(connection&&) noexcept = default;
+connection& connection::operator=(connection&& other) noexcept {
+   if (this != &other) {
+      if (impl_) {
+         impl_->cancel();
+      }
+      impl_ = std::move(other.impl_);
+   }
+   return *this;
+}
 
 bool connection::valid() const noexcept {
    return impl_ && impl_->valid();
@@ -1061,21 +945,17 @@ boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, 
    }
    const auto remote = source.remote_endpoint();
    auto context = make_client_context(options);
-   auto stream = std::make_shared<native_stream>(std::move(source).release_socket(), *context);
-   configure_client_stream(*stream, options, remote.host);
+   auto stream = tls::make_asio_stream(context, std::move(source).release_socket());
+   configure_tls_client_stream(*stream, options, remote.host, *context);
 
    try {
       co_await async_handshake(stream, asio::ssl::stream_base::client, timeout, stop);
    } catch (const exceptions::handshake_failed&) {
-      const auto verify_result = SSL_get_verify_result(stream->native_handle());
-      if (options.security.verify_peer && verify_result != X509_V_OK) {
-         FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp server certificate verification failed",
-                               forge::exceptions::ctx("reason", X509_verify_cert_error_string(verify_result)));
-      }
+      classify_tls_handshake_failure(*stream, *context);
       throw;
    }
    const auto expected_host = options.server_name.empty() ? remote.host : options.server_name;
-   verify_peer(*stream, options.security, expected_host);
+   validate_tls_peer(*stream, *context, options.security, expected_host);
    co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 
@@ -1105,10 +985,9 @@ boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, 
       FORGE_THROW_EXCEPTION(exceptions::closed, "invalid source tcp connection");
    }
    auto context = make_server_context(options);
-   configure_server_context(*context, options);
-   auto stream = std::make_shared<native_stream>(std::move(source).release_socket(), *context);
+   auto stream = tls::make_asio_stream(context, std::move(source).release_socket());
    co_await async_handshake(stream, asio::ssl::stream_base::server, timeout, stop);
-   verify_peer(*stream, options.security, {});
+   validate_tls_peer(*stream, *context, options.security, {});
    co_return connection{connection::native_token{}, std::move(stream), std::move(context), options.read_chunk_size};
 }
 

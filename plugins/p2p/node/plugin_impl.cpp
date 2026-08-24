@@ -29,7 +29,9 @@ import forge.asio.runtime;
 import forge.asio.task;
 import forge.exceptions;
 import forge.net.p2p.diagnostics;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
+import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
 import forge.net.p2p.peer_store;
@@ -47,10 +49,11 @@ import forge.plugins.db.store.api;
 namespace forge::plugins::p2p::node {
 namespace {
 
+template <typename Routes>
 [[nodiscard]] bool contains_protocol(
-    const std::vector<std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>>& routes,
+    const Routes& routes,
     const forge::net::p2p::protocol_id& protocol) {
-   return std::any_of(routes.begin(), routes.end(), [&](const auto& route) { return route.first == protocol; });
+   return std::any_of(routes.begin(), routes.end(), [&](const auto& route) { return route.protocol == protocol; });
 }
 
 } // namespace
@@ -94,13 +97,18 @@ std::shared_ptr<forge::net::p2p::node> plugin::impl::ensure_node(const std::vect
       }
       auto candidate = std::make_shared<forge::net::p2p::node>(*runtime, options);
       for (const auto& route : startup_routes) {
-         candidate->register_protocol_handler(route.first, route.second);
+         candidate->register_protocol_handler(route.protocol, route.handler);
       }
       if (!std::atomic_compare_exchange_strong_explicit(&node, &current, candidate, std::memory_order_acq_rel,
                                                         std::memory_order_acquire)) {
          candidate->stop();
       } else {
          current = std::move(candidate);
+      }
+   }
+   for (const auto& route : startup_routes) {
+      if (!route.state->active.load(std::memory_order_acquire)) {
+         static_cast<void>(current->unregister_protocol_handler(route.protocol));
       }
    }
    if (stop_requested.load(std::memory_order_acquire)) {
@@ -121,7 +129,9 @@ std::shared_ptr<forge::net::p2p::node> plugin::impl::require_node() const {
    return current;
 }
 
-void plugin::impl::add_route(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler) {
+plugin::impl::route_ticket plugin::impl::add_route(forge::net::p2p::protocol_id protocol,
+                                                    forge::net::p2p::node::protocol_handler handler,
+                                                    std::function<void()> on_close) {
    auto lock = std::scoped_lock{configuration_mutex};
    if (phase.load(std::memory_order_relaxed) != lifecycle_phase::idle) {
       FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P routes must be published before startup",
@@ -134,7 +144,78 @@ void plugin::impl::add_route(forge::net::p2p::protocol_id protocol, forge::net::
       FORGE_THROW_EXCEPTION(exceptions::route_conflict, "duplicate P2P route",
                             forge::exceptions::ctx("protocol", protocol.value));
    }
-   routes.emplace_back(std::move(protocol), std::move(handler));
+   auto state = std::make_shared<route_state>();
+   auto guarded = [state, protocol, handler = std::move(handler)](forge::net::p2p::node::incoming_protocol_stream stream)
+       -> boost::asio::awaitable<void> {
+      if (!state->active.load(std::memory_order_acquire)) {
+         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::closed, "P2P route publication is closed",
+                               forge::exceptions::ctx("protocol", protocol.value));
+      }
+      co_await handler(std::move(stream));
+   };
+   const auto ticket = route_ticket{.protocol = std::move(protocol), .generation = next_route_generation++};
+   routes.push_back(route{
+       .protocol = ticket.protocol,
+       .handler = std::move(guarded),
+       .state = std::move(state),
+       .on_close = std::move(on_close),
+       .generation = ticket.generation,
+   });
+   return ticket;
+}
+
+void plugin::impl::close_route(route_ticket ticket) noexcept {
+   auto callback = std::function<void()>{};
+   auto current = std::shared_ptr<forge::net::p2p::node>{};
+   {
+      auto lock = std::scoped_lock{configuration_mutex};
+      const auto found = std::find_if(routes.begin(), routes.end(), [&](const auto& route) {
+         return route.protocol == ticket.protocol && route.generation == ticket.generation;
+      });
+      if (found == routes.end()) {
+         return;
+      }
+      found->state->active.store(false, std::memory_order_release);
+      callback = std::move(found->on_close);
+      routes.erase(found);
+      current = node_snapshot();
+   }
+   try {
+      if (current) {
+         static_cast<void>(current->unregister_protocol_handler(ticket.protocol));
+      }
+      if (callback) {
+         callback();
+      }
+   } catch (...) {
+      // Publication close is the noexcept shutdown boundary.
+   }
+}
+
+void plugin::impl::close_routes() noexcept {
+   auto closing = std::vector<route>{};
+   auto current = std::shared_ptr<forge::net::p2p::node>{};
+   {
+      auto lock = std::scoped_lock{configuration_mutex};
+      for (auto& route : routes) {
+         route.state->active.store(false, std::memory_order_release);
+      }
+      closing = std::move(routes);
+      routes.clear();
+      current = node_snapshot();
+   }
+   for (auto& route : closing) {
+      try {
+         if (current) {
+            static_cast<void>(current->unregister_protocol_handler(route.protocol));
+         }
+         if (route.on_close) {
+            route.on_close();
+         }
+      } catch (...) {
+         // Continue closing the remaining publications.
+      }
+   }
 }
 
 void plugin::impl::enable_pubsub(forge::net::p2p::pubsub::options options_value) {

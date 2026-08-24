@@ -60,6 +60,7 @@ import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.stream;
+import forge.net.p2p.topology;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -448,6 +449,7 @@ bool node::impl::unregister_protocol_handler(const protocol_id& protocol) {
 
 void node::impl::set_advertised_endpoints(std::vector<forge::net::p2p::endpoint> endpoints) {
    auto launch = false;
+   auto endpoints_changed = false;
    {
       auto lock = std::scoped_lock{mutex};
       if (stopped) {
@@ -456,8 +458,12 @@ void node::impl::set_advertised_endpoints(std::vector<forge::net::p2p::endpoint>
       const auto previous = local_endpoints_for_control_locked();
       options.advertised_endpoints = std::move(endpoints);
       if (!same_endpoints(previous, local_endpoints_for_control_locked())) {
+         endpoints_changed = true;
          launch = advance_identify_generation_locked() && schedule_identify_push_locked();
       }
+   }
+   if (endpoints_changed && provider_registry) {
+      provider_registry->notify_endpoints_changed();
    }
    if (launch) {
       launch_identify_pushes();
@@ -469,6 +475,9 @@ void node::impl::notify_listen_endpoints_changed() {
    {
       auto lock = std::scoped_lock{mutex};
       launch = advance_identify_generation_locked() && schedule_identify_push_locked();
+   }
+   if (provider_registry) {
+      provider_registry->notify_endpoints_changed();
    }
    if (launch) {
       launch_identify_pushes();
@@ -622,6 +631,7 @@ void node::impl::learn_from_identify(const std::shared_ptr<session_state>& sessi
        .remote_endpoint = session->remote_endpoint,
    };
    auto launch = false;
+   auto verified_dht_server = false;
    {
       auto lock = std::scoped_lock{mutex};
       const auto found = sessions.find(session->id);
@@ -671,18 +681,23 @@ void node::impl::learn_from_identify(const std::shared_ptr<session_state>& sessi
          routing_peer.endpoints.push_back(endpoint.endpoint);
       }
 
-      if (remote_capabilities.has(capabilities::dht)) {
-         routing.upsert(std::move(routing_peer), dht::routing_admission::verified_server);
-      } else {
-         routing.remove(peer);
+      for (auto& [protocol, state] : dht_profiles) {
+         if (std::ranges::find(record.protocols, protocol) != record.protocols.end()) {
+            state->routing.upsert(routing_peer, dht::routing_admission::verified_server);
+            verified_dht_server = true;
+         } else {
+            state->routing.remove(peer);
+         }
       }
 
       if (!received_push) {
          session->info.capabilities = remote_capabilities;
          session->info.identify_state = identify::state::identified;
+         session->remote_protocols = record.protocols;
          session->identify_error = std::move(certified_error);
       } else if (session->info.identify_state == identify::state::identified) {
          session->info.capabilities = remote_capabilities;
+         session->remote_protocols = record.protocols;
          if (!certified_error.empty()) {
             session->identify_error = std::move(certified_error);
          }
@@ -691,6 +706,9 @@ void node::impl::learn_from_identify(const std::shared_ptr<session_state>& sessi
       if (!received_push && session->identify_push_supported) {
          launch = schedule_identify_push_locked();
       }
+   }
+   if (verified_dht_server) {
+      notify_dht_routing_refresh();
    }
    if (launch) {
       launch_identify_pushes();
@@ -792,7 +810,7 @@ node::impl::identify_peer_for_discovery(const peer_id& peer, discovery::source s
        store.apply_discovery(peer, peer_store::discovery_update{
                                        .source = source,
                                        .observed_at = discovered_at,
-                                       .expires_at = discovered_at + options.limits.discovery.refresh_interval,
+                                       .expires_at = discovered_at + options.limits.topology.refresh_interval,
                                    });
    if (!record) {
       co_return std::nullopt;

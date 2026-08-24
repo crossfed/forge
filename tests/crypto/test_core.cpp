@@ -1,9 +1,11 @@
 #include <boost/test/unit_test.hpp>
 
+#include <array>
 #include <string>
 #include <type_traits>
 #include <utility>
 
+import forge.crypto.core.constant_time;
 import forge.crypto.core.random;
 import forge.crypto.core.secret_bytes;
 import forge.crypto.core.secret_string;
@@ -32,6 +34,19 @@ BOOST_AUTO_TEST_CASE(secure_erase_clears_owned_buffers) {
 
    BOOST_TEST(bytes.empty());
    BOOST_TEST(text.empty());
+}
+
+BOOST_AUTO_TEST_CASE(constant_time_compare_requires_equal_bytes_and_length) {
+   constexpr auto value = std::array<std::uint8_t, 4>{1U, 2U, 3U, 4U};
+   constexpr auto same = std::array<std::uint8_t, 4>{1U, 2U, 3U, 4U};
+   constexpr auto different = std::array<std::uint8_t, 4>{1U, 2U, 0U, 4U};
+   constexpr auto shorter = std::array<std::uint8_t, 3>{1U, 2U, 3U};
+
+   BOOST_TEST(forge::crypto::core::constant_time_equal(value, same));
+   BOOST_TEST(!forge::crypto::core::constant_time_equal(value, different));
+   BOOST_TEST(!forge::crypto::core::constant_time_equal(value, shorter));
+   BOOST_TEST(
+       forge::crypto::core::constant_time_equal(std::span<const std::uint8_t>{}, std::span<const std::uint8_t>{}));
 }
 
 BOOST_AUTO_TEST_CASE(secret_string_owns_copy_and_move_lifetimes) {

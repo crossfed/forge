@@ -7,6 +7,7 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -19,6 +20,7 @@ module forge.net.p2p.dht;
 
 import forge.crypto.digest.sha256;
 import forge.multiformats.multiaddr;
+import forge.multiformats.multihash;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -29,6 +31,8 @@ import forge.net.p2p.exceptions;
 namespace forge::net::p2p {
 namespace {
 
+constexpr auto amino_provider_key_limit = std::size_t{80};
+
 [[nodiscard]] std::vector<std::uint8_t> endpoint_bytes(const endpoint& value) {
    return forge::multiformats::multiaddr::parse(value.to_string()).to_bytes();
 }
@@ -37,11 +41,49 @@ namespace {
    return parse_endpoint(forge::multiformats::multiaddr::from_bytes(value).to_string());
 }
 
-void validate_options(const dht::options& opts) {
-   if (opts.replication == 0 || opts.alpha == 0 || opts.max_message_size == 0 || opts.max_record_size == 0 ||
-       opts.max_closer_peers == 0 || opts.max_provider_peers == 0 || opts.query_timeout.count() <= 0 ||
-       opts.refresh_interval.count() <= 0 || opts.provider_record_ttl.count() <= 0) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid DHT options");
+void validate_codec_options(const dht::options& opts) {
+   if (opts.max_outbound_message_size == 0 || opts.max_inbound_message_size == 0 || opts.max_record_size == 0 ||
+       opts.max_closer_peers == 0 || opts.max_provider_peers == 0 || opts.max_peer_endpoints == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid DHT codec options");
+   }
+}
+
+[[nodiscard]] bool valid_amino_provider_key(std::span<const std::uint8_t> value) {
+   if (value.empty() || value.size() > amino_provider_key_limit) {
+      return false;
+   }
+   try {
+      (void)forge::multiformats::multihash::decode(value);
+      return true;
+   } catch (const forge::multiformats::exceptions::invalid_format&) {
+      return false;
+   }
+}
+
+void validate_outbound_provider_key(const dht::message& value) {
+   if (value.type != dht::message_type::add_provider && value.type != dht::message_type::get_providers) {
+      return;
+   }
+   // Rust libp2p omits the request key from non-PUT responses. Request
+   // semantics validate the key after decoding, where direction is known.
+   if (value.key_value.bytes.empty()) {
+      return;
+   }
+   if (!valid_amino_provider_key(value.key_value.bytes)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "Amino DHT provider key must be a multihash of at most 80 bytes");
+   }
+}
+
+void validate_inbound_provider_key(const dht::message& value) {
+   if (value.type != dht::message_type::add_provider && value.type != dht::message_type::get_providers) {
+      return;
+   }
+   if (value.key_value.bytes.empty()) {
+      return;
+   }
+   if (!valid_amino_provider_key(value.key_value.bytes)) {
+      FORGE_THROW_EXCEPTION(exceptions::codec_error, "Amino DHT provider key must be a multihash of at most 80 bytes");
    }
 }
 
@@ -76,6 +118,10 @@ void validate_options(const dht::options& opts) {
    if (value.value.size() > opts.max_record_size) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT record exceeds max size");
    }
+   if (value.ttl.count() < 0 ||
+       static_cast<std::uint64_t>(value.ttl.count()) > std::numeric_limits<std::uint32_t>::max()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT record ttl must fit uint32");
+   }
    auto out = std::vector<std::uint8_t>{};
    detail::append_bytes(out, 1, value.key_value.bytes);
    detail::append_bytes(out, 2, value.value);
@@ -107,9 +153,12 @@ void validate_options(const dht::options& opts) {
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record value must be bytes");
          }
-         out.value = in.bytes();
-         if (out.value.size() > opts.max_record_size) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record exceeds max size");
+         {
+            auto value = in.bytes();
+            if (value.size() > opts.max_record_size) {
+               FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record exceeds max size");
+            }
+            out.value = std::move(value);
          }
          break;
       case 5:
@@ -122,13 +171,22 @@ void validate_options(const dht::options& opts) {
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record publisher must be bytes");
          }
-         out.publisher = peer_id::from_bytes(in.bytes());
+         {
+            auto publisher = peer_id::from_bytes(in.bytes());
+            out.publisher = std::move(publisher);
+         }
          break;
       case 777:
          if (type != detail::wire_type::varint) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record ttl must be varint");
          }
-         out.ttl = std::chrono::seconds{static_cast<std::int64_t>(in.read_varint())};
+         {
+            const auto ttl = in.read_varint();
+            if (ttl > std::numeric_limits<std::uint32_t>::max()) {
+               FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record ttl exceeds uint32");
+            }
+            out.ttl = std::chrono::seconds{static_cast<std::uint32_t>(ttl)};
+         }
          break;
       default:
          in.skip(type);
@@ -141,20 +199,30 @@ void validate_options(const dht::options& opts) {
    return out;
 }
 
-void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht::peer& value) {
+void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht::peer& value,
+                 const dht::options& opts) {
    if (!valid_peer_id(value.id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT peer has invalid Peer ID");
    }
    auto encoded = std::vector<std::uint8_t>{};
    detail::append_bytes(encoded, 1, value.id.to_bytes());
+   if (value.endpoints.size() > opts.max_peer_endpoints) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT peer has too many endpoints");
+   }
    for (const auto& endpoint : value.endpoints) {
       detail::append_bytes(encoded, 2, endpoint_bytes(endpoint));
    }
    detail::append_uint64(encoded, 3, static_cast<std::uint16_t>(value.connection));
+   if (encoded.size() > opts.max_outbound_message_size) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT peer record exceeds max message size");
+   }
    detail::append_bytes(out, field, encoded);
 }
 
-[[nodiscard]] dht::peer decode_peer(std::span<const std::uint8_t> bytes) {
+[[nodiscard]] dht::peer decode_peer(std::span<const std::uint8_t> bytes, const dht::options& opts) {
+   if (bytes.size() > opts.max_inbound_message_size) {
+      FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer record exceeds max message size");
+   }
    auto out = dht::peer{};
    auto saw_id = false;
    auto in = detail::reader{bytes};
@@ -165,20 +233,37 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer id must be bytes");
          }
-         out.id = peer_id::from_bytes(in.bytes());
+         {
+            auto id = peer_id::from_bytes(in.bytes());
+            out.id = std::move(id);
+         }
          saw_id = true;
          break;
       case 2:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer address must be bytes");
          }
-         out.endpoints.push_back(endpoint_from_bytes(in.bytes()));
+         if (out.endpoints.size() >= opts.max_peer_endpoints) {
+            in.skip(type);
+            break;
+         }
+         {
+            const auto address = in.bytes();
+            if (address.size() > opts.max_inbound_message_size) {
+               FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer address exceeds max message size");
+            }
+            auto decoded = endpoint_from_bytes(address);
+            out.endpoints.push_back(std::move(decoded));
+         }
          break;
       case 3:
          if (type != detail::wire_type::varint) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer connection type must be varint");
          }
-         out.connection = checked_connection_type(in.read_varint());
+         {
+            const auto connection = checked_connection_type(in.read_varint());
+            out.connection = connection;
+         }
          break;
       default:
          in.skip(type);
@@ -193,7 +278,9 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
 
 [[nodiscard]] std::vector<std::uint8_t> encode_payload(const dht::message& value, const dht::options& opts) {
    auto out = std::vector<std::uint8_t>{};
-   detail::append_uint64(out, 1, static_cast<std::uint16_t>(value.type));
+   if (value.type != dht::message_type::put_value) {
+      detail::append_uint64(out, 1, static_cast<std::uint16_t>(value.type));
+   }
    if (value.cluster_level_raw != 0) {
       detail::append_uint64(out, 10, static_cast<std::uint64_t>(value.cluster_level_raw));
    }
@@ -208,13 +295,13 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT message has too many closer peers");
    }
    for (const auto& peer : value.closer_peers) {
-      append_peer(out, 8, peer);
+      append_peer(out, 8, peer, opts);
    }
    if (value.provider_peers.size() > opts.max_provider_peers) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT message has too many provider peers");
    }
    for (const auto& peer : value.provider_peers) {
-      append_peer(out, 9, peer);
+      append_peer(out, 9, peer, opts);
    }
    return out;
 }
@@ -226,8 +313,12 @@ std::vector<std::uint8_t> dht::codec::encode(const dht::message& value) {
 }
 
 std::vector<std::uint8_t> dht::codec::encode(const dht::message& value, const dht::options& opts) {
-   validate_options(opts);
-   return detail::wrap_message(encode_payload(value, opts));
+   validate_codec_options(opts);
+   const auto payload = encode_payload(value, opts);
+   if (payload.size() > opts.max_outbound_message_size) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT message exceeds max size");
+   }
+   return detail::wrap_message(payload);
 }
 
 dht::message dht::codec::decode(std::span<const std::uint8_t> bytes) {
@@ -235,10 +326,9 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes) {
 }
 
 dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::options& opts) {
-   validate_options(opts);
-   const auto payload = detail::unwrap_message(bytes, opts.max_message_size);
-   auto out = dht::message{};
-   auto saw_type = false;
+   validate_codec_options(opts);
+   const auto payload = detail::unwrap_message(bytes, opts.max_inbound_message_size);
+   auto out = dht::message{.type = dht::message_type::put_value};
    auto in = detail::reader{payload};
    while (!in.done()) {
       const auto [field, type] = in.key();
@@ -247,8 +337,10 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
          if (type != detail::wire_type::varint) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message type must be varint");
          }
-         out.type = checked_message_type(in.read_varint());
-         saw_type = true;
+         {
+            const auto message_type = checked_message_type(in.read_varint());
+            out.type = message_type;
+         }
          break;
       case 10:
          if (type != detail::wire_type::varint) {
@@ -260,30 +352,44 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT key must be bytes");
          }
-         out.key_value = dht::key{.bytes = in.bytes()};
+         {
+            auto key = dht::key{.bytes = in.bytes()};
+            out.key_value = std::move(key);
+         }
          break;
       case 3:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT record must be bytes");
          }
-         out.record_value = decode_record_payload(in.bytes(), opts);
+         {
+            auto record = decode_record_payload(in.bytes(), opts);
+            out.record_value = std::move(record);
+         }
          break;
       case 8:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT closer peer must be bytes");
          }
-         out.closer_peers.push_back(decode_peer(in.bytes()));
-         if (out.closer_peers.size() > opts.max_closer_peers) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message has too many closer peers");
+         if (out.closer_peers.size() >= opts.max_closer_peers) {
+            in.skip(type);
+            break;
+         }
+         {
+            auto peer = decode_peer(in.bytes(), opts);
+            out.closer_peers.push_back(std::move(peer));
          }
          break;
       case 9:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT provider peer must be bytes");
          }
-         out.provider_peers.push_back(decode_peer(in.bytes()));
-         if (out.provider_peers.size() > opts.max_provider_peers) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message has too many provider peers");
+         if (out.provider_peers.size() >= opts.max_provider_peers) {
+            in.skip(type);
+            break;
+         }
+         {
+            auto peer = decode_peer(in.bytes(), opts);
+            out.provider_peers.push_back(std::move(peer));
          }
          break;
       default:
@@ -291,10 +397,24 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
          break;
       }
    }
-   if (!saw_type) {
-      FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message missing type");
-   }
    return out;
+}
+
+std::vector<std::uint8_t> dht::codec::encode(const dht::message& value, const dht::profile& profile_value) {
+   validate(profile_value);
+   if (profile_value.kind == dht::profile_kind::amino_v1) {
+      validate_outbound_provider_key(value);
+   }
+   return encode(value, profile_value.limits);
+}
+
+dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::profile& profile_value) {
+   validate(profile_value);
+   auto result = decode(bytes, profile_value.limits);
+   if (profile_value.kind == dht::profile_kind::amino_v1) {
+      validate_inbound_provider_key(result);
+   }
+   return result;
 }
 
 dht::key make_dht_key(std::span<const std::uint8_t> value) {

@@ -2,6 +2,8 @@ module;
 
 #include <compare>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -46,8 +48,12 @@ struct peer_id {
    [[nodiscard]] friend auto operator<=>(const peer_id&, const peer_id&) noexcept = default;
 };
 
+using public_key_resolver = std::function<std::optional<public_key>(const peer_id&)>;
+
 [[nodiscard]] forge::multiformats::bytes encode_public_key(const public_key& key);
 [[nodiscard]] public_key decode_public_key(std::span<const std::uint8_t> bytes);
+void validate_public_key(const public_key& key);
+void validate_public_key(const public_key& key, const peer_id& expected_peer);
 [[nodiscard]] peer_id make_peer_id(const public_key& key);
 [[nodiscard]] peer_id make_peer_id_from_certificate_pem(std::string_view certificate_pem);
 [[nodiscard]] peer_id make_peer_id_from_certificate_der(std::span<const std::uint8_t> der);

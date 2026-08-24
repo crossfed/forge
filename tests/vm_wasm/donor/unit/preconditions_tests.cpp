@@ -1,17 +1,17 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.backend;
-import forge.vm.wasm.host_function;
-#define FORGE_VM_WASM_TEST_USES_BACKEND
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.backend;
+import forge.vm.wasm.interpret.host_function;
+#define FORGE_VM_WASM_INTERPRET_TEST_USES_BACKEND
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE preconditions_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE preconditions_tests
 
 #include <exception>
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 static int check = 0;
 static int check2 = 0;
@@ -42,49 +42,49 @@ bool check_exception_msg(F&& func, const std::string& chck) {
 #define CHECK_MSG(Msg, ...) \
    BOOST_TEST(static_cast<bool>(check_exception_msg<std::runtime_error>([&](){ __VA_ARGS__; }, Msg)))
 
-FORGE_VM_WASM_PRECONDITION(int_equals_42,
-      FORGE_VM_WASM_INVOKE_ON(int, [&](auto arg, auto&&... rest) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(int_equals_42,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ON(int, [&](auto arg, auto&&... rest) {
          if (arg != 42)
             throw std::runtime_error("arg != 42");
       }));
 
-FORGE_VM_WASM_PRECONDITION(float_equals_42,
-      FORGE_VM_WASM_INVOKE_ON(float, [&](auto arg, auto&&... rest) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(float_equals_42,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ON(float, [&](auto arg, auto&&... rest) {
          if (arg != 42.42f)
             throw std::runtime_error("arg != 42.42f");
       }));
 
-FORGE_VM_WASM_PRECONDITION(str_equals_hello,
-      FORGE_VM_WASM_INVOKE_ON(const char*, [&](auto arg, auto&&... rest) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(str_equals_hello,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ON(const char*, [&](auto arg, auto&&... rest) {
          if (memcmp(arg, "hello", 5) != 0)
             throw std::runtime_error("str != hello");
       }));
 
-FORGE_VM_WASM_PRECONDITION(span_and_check,
-      FORGE_VM_WASM_INVOKE_ON_ALL([&](auto arg, auto&&... rest) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(span_and_check,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ON_ALL([&](auto arg, auto&&... rest) {
          if constexpr (is_span_type_v<decltype(arg)>) {
             if (memcmp(arg.data(), "hellohe", arg.size_bytes()) != 0)
                throw std::runtime_error("span<T> != hellohe");
          }
       }));
 
-FORGE_VM_WASM_PRECONDITION(check2_once,
-      FORGE_VM_WASM_INVOKE_ONCE([&](auto&&... args) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(check2_once,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ONCE([&](auto&&... args) {
          check2++;
       }));
 
-FORGE_VM_WASM_PRECONDITION(check2_all,
-      FORGE_VM_WASM_INVOKE_ON_ALL([&](auto&&... args) {
+FORGE_VM_WASM_INTERPRET_PRECONDITION(check2_all,
+      FORGE_VM_WASM_INTERPRET_INVOKE_ON_ALL([&](auto&&... args) {
          check2++;
       }));
 
 struct cnv : type_converter<standalone_function_t> {
    using type_converter::from_wasm;
    using type_converter::type_converter;
-   FORGE_VM_WASM_FROM_WASM(char*, (void* ptr)) { return static_cast<char*>(ptr); }
-   FORGE_VM_WASM_FROM_WASM(const char*, (void* ptr)) { return static_cast<char*>(ptr); }
-   FORGE_VM_WASM_FROM_WASM(float*, (void* ptr)) { return static_cast<float*>(ptr); }
-   FORGE_VM_WASM_FROM_WASM(int&, (void* ptr)) { return *static_cast<int*>(ptr); }
+   FORGE_VM_WASM_INTERPRET_FROM_WASM(char*, (void* ptr)) { return static_cast<char*>(ptr); }
+   FORGE_VM_WASM_INTERPRET_FROM_WASM(const char*, (void* ptr)) { return static_cast<char*>(ptr); }
+   FORGE_VM_WASM_INTERPRET_FROM_WASM(float*, (void* ptr)) { return static_cast<float*>(ptr); }
+   FORGE_VM_WASM_INTERPRET_FROM_WASM(int&, (void* ptr)) { return *static_cast<int*>(ptr); }
 };
 
 BACKEND_TEST_CASE("Testing invoke_on", "[preconditions_tests]") {

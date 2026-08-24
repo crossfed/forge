@@ -13,16 +13,16 @@ module;
 #include <limits>
 #include <thread>
 
-module forge.vm.wasm.backend;
+module forge.vm.wasm.interpret.backend;
 
 import :signals;
-import forge.vm.wasm.allocator;
+import forge.vm.wasm.interpret.allocator;
 
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE signals_regression_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE signals_regression_tests
 
-namespace wasm = forge::vm::wasm;
+namespace wasm = forge::vm::wasm::interpret;
 
 namespace {
 struct reexport_host {
@@ -288,7 +288,7 @@ TEST_CASE("interpreter re-exported host imports translate guest memory faults", 
    check_reexported_host_import<wasm::interpreter>();
 }
 
-#if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+#if FORGE_VM_WASM_INTERPRET_HAS_JIT && !defined(FORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit re-exported host imports translate guest memory faults", "[signals]") {
    check_reexported_host_import<wasm::jit>();
 }

@@ -19,12 +19,15 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
 #include <type_traits>
 #include <vector>
+
+#include <sys/stat.h>
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
@@ -33,6 +36,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -55,6 +59,7 @@ import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.asio.blocking;
+import forge.asio.compute;
 import forge.asio.exceptions;
 import forge.asio.runtime;
 import forge.api.http.binding;
@@ -62,9 +67,11 @@ import forge.net.http.base_url;
 import forge.api.http.parameters;
 import forge.net.http.body;
 import forge.net.http.client;
+import forge.net.http.cookie;
 import forge.net.http.connection;
 import forge.net.http.exceptions;
 import forge.net.http.file;
+import forge.net.http.assets;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
 import forge.net.http.middleware;
@@ -120,6 +127,73 @@ BOOST_AUTO_TEST_CASE(http_negotiation_matches_media_types_suffixes_and_accept_qu
    BOOST_TEST(!accept_allows("application/json;q=1, application/xml;q=0, text/xml;q=0", xml));
    BOOST_TEST(accept_allows("text/*;q=0.5", xml));
    BOOST_TEST(accept_allows("*/*", json));
+}
+
+BOOST_AUTO_TEST_CASE(http_cookie_parses_formats_and_appends_repeated_set_cookie_headers) {
+   const auto parsed = parse_cookie_header("session=alpha; csrf=beta");
+   BOOST_REQUIRE_EQUAL(parsed.size(), 2U);
+   BOOST_TEST(parsed[0].name == "session");
+   BOOST_TEST(parsed[0].value == "alpha");
+   BOOST_TEST(format_cookie_header(std::span<const cookie>{parsed}) == "session=alpha; csrf=beta");
+
+   const auto configured = set_cookie{
+       .name = "session",
+       .value = "alpha",
+       .path = "/admin",
+       .domain = "console.example",
+       .max_age = std::chrono::seconds{600},
+       .same_site_value = same_site::strict,
+       .secure = true,
+       .http_only = true,
+   };
+   const auto formatted = format_set_cookie(configured);
+   BOOST_TEST(formatted == "session=alpha; Path=/admin; Domain=console.example; Max-Age=600; Secure; HttpOnly; "
+                           "SameSite=Strict");
+   const auto round_trip = parse_set_cookie_header(formatted);
+   BOOST_TEST(round_trip.name == configured.name);
+   BOOST_TEST(round_trip.value == configured.value);
+   BOOST_REQUIRE(round_trip.path.has_value());
+   BOOST_TEST(*round_trip.path == "/admin");
+   BOOST_REQUIRE(round_trip.domain.has_value());
+   BOOST_TEST(*round_trip.domain == "console.example");
+   BOOST_REQUIRE(round_trip.max_age.has_value());
+   BOOST_TEST(*round_trip.max_age == std::chrono::seconds{600});
+   BOOST_REQUIRE(round_trip.same_site_value.has_value());
+   BOOST_TEST(static_cast<unsigned>(*round_trip.same_site_value) == static_cast<unsigned>(same_site::strict));
+   BOOST_TEST(round_trip.secure);
+   BOOST_TEST(round_trip.http_only);
+
+   auto response_value = response{status::ok, 11};
+   append_set_cookie(response_value, configured);
+   append_set_cookie(response_value, set_cookie{.name = "csrf", .value = "beta", .path = "/admin", .secure = true});
+   auto cookies = std::vector<std::string>{};
+   for (const auto& header : response_value.headers()) {
+      if (header_name_equal(header.name, "Set-Cookie")) {
+         cookies.push_back(header.text);
+      }
+   }
+   BOOST_TEST(cookies == (std::vector<std::string>{formatted, "csrf=beta; Path=/admin; Secure"}),
+              boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(http_cookie_rejects_malformed_and_injectable_headers) {
+   for (const auto& value :
+        {"", "=value", "name=value; name=other", "name=value;", "name=value\r\nX-Evil: yes", "name=contains space"}) {
+      BOOST_CHECK_THROW(static_cast<void>(parse_cookie_header(value)), exceptions::bad_request);
+   }
+   for (const auto& value :
+        {"session=value;", "session=value; Secure;", "session=value; Secure; Secure",
+         "session=value; HttpOnly; HttpOnly", "session=value; Path=/; Path=/admin",
+         "session=value; Domain=foo-.example", "session=value; SameSite=None", "session=value; Max-Age=invalid",
+         "session=value; Unknown=attribute", "session=value\r\nX-Evil: yes"}) {
+      BOOST_CHECK_THROW(static_cast<void>(parse_set_cookie_header(value)), exceptions::bad_request);
+   }
+   BOOST_CHECK_THROW(static_cast<void>(format_set_cookie(set_cookie{
+                         .name = "session",
+                         .value = "value",
+                         .same_site_value = static_cast<same_site>(999),
+                     })),
+                     exceptions::bad_request);
 }
 
 [[nodiscard]] method to_http_method(beast_http::verb value) noexcept {
@@ -1090,6 +1164,41 @@ template <> struct api_traits<::forge::net::http::test_api::api_cache> {
 namespace forge::net::http {
 namespace {
 
+[[nodiscard]] std::shared_ptr<forge::asio::compute::pool> make_http_file_read_pool() {
+   return std::make_shared<forge::asio::compute::pool>(forge::asio::compute::pool::options{
+       .worker_threads = 2,
+       .max_pending_tasks = 16,
+       .max_waiting_submissions = 16,
+       .thread_name = "forge-http-file-test",
+   });
+}
+
+template <typename Predicate>
+[[nodiscard]] bool wait_for_http_test(Predicate predicate,
+                                      std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
+   const auto deadline = std::chrono::steady_clock::now() + timeout;
+   while (!predicate() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   return predicate();
+}
+
+class release_compute_work {
+ public:
+   explicit release_compute_work(std::atomic_bool& value) : value_{value} {}
+
+   ~release_compute_work() {
+      release();
+   }
+
+   void release() noexcept {
+      value_.store(true, std::memory_order_release);
+   }
+
+ private:
+   std::atomic_bool& value_;
+};
+
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace beast_http = boost::beast::http;
@@ -1512,7 +1621,8 @@ class default_header_api_impl final : public default_header_api {
 
 class object_api_impl final : public object_api {
  public:
-   explicit object_api_impl(std::filesystem::path root) : root_{std::move(root)} {}
+   explicit object_api_impl(std::filesystem::path root)
+       : root_{std::move(root)}, file_reads_{make_http_file_read_pool()} {}
 
    boost::asio::awaitable<object_put_response> put_object(object_put_request request) override {
       auto body = co_await request.body.async_read_all();
@@ -1534,7 +1644,7 @@ class object_api_impl final : public object_api {
          co_return forge::net::http::file_response::from_body(std::move(reply), make_body_reader({"body-payload"}));
       }
       co_return forge::net::http::file_response::from_path(
-          object_path(request.collection, request.key),
+          object_path(request.collection, request.key), file_reads_->get_executor(),
           forge::net::http::file_options{.content_type = "application/octet-stream"});
    }
 
@@ -1570,6 +1680,7 @@ class object_api_impl final : public object_api {
    }
 
    std::filesystem::path root_;
+   std::shared_ptr<forge::asio::compute::pool> file_reads_;
 };
 
 class object_proxy_api_impl final : public object_api {
@@ -1623,11 +1734,12 @@ class json_stream_api_impl final : public json_stream_api {
 
 class endpoint_api_impl final : public endpoint_api {
  public:
-   explicit endpoint_api_impl(std::filesystem::path root) : root_{std::move(root)} {}
+   explicit endpoint_api_impl(std::filesystem::path root)
+       : root_{std::move(root)}, file_reads_{make_http_file_read_pool()} {}
 
    boost::asio::awaitable<endpoint_control_response> current(endpoint_control_request request) override {
       request.response().set("X-Endpoint-Id", request.id);
-      request.response().set_cookie("endpoint", request.id);
+      append_set_cookie(request.response(), set_cookie{.name = "endpoint", .value = request.id});
       if (request.id == "status-mismatch") {
          request.response().result(status::accepted);
       }
@@ -1640,13 +1752,14 @@ class endpoint_api_impl final : public endpoint_api {
    boost::asio::awaitable<forge::net::http::file_response> download(endpoint_control_request request) override {
       request.response().set("X-Endpoint-File", request.id);
       co_return forge::net::http::file_response::from_path(
-          root_ / "asset.txt", forge::net::http::file_options{.content_type = "text/plain"});
+          root_ / "asset.txt", file_reads_->get_executor(),
+          forge::net::http::file_options{.content_type = "text/plain"});
    }
 
    boost::asio::awaitable<forge::net::http::streaming_response> stream(endpoint_control_request request) override {
       request.response().set("X-Endpoint-Stream", request.id);
-      request.response().set_cookie("endpoint", request.id);
-      request.response().set_cookie("stream", "yes");
+      append_set_cookie(request.response(), set_cookie{.name = "endpoint", .value = request.id});
+      append_set_cookie(request.response(), set_cookie{.name = "stream", .value = "yes"});
       auto text = std::make_shared<std::string>("stream:" + request.id);
       co_return forge::net::http::streaming_response::from_source(forge::net::http::streaming_response_options{
           .content_type = "text/plain",
@@ -1671,14 +1784,15 @@ class endpoint_api_impl final : public endpoint_api {
 
  private:
    std::filesystem::path root_;
+   std::shared_ptr<forge::asio::compute::pool> file_reads_;
 };
 
 class stream_buffered_api_impl final : public stream_buffered_api {
  public:
    boost::asio::awaitable<endpoint_control_response> write(stream_buffered_request request) override {
       const auto payload = co_await request.body.async_read_all();
-      request.response().set_cookie("endpoint", request.id);
-      request.response().set_cookie("stream", payload);
+      append_set_cookie(request.response(), set_cookie{.name = "endpoint", .value = request.id});
+      append_set_cookie(request.response(), set_cookie{.name = "stream", .value = payload});
       co_return endpoint_control_response{.summary = request.id + ":" + payload};
    }
 };
@@ -1701,7 +1815,8 @@ class stream_body_echo_api_impl final : public stream_body_echo_api {
 
 class mixed_proxy_api_impl final : public mixed_proxy_api {
  public:
-   explicit mixed_proxy_api_impl(std::filesystem::path root) : root_{std::move(root)} {}
+   explicit mixed_proxy_api_impl(std::filesystem::path root)
+       : root_{std::move(root)}, file_reads_{make_http_file_read_pool()} {}
 
    boost::asio::awaitable<control_response> read(std::string collection, std::string key) override {
       co_return control_response{.value = std::move(collection) + ":" + std::move(key)};
@@ -1709,12 +1824,13 @@ class mixed_proxy_api_impl final : public mixed_proxy_api {
 
    boost::asio::awaitable<forge::net::http::file_response> download(mixed_download_request request) override {
       co_return forge::net::http::file_response::from_path(
-          root_ / request.collection / request.key,
+          root_ / request.collection / request.key, file_reads_->get_executor(),
           forge::net::http::file_options{.content_type = "application/octet-stream"});
    }
 
  private:
    std::filesystem::path root_;
+   std::shared_ptr<forge::asio::compute::pool> file_reads_;
 };
 
 class form_api_impl final : public form_api {
@@ -7118,10 +7234,23 @@ BOOST_AUTO_TEST_CASE(http_stream_body_limit_fires_during_stream_read) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_path_backed_files_require_an_explicit_read_executor) {
+   auto files = temp_directory{};
+   files.write("chunk.bin", "0123456789");
+
+   BOOST_CHECK_THROW(static_cast<void>(static_file_root{files.path(), {}}), exceptions::bad_request);
+   BOOST_CHECK_THROW(static_cast<void>(file_response::from_path(files.path() / "chunk.bin", {})),
+                     exceptions::bad_request);
+   BOOST_CHECK_THROW(static_cast<void>(asset_bundle{asset_mount{.path = "/admin", .root = files.path()}, {}}),
+                     exceptions::bad_request);
+}
+
 BOOST_AUTO_TEST_CASE(http_static_file_root_serves_full_file_stream) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path(), file_options{.content_type = "application/test"});
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor(),
+                                                  file_options{.content_type = "application/test"});
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7145,10 +7274,128 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_serves_full_file_stream) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_file_reads_use_bounded_compute_capacity_without_stalling_runtime_workers) {
+   auto files = temp_directory{};
+   files.write("chunk.bin", "0123456789");
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto file_reads = std::make_shared<forge::asio::compute::pool>(forge::asio::compute::pool::options{
+       .worker_threads = 1,
+       .max_pending_tasks = 0,
+       .max_waiting_submissions = 1,
+       .thread_name = "forge-http-file-bound",
+   });
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
+   const auto serve = [&]() {
+      auto request_value = make_request(method::get, "/files/chunk.bin");
+      auto context = make_route_context(request_value);
+      auto stream_request_value = stream_request{context, body_reader{}};
+      return forge::asio::blocking::run(runtime, root.serve(stream_request_value, "chunk.bin"));
+   };
+   auto first = serve();
+   auto overflow = serve();
+   auto blocker_started = std::atomic_bool{false};
+   auto release_blocker = std::atomic_bool{false};
+   auto release_guard = release_compute_work{release_blocker};
+   auto blocker =
+       forge::asio::blocking::run(runtime, file_reads->get_executor().submit({.name = "slow-file-read"}, [&] {
+          blocker_started.store(true, std::memory_order_release);
+          while (!release_blocker.load(std::memory_order_acquire)) {
+             std::this_thread::yield();
+          }
+       }));
+   BOOST_REQUIRE(wait_for_http_test([&] { return blocker_started.load(std::memory_order_acquire); }));
+
+   auto first_read = boost::asio::co_spawn(runtime.context(), first.body(), boost::asio::use_future);
+   BOOST_REQUIRE(wait_for_http_test([&] { return file_reads->snapshot().waiting == 1U; }));
+
+   auto runtime_progress = std::promise<void>{};
+   auto runtime_progressed = runtime_progress.get_future();
+   boost::asio::post(runtime.context(), [&] { runtime_progress.set_value(); });
+   BOOST_CHECK(runtime_progressed.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready);
+
+   auto overflow_read = boost::asio::co_spawn(runtime.context(), overflow.body(), boost::asio::use_future);
+   BOOST_REQUIRE(overflow_read.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(overflow_read.get()), exceptions::unavailable);
+   const auto saturated = file_reads->snapshot();
+   BOOST_CHECK_EQUAL(saturated.running, 1U);
+   BOOST_CHECK_EQUAL(saturated.waiting, 1U);
+   BOOST_CHECK_GE(saturated.rejected, 1U);
+
+   file_reads->request_stop();
+   BOOST_REQUIRE(first_read.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(first_read.get()), exceptions::unavailable);
+   release_guard.release();
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, std::move(blocker).wait()), forge::asio::exceptions::canceled);
+   forge::asio::blocking::run(runtime, file_reads->shutdown());
+   const auto stopped = file_reads->snapshot();
+   BOOST_CHECK(stopped.stopped);
+   BOOST_CHECK_EQUAL(stopped.waiting, 0U);
+   BOOST_CHECK_EQUAL(stopped.running, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(http_request_time_file_open_is_bounded_and_does_not_stall_runtime_workers) {
+   auto files = temp_directory{};
+   files.write("chunk.bin", "0123456789");
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto file_reads = std::make_shared<forge::asio::compute::pool>(forge::asio::compute::pool::options{
+       .worker_threads = 1,
+       .max_pending_tasks = 0,
+       .max_waiting_submissions = 1,
+       .thread_name = "forge-http-open-bound",
+   });
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
+   auto blocker_started = std::atomic_bool{false};
+   auto release_blocker = std::atomic_bool{false};
+   auto release_guard = release_compute_work{release_blocker};
+   auto blocker =
+       forge::asio::blocking::run(runtime, file_reads->get_executor().submit({.name = "slow-file-open"}, [&] {
+          blocker_started.store(true, std::memory_order_release);
+          while (!release_blocker.load(std::memory_order_acquire)) {
+             std::this_thread::yield();
+          }
+       }));
+   BOOST_REQUIRE(wait_for_http_test([&] { return blocker_started.load(std::memory_order_acquire); }));
+
+   auto direct_request = make_request(method::get, "/files/chunk.bin");
+   auto direct = file_response::from_path(files.path() / "chunk.bin", file_reads->get_executor());
+   auto waiting_open =
+       boost::asio::co_spawn(runtime.context(), std::move(direct).materialize(direct_request), boost::asio::use_future);
+   BOOST_REQUIRE(wait_for_http_test([&] { return file_reads->snapshot().waiting == 1U; }));
+
+   auto runtime_progress = std::promise<void>{};
+   auto runtime_progressed = runtime_progress.get_future();
+   boost::asio::post(runtime.context(), [&] { runtime_progress.set_value(); });
+   BOOST_CHECK(runtime_progressed.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready);
+
+   auto static_request = make_request(method::get, "/files/chunk.bin");
+   auto static_context = make_route_context(static_request);
+   auto static_stream_request = stream_request{static_context, body_reader{}};
+   auto overflow_open = boost::asio::co_spawn(runtime.context(), root.serve(static_stream_request, "chunk.bin"),
+                                              boost::asio::use_future);
+   BOOST_REQUIRE(overflow_open.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(overflow_open.get()), exceptions::unavailable);
+   const auto saturated = file_reads->snapshot();
+   BOOST_CHECK_EQUAL(saturated.running, 1U);
+   BOOST_CHECK_EQUAL(saturated.waiting, 1U);
+   BOOST_CHECK_GE(saturated.rejected, 1U);
+
+   file_reads->request_stop();
+   BOOST_REQUIRE(waiting_open.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(waiting_open.get()), exceptions::unavailable);
+   release_guard.release();
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, std::move(blocker).wait()), forge::asio::exceptions::canceled);
+   forge::asio::blocking::run(runtime, file_reads->shutdown());
+   const auto stopped = file_reads->snapshot();
+   BOOST_CHECK(stopped.stopped);
+   BOOST_CHECK_EQUAL(stopped.waiting, 0U);
+   BOOST_CHECK_EQUAL(stopped.running, 0U);
+}
+
 BOOST_AUTO_TEST_CASE(http_static_file_root_serves_byte_range) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path());
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7177,7 +7424,8 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_serves_byte_range) {
 BOOST_AUTO_TEST_CASE(http_static_file_root_ignores_unsupported_multi_range) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path());
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7207,7 +7455,8 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_ignores_unsupported_multi_range) {
 BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_invalid_range) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path());
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7235,7 +7484,8 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_invalid_range) {
 BOOST_AUTO_TEST_CASE(http_static_file_root_uses_deterministic_weak_etag) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path());
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7264,10 +7514,146 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_uses_deterministic_weak_etag) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_static_file_root_honors_conditional_and_if_range_semantics) {
+   auto files = temp_directory{};
+   files.write("chunk.bin", "0123456789");
+   const auto path = files.path() / "chunk.bin";
+   const auto initial_time = std::filesystem::last_write_time(path);
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto router = forge::net::http::router{};
+   router.get_stream("/files/:name", [root](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+      co_return co_await root->serve(request_value, *request_value.context.route_param("name"));
+   });
+
+   auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   const auto first =
+       forge::asio::blocking::run(runtime, connection.async_request(make_request(method::get, "/files/chunk.bin")));
+   BOOST_TEST(first.result_int() == static_cast<unsigned>(status::ok));
+
+   auto list_match = make_request(method::get, "/files/chunk.bin");
+   list_match.set(field::if_none_match, std::string{"\"other\", "} + first[field::etag]);
+   const auto list_response = forge::asio::blocking::run(runtime, connection.async_request(std::move(list_match)));
+   BOOST_TEST(list_response.result_int() == static_cast<unsigned>(status::not_modified));
+
+   auto wildcard_match = make_request(method::get, "/files/chunk.bin");
+   wildcard_match.set(field::if_none_match, "*");
+   const auto wildcard_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(wildcard_match)));
+   BOOST_TEST(wildcard_response.result_int() == static_cast<unsigned>(status::not_modified));
+
+   auto weak_if_range = make_request(method::get, "/files/chunk.bin");
+   weak_if_range.set(field::range, "bytes=0-2");
+   weak_if_range.set(field::if_range, first[field::etag]);
+   const auto weak_if_range_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(weak_if_range)));
+   BOOST_TEST(weak_if_range_response.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(weak_if_range_response.body() == "0123456789");
+
+   auto mismatched_if_range = make_request(method::get, "/files/chunk.bin");
+   mismatched_if_range.set(field::range, "bytes=0-2");
+   mismatched_if_range.set(field::if_range, "\"different\"");
+   const auto mismatched_if_range_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(mismatched_if_range)));
+   BOOST_TEST(mismatched_if_range_response.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(mismatched_if_range_response.body() == "0123456789");
+
+   auto dated_if_range = make_request(method::get, "/files/chunk.bin");
+   dated_if_range.set(field::range, "bytes=0-2");
+   dated_if_range.set(field::if_range, first[field::last_modified]);
+   const auto dated_if_range_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(dated_if_range)));
+   BOOST_TEST(dated_if_range_response.result_int() == static_cast<unsigned>(status::partial_content));
+   BOOST_TEST(dated_if_range_response.body() == "012");
+
+   files.write("chunk.bin", "0123456789x");
+   auto time_error = std::error_code{};
+   std::filesystem::last_write_time(path, initial_time, time_error);
+   BOOST_REQUIRE(!static_cast<bool>(time_error));
+
+   auto stale_same_second = make_request(method::get, "/files/chunk.bin");
+   stale_same_second.set(field::if_none_match, first[field::etag]);
+   stale_same_second.set(field::if_modified_since, first[field::last_modified]);
+   const auto stale_same_second_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(stale_same_second)));
+   BOOST_TEST(stale_same_second_response.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(stale_same_second_response.body() == "0123456789x");
+   BOOST_TEST(stale_same_second_response[field::last_modified] == first[field::last_modified]);
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(http_static_file_options_preserve_legacy_aggregate_and_gate_conditionals) {
+   const auto legacy = file_options{"application/test", 4096U, symlink_policy::follow, false, false};
+   BOOST_TEST(legacy.content_type == "application/test");
+   BOOST_TEST(legacy.chunk_bytes == 4096U);
+   BOOST_CHECK(legacy.symlinks == symlink_policy::follow);
+   BOOST_TEST(!legacy.etag);
+   BOOST_TEST(!legacy.last_modified);
+
+   auto files = temp_directory{};
+   files.write("chunk.bin", "0123456789");
+   auto runtime = forge::asio::runtime{};
+   auto file_reads = make_http_file_read_pool();
+   const auto serve = [&files, &runtime, &file_reads](request request_value, file_options options) {
+      auto context = make_route_context(request_value);
+      auto stream_request_value = stream_request{context, body_reader{}};
+      auto root = static_file_root{files.path(), file_reads->get_executor(), std::move(options)};
+      return forge::asio::blocking::run(runtime, root.serve(stream_request_value, "chunk.bin"));
+   };
+
+   auto disabled = make_request(method::get, "/files/chunk.bin");
+   disabled.set(field::if_none_match, "*");
+   const auto disabled_response = serve(std::move(disabled), legacy);
+   BOOST_TEST(disabled_response.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_CHECK(disabled_response.head.find(field::etag) == disabled_response.head.end());
+   BOOST_CHECK(disabled_response.head.find(field::last_modified) == disabled_response.head.end());
+
+   auto modified_only = file_options{"application/test", 4096U, symlink_policy::reject, false, true};
+   const auto modified = serve(make_request(method::get, "/files/chunk.bin"), modified_only);
+   const auto modified_value = std::string{modified.head[field::last_modified]};
+   auto condition = make_request(method::get, "/files/chunk.bin");
+   condition.set(field::if_none_match, "\"other\"");
+   condition.set(field::if_modified_since, modified_value);
+   const auto modified_response = serve(std::move(condition), std::move(modified_only));
+   BOOST_TEST(modified_response.head.result_int() == static_cast<unsigned>(status::not_modified));
+
+   auto etag_only = file_options{"application/test", 4096U, symlink_policy::reject, true, false};
+   auto ignored_ims = make_request(method::get, "/files/chunk.bin");
+   ignored_ims.set(field::if_modified_since, "Wed, 21 Oct 2030 07:28:00 GMT");
+   const auto etag_response = serve(std::move(ignored_ims), std::move(etag_only));
+   BOOST_TEST(etag_response.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_CHECK(etag_response.head.find(field::last_modified) == etag_response.head.end());
+
+   auto hidden_if_range = make_request(method::get, "/files/chunk.bin");
+   hidden_if_range.set(field::range, "bytes=0-2");
+   hidden_if_range.set(field::if_range, "Wed, 21 Oct 2030 07:28:00 GMT");
+   const auto hidden_if_range_response = serve(
+       std::move(hidden_if_range), file_options{"application/test", 4096U, symlink_policy::reject, true, false});
+   BOOST_TEST(hidden_if_range_response.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(hidden_if_range_response.head[field::content_length] == "10");
+
+   auto cacheable = file_options{"application/test", 4096U, symlink_policy::reject, true, true};
+   cacheable.cache_control = "public, max-age=60";
+   const auto cacheable_first = serve(make_request(method::get, "/files/chunk.bin"), cacheable);
+   auto cacheable_match = make_request(method::get, "/files/chunk.bin");
+   cacheable_match.set(field::if_none_match, cacheable_first.head[field::etag]);
+   const auto cacheable_response = serve(std::move(cacheable_match), std::move(cacheable));
+   BOOST_TEST(cacheable_response.head.result_int() == static_cast<unsigned>(status::not_modified));
+   BOOST_TEST(cacheable_response.head["Cache-Control"] == "public, max-age=60");
+}
+
 BOOST_AUTO_TEST_CASE(http_static_file_root_head_returns_headers_without_body) {
    auto files = temp_directory{};
    files.write("chunk.bin", "0123456789");
-   auto root = std::make_shared<static_file_root>(files.path());
+   auto file_reads = make_http_file_read_pool();
+   auto root = std::make_shared<static_file_root>(files.path(), file_reads->get_executor());
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
@@ -7305,7 +7691,8 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_traversal_and_symlink) {
    std::filesystem::create_symlink(outside, link, symlink_error);
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto root = static_file_root{files.path()};
+   auto file_reads = make_http_file_read_pool();
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
    auto request_value = make_request(method::get, "/files/link.bin");
    auto context = make_route_context(request_value);
    auto stream_request_value = stream_request{context, body_reader{}};
@@ -7322,7 +7709,7 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_traversal_and_symlink) {
    std::filesystem::remove(outside, ignored);
 }
 
-BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_backslash_and_symlink_escape_when_following) {
+BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_backslash_and_symlink_escape) {
    auto files = temp_directory{};
    files.write("visible.bin", "visible");
    auto outside = std::filesystem::temp_directory_path() / "forge-http-follow-outside-secret.bin";
@@ -7335,7 +7722,9 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_backslash_and_symlink_escape_
    std::filesystem::create_symlink(outside, link, symlink_error);
 
    auto runtime = forge::asio::runtime{};
-   auto root = static_file_root{files.path(), file_options{.symlinks = symlink_policy::follow}};
+   auto file_reads = make_http_file_read_pool();
+   auto root =
+       static_file_root{files.path(), file_reads->get_executor(), file_options{.symlinks = symlink_policy::follow}};
    auto request_value = make_request(method::get, "/files/follow.bin");
    auto context = make_route_context(request_value);
    auto stream_request_value = stream_request{context, body_reader{}};
@@ -7350,6 +7739,256 @@ BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_backslash_and_symlink_escape_
 
    std::error_code ignored;
    std::filesystem::remove(outside, ignored);
+}
+
+BOOST_AUTO_TEST_CASE(http_static_file_root_and_file_response_follow_contained_symlinks_when_explicitly_enabled) {
+   auto files = temp_directory{};
+   files.write("visible.bin", "visible");
+   auto symlink_error = std::error_code{};
+   std::filesystem::create_symlink("visible.bin", files.path() / "contained-link.bin", symlink_error);
+   if (symlink_error) {
+      BOOST_TEST_MESSAGE("symlink creation is unavailable on this host");
+      return;
+   }
+
+   auto runtime = forge::asio::runtime{};
+   auto file_reads = make_http_file_read_pool();
+   auto request_value = make_request(method::get, "/files/contained-link.bin");
+   auto context = make_route_context(request_value);
+   auto stream_request_value = stream_request{context, body_reader{}};
+
+   auto rejecting_root = static_file_root{files.path(), file_reads->get_executor()};
+   const auto rejected =
+       forge::asio::blocking::run(runtime, rejecting_root.serve(stream_request_value, "contained-link.bin"));
+   BOOST_TEST(rejected.head.result_int() == static_cast<unsigned>(status::forbidden));
+
+   auto following_root =
+       static_file_root{files.path(), file_reads->get_executor(), file_options{.symlinks = symlink_policy::follow}};
+   auto served = forge::asio::blocking::run(runtime, following_root.serve(stream_request_value, "contained-link.bin"));
+   BOOST_TEST(served.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_REQUIRE(static_cast<bool>(served.body));
+   const auto chunk = forge::asio::blocking::run(runtime, served.body());
+   BOOST_REQUIRE(chunk.has_value());
+   const auto served_text = std::string{reinterpret_cast<const char*>(chunk->bytes.data()), chunk->bytes.size()};
+   BOOST_TEST(served_text == "visible");
+
+   auto direct = file_response::from_path(files.path() / "contained-link.bin", file_reads->get_executor(),
+                                          file_options{.symlinks = symlink_policy::follow});
+   auto direct_stream = forge::asio::blocking::run(runtime, std::move(direct).materialize(request_value));
+   BOOST_TEST(direct_stream.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_REQUIRE(static_cast<bool>(direct_stream.body));
+   const auto direct_chunk = forge::asio::blocking::run(runtime, direct_stream.body());
+   BOOST_REQUIRE(direct_chunk.has_value());
+   const auto direct_text =
+       std::string{reinterpret_cast<const char*>(direct_chunk->bytes.data()), direct_chunk->bytes.size()};
+   BOOST_TEST(direct_text == "visible");
+}
+
+BOOST_AUTO_TEST_CASE(http_static_file_root_keeps_opened_descriptor_across_name_swap) {
+   auto files = temp_directory{};
+   files.write("stable.txt", "opened-content");
+   const auto outside = files.path() / "outside.txt";
+   {
+      auto output = std::ofstream{outside, std::ios::binary};
+      output << "outside-content";
+   }
+
+   auto runtime = forge::asio::runtime{};
+   auto file_reads = make_http_file_read_pool();
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
+   auto request_value = make_request(method::get, "/files/stable.txt");
+   auto context = make_route_context(request_value);
+   auto stream_request_value = stream_request{context, body_reader{}};
+   auto served = forge::asio::blocking::run(runtime, root.serve(stream_request_value, "stable.txt"));
+
+   std::filesystem::rename(files.path() / "stable.txt", files.path() / "replaced.txt");
+   auto symlink_error = std::error_code{};
+   std::filesystem::create_symlink(outside, files.path() / "stable.txt", symlink_error);
+
+   BOOST_REQUIRE(static_cast<bool>(served.body));
+   const auto chunk = forge::asio::blocking::run(runtime, served.body());
+   BOOST_REQUIRE(chunk.has_value());
+   const auto served_text = std::string{reinterpret_cast<const char*>(chunk->bytes.data()), chunk->bytes.size()};
+   BOOST_TEST(served_text == "opened-content");
+}
+
+BOOST_AUTO_TEST_CASE(http_static_file_root_keeps_root_descriptor_across_root_name_swap) {
+   auto files = temp_directory{};
+   auto replacement = temp_directory{};
+   files.write("visible.txt", "trusted-content");
+   replacement.write("visible.txt", "replacement-content");
+
+   auto runtime = forge::asio::runtime{};
+   auto file_reads = make_http_file_read_pool();
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
+   auto moved_root = files.path();
+   moved_root += "-moved";
+   auto rename_error = std::error_code{};
+   std::filesystem::rename(files.path(), moved_root, rename_error);
+   if (rename_error) {
+      BOOST_FAIL("failed to rename static file root");
+   }
+
+   auto symlink_error = std::error_code{};
+   std::filesystem::create_directory_symlink(replacement.path(), files.path(), symlink_error);
+   if (symlink_error) {
+      auto restore_error = std::error_code{};
+      std::filesystem::rename(moved_root, files.path(), restore_error);
+      BOOST_TEST_MESSAGE("directory symlink creation is unavailable on this host");
+      return;
+   }
+
+   auto request_value = make_request(method::get, "/files/visible.txt");
+   auto context = make_route_context(request_value);
+   auto stream_request_value = stream_request{context, body_reader{}};
+   auto served = forge::asio::blocking::run(runtime, root.serve(stream_request_value, "visible.txt"));
+
+   std::error_code cleanup_error;
+   std::filesystem::remove(files.path(), cleanup_error);
+   std::filesystem::rename(moved_root, files.path(), cleanup_error);
+
+   BOOST_TEST(served.head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_REQUIRE(static_cast<bool>(served.body));
+   const auto chunk = forge::asio::blocking::run(runtime, served.body());
+   BOOST_REQUIRE(chunk.has_value());
+   const auto served_text = std::string{reinterpret_cast<const char*>(chunk->bytes.data()), chunk->bytes.size()};
+   BOOST_TEST(served_text == "trusted-content");
+}
+
+BOOST_AUTO_TEST_CASE(http_static_file_root_rejects_fifo_without_blocking) {
+   auto files = temp_directory{};
+   const auto fifo = files.path() / "blocking.fifo";
+   BOOST_REQUIRE_EQUAL(::mkfifo(fifo.c_str(), 0600), 0);
+
+   auto runtime = forge::asio::runtime{};
+   auto file_reads = make_http_file_read_pool();
+   auto root = static_file_root{files.path(), file_reads->get_executor()};
+   auto request_value = make_request(method::get, "/files/blocking.fifo");
+   auto context = make_route_context(request_value);
+   auto stream_request_value = stream_request{context, body_reader{}};
+   const auto served = forge::asio::blocking::run(runtime, root.serve(stream_request_value, "blocking.fifo"));
+
+   BOOST_TEST(served.head.result_int() == static_cast<unsigned>(status::not_found));
+
+   auto direct = file_response::from_path(fifo, file_reads->get_executor());
+   const auto direct_response = forge::asio::blocking::run(runtime, std::move(direct).materialize(request_value));
+   BOOST_TEST(direct_response.head.result_int() == static_cast<unsigned>(status::not_found));
+}
+
+BOOST_AUTO_TEST_CASE(http_asset_mount_serves_streaming_get_head_ranges_and_cache_policy) {
+   auto files = temp_directory{};
+   std::filesystem::create_directories(files.path() / "assets");
+   files.write("index.html", "<main>console</main>");
+   files.write("assets/app.a81f2.js", "0123456789");
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto file_reads = make_http_file_read_pool();
+   auto router = forge::net::http::router{};
+   router.mount_assets(asset_mount{.path = "/admin", .root = files.path(), .index = "index.html"},
+                       file_reads->get_executor());
+   auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto client = forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   const auto index = forge::asio::blocking::run(runtime, client.async_get("/admin/"));
+   BOOST_TEST(index.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(index.body() == "<main>console</main>");
+   BOOST_TEST(index[field::content_type] == "text/html; charset=utf-8");
+   BOOST_TEST(index["Cache-Control"] == "no-cache");
+
+   const auto script = forge::asio::blocking::run(runtime, client.async_get("/admin/assets/app.a81f2.js"));
+   BOOST_TEST(script.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(script[field::content_type] == "text/javascript; charset=utf-8");
+   BOOST_TEST(script["Cache-Control"] == "public, max-age=31536000, immutable");
+
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   auto ranged = make_request(method::get, "/admin/assets/app.a81f2.js");
+   ranged.set(field::range, "bytes=2-5");
+   const auto range_response = forge::asio::blocking::run(runtime, connection.async_request(std::move(ranged)));
+   BOOST_TEST(range_response.result_int() == static_cast<unsigned>(status::partial_content));
+   BOOST_TEST(range_response.body() == "2345");
+   BOOST_TEST(range_response[field::content_range] == "bytes 2-5/10");
+
+   const auto head = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::head, "/admin/assets/app.a81f2.js")));
+   BOOST_TEST(head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(head.body().empty());
+   BOOST_TEST(head[field::content_length] == "10");
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(http_asset_mount_rejects_unsafe_paths_and_preserves_api_boundaries) {
+   auto files = temp_directory{};
+   files.write("index.html", "asset-index");
+   files.write("visible.txt", "visible");
+   const auto outside = files.path() / "outside.txt";
+   {
+      auto output = std::ofstream{outside, std::ios::binary};
+      output << "outside";
+   }
+   auto symlink_error = std::error_code{};
+   std::filesystem::create_symlink(outside, files.path() / "link.txt", symlink_error);
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto file_reads = make_http_file_read_pool();
+   auto router = forge::net::http::router{};
+   router.reserve_path_prefix("/admin-ui/v1");
+   router.get("/admin/health", [](route_context& context) -> boost::asio::awaitable<response> {
+      co_return make_text_response(context.request, status::ok, "api-route");
+   });
+   router.mount_assets(asset_mount{.path = "/admin", .root = files.path(), .index = "index.html"},
+                       file_reads->get_executor());
+   auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto client = forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   const auto fallback = forge::asio::blocking::run(runtime, client.async_get("/admin/dashboard"));
+   BOOST_TEST(fallback.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(fallback.body() == "asset-index");
+   const auto api_route = forge::asio::blocking::run(runtime, client.async_get("/admin/health"));
+   BOOST_TEST(api_route.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(api_route.body() == "api-route");
+   const auto api_miss = forge::asio::blocking::run(runtime, client.async_get("/admin-ui/v1/missing"));
+   BOOST_TEST(api_miss.result_int() == static_cast<unsigned>(status::not_found));
+
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   for (const auto& target : {"/admin/%2fsecret", "/admin/%2Fsecret", "/admin/%5csecret", "/admin/%2e%2e/secret"}) {
+      const auto rejected =
+          forge::asio::blocking::run(runtime, connection.async_request(make_request(method::get, target)));
+      const auto unsafe_path_rejected = rejected.result_int() == static_cast<unsigned>(status::bad_request) ||
+                                        rejected.result_int() == static_cast<unsigned>(status::forbidden);
+      BOOST_CHECK(unsafe_path_rejected);
+   }
+   const auto nul =
+       forge::asio::blocking::run(runtime, connection.async_request(make_request(method::get, "/admin/%00secret")));
+   const auto nul_rejected = nul.result_int() == static_cast<unsigned>(status::bad_request) ||
+                             nul.result_int() == static_cast<unsigned>(status::forbidden);
+   BOOST_CHECK(nul_rejected);
+   const auto unsupported =
+       forge::asio::blocking::run(runtime, connection.async_request(make_request(method::post, "/admin/visible.txt")));
+   BOOST_TEST(unsupported.result_int() == static_cast<unsigned>(status::method_not_allowed));
+   if (!symlink_error) {
+      const auto escaped = forge::asio::blocking::run(runtime, client.async_get("/admin/link.txt"));
+      BOOST_TEST(escaped.result_int() == static_cast<unsigned>(status::forbidden));
+   }
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+
+   auto overlap_router = forge::net::http::router{};
+   overlap_router.mount_assets(asset_mount{.path = "/admin", .root = files.path()}, file_reads->get_executor());
+   BOOST_CHECK_THROW(overlap_router.mount_assets(asset_mount{.path = "/admin/docs", .root = files.path()},
+                                                 file_reads->get_executor()),
+                     exceptions::conflict);
+   BOOST_CHECK_THROW(overlap_router.reserve_path_prefix("/"), exceptions::conflict);
+
+   auto root_api_router = forge::net::http::router{};
+   root_api_router.reserve_path_prefix("/");
+   BOOST_CHECK_THROW(
+       root_api_router.mount_assets(asset_mount{.path = "/admin", .root = files.path()}, file_reads->get_executor()),
+       exceptions::conflict);
 }
 
 BOOST_AUTO_TEST_CASE(http_upload_reader_keeps_small_upload_in_memory) {

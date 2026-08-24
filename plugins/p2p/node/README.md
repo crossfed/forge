@@ -5,12 +5,16 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 
 ## Current Support State
 
-The plugin now provides the Stage 3 production foundation: identity material is
-loaded through Crypto Secrets, peer/provider/Rendezvous state is persisted in a
-dedicated DB Store Object layer, hydration completes before listeners open and
-the low-level node owns bootstrap, automatic Identify/Identify Push, scoped
-network resources and bounded Kademlia routing state. It remains a configuration
-adapter; complete Kademlia records and autonomous topology remain Stage 4/5.
+The plugin provides the Stage 5 persistence and topology configuration surface:
+identity material is loaded through Crypto Secrets, peer/Rendezvous state and
+per-profile DHT values/providers are persisted through separate adapters in
+one dedicated DB Store Object layer, and hydration completes before listeners
+open. The low-level node owns bootstrap, automatic Identify/Identify Push,
+scoped network resources, multi-profile Kademlia routing, durable records and
+provider maintenance. It also owns the managed/static mode selection,
+watermarks and explicit Rendezvous/Forge Peer Exchange source configuration;
+all timers, queries, dials and pruning remain owned by the low-level node. The
+plugin does not contain a second network maintenance loop.
 
 Insecure memory mode remains an explicit local-test path only. Current support
 classifications live
@@ -53,21 +57,27 @@ isolated codec and interop fixtures do not promote this plugin to production.
 ## What It Provides Today
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
-- Registers and validates the private peer-state ObjectDB schema during
-  `after_initialize()`.
-- Loads certificate/private-key secrets, opens ObjectDB persistence and performs
-  bounded hydration before opening any listener.
+- Acquires the configured physical store and registers private P2P-state
+  ObjectDB models during `after_initialize()`.
+- Loads certificate/private-key secrets, validates or explicitly resets the
+  private cache schema, opens ObjectDB persistence and performs bounded
+  hydration during `startup()` before opening any listener.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
+- Maps topology watermarks, configured Rendezvous points/namespaces and Forge
+  Peer Exchange policy into the node-owned topology manager.
 - Passes bootstrap policy to the node, which owns bounded startup, reconnect
   backoff and connection-manager protection.
 - Lets application plugins publish typed APIs over a P2P protocol id.
 - Opens typed remote API handles to peers through `remote<Interface>()`.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
-`request_stop()` synchronously asks the node lifecycle to stop admission,
-listeners, bootstrap, Identify Push and sessions. `shutdown()` then awaits all
-tracked network work and peer-state flush/close before releasing DB and Secrets
-handles.
+`request_stop()` synchronously closes managed-topology, Forge Peer Exchange and
+new-session admission, then requests cancellation of bootstrap and maintenance
+work. It intentionally does not tear down established sessions. `shutdown()` is
+the completion barrier: it awaits topology workers, including best-effort
+Rendezvous unregister, then tears down sessions and flushes/closes peer state
+before releasing DB and Secrets handles. Application lifecycle code calls
+`request_stop()` to initiate shutdown and awaits `shutdown()` for cleanup.
 If peer-state close fails, the stopped node and its persistence ownership are
 retained so a subsequent `shutdown()` can retry deterministic close; the plugin
 never drops a persistence backend that still reports pending close work.
@@ -105,6 +115,27 @@ plugins:
          max-sessions: 1024
          max-protocol-handlers: 1024
          allow-insecure-test-mode: false
+         topology:
+            mode: managed
+            peers:
+               low: 128
+               target: 160
+               high: 192
+            refresh-interval-ms: 600000
+            query-timeout-ms: 10000
+            max-candidates: 256
+            max-parallel-queries: 10
+            max-parallel-dials: 4
+            retry-jitter: 0.20
+         rendezvous:
+            role: client
+            max-points: 4
+            points:
+               - endpoint: "/dns4/rendezvous.example/udp/9443/quic-v1/p2p/<peer-id>"
+                 namespaces: ["forge.content"]
+         peer-exchange:
+            enabled: true
+            max-peers: 4
          path:
             policy: direct-preferred
          relay:
@@ -121,11 +152,16 @@ authenticated peer and is recommended for production. Existing peer-less
 bootstrap endpoints remain supported; their peer is learned only after the
 authenticated connection succeeds.
 
-The named DB Store must provide an Object layer dedicated to P2P peer state.
+The named DB Store must provide an Object layer dedicated to P2P peer and DHT
+record state.
 One authoritative schema marker versions the complete private row family, so
 startup validates the format without scanning durable history. A missing marker
-in nonempty storage or a version mismatch fails startup; the v1 recovery path is
-to remove the peer cache and hydrate it again from configured bootstrap peers.
+in nonempty storage or a version mismatch fails startup. With
+`schema-policy: reset`, the v2 recovery path atomically removes the complete private P2P row
+family, including peer, Rendezvous, DHT value/provider and sequence records.
+Normal node startup hydrates peer candidates from configured bootstrap peers;
+it does not recover DHT values, local provider ownership or Rendezvous
+registrations. Products must publish or register those records again.
 Secret policies must allow
 `p2p.identity.certificate` and `p2p.identity.private-key` respectively.
 `allow-insecure-test-mode` is for local tests only. Programmatic low-level node
@@ -135,6 +171,24 @@ Plugin 2.0 removes inline certificate and private-key PEM configuration. Migrate
 each value into Crypto Secrets and replace it with `certificate-secret` or
 `private-key-secret`. This is an intentional plugin configuration break; the
 low-level `forge_net_p2p` identity options remain source-compatible.
+
+Plugin 3.0 replaces the single DHT capability/configuration surface with
+explicit `dht.profiles` and adds `peer-store.schema-policy` for the recoverable
+private cache. The local plugin API contract was `1.0` at that release; only Preview
+configuration and low-level DHT source contracts change.
+
+Plugin 4.0 adds the managed topology configuration shown above. Rendezvous
+client activity is limited to explicitly configured points and namespaces;
+Forge Peer Exchange is a Forge extension and is queried only on identified
+peers that advertise its exact protocol. Set `topology.mode: static-only` to
+disable autonomous discovery, dialing and pruning. The local plugin API
+contract was `1.0` at that release.
+
+The main node API is now `2.0` after a deliberate clean break:
+`publish_api(...)` returns a move-only `forge::api::p2p::publication`. Request
+`forge.plugins.p2p.node` major `2`, retain the handle while the route must stay
+live, and call `close()` to remove it early. Diagnostics and pubsub API
+contracts remain at `1.0`.
 
 ## Dependencies
 
@@ -153,6 +207,7 @@ low-level `forge_net_p2p` identity options remain source-compatible.
 
 ```cpp
 import forge.api.core.binding;
+import forge.api.p2p.publication;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 
@@ -160,16 +215,20 @@ class catalog_p2p_plugin final : public forge::app::plugin {
  public:
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-         {.id = {"forge.plugins.p2p.node"}, .major = 1});
+         {.id = {"forge.plugins.p2p.node"}, .major = 2});
 
       auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
+      publication_ = p2p->publish_api(
+         std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 ```
 

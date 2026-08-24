@@ -6,7 +6,7 @@
 #include <vector>
 
 import forge.chain.protocol.values;
-import forge.contract.testing.host;
+import forge.tooling.testing.host;
 
 namespace {
 
@@ -34,7 +34,7 @@ int main() {
 
    const auto code = read_bytes(ALIGNED_MULTI_INDEX_WASM);
    const auto account = protocol::make_name("alignedidx").value;
-   auto host = forge::contract::testing::host{};
+   auto host = forge::tooling::testing::host{};
    host.invoke(code, account, account, protocol::make_name("create").value);
 
    const auto row =

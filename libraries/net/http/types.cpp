@@ -18,15 +18,13 @@ namespace {
 
 std::vector<header_entry>::const_iterator find_header(const std::vector<header_entry>& headers,
                                                       std::string_view name) noexcept {
-   return std::find_if(headers.begin(), headers.end(), [&](const header_entry& entry) {
-      return header_name_equal(entry.name, name);
-   });
+   return std::find_if(headers.begin(), headers.end(),
+                       [&](const header_entry& entry) { return header_name_equal(entry.name, name); });
 }
 
 void set_header(std::vector<header_entry>& headers, std::string_view name, std::string value) {
-   headers.erase(std::remove_if(headers.begin(), headers.end(), [&](const header_entry& entry) {
-                    return header_name_equal(entry.name, name);
-                 }),
+   headers.erase(std::remove_if(headers.begin(), headers.end(),
+                                [&](const header_entry& entry) { return header_name_equal(entry.name, name); }),
                  headers.end());
    headers.push_back(header_entry{.name = std::string{name}, .text = std::move(value)});
 }
@@ -52,9 +50,8 @@ bool header_name_equal(std::string_view left, std::string_view right) noexcept {
 }
 
 std::optional<std::string_view> find_header(std::span<const header_entry> headers, std::string_view name) noexcept {
-   const auto found = std::find_if(headers.begin(), headers.end(), [&](const header_entry& entry) {
-      return header_name_equal(entry.name, name);
-   });
+   const auto found = std::find_if(headers.begin(), headers.end(),
+                                   [&](const header_entry& entry) { return header_name_equal(entry.name, name); });
    if (found == headers.end()) {
       return std::nullopt;
    }
@@ -62,9 +59,8 @@ std::optional<std::string_view> find_header(std::span<const header_entry> header
 }
 
 void set_header(std::vector<header_entry>& headers, std::string name, std::string value) {
-   headers.erase(std::remove_if(headers.begin(), headers.end(), [&](const header_entry& entry) {
-                    return header_name_equal(entry.name, name);
-                 }),
+   headers.erase(std::remove_if(headers.begin(), headers.end(),
+                                [&](const header_entry& entry) { return header_name_equal(entry.name, name); }),
                  headers.end());
    headers.push_back(header_entry{.name = std::move(name), .text = std::move(value)});
 }
@@ -101,7 +97,8 @@ const header_entry* header_iterator::operator->() const noexcept {
 
 bool operator==(const header_iterator& left, const header_iterator& right) noexcept {
    return left.value_.has_value() == right.value_.has_value() &&
-          (!left.value_.has_value() || (left.value_->name == right.value_->name && left.value_->text == right.value_->text));
+          (!left.value_.has_value() ||
+           (left.value_->name == right.value_->name && left.value_->text == right.value_->text));
 }
 
 header_iterator::header_iterator(std::optional<header_entry> value) : value_(std::move(value)) {}
@@ -134,6 +131,8 @@ std::string_view field_name(field value) noexcept {
       return "If-Modified-Since";
    case field::if_none_match:
       return "If-None-Match";
+   case field::if_range:
+      return "If-Range";
    case field::last_modified:
       return "Last-Modified";
    case field::range:
@@ -265,10 +264,9 @@ void request::erase(field name) {
 }
 
 void request::erase(std::string_view name) {
-   state_->headers.erase(std::remove_if(state_->headers.begin(), state_->headers.end(), [&](const header_entry& entry) {
-                           return header_name_equal(entry.name, name);
-                        }),
-                        state_->headers.end());
+   state_->headers.erase(std::remove_if(state_->headers.begin(), state_->headers.end(),
+                                        [&](const header_entry& entry) { return header_name_equal(entry.name, name); }),
+                         state_->headers.end());
 }
 
 header_iterator request::find(field name) const {
@@ -385,17 +383,9 @@ void response::erase(field name) {
 }
 
 void response::erase(std::string_view name) {
-   state_->headers.erase(std::remove_if(state_->headers.begin(), state_->headers.end(), [&](const header_entry& entry) {
-                           return header_name_equal(entry.name, name);
-                        }),
-                        state_->headers.end());
-}
-
-void response::set_cookie(std::string_view name, std::string_view value) {
-   auto cookie = std::string{name};
-   cookie += '=';
-   cookie += value;
-   insert("Set-Cookie", cookie);
+   state_->headers.erase(std::remove_if(state_->headers.begin(), state_->headers.end(),
+                                        [&](const header_entry& entry) { return header_name_equal(entry.name, name); }),
+                         state_->headers.end());
 }
 
 header_iterator response::find(field name) const {
@@ -470,8 +460,8 @@ const forge::net::http::response& endpoint_request::response() const noexcept {
 std::shared_ptr<endpoint_state> endpoint_state_access::make(forge::net::http::request request_value,
                                                             forge::net::http::response response_value) {
    return std::make_shared<endpoint_state>(endpoint_state{
-      .request_value = std::move(request_value),
-      .response_value = std::move(response_value),
+       .request_value = std::move(request_value),
+       .response_value = std::move(response_value),
    });
 }
 
@@ -483,7 +473,8 @@ forge::net::http::response& endpoint_state_access::response(std::shared_ptr<endp
    return state->response_value;
 }
 
-const forge::net::http::response& endpoint_state_access::response(const std::shared_ptr<endpoint_state>& state) noexcept {
+const forge::net::http::response&
+endpoint_state_access::response(const std::shared_ptr<endpoint_state>& state) noexcept {
    return state->response_value;
 }
 

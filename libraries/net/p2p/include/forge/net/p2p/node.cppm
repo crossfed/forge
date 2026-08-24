@@ -4,9 +4,12 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
@@ -15,15 +18,18 @@ export module forge.net.p2p.node;
 
 import forge.asio.runtime;
 import forge.net.p2p.dht;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.discovery;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.hole_punch;
 import forge.net.p2p.identity;
 import forge.net.p2p.identify;
+import forge.net.p2p.ipns;
 import forge.net.p2p.lifecycle;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
+import forge.net.p2p.provider_registration;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.reachability;
 import forge.net.p2p.rendezvous;
@@ -31,6 +37,7 @@ import forge.net.p2p.relay;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.net.p2p.topology;
 import forge.net.transport.limits;
 
 export namespace forge::net::p2p {
@@ -57,9 +64,9 @@ class node {
       relay::limits relay{};
       resource_manager::limits resources{};
       discovery::policy discovery{};
-      dht::options dht{};
       rendezvous::options rendezvous{};
       pubsub::options pubsub{};
+      topology::policy topology{};
    };
 
    struct options {
@@ -79,6 +86,8 @@ class node {
       bool allow_insecure_test_mode = false;
       identify::limits identify;
       lifecycle_options lifecycle;
+      std::vector<dht::profile> dht_profiles;
+      std::map<protocol_id, std::shared_ptr<dht::record_store::persistence>> dht_record_persistence;
    };
 
    struct connect_options {
@@ -139,12 +148,14 @@ class node {
    diagnostics(forge::net::p2p::diagnostics::options options = {}) const;
    [[nodiscard]] peer_store& peers() noexcept;
    [[nodiscard]] const peer_store& peers() const noexcept;
-   [[nodiscard]] dht::routing_status routing_status() const;
+   [[nodiscard]] dht::routing_status routing_status(const protocol_id& profile) const;
    [[nodiscard]] lifecycle_status lifecycle_state() const;
 
    void protect_peer(peer_id peer, std::string tag = "manual");
    [[nodiscard]] bool unprotect_peer(peer_id peer, std::string tag = "manual");
    [[nodiscard]] bool is_peer_protected(const peer_id& peer) const;
+   void tag_peer(peer_id peer, std::string tag, std::int64_t value);
+   [[nodiscard]] bool untag_peer(peer_id peer, std::string_view tag);
 
    void register_protocol_handler(protocol_id protocol, protocol_handler handler);
    [[nodiscard]] bool unregister_protocol_handler(const protocol_id& protocol);
@@ -163,9 +174,19 @@ class node {
    boost::asio::awaitable<std::vector<relay::reservation::info>> async_refresh_relay_candidates();
    boost::asio::awaitable<std::vector<discovery::result>> async_refresh_discovery();
    boost::asio::awaitable<void> async_cancel_relay(peer_id relay_peer);
-   boost::asio::awaitable<dht::query_result> async_find_peer(peer_id peer);
-   boost::asio::awaitable<void> async_provide(dht::key key);
-   boost::asio::awaitable<std::vector<dht::peer>> async_find_providers(dht::key key);
+   boost::asio::awaitable<dht::query_result> async_find_peer(protocol_id profile, peer_id peer,
+                                                             dht::query_options options = {});
+   boost::asio::awaitable<provider_registration> async_provide(protocol_id profile, dht::key key,
+                                                               dht::query_options options = {});
+   boost::asio::awaitable<std::vector<dht::peer>> async_find_providers(protocol_id profile, dht::key key,
+                                                                       dht::query_options options = {});
+   boost::asio::awaitable<dht::value_put_result> async_put_value(protocol_id profile, dht::record value,
+                                                                 dht::query_options options = {});
+   boost::asio::awaitable<dht::value_get_result> async_get_value(protocol_id profile, dht::key key,
+                                                                 dht::query_options options = {});
+   [[nodiscard]] ipns::record create_ipns_record(std::span<const std::uint8_t> value, std::uint64_t sequence,
+                                                 ipns::time_point eol, std::chrono::nanoseconds ttl,
+                                                 ipns::create_options options = {}) const;
    boost::asio::awaitable<rendezvous::register_response>
    async_rendezvous_register(peer_id rendezvous_peer, rendezvous::register_request request);
    boost::asio::awaitable<rendezvous::discover_response>
@@ -183,7 +204,9 @@ class node {
                             std::chrono::milliseconds timeout = std::chrono::milliseconds{10'000});
    boost::asio::awaitable<forge::net::p2p::stream> async_open_protocol_stream(peer_id peer, protocol_id protocol);
    boost::asio::awaitable<forge::net::p2p::stream> async_open_protocol_stream(peer_id peer, protocol_id protocol,
-                                                                       open_options options);
+                                                                              open_options options);
+   // Preview: begins graceful lifecycle shutdown without tearing down sessions.
+   void request_stop() noexcept;
    boost::asio::awaitable<void> async_stop();
    void stop();
 

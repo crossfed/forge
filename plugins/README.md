@@ -47,7 +47,7 @@ registry.register_plugin(forge::plugins::db::store::descriptor());
 
 ```cpp
 auto http = context.apis().get<forge::plugins::http::server::api>(
-   {.id = {"forge.plugins.http.server"}, .major = 1});
+   {.id = {"forge.plugins.http.server"}, .major = 2});
 
 co_await http->publish<catalog_api>();
 ```
@@ -66,7 +66,7 @@ target_link_libraries(app PRIVATE
 
 | Plugin | Target | Config section | Purpose |
 | --- | --- | --- | --- |
-| [`forge::plugins::http::server`](http/server/README.md) | `forge_plugins_http_server` | `plugins.http.server` | Runs one HTTP server and accepts typed HTTP API and middleware contributions. |
+| [`forge::plugins::http::server`](http/server/README.md) | `forge_plugins_http_server` | `plugins.http.server` | Runs one HTTP server, composes TLS from scoped Secrets material and accepts typed HTTP API and middleware contributions. |
 | [`forge::plugins::p2p::node`](p2p/node/README.md) | `forge_plugins_p2p_node` | `plugins.p2p.node` | Runs one P2P node and lets plugins publish protocols and typed remote APIs. |
 | [`forge::plugins::p2p::resolver`](p2p/resolver/README.md) | `forge_plugins_p2p_resolver` | `plugins.p2p.resolver` | Publishes and resolves peer API metadata over the P2P node. |
 | [`forge::plugins::p2p::diagnostics`](p2p/diagnostics/README.md) | `forge_plugins_p2p_diagnostics` | `plugins.p2p.diagnostics` | Exposes read-only P2P network/resource/pubsub diagnostics. |

@@ -12,22 +12,22 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
    find_package(
       Forge CONFIG REQUIRED
       COMPONENTS
-         contract_abi
-         contract_attributes
-         contract_validation
-         contract_manifest
+         tooling_abi
+         tooling_attributes
+         tooling_validation
+         tooling_manifest
    )
 endif()
 
 add_executable(abigen abigen/main.cpp)
-target_link_libraries(abigen PRIVATE Forge::forge_contract_abi)
+target_link_libraries(abigen PRIVATE Forge::forge_tooling_abi)
 
 add_library(attr_plugin MODULE attr-plugin/plugin.cpp)
 target_link_libraries(
    attr_plugin
    PRIVATE
-      Forge::forge_contract_abi
-      Forge::forge_contract_attributes
+      Forge::forge_tooling_abi
+      Forge::forge_tooling_attributes
       clang-cpp
       LLVM
 )
@@ -36,11 +36,11 @@ target_compile_definitions(attr_plugin PRIVATE ${LLVM_DEFINITIONS})
 set_target_properties(attr_plugin PROPERTIES PREFIX "" OUTPUT_NAME "attr-plugin")
 
 add_executable(contract_check contract-check/main.cpp)
-target_link_libraries(contract_check PRIVATE Forge::forge_contract_validation)
+target_link_libraries(contract_check PRIVATE Forge::forge_tooling_validation)
 set_target_properties(contract_check PROPERTIES OUTPUT_NAME "contract-check")
 
 add_executable(contract_manifest contract-manifest/main.cpp)
-target_link_libraries(contract_manifest PRIVATE Forge::forge_contract_manifest)
+target_link_libraries(contract_manifest PRIVATE Forge::forge_tooling_manifest)
 set_target_properties(contract_manifest PROPERTIES OUTPUT_NAME "contract-manifest")
 
 foreach(_target abigen attr_plugin contract_check contract_manifest)

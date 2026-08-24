@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -10,11 +12,27 @@
 
 #include "config.hxx"
 #include "lifecycle_phase.hxx"
+#include "object_dht_record_store_adapter.hxx"
 
 namespace forge::plugins::p2p::node {
 
 struct plugin::impl {
-   using route = std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>;
+   struct route_state {
+      std::atomic_bool active = true;
+   };
+
+   struct route {
+      forge::net::p2p::protocol_id protocol;
+      forge::net::p2p::node::protocol_handler handler;
+      std::shared_ptr<route_state> state;
+      std::function<void()> on_close;
+      std::uint64_t generation = 0;
+   };
+
+   struct route_ticket {
+      forge::net::p2p::protocol_id protocol;
+      std::uint64_t generation = 0;
+   };
 
    forge::net::p2p::node::options options{
        .allow_insecure_test_mode = false,
@@ -25,6 +43,7 @@ struct plugin::impl {
    };
    parsed_policy policy{};
    std::vector<route> routes;
+   std::uint64_t next_route_generation = 1;
    std::string peer_store_name;
    std::string certificate_secret;
    std::string private_key_secret;
@@ -32,6 +51,7 @@ struct plugin::impl {
    forge::plugins::crypto::secrets::api* secrets = nullptr;
    std::shared_ptr<forge::plugins::db::store::store_handle> peer_state_store;
    std::shared_ptr<forge::net::p2p::peer_store::persistence> peer_state;
+   std::vector<std::pair<forge::net::p2p::protocol_id, std::shared_ptr<object_dht_record_store_adapter>>> dht_state;
    forge::net::p2p::pubsub::options pubsub_options{};
    std::shared_ptr<forge::net::p2p::node> node;
    forge::asio::runtime* runtime = nullptr;
@@ -39,6 +59,7 @@ struct plugin::impl {
    std::atomic<lifecycle_phase> phase = lifecycle_phase::idle;
    mutable std::mutex configuration_mutex;
    bool pubsub_requested = false;
+   bool reset_incompatible_peer_state = true;
 
    [[nodiscard]] std::optional<std::vector<route>> begin_startup();
    void mark_started() noexcept;
@@ -47,7 +68,11 @@ struct plugin::impl {
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> ensure_node(const std::vector<route>& startup_routes);
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> node_snapshot() const noexcept;
    [[nodiscard]] std::shared_ptr<forge::net::p2p::node> require_node() const;
-   void add_route(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler);
+   [[nodiscard]] route_ticket add_route(forge::net::p2p::protocol_id protocol,
+                                        forge::net::p2p::node::protocol_handler handler,
+                                        std::function<void()> on_close = {});
+   void close_route(route_ticket ticket) noexcept;
+   void close_routes() noexcept;
    void enable_pubsub(forge::net::p2p::pubsub::options options);
    [[nodiscard]] forge::net::p2p::node::open_options open_options_for(remote_options value) const;
    [[nodiscard]] forge::api::transport::options api_options_for(const remote_options& value) const;

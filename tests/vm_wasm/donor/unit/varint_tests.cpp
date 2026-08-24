@@ -6,20 +6,20 @@ module;
 #include <limits>
 #include <vector>
 
-module forge.vm.wasm.backend;
+module forge.vm.wasm.interpret.backend;
 
 import :leb128;
-import forge.vm.wasm.allocator;
-import forge.vm.wasm.stack_elem;
-import forge.vm.wasm.utils;
-import forge.vm.wasm.types;
+import forge.vm.wasm.interpret.allocator;
+import forge.vm.wasm.interpret.stack_elem;
+import forge.vm.wasm.interpret.utils;
+import forge.vm.wasm.interpret.types;
 
-#define FORGE_VM_WASM_INTERNAL_TESTS
+#define FORGE_VM_WASM_INTERPRET_INTERNAL_TESTS
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE varint_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE varint_tests
 
-using namespace forge::vm::wasm;
+using namespace forge::vm::wasm::interpret;
 
 TEST_CASE("Testing varuint", "[varuint_tests]") {
    {

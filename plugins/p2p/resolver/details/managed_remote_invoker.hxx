@@ -1,5 +1,8 @@
 #pragma once
 
+#include "managed_remote_state.hxx"
+
+extern "C++" {
 namespace forge::plugins::p2p::resolver::detail {
 
 class managed_remote_invoker final : public forge::api::core::remote_invoker,
@@ -21,16 +24,18 @@ class managed_remote_invoker final : public forge::api::core::remote_invoker,
                      std::shared_ptr<forge::api::core::detail::stream_endpoint> output) override;
 
  private:
-   struct generation;
-   struct reconnect_flight;
-   struct timer_state;
-
-   [[nodiscard]] boost::asio::awaitable<std::shared_ptr<generation>> require_generation();
-   boost::asio::awaitable<void> run_connect(std::shared_ptr<reconnect_flight> flight);
-   [[nodiscard]] boost::asio::awaitable<std::shared_ptr<generation>> connect_generation();
+   [[nodiscard]] boost::asio::awaitable<std::shared_ptr<managed_remote_generation>> require_generation();
+   boost::asio::awaitable<void> run_flight(std::shared_ptr<managed_remote_reconnect_flight> flight);
+   boost::asio::awaitable<void> run_connect(std::shared_ptr<managed_remote_reconnect_flight> flight);
+   boost::asio::awaitable<void> watch_stop(std::shared_ptr<managed_remote_reconnect_flight> flight);
+   void finish_flight(const std::shared_ptr<managed_remote_reconnect_flight>& flight,
+                      std::exception_ptr error) noexcept;
+   void cancel_connect(const std::shared_ptr<managed_remote_reconnect_flight>& flight,
+                       const std::shared_ptr<managed_remote_timer_state>& timer) noexcept;
+   [[nodiscard]] boost::asio::awaitable<std::shared_ptr<managed_remote_generation>> connect_generation();
    [[nodiscard]] std::chrono::milliseconds backoff_for(std::uint32_t round) const noexcept;
-   void invalidate(const std::shared_ptr<generation>& value) noexcept;
-   void leave_flight(const std::shared_ptr<reconnect_flight>& value) noexcept;
+   void invalidate(const std::shared_ptr<managed_remote_generation>& value) noexcept;
+   void leave_flight(const std::shared_ptr<managed_remote_reconnect_flight>& value) noexcept;
    [[nodiscard]] bool stopped() const noexcept;
 
    std::weak_ptr<plugin::impl> owner_;
@@ -38,13 +43,8 @@ class managed_remote_invoker final : public forge::api::core::remote_invoker,
    forge::api::core::api_ref requested_;
    forge::api::core::descriptor descriptor_;
    managed_remote_options options_;
-   std::size_t max_waiters_ = 0;
-   mutable std::mutex mutex_;
-   std::shared_ptr<generation> current_;
-   std::shared_ptr<reconnect_flight> reconnect_;
-   std::shared_ptr<timer_state> backoff_timer_;
-   std::size_t next_peer_ = 0;
-   bool stopped_ = false;
+   std::unique_ptr<managed_remote_state> state_;
 };
 
 } // namespace forge::plugins::p2p::resolver::detail
+}

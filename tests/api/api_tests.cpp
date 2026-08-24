@@ -33,6 +33,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.core.server_supplied;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.crypto.digest.sha256;
@@ -74,13 +75,29 @@ struct chunk {
    std::string bytes;
 };
 
+struct trusted_identity {
+   std::string subject;
+};
+
+struct authorization {
+   trusted_identity identity;
+};
+
+struct server_supplied_request {
+   std::string key;
+   authorization auth;
+};
+
 } // namespace protocol
 
-BOOST_DESCRIBE_STRUCT(protocol::read_chunk, (), (ref))
-BOOST_DESCRIBE_STRUCT(protocol::read_old_request, (), (ref))
-BOOST_DESCRIBE_STRUCT(protocol::chunk, (), (bytes))
-
 namespace protocol {
+
+BOOST_DESCRIBE_STRUCT(read_chunk, (), (ref))
+BOOST_DESCRIBE_STRUCT(read_old_request, (), (ref))
+BOOST_DESCRIBE_STRUCT(chunk, (), (bytes))
+BOOST_DESCRIBE_STRUCT(trusted_identity, (), (subject))
+BOOST_DESCRIBE_STRUCT(authorization, (), (identity))
+BOOST_DESCRIBE_STRUCT(server_supplied_request, (), (key, auth))
 
 template <typename Stream> Stream& operator<<(Stream& stream, const read_chunk& value) {
    forge::raw::pack(stream, value.ref);
@@ -112,7 +129,58 @@ template <typename Stream> Stream& operator>>(Stream& stream, chunk& value) {
    return stream;
 }
 
+template <typename Stream> Stream& operator<<(Stream& stream, const trusted_identity& value) {
+   forge::raw::pack(stream, value.subject);
+   return stream;
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, trusted_identity& value) {
+   forge::raw::unpack(stream, value.subject);
+   return stream;
+}
+
+template <typename Stream> Stream& operator<<(Stream& stream, const authorization& value) {
+   forge::raw::pack(stream, value.identity);
+   return stream;
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, authorization& value) {
+   forge::raw::unpack(stream, value.identity);
+   return stream;
+}
+
+template <typename Stream> Stream& operator<<(Stream& stream, const server_supplied_request& value) {
+   forge::raw::pack(stream, value.key);
+   forge::raw::pack(stream, value.auth);
+   return stream;
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, server_supplied_request& value) {
+   forge::raw::unpack(stream, value.key);
+   forge::raw::unpack(stream, value.auth);
+   return stream;
+}
+
 } // namespace protocol
+
+template <> struct forge::api::core::server_supplied<protocol::trusted_identity> {
+   static constexpr bool required = true;
+
+   static void reset(protocol::trusted_identity& value) {
+      value.subject.clear();
+   }
+
+   static bool apply(protocol::trusted_identity& value,
+                     const forge::api::core::trusted_invocation& trusted) {
+      for (const auto& entry : trusted.metadata) {
+         if (entry.key == "forge.test.auth.subject" && !entry.value.empty()) {
+            value.subject = entry.value;
+            return true;
+         }
+      }
+      return false;
+   }
+};
 
 template <typename T> forge::api::core::bytes pack_api_payload(const T& value) {
    return forge::api::core::pack_body(value);
@@ -264,6 +332,22 @@ static_assert(forge::api::core::interface<positional_api>);
 static_assert(forge::api::core::local_interface<positional_api>);
 static_assert(forge::api::core::remote_interface<positional_api>);
 
+class server_supplied_api
+    : public forge::api::core::contract<
+         server_supplied_api,
+         forge::api::core::surface::local |
+            forge::api::core::surface::remote> {
+ public:
+   virtual ~server_supplied_api() = default;
+
+   virtual boost::asio::awaitable<protocol::chunk> unary(protocol::server_supplied_request request) = 0;
+   virtual boost::asio::awaitable<void>
+   open(protocol::server_supplied_request request, forge::api::core::stream_writer<protocol::chunk> output) = 0;
+};
+
+FORGE_API(server_supplied_api, FORGE_API_CONTRACT("server.supplied", 1, 0), FORGE_API_METHOD(unary),
+          FORGE_API_METHOD(open, request))
+
 class live_stream_api
     : public forge::api::core::contract<
          live_stream_api,
@@ -354,6 +438,23 @@ class cache_impl final : public cache_api {
       }
       co_return out;
    }
+};
+
+class server_supplied_impl final : public server_supplied_api {
+ public:
+   boost::asio::awaitable<protocol::chunk> unary(protocol::server_supplied_request request) override {
+      unary_subject = std::move(request.auth.identity.subject);
+      co_return protocol::chunk{.bytes = request.key};
+   }
+
+   boost::asio::awaitable<void>
+   open(protocol::server_supplied_request request, forge::api::core::stream_writer<protocol::chunk> output) override {
+      stream_subject = std::move(request.auth.identity.subject);
+      co_await output.async_close();
+   }
+
+   std::string unary_subject;
+   std::string stream_subject;
 };
 
 class positional_impl final : public positional_api {
@@ -644,6 +745,23 @@ class recording_positional_invoker final : public forge::api::core::remote_invok
    forge::api::core::request last;
 };
 
+class server_supplied_recording_invoker final : public forge::api::core::remote_invoker {
+ public:
+   boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+      last = std::move(value);
+      observed_subject = forge::api::core::unpack_body<protocol::server_supplied_request>(last.body).auth.identity.subject;
+      co_return forge::api::core::response{
+          .api = last.api,
+          .method = last.method,
+          .codec = last.codec,
+          .body = forge::api::core::pack_body(protocol::chunk{.bytes = "client"}),
+      };
+   }
+
+   forge::api::core::request last;
+   std::string observed_subject;
+};
+
 BOOST_AUTO_TEST_CASE(generated_api_descriptor_records_contract_and_method_metadata) {
    const auto descriptor = cache_api::describe();
 
@@ -790,6 +908,21 @@ BOOST_AUTO_TEST_CASE(generated_proxy_invokes_positional_method) {
    const auto args = forge::api::core::unpack_body<std::tuple<std::string, std::string>>(invoker->last.body);
    BOOST_TEST(std::get<0>(args) == "a");
    BOOST_TEST(std::get<1>(args) == "b");
+}
+
+BOOST_AUTO_TEST_CASE(server_supplied_client_clears_spoofed_unary_fields_before_serialization) {
+   auto runtime = forge::asio::runtime{};
+   auto invoker = std::make_shared<server_supplied_recording_invoker>();
+   auto handle = forge::api::core::handle<server_supplied_api>{
+       std::make_shared<forge::api::core::proxy<server_supplied_api>>(invoker)};
+
+   const auto response = forge::asio::blocking::run(runtime, handle->unary({
+                                                               .key = "client-key",
+                                                               .auth = {.identity = {.subject = "spoofed"}},
+                                                           }));
+
+   BOOST_TEST(response.bytes == "client");
+   BOOST_TEST(invoker->observed_subject.empty());
 }
 
 BOOST_AUTO_TEST_CASE(generated_proxy_preserves_requested_api_revision) {
@@ -1155,7 +1288,7 @@ BOOST_AUTO_TEST_CASE(api_dispatcher_strips_reserved_metadata_before_interceptors
    BOOST_TEST(*observed_public == "trace-1");
 }
 
-BOOST_AUTO_TEST_CASE(api_dispatcher_injects_trusted_metadata_after_scrub) {
+BOOST_AUTO_TEST_CASE(api_dispatcher_keeps_trusted_metadata_out_of_frame_metadata) {
    auto runtime = forge::asio::runtime{};
    auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
@@ -1196,7 +1329,146 @@ BOOST_AUTO_TEST_CASE(api_dispatcher_injects_trusted_metadata_after_scrub) {
    const auto response = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
 
    BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
-   BOOST_TEST(*observed == "trusted");
+   BOOST_TEST(*observed == "missing");
+}
+
+BOOST_AUTO_TEST_CASE(server_supplied_unary_ignores_spoofed_fields_and_applies_trusted_metadata) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<server_supplied_impl>();
+   registry.install<server_supplied_api>(server_supplied_api::describe(), implementation);
+
+   auto intercepted = std::make_shared<std::string>();
+   auto plan = forge::api::core::binding()
+                   .serve(registry)
+                   .interceptor(forge::api::core::interceptor()
+                                    .id("trusted-metadata-isolation")
+                                    .phase(forge::api::core::interceptor_phase::authorize)
+                                    .handler([intercepted](forge::api::core::call_context& context)
+                                                 -> boost::asio::awaitable<void> {
+                                       *intercepted = forge::api::core::metadata_value(
+                                                          context.meta, "forge.test.auth.subject")
+                                                          .value_or("missing");
+                                       co_return;
+                                    })
+                                    .build())
+                   .build();
+   auto dispatcher = forge::api::core::frame_dispatcher{
+       std::move(plan),
+       forge::api::core::dispatch_options{
+           .trusted_metadata = {{.key = "forge.test.auth.subject", .value = "authenticated"}},
+       },
+   };
+   auto request = forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
+       .id = {.value = 77},
+       .api = server_supplied_api::ref(),
+       .method = "unary",
+       .meta = {{.key = "forge.test.auth.subject", .value = "spoofed-metadata"}},
+       .codec = {.value = "forge.raw"},
+       .payload = pack_api_payload(protocol::server_supplied_request{
+           .key = "server-key",
+           .auth = {.identity = {.subject = "spoofed-payload"}},
+       }),
+   };
+
+   const auto response = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(*intercepted == "missing");
+   BOOST_TEST(implementation->unary_subject == "authenticated");
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "server-key");
+}
+
+BOOST_AUTO_TEST_CASE(server_supplied_unary_fails_closed_when_required_metadata_is_missing) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<server_supplied_impl>();
+   registry.install<server_supplied_api>(server_supplied_api::describe(), implementation);
+   auto dispatcher = forge::api::core::frame_dispatcher{forge::api::core::binding().serve(registry).build()};
+   auto request = forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
+       .id = {.value = 78},
+       .api = server_supplied_api::ref(),
+       .method = "unary",
+       .codec = {.value = "forge.raw"},
+       .payload = pack_api_payload(protocol::server_supplied_request{
+           .key = "server-key",
+           .auth = {.identity = {.subject = "spoofed-payload"}},
+       }),
+   };
+
+   const auto response = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::raw::unpack<forge::api::core::error_payload>(response.payload);
+   BOOST_CHECK(error.status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+   BOOST_TEST(implementation->unary_subject.empty());
+}
+
+BOOST_AUTO_TEST_CASE(server_supplied_stream_open_ignores_spoofed_fields_and_applies_trusted_metadata) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<server_supplied_impl>();
+   registry.install<server_supplied_api>(server_supplied_api::describe(), implementation);
+   auto dispatcher = forge::api::core::frame_dispatcher{
+       forge::api::core::binding().serve(registry).build(),
+       forge::api::core::dispatch_options{
+           .trusted_metadata = {{.key = "forge.test.auth.subject", .value = "authenticated-stream"}},
+       },
+   };
+   auto pipe = forge::api::core::detail::make_local_stream_pair(
+       runtime.context().get_executor(), 1024, 1, 1024);
+   auto request = forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
+       .id = {.value = 79},
+       .api = server_supplied_api::ref(),
+       .method = "open",
+       .codec = {.value = "forge.raw"},
+       .payload = pack_api_payload(protocol::server_supplied_request{
+           .key = "stream-key",
+           .auth = {.identity = {.subject = "spoofed-stream-payload"}},
+       }),
+   };
+
+   const auto response = forge::asio::blocking::run(
+       runtime, dispatcher.dispatch_stream(std::move(request), {}, std::move(pipe.writer)));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(implementation->stream_subject == "authenticated-stream");
+}
+
+BOOST_AUTO_TEST_CASE(server_supplied_stream_open_fails_closed_when_required_metadata_is_missing) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<server_supplied_impl>();
+   registry.install<server_supplied_api>(server_supplied_api::describe(), implementation);
+   auto dispatcher = forge::api::core::frame_dispatcher{forge::api::core::binding().serve(registry).build()};
+   auto pipe = forge::api::core::detail::make_local_stream_pair(
+       runtime.context().get_executor(), 1024, 1, 1024);
+   auto request = forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
+       .id = {.value = 80},
+       .api = server_supplied_api::ref(),
+       .method = "open",
+       .codec = {.value = "forge.raw"},
+       .payload = pack_api_payload(protocol::server_supplied_request{
+           .key = "stream-key",
+           .auth = {.identity = {.subject = "spoofed-stream-payload"}},
+       }),
+   };
+
+   const auto response = forge::asio::blocking::run(
+       runtime, dispatcher.dispatch_stream(std::move(request), {}, std::move(pipe.writer)));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::raw::unpack<forge::api::core::error_payload>(response.payload);
+   BOOST_CHECK(error.status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+   BOOST_TEST(implementation->stream_subject.empty());
 }
 
 BOOST_AUTO_TEST_CASE(binding_plan_exports_are_enforced_when_declared) {

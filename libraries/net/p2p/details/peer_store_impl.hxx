@@ -34,10 +34,9 @@ struct peer_store::impl {
                                                                    peer_store::discovery_update update);
    void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
    void upsert_relay_reservation(peer_store::relay_record value);
-   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer,
-                                             std::chrono::system_clock::time_point backoff_until);
-   [[nodiscard]] std::size_t prune_expired_relay_reservations(
-      const peer_id& peer, std::chrono::system_clock::time_point now);
+   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
+   [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,
+                                                              std::chrono::system_clock::time_point now);
    void learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities);
    void mark_reachability(peer_id peer, reachability::state state, std::optional<forge::net::p2p::endpoint> observed);
    void mark_success(const peer_id& peer, path::kind kind, std::chrono::milliseconds latency);
@@ -46,10 +45,9 @@ struct peer_store::impl {
                               std::chrono::milliseconds latency);
    void mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                               std::chrono::system_clock::time_point backoff_until);
-   void upsert_routing_peer(dht::peer value, discovery::source source,
+   void upsert_routing_peer(protocol_id protocol, dht::peer value, discovery::source source,
                             std::chrono::system_clock::time_point expires_at);
 
-   boost::asio::awaitable<void> async_upsert_provider(peer_store::provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
    boost::asio::awaitable<void> async_register_rendezvous(rendezvous::registration value,
                                                           std::size_t max_registrations_per_peer);
@@ -59,26 +57,39 @@ struct peer_store::impl {
    boost::asio::awaitable<void> async_flush();
    boost::asio::awaitable<void> async_close();
 
+   static boost::asio::awaitable<void> async_upsert_rendezvous_owned(std::shared_ptr<impl> self,
+                                                                     rendezvous::registration value);
+   static boost::asio::awaitable<void> async_register_rendezvous_owned(std::shared_ptr<impl> self,
+                                                                       rendezvous::registration value,
+                                                                       std::size_t max_registrations_per_peer);
+   static boost::asio::awaitable<void> async_remove_rendezvous_owned(std::shared_ptr<impl> self, peer_id peer,
+                                                                     std::string namespace_name);
+   static boost::asio::awaitable<void> async_hydrate_owned(std::shared_ptr<impl> self);
+   static boost::asio::awaitable<peer_store::prune_result>
+   async_prune_expired_owned(std::shared_ptr<impl> self, std::chrono::system_clock::time_point now);
+   static boost::asio::awaitable<void> async_flush_owned(std::shared_ptr<impl> self);
+   static boost::asio::awaitable<void> async_close_owned(std::shared_ptr<impl> self);
+
    [[nodiscard]] std::optional<peer_store::record> find(const peer_id& peer) const;
+   [[nodiscard]] std::optional<public_key> find_public_key(const peer_id& peer) const;
    [[nodiscard]] std::vector<peer_store::record> snapshot(std::size_t limit) const;
    [[nodiscard]] std::vector<peer_store::record> candidates(std::uint64_t capability, std::size_t limit) const;
-   [[nodiscard]] std::vector<peer_store::provider_record> find_providers(const dht::key& key, std::size_t limit) const;
+   [[nodiscard]] std::vector<peer_store::record> scored_candidates(std::size_t limit) const;
+   [[nodiscard]] std::vector<peer_store::record> scored_candidates(discovery::source source, std::size_t limit) const;
    [[nodiscard]] std::vector<rendezvous::registration>
    discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence, std::size_t limit) const;
    [[nodiscard]] peer_store::persistence_status persistence_state() const;
 
  private:
-   using provider_key = std::pair<std::vector<std::uint8_t>, peer_id>;
    using rendezvous_map_key = std::pair<std::string, peer_id>;
    using rendezvous_sequence_key = std::tuple<std::string, std::uint64_t, peer_id>;
    using rendezvous_global_sequence_key = std::pair<std::uint64_t, rendezvous_map_key>;
    using score_key = std::pair<double, peer_id>;
    using peer_expiry_key = std::pair<std::chrono::system_clock::time_point, peer_id>;
-   using provider_expiry_key = std::tuple<std::chrono::system_clock::time_point, std::vector<std::uint8_t>, peer_id>;
    using rendezvous_expiry_key = std::pair<std::chrono::system_clock::time_point, rendezvous_map_key>;
 
-   [[nodiscard]] peer_store::record
-   mutate_peer(const peer_id& peer, const std::function<void(peer_store::record&)>& mutation);
+   [[nodiscard]] peer_store::record mutate_peer(const peer_id& peer,
+                                                const std::function<void(peer_store::record&)>& mutation);
    void commit_peer_mutation(peer_store::record value);
    void commit_peer_mutation_locked(peer_store::record value);
    [[nodiscard]] std::optional<peer_id> store_peer_operational(peer_store::record value);
@@ -116,8 +127,7 @@ struct peer_store::impl {
    std::set<score_key> score_index_;
    std::set<peer_expiry_key> peer_expiry_index_;
    std::map<std::uint64_t, std::set<score_key>> candidates_by_capability_;
-   std::map<provider_key, peer_store::provider_record> providers_;
-   std::set<provider_expiry_key> provider_expiry_index_;
+   std::map<discovery::source, std::set<score_key>> candidates_by_source_;
    std::map<rendezvous_map_key, rendezvous::registration> rendezvous_;
    std::map<peer_id, std::size_t> rendezvous_per_peer_;
    std::map<rendezvous_sequence_key, rendezvous_map_key> rendezvous_by_sequence_;

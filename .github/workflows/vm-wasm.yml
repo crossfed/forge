@@ -25,7 +25,7 @@ jobs:
       - name: Check Forge-owned VM sources
         shell: bash
         run: |
-          find libraries/vm/wasm -type f \
+          find libraries/vm/wasm/interpret -type f \
             \( -name '*.cppm' -o -name '*.cpp' -o -name '*.hpp' \) \
             -print0 | xargs -0 clang-format-22 --dry-run --Werror
           printf '%s\0' \
@@ -35,7 +35,7 @@ jobs:
             tests/vm_wasm/test_prelude.hpp \
             tests/vm_wasm/test_support.hpp \
             tests/vm_wasm/fuzz_driver.cpp \
-            tests/package_vm_wasm_component/main.cpp \
+            tests/package_vm_wasm_interpret_component/main.cpp \
             | xargs -0 clang-format-22 --dry-run --Werror
 
   native:
@@ -94,20 +94,20 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
-            -DFORGE_VM_WASM_DONOR_ROOT="$GITHUB_WORKSPACE/build/eos-vm-donor" \
+            -DFORGE_VM_WASM_INTERPRET_DONOR_ROOT="$GITHUB_WORKSPACE/build/eos-vm-donor" \
             -DBUILD_TESTING=ON
 
       - name: Build native VM tests
         run: >-
           cmake --build build/vm-wasm --target
-          test_forge_vm_wasm_unit
-          test_forge_vm_wasm_internal
-          test_forge_vm_wasm_spec
-          test_forge_vm_wasm_spec_generator_mapping
+          test_forge_vm_wasm_interpret_unit
+          test_forge_vm_wasm_interpret_internal
+          test_forge_vm_wasm_interpret_spec
+          test_forge_vm_wasm_interpret_spec_generator_mapping
           -j 4
 
       - name: Run interpreter and JIT matrix
-        run: ctest --test-dir build/vm-wasm -L vm_wasm --output-on-failure
+        run: ctest --test-dir build/vm-wasm -L vm_wasm_interpret --output-on-failure
 
   arm64-interpreter:
     name: macos-15 / arm64 / interpreter
@@ -140,20 +140,20 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
-            -DFORGE_VM_WASM_TEST_INTERPRETER_ONLY=ON \
+            -DFORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY=ON \
             -DBUILD_TESTING=ON
 
       - name: Build interpreter tests
         run: >-
           cmake --build build/vm-wasm-arm64 --target
-          test_forge_vm_wasm_unit
-          test_forge_vm_wasm_internal
-          test_forge_vm_wasm_spec
-          test_forge_vm_wasm_spec_generator_mapping
+          test_forge_vm_wasm_interpret_unit
+          test_forge_vm_wasm_interpret_internal
+          test_forge_vm_wasm_interpret_spec
+          test_forge_vm_wasm_interpret_spec_generator_mapping
           -j 4
 
       - name: Run interpreter suite
-        run: ctest --test-dir build/vm-wasm-arm64 -L vm_wasm --output-on-failure
+        run: ctest --test-dir build/vm-wasm-arm64 -L vm_wasm_interpret --output-on-failure
 
   sanitizer:
     name: ubuntu-26.04 / interpreter / ASan+UBSan
@@ -196,15 +196,15 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
-            -DFORGE_VM_WASM_TEST_INTERPRETER_ONLY=ON \
+            -DFORGE_VM_WASM_INTERPRET_TEST_INTERPRETER_ONLY=ON \
             -DBUILD_TESTING=ON
 
       - name: Build sanitizer tests
         run: >-
           cmake --build build/vm-wasm-sanitizer --target
-          test_forge_vm_wasm_unit
-          test_forge_vm_wasm_internal
-          test_forge_vm_wasm_spec
+          test_forge_vm_wasm_interpret_unit
+          test_forge_vm_wasm_interpret_internal
+          test_forge_vm_wasm_interpret_spec
           -j 4
 
       - name: Run sanitizer tests
@@ -213,7 +213,7 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: >-
           ctest --test-dir build/vm-wasm-sanitizer
-          -R '^test_forge_vm_wasm_(unit|internal|spec)$'
+          -R '^test_forge_vm_wasm_interpret_(unit|internal|spec)$'
           --output-on-failure
 
   package:
@@ -256,7 +256,7 @@ jobs:
             -DBUILD_TESTING=ON
 
       - name: Build installed package consumer
-        run: cmake --build build/vm-wasm-package --target test_forge_package_vm_wasm_component -j 4
+        run: cmake --build build/vm-wasm-package --target test_forge_package_vm_wasm_interpret_component -j 4
 
   donor-oracle:
     name: ubuntu-24.04 / original Catch2 bodies

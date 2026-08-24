@@ -13,9 +13,9 @@ Additional embedded and vendored third-party notices are listed in
 THIRD_PARTY_LICENSES. File-level source lineage and compatibility-only donor
 boundaries are documented in PROVENANCE.md.
 
-`libraries/vm/wasm` is a derived native port of AntelopeIO/eos-vm and is
+`libraries/vm/wasm/interpret` is a derived native port of AntelopeIO/eos-vm and is
 distributed under EOS VM License V1.0. The complete license is preserved in
-`libraries/vm/wasm/LICENSE.eos-vm`.
+`libraries/vm/wasm/interpret/LICENSE.eos-vm`.
 
 `guest/libraries/runtime/details/allocator.hxx` is derived from AntelopeIO/cdt and
 EOSIO/eosio.cdt under the MIT License. Forge Contract SDK release archives also

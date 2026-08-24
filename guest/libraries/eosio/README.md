@@ -46,6 +46,6 @@ contract context, value aliases, checks and `EOSIO_DISPATCH` are compatibility
 surfaces. Header coverage grows only with donor-backed tests.
 
 The legacy consumer is compiled from the relocated SDK and executed beside the
-modern contract in the same `forge.vm.wasm` E2E suite. ABI parity tests prove
+modern contract in the same `forge.vm.wasm.interpret` E2E suite. ABI parity tests prove
 that Forge and EOSIO attribute spellings, `multi_index`, `singleton`, return
 values and committed ObjectDB state have the same observable result.

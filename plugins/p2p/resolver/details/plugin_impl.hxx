@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cache_record.hxx"
+#include "catalog_publication.hxx"
 
 namespace forge::plugins::p2p::resolver {
 
@@ -11,7 +12,9 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    forge::net::p2p::protocol_id protocol = default_protocol();
    forge::plugins::p2p::node::api* p2p = nullptr;
    forge::api::core::registry protocol_registry;
-   std::vector<entry> local;
+   std::list<detail::catalog_publication> local;
+   std::optional<forge::api::p2p::publication> resolver_publication;
+   std::uint64_t next_local_generation = 1;
    std::map<std::string, cache_record> cache;
    std::vector<std::weak_ptr<detail::managed_remote_invoker>> managed_remotes;
    bool initialized = false;
@@ -26,7 +29,11 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                                                                resolve_options options) const;
    void store_peer(const forge::net::p2p::peer_id& peer, std::vector<entry> entries);
    [[nodiscard]] std::vector<entry> local_snapshot() const;
-   void add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options);
+   [[nodiscard]] forge::api::p2p::publication add_local(forge::api::core::binding_plan plan,
+                                                         forge::net::p2p::protocol_id route,
+                                                         publish_options options);
+   void close_local(detail::catalog_ticket ticket) noexcept;
+   void close_local_publications() noexcept;
    [[nodiscard]] response query_local(const query& request) const;
    [[nodiscard]] static std::string api_key(const forge::api::core::api_id& id, std::uint16_t major);
    [[nodiscard]] entry project_descriptor(const forge::api::core::descriptor& descriptor,

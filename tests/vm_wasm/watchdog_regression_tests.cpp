@@ -5,11 +5,11 @@
 #include <functional>
 #include <utility>
 
-import forge.vm.wasm.backend;
+import forge.vm.wasm.interpret.backend;
 
 #include "test_support.hpp"
 
-#define FORGE_VM_WASM_TEST_FILE watchdog_regression_tests
+#define FORGE_VM_WASM_INTERPRET_TEST_FILE watchdog_regression_tests
 
 namespace {
 class expires_on_guard_destruction {
@@ -33,7 +33,7 @@ class expires_on_guard_destruction {
 
 TEST_CASE("expired watchdog runs callback before guard destruction", "[watchdog_expiration]") {
    auto expired = std::atomic_bool{false};
-   auto timer = forge::vm::wasm::watchdog{std::chrono::milliseconds{0}};
+   auto timer = forge::vm::wasm::interpret::watchdog{std::chrono::milliseconds{0}};
 
    {
       auto guard = timer.scoped_run([&expired] { expired = true; });
@@ -43,7 +43,7 @@ TEST_CASE("expired watchdog runs callback before guard destruction", "[watchdog_
 }
 
 TEST_CASE("timed run reports expiry triggered during guard destruction", "[watchdog_expiration]") {
-   namespace wasm = forge::vm::wasm;
+   namespace wasm = forge::vm::wasm::interpret;
    auto code = wasm::wasm_code{
        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
        0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // one function type

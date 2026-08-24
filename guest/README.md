@@ -1,7 +1,7 @@
 # Forge Contract SDK
 
 Forge Contract SDK is the standalone C++23 toolchain for building smart
-contracts executed by `forge.vm.wasm`. It compiles contracts for freestanding
+contracts executed by `forge.vm.wasm.interpret`. It compiles contracts for freestanding
 `wasm32`, generates Spring-compatible ABI data and a dispatcher, validates the
 finished WebAssembly module, and records the complete build identity in a
 sidecar manifest.
@@ -9,7 +9,7 @@ sidecar manifest.
 The SDK is separate from the normal Forge host build. Configuring Forge does
 not download LLVM, build a guest sysroot, or compile contract tools.
 
-Reusable host services live in optional `libraries/contract/*` package
+Reusable host services live in optional `libraries/tooling/*` package
 components. The command programs in `tools/` are thin adapters over those
 libraries; guest code and the SDK assembly remain under `guest/`.
 
@@ -423,7 +423,7 @@ primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
 from that registry without a second declaration list. The shipped interface
 defines signatures only. The optional installed
-`Forge::forge_contract_testing` target registers all 152 functions directly
+`Forge::forge_tooling_testing` target registers all 152 functions directly
 from the same registry. It executes the database family against
 `forge.db.object`, uses Forge crypto for contract-visible primitives, and
 supplies deterministic state for the remaining capability families. This is
@@ -441,7 +441,7 @@ The declarative registry generates guest declarations and the compatibility
 manifest consumed by `contract-check`. Validation rejects unknown or
 wrongly typed imports, WASI, unsupported WebAssembly features, malformed ABI,
 malformed modules and a missing `apply` export. Structural validation uses
-`forge.vm.wasm`, so the build and node execution surfaces share one parser and
+`forge.vm.wasm.interpret`, so the build and node execution surfaces share one parser and
 validation model.
 
 ## Build Manifest
@@ -514,7 +514,7 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
 - Blockchain controller bindings and deployment are outside this vertical
-  block. `Forge::forge_contract_testing` is an installed deterministic VM and
+  block. `Forge::forge_tooling_testing` is an installed deterministic VM and
   ObjectDB test host, not a production blockchain controller.
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted

@@ -16,7 +16,7 @@ fake public module because the external C ABI comes from generated sysroot
 headers.
 
 Allocator fragmentation, alignment, reuse, growth and exhaustion are exercised
-by guest contracts and then executed through `forge.vm.wasm`. Oversized
+by guest contracts and then executed through `forge.vm.wasm.interpret`. Oversized
 requests and arithmetic overflow fail without changing existing allocations.
 Aligned allocations are identified by allocator-owned block metadata; bytes in
 ordinary allocation headers cannot redirect `free` or `realloc`.

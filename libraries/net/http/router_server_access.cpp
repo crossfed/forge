@@ -37,6 +37,15 @@ bool detail::router_server_access::reject_without_body(const router& router_valu
       output = make_text_response(context.request, status::upgrade_required, "websocket upgrade required");
       return true;
    }
+   for (const auto& mount : router_value.asset_mounts_) {
+      if (mount.serves(context.request.method(), context.parsed_target.path)) {
+         return false;
+      }
+      if (mount.contains(context.parsed_target.path)) {
+         output = make_text_response(context.request, status::method_not_allowed, "method not allowed");
+         return true;
+      }
+   }
    output = make_text_response(context.request, status::not_found, "not found");
    return true;
 }

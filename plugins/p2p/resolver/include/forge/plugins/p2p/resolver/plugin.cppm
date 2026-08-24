@@ -24,9 +24,16 @@ import forge.config.core.component;
 import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.types;
 
+extern "C++" {
 namespace forge::plugins::p2p::resolver::detail {
 
 class managed_remote_invoker;
+
+} // namespace forge::plugins::p2p::resolver::detail
+}
+
+namespace forge::plugins::p2p::resolver::detail {
+
 class resolver_protocol;
 
 } // namespace forge::plugins::p2p::resolver::detail

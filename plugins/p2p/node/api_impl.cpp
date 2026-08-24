@@ -20,6 +20,8 @@ import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.asio.task;
 import forge.api.p2p.binding;
+import forge.api.p2p.publication;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
@@ -60,22 +62,36 @@ info plugin::api_impl::network_info() const {
    };
 }
 
-void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol) {
-   publish_api(std::move(plan), std::move(protocol), impl_->api_options);
+forge::api::p2p::publication plugin::api_impl::publish_api(forge::api::core::binding_plan plan,
+                                                            forge::net::p2p::protocol_id protocol) {
+   return publish_api(std::move(plan), std::move(protocol), impl_->api_options);
 }
 
-void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                                   forge::api::transport::options options) {
+forge::api::p2p::publication
+plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+                              forge::api::transport::options options) {
    options.max_item_size = std::min(options.max_item_size, options.max_frame_size);
    auto binding =
        forge::api::p2p::api().use(std::move(plan)).protocol_id(protocol).session_options(std::move(options)).build();
-   impl_->add_route(binding.protocol(), binding.handler());
+   auto api_publication = std::make_shared<forge::api::p2p::publication>(binding.publication_handle());
+   auto ticket = std::make_shared<plugin::impl::route_ticket>();
+   auto handle = forge::api::p2p::detail::publication_access::make([owner = std::weak_ptr<plugin::impl>{impl_}, ticket] {
+      if (const auto current = owner.lock()) {
+         current->close_route(*ticket);
+      }
+   });
+   const auto close_handle = forge::api::p2p::detail::publication_access::close_callback(handle);
+   *ticket = impl_->add_route(binding.protocol(), binding.handler(), [api_publication, close_handle] {
+      api_publication->close();
+      close_handle();
+   });
+   return handle;
 }
 
 void plugin::api_impl::publish_protocol(forge::net::p2p::protocol_id protocol,
                                         forge::net::p2p::node::protocol_handler handler) {
    auto binding = forge::api::p2p::route().protocol_id(std::move(protocol)).handler(std::move(handler)).build();
-   impl_->add_route(binding.protocol(), binding.handler());
+   static_cast<void>(impl_->add_route(binding.protocol(), binding.handler()));
 }
 
 boost::asio::awaitable<forge::api::transport::connection>

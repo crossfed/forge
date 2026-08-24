@@ -15,6 +15,7 @@ import forge.api.core.descriptor;
 import forge.api.core.handle;
 import forge.api.core.binding;
 import forge.api.core.registry;
+import forge.api.core.server_supplied;
 import forge.api.core.server_stream_call;
 import forge.api.core.stream_reader;
 import forge.api.core.stream_writer;
@@ -31,6 +32,25 @@ using package_client_call =
 using package_bidirectional_call =
    forge::api::core::bidirectional_stream_call<std::string, std::string>;
 
+struct package_server_value {
+   std::string value;
+};
+
+template <>
+struct forge::api::core::server_supplied<package_server_value> {
+   static constexpr bool required = true;
+
+   static void reset(package_server_value& value) {
+      value.value.clear();
+   }
+
+   static bool apply(package_server_value& value,
+                     const forge::api::core::trusted_invocation&) {
+      value.value = "trusted";
+      return true;
+   }
+};
+
 static_assert(std::movable<package_writer> &&
               !std::copy_constructible<package_writer>);
 static_assert(std::movable<package_reader> &&
@@ -43,7 +63,6 @@ static_assert(std::movable<package_client_call> &&
               !std::copy_constructible<package_client_call>);
 static_assert(std::movable<package_bidirectional_call> &&
               !std::copy_constructible<package_bidirectional_call>);
-
 class local_request {
  public:
    explicit local_request(std::string value) : value_(std::make_unique<std::string>(std::move(value))) {}

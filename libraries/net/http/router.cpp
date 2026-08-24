@@ -4,7 +4,9 @@ module;
 #include <algorithm>
 #include <coroutine>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -24,7 +26,9 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.asio.compute;
 import forge.net.http.exceptions;
+import forge.net.http.assets;
 import forge.net.http.middleware;
 import forge.net.http.stream;
 import forge.net.http.target;
@@ -233,6 +237,21 @@ middleware_list matching_middlewares(const std::vector<Entry>& middlewares, cons
    return result;
 }
 
+[[nodiscard]] bool path_prefix_matches(std::string_view path, std::string_view prefix) noexcept {
+   return prefix == "/" || path == prefix ||
+          (path.size() > prefix.size() && path.starts_with(prefix) && path[prefix.size()] == '/');
+}
+
+[[nodiscard]] bool reserved_path_matches(const std::vector<std::string>& prefixes,
+                                         const target& parsed_target) noexcept {
+   return std::ranges::any_of(prefixes,
+                              [&](const auto& prefix) { return path_prefix_matches(parsed_target.path, prefix); });
+}
+
+[[nodiscard]] bool asset_mounts_overlap(std::string_view left, std::string_view right) noexcept {
+   return path_prefix_matches(left, right) || path_prefix_matches(right, left);
+}
+
 } // namespace
 
 void router::use(middleware handler) {
@@ -343,6 +362,41 @@ void router::websocket(std::string path, websocket_route_handler handler) {
    });
 }
 
+void router::mount_assets(asset_mount value, forge::asio::compute::executor read_executor) {
+   mount_assets(asset_bundle{std::move(value), std::move(read_executor)});
+}
+
+void router::mount_assets(asset_bundle bundle) {
+   if (std::ranges::any_of(reserved_path_prefixes_,
+                           [&](const auto& prefix) { return asset_mounts_overlap(prefix, bundle.path()); })) {
+      throw exceptions::conflict{"HTTP asset mount overlaps a reserved API path prefix"};
+   }
+   for (const auto& existing : asset_mounts_) {
+      if (asset_mounts_overlap(existing.path(), bundle.path())) {
+         throw exceptions::conflict{"HTTP asset mounts must not overlap"};
+      }
+   }
+   asset_mounts_.push_back(std::move(bundle));
+}
+
+void router::reserve_path_prefix(std::string path) {
+   const auto parsed = parse_target(path);
+   if (!parsed.query.empty()) {
+      throw exceptions::bad_request{"reserved HTTP path prefix must not contain a query"};
+   }
+   auto prefix = parsed.path;
+   while (prefix.size() > 1U && prefix.ends_with('/')) {
+      prefix.pop_back();
+   }
+   if (std::ranges::any_of(asset_mounts_,
+                           [&](const auto& mount) { return asset_mounts_overlap(prefix, mount.path()); })) {
+      throw exceptions::conflict{"reserved HTTP path prefix overlaps an asset mount"};
+   }
+   if (!std::ranges::contains(reserved_path_prefixes_, prefix)) {
+      reserved_path_prefixes_.push_back(std::move(prefix));
+   }
+}
+
 boost::asio::awaitable<response> router::handle(route_context& context) const {
    try {
       auto params = std::unordered_map<std::string, std::string>{};
@@ -370,6 +424,13 @@ boost::asio::awaitable<response> router::handle(route_context& context) const {
       if (path_exists(websocket_routes_, context.parsed_target)) {
          co_return make_text_response(context.request, status::upgrade_required, "websocket upgrade required");
       }
+      if (reserved_path_matches(reserved_path_prefixes_, context.parsed_target)) {
+         co_return make_text_response(context.request, status::not_found, "not found");
+      }
+      if (std::ranges::any_of(asset_mounts_,
+                              [&](const auto& mount) { return mount.contains(context.parsed_target.path); })) {
+         co_return make_text_response(context.request, status::method_not_allowed, "method not allowed");
+      }
       co_return make_text_response(context.request, status::not_found, "not found");
    } catch (const forge::exceptions::base& error) {
       co_return make_exception_response(context.request, error);
@@ -391,17 +452,54 @@ boost::asio::awaitable<response> router::handle(route_context& context) const {
 }
 
 bool router::can_handle_stream(route_context& context) const {
-   for (const auto& route : stream_routes_) {
-      if (route.verb == context.request.method() && match_path(route, context.parsed_target, nullptr)) {
-         return true;
-      }
+   if (method_path_exists(routes_, context.request.method(), context.parsed_target)) {
+      return false;
    }
-   return false;
+   if (method_path_exists(stream_routes_, context.request.method(), context.parsed_target)) {
+      return true;
+   }
+   if (path_exists(routes_, context.parsed_target) || path_exists(stream_routes_, context.parsed_target) ||
+       path_exists(websocket_routes_, context.parsed_target) ||
+       reserved_path_matches(reserved_path_prefixes_, context.parsed_target)) {
+      return false;
+   }
+   return std::ranges::any_of(asset_mounts_, [&](const auto& mount) {
+      return mount.serves(context.request.method(), context.parsed_target.path);
+   });
 }
 
 boost::asio::awaitable<stream_response> router::handle_stream(stream_request& request) const {
    auto& context = request.context;
    try {
+      auto run_stream = [this, &context](auto&& handler) -> boost::asio::awaitable<stream_response> {
+         auto result = std::optional<stream_response>{};
+         auto framing = stream_transfer_framing{};
+         auto stream_state = stream_pass_through_state{};
+         auto head =
+             co_await run_middleware_chain(matching_middlewares(middlewares_, context.parsed_target), context,
+                                           [handler = std::forward<decltype(handler)>(handler), &result, &framing,
+                                            &stream_state](route_context&) mutable -> boost::asio::awaitable<response> {
+                                              result = co_await handler();
+                                              framing = capture_stream_transfer_framing(result->head);
+                                              stream_state = mark_stream_pass_through(result->head);
+                                              co_return std::move(result->head);
+                                           });
+         if (!result.has_value()) {
+            clear_stream_pass_through(head);
+            co_return stream_response::buffered(std::move(head));
+         }
+         const auto preserve_stream_body =
+             static_cast<bool>(result->body) && is_stream_pass_through(head, stream_state) && head.body().empty();
+         clear_stream_pass_through(head);
+         if (!preserve_stream_body) {
+            co_return stream_response::buffered(std::move(head));
+         }
+         if (result->body) {
+            restore_stream_transfer_framing(head, framing);
+         }
+         result->head = std::move(head);
+         co_return std::move(*result);
+      };
       auto params = std::unordered_map<std::string, std::string>{};
       for (const auto prefer_parameterized : {false, true}) {
          for (const auto& route : stream_routes_) {
@@ -413,37 +511,29 @@ boost::asio::awaitable<stream_response> router::handle_stream(stream_request& re
             }
 
             context.route_params = std::move(params);
-            auto result = std::optional<stream_response>{};
-            auto framing = stream_transfer_framing{};
-            auto stream_state = stream_pass_through_state{};
-            auto head =
-                co_await run_middleware_chain(matching_middlewares(middlewares_, context.parsed_target), context,
-                                              [&request, &route, &result, &framing,
-                                               &stream_state](route_context&) -> boost::asio::awaitable<response> {
-                                                 result = co_await route.handler(request);
-                                                 framing = capture_stream_transfer_framing(result->head);
-                                                 stream_state = mark_stream_pass_through(result->head);
-                                                 co_return std::move(result->head);
-                                              });
-            if (!result.has_value()) {
-               clear_stream_pass_through(head);
-               co_return stream_response::buffered(std::move(head));
-            }
-            const auto preserve_stream_body =
-                static_cast<bool>(result->body) && is_stream_pass_through(head, stream_state) && head.body().empty();
-            clear_stream_pass_through(head);
-            if (!preserve_stream_body) {
-               co_return stream_response::buffered(std::move(head));
-            }
-            if (result->body) {
-               restore_stream_transfer_framing(head, framing);
-            }
-            result->head = std::move(head);
-            co_return std::move(*result);
+            co_return co_await run_stream([&route, &request]() -> boost::asio::awaitable<stream_response> {
+               co_return co_await route.handler(request);
+            });
          }
       }
 
+      if (path_exists(routes_, context.parsed_target) || path_exists(websocket_routes_, context.parsed_target) ||
+          reserved_path_matches(reserved_path_prefixes_, context.parsed_target)) {
+         co_return stream_response::buffered(make_text_response(context.request, status::not_found, "not found"));
+      }
       if (path_exists(stream_routes_, context.parsed_target)) {
+         co_return stream_response::buffered(
+             make_text_response(context.request, status::method_not_allowed, "method not allowed"));
+      }
+      for (const auto& mount : asset_mounts_) {
+         if (mount.serves(context.request.method(), context.parsed_target.path)) {
+            co_return co_await run_stream([&mount, &request]() -> boost::asio::awaitable<stream_response> {
+               co_return co_await mount.serve(request);
+            });
+         }
+      }
+      if (std::ranges::any_of(asset_mounts_,
+                              [&](const auto& mount) { return mount.contains(context.parsed_target.path); })) {
          co_return stream_response::buffered(
              make_text_response(context.request, status::method_not_allowed, "method not allowed"));
       }
