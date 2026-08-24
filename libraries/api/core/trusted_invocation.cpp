@@ -2,6 +2,7 @@ module;
 
 #include <memory>
 #include <typeindex>
+#include <unordered_map>
 #include <utility>
 
 module forge.api.core.trusted_invocation;

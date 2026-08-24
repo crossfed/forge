@@ -1,9 +1,5 @@
 #pragma once
 
-#include <memory>
-#include <typeindex>
-#include <unordered_map>
-
 namespace forge::api::core {
 
 struct trusted_invocation::state final {
