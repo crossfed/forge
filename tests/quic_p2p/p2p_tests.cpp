@@ -147,7 +147,8 @@ class live_api : public forge::api::core::contract<live_api, forge::api::core::s
 
 } // namespace p2p_live_types
 
-FORGE_API(::p2p_live_types::live_api, FORGE_API_CONTRACT("test.p2p.live", 1, 0), FORGE_API_METHOD(exchange))
+FORGE_API(::p2p_live_types::live_api, FORGE_API_CONTRACT("test.p2p.live", 1, 0),
+          FORGE_API_METHOD(exchange, authenticated))
 
 #include "../../libraries/net/p2p/details/session_lifecycle.hxx"
 #include "../../libraries/net/p2p/details/libp2p_tls.hxx"
