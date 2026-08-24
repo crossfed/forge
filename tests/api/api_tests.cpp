@@ -306,11 +306,11 @@ class move_only_api : public forge::api::core::contract<move_only_api, forge::ap
 
    virtual boost::asio::awaitable<protocol::chunk> unary(protocol::move_only_request request) = 0;
    virtual boost::asio::awaitable<void>
-   server_stream(protocol::move_only_request request, forge::api::core::stream_writer<protocol::chunk> output) = 0;
+   stream_values(protocol::move_only_request request, forge::api::core::stream_writer<protocol::chunk> output) = 0;
 };
 
 FORGE_API(move_only_api, FORGE_API_CONTRACT("move.only", 1, 0), FORGE_API_METHOD(unary),
-          FORGE_API_METHOD(server_stream))
+          FORGE_API_METHOD(stream_values))
 
 class local_only_api : public forge::api::core::contract<local_only_api> {
  public:
@@ -2079,12 +2079,12 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
 
    auto stream_descriptor = move_only_api::describe();
    auto stream_method = std::ranges::find_if(
-      stream_descriptor.methods, [](const auto& value) { return value.name == "server_stream"; });
+      stream_descriptor.methods, [](const auto& value) { return value.name == "stream_values"; });
    BOOST_REQUIRE(stream_method != stream_descriptor.methods.end());
    stream_method->request_encoder = {};
    stream_method->server_fields = {};
    auto fixed_arguments = std::tuple{protocol::move_only_request{"legacy-stream"}};
-   const auto stream_wire = forge::api::core::detail::encode_fixed_proxy_arguments<&move_only_api::server_stream>(
+   const auto stream_wire = forge::api::core::detail::encode_fixed_proxy_arguments<&move_only_api::stream_values>(
       *stream_method, fixed_arguments, std::make_index_sequence<1>{});
    BOOST_TEST(*forge::api::core::unpack_body<protocol::move_only_request>(stream_wire).value == "legacy-stream");
 }
@@ -2102,7 +2102,7 @@ BOOST_AUTO_TEST_CASE(remote_proxy_encodes_move_only_unary_and_stream_fixed_argum
    auto stream_output = forge::api::core::detail::make_local_stream_pair(
       runtime.context().get_executor(), 4096, 2, 8192);
    auto output = forge::api::core::detail::writer_access::make<protocol::chunk>(stream_output.writer);
-   forge::asio::blocking::run(runtime, proxy->server_stream(protocol::move_only_request{"stream"}, std::move(output)));
+   forge::asio::blocking::run(runtime, proxy->stream_values(protocol::move_only_request{"stream"}, std::move(output)));
    BOOST_TEST(remote->stream == "stream");
 }
 
