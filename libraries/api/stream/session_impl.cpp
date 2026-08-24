@@ -114,17 +114,15 @@ session::impl::impl(forge::net::transport::stream stream_value, options settings
 }
 
 session::impl::impl(forge::net::transport::stream stream_value, forge::api::core::binding_plan plan_value,
-                    options settings_value, forge::api::core::metadata trusted_metadata)
+                    options settings_value, forge::api::core::dispatch_options dispatch_options)
     : stream{std::move(stream_value)}, settings{std::move(settings_value)}, plan{std::move(plan_value)} {
    validate_options();
    next_call_id = std::uint64_t{1} << 63U;
    next_remote_call_id = 1;
-   dispatcher.emplace(*plan, forge::api::core::dispatch_options{
-                                 .codec = settings.codec,
-                                 .max_inflight = settings.max_inflight,
-                                 .deadline = settings.deadline,
-                                 .trusted_metadata = std::move(trusted_metadata),
-                             });
+   dispatch_options.codec = settings.codec;
+   dispatch_options.max_inflight = settings.max_inflight;
+   dispatch_options.deadline = settings.deadline;
+   dispatcher.emplace(*plan, std::move(dispatch_options));
 }
 
 bool session::impl::valid() const noexcept {

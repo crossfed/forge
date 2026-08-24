@@ -15,5 +15,7 @@ boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, 
                                           options value = {});
 boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
                                           forge::api::core::metadata trusted_metadata);
+boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
+                                          forge::api::core::dispatch_options dispatch);
 
 } // namespace forge::api::stream

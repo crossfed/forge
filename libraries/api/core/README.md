@@ -41,6 +41,10 @@ diagnostic context.
 - `forge.api.core.binding` — binding plan and protocol-neutral interceptors.
 - `forge.api.core.dispatcher` — shared API frame dispatcher for stream-oriented
   bindings.
+- `forge.api.core.trusted_invocation` — immutable, non-wire values established
+  by the server-side binding for one invocation.
+- `forge.api.core.server_supplied` — opt-in typed request-field reset and
+  server-side trusted-value application.
 - `forge.api.core.exceptions` — core typed exceptions such as `method_not_found`,
   `incompatible_version` and `remote_internal`.
 
@@ -309,6 +313,28 @@ try {
 Unknown remote identities become `forge::api::core::exceptions::remote_internal` with
 the remote category/code preserved as redacted-safe context.
 
+## Trusted Invocation
+
+`trusted_invocation` carries immutable server authority by exact C++ type. It
+is deliberately non-serializable and is distinct from frame metadata: metadata
+continues through the existing boundary and interceptor path, while trusted
+values are available only when dispatch enriches typed fixed request arguments.
+
+Specialize `server_supplied<T>` with `required`, `reset(T&)` and
+`apply(T&, const trusted_invocation&)`. Generated remote calls reset only their
+owned wire copies. Contextual server dispatch decodes fixed arguments once,
+resets them again, applies trusted values, and returns
+`server_supplied_unavailable` before the handler when a required value is
+missing. Traversal is exact-specialization first, then fixed tuple-like values
+and Boost.Describe structs; it does not implicitly traverse optionals, ranges,
+variants or pointers. Stream items are never enriched.
+
+The ordinary dispatch and legacy descriptor invokers remain unchanged: they do
+not require trusted values and continue to serve existing APIs. Trusted metadata
+is still available to interceptors for compatibility, but it never creates typed
+authority. Core does not name or depend on a transport or P2P identity type;
+transport adapters own the conversion from their authenticated connection state.
+
 ## Risks And Anti-Patterns
 
 - Do not branch on exception message strings. Use typed exceptions or
@@ -323,5 +349,5 @@ the remote category/code preserved as redacted-safe context.
 ## Tests
 
 `test_forge_api_core` covers descriptor validation, local registry/view lookup, raw
-frame dispatch, shared error payload serialization, declared typed exception
-projection and typed remote exception restoration.
+frame dispatch, trusted invocation enrichment, shared error payload serialization,
+declared typed exception projection and typed remote exception restoration.

@@ -12,15 +12,25 @@ boost::asio::awaitable<void> serve_stream(
    forge::net::transport::stream stream,
    forge::api::core::binding_plan plan, options value) {
    co_await serve_stream(std::move(stream), std::move(plan), std::move(value),
-                         {});
+                         forge::api::core::dispatch_options{});
 }
 
 boost::asio::awaitable<void> serve_stream(
    forge::net::transport::stream stream,
    forge::api::core::binding_plan plan, options value,
    forge::api::core::metadata trusted_metadata) {
+   co_await serve_stream(std::move(stream), std::move(plan), std::move(value),
+                         forge::api::core::dispatch_options{
+                            .trusted_metadata = std::move(trusted_metadata),
+                         });
+}
+
+boost::asio::awaitable<void> serve_stream(
+   forge::net::transport::stream stream,
+   forge::api::core::binding_plan plan, options value,
+   forge::api::core::dispatch_options dispatch) {
    auto live = session{std::move(stream), std::move(plan), std::move(value),
-                       std::move(trusted_metadata)};
+                       std::move(dispatch)};
    co_await live.async_serve();
 }
 

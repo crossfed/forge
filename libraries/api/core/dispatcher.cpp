@@ -74,7 +74,10 @@ boost::asio::awaitable<frame> frame_dispatcher::dispatch(frame value) {
    }
    validate_request(value, impl_->options);
    apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   co_return co_await impl_->plan.dispatch(std::move(value));
+   if (!impl_->options.trusted.has_value()) {
+      co_return co_await impl_->plan.dispatch(std::move(value));
+   }
+   co_return co_await impl_->plan.dispatch_contextual(std::move(value), *impl_->options.trusted);
 }
 
 boost::asio::awaitable<frame>
@@ -87,8 +90,11 @@ frame_dispatcher::dispatch_stream(
    }
    validate_request(value, impl_->options);
    apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   co_return co_await impl_->plan.dispatch_stream(
-      std::move(value), std::move(input), std::move(output));
+   if (!impl_->options.trusted.has_value()) {
+      co_return co_await impl_->plan.dispatch_stream(std::move(value), std::move(input), std::move(output));
+   }
+   co_return co_await impl_->plan.dispatch_stream_contextual(
+      std::move(value), std::move(input), std::move(output), *impl_->options.trusted);
 }
 
 const dispatch_options& frame_dispatcher::options() const noexcept {

@@ -76,6 +76,10 @@ import forge.api.core.binding;
 import forge.api.core.connection;
 import forge.api.core.duplex_stream;
 import forge.api.core.registry;
+import forge.api.core.server_supplied;
+import forge.api.core.trusted_invocation;
+import forge.api.core.types;
+import forge.api.p2p.authenticated_peer;
 import forge.api.p2p.binding;
 import forge.api.transport.connection;
 import forge.crypto.asymmetric;
@@ -136,7 +140,9 @@ class live_api : public forge::api::core::contract<live_api, forge::api::core::s
  public:
    virtual ~live_api() = default;
 
-   virtual boost::asio::awaitable<void> exchange(forge::api::core::duplex_stream<std::uint32_t, std::uint32_t>) = 0;
+   virtual boost::asio::awaitable<void>
+   exchange(forge::api::p2p::authenticated_peer,
+            forge::api::core::duplex_stream<std::uint32_t, std::uint32_t>) = 0;
 };
 
 } // namespace p2p_live_types
@@ -190,12 +196,16 @@ void cancel_timer_noexcept(const std::shared_ptr<boost::asio::steady_timer>& tim
 class live_impl final : public live_api {
  public:
    boost::asio::awaitable<void>
-   exchange(forge::api::core::duplex_stream<std::uint32_t, std::uint32_t> stream) override {
+   exchange(forge::api::p2p::authenticated_peer authenticated,
+            forge::api::core::duplex_stream<std::uint32_t, std::uint32_t> stream) override {
+      caller = std::move(authenticated.id);
       while (const auto value = co_await stream.async_read()) {
          co_await stream.async_write(*value * 2U);
       }
       co_await stream.async_close();
    }
+
+   peer_id caller;
 };
 
 struct product_announce {
@@ -886,7 +896,8 @@ void verify_dht_server(forge::asio::runtime& runtime, node& client, const node& 
 
 boost::asio::awaitable<void> exercise_live_api(forge::api::transport::connection& connection) {
    auto remote = co_await connection.get_remote_api<live_api>();
-   auto call = co_await remote.async_open<&live_api::exchange>();
+   auto call = co_await remote.async_open<&live_api::exchange>(
+      forge::api::p2p::authenticated_peer{.id = peer(244)});
    co_await call.async_write(3U);
    auto first = co_await call.async_read();
    BOOST_REQUIRE(first.has_value());
@@ -931,6 +942,7 @@ void run_live_api_over(endpoint::protocol_kind transport) {
                                                                              node::open_options{.allow_relay = false}));
    auto connection = forge::api::transport::connection{std::move(stream).into_transport_stream(), binding.options()};
    forge::asio::blocking::run(runtime, exercise_live_api(connection));
+   BOOST_TEST(implementation->caller.value == client.local_peer().value);
 
    const auto diagnostics = client.diagnostics();
    const auto found = std::ranges::find_if(diagnostics.sessions, [&](const auto& value) {
@@ -8821,6 +8833,27 @@ BOOST_AUTO_TEST_CASE(p2p_api_wire_v2_duplex_streams_over_direct_quic) {
 
 BOOST_AUTO_TEST_CASE(p2p_api_wire_v2_duplex_streams_over_tcp_yamux) {
    run_live_api_over(endpoint::protocol_kind::tcp);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
+   const auto authenticated = peer(243);
+   const auto spoofed = peer(244);
+   const auto legacy_metadata = forge::api::core::metadata{
+      forge::api::core::metadata_entry{
+         .key = "forge.p2p.remote_peer",
+         .value = spoofed.to_string(),
+      },
+   };
+   const auto trusted = forge::api::core::trusted_invocation_builder{}
+                            .set(forge::api::p2p::authenticated_peer{.id = authenticated})
+                            .build();
+   auto value = forge::api::p2p::authenticated_peer{.id = spoofed};
+
+   forge::api::core::server_supplied<forge::api::p2p::authenticated_peer>::reset(value);
+   BOOST_REQUIRE(forge::api::core::server_supplied<forge::api::p2p::authenticated_peer>::apply(value, trusted));
+   BOOST_TEST(legacy_metadata.front().value == spoofed.to_string());
+   BOOST_TEST(value.id.value == authenticated.value);
+   BOOST_TEST(value.id.value != spoofed.value);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_direct_quic_uses_endpoint_peer_when_expected_peer_is_absent) {

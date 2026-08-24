@@ -32,13 +32,13 @@ void fail_stream_endpoints(
    }
 }
 
-[[nodiscard]] call_context make_context(const frame& value) {
+[[nodiscard]] call_context make_context(frame& value) {
    return call_context{
       .id = value.id,
       .api = value.api,
       .method = value.method,
-      .meta = value.meta,
-      .payload = value.payload,
+      .meta = std::move(value.meta),
+      .payload = std::move(value.payload),
       .codec = value.codec,
       .kind = value.kind,
    };
@@ -145,6 +145,13 @@ void validate_interceptors(
 
 boost::asio::awaitable<void>
 run_before_interceptors(const binding_plan& plan, frame& request) {
+   const auto matched = std::any_of(plan.interceptors.begin(), plan.interceptors.end(),
+                                    [](const auto& step) {
+                                       return step.handler && step.phase <= interceptor_phase::before_call;
+                                    });
+   if (!matched) {
+      co_return;
+   }
    auto context = make_context(request);
    for (const auto& step : plan.interceptors) {
       if (step.handler && step.phase <= interceptor_phase::before_call) {
@@ -157,6 +164,16 @@ run_before_interceptors(const binding_plan& plan, frame& request) {
 
 boost::asio::awaitable<void>
 run_terminal_interceptors(const binding_plan& plan, frame& response) {
+   const auto matched = std::any_of(plan.interceptors.begin(), plan.interceptors.end(),
+                                    [&](const auto& step) {
+                                       return step.handler &&
+                                              (response.kind == frame_kind::error
+                                                  ? step.phase == interceptor_phase::error
+                                                  : step.phase == interceptor_phase::after_call);
+                                    });
+   if (!matched) {
+      co_return;
+   }
    auto context = make_context(response);
    for (const auto& step : plan.interceptors) {
       const auto matches =
@@ -220,6 +237,28 @@ boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
 }
 
 boost::asio::awaitable<frame>
+binding_plan::dispatch(frame request, const trusted_invocation& trusted) const {
+   return dispatch_contextual(std::move(request), trusted);
+}
+
+boost::asio::awaitable<frame>
+binding_plan::dispatch_contextual(frame request, const trusted_invocation& trusted) const {
+   if (local == nullptr) {
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                            "API binding plan has no local registry");
+   }
+   if (!exports_api(*this, request.api) ||
+       method_hidden_by_export(*this, request.api, request.method)) {
+      co_return make_api_not_exported_response(request);
+   }
+
+   co_await run_before_interceptors(*this, request);
+   auto response = co_await local->dispatch_contextual(std::move(request), trusted);
+   co_await run_terminal_interceptors(*this, response);
+   co_return response;
+}
+
+boost::asio::awaitable<frame>
 binding_plan::dispatch_stream(
    frame request, std::shared_ptr<detail::stream_endpoint> input,
    std::shared_ptr<detail::stream_endpoint> output) const {
@@ -238,6 +277,45 @@ binding_plan::dispatch_stream(
       co_await run_before_interceptors(*this, request);
       auto response = co_await local->dispatch_stream(
          std::move(request), input, output);
+      co_await run_terminal_interceptors(*this, response);
+      if (response.kind == frame_kind::error) {
+         fail_stream_endpoints(input, output);
+      }
+      co_return response;
+   } catch (...) {
+      fail_stream_endpoints(input, output);
+      throw;
+   }
+}
+
+boost::asio::awaitable<frame>
+binding_plan::dispatch_stream(
+   frame request, std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output,
+   const trusted_invocation& trusted) const {
+   return dispatch_stream_contextual(std::move(request), std::move(input), std::move(output), trusted);
+}
+
+boost::asio::awaitable<frame>
+binding_plan::dispatch_stream_contextual(
+   frame request, std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output,
+   const trusted_invocation& trusted) const {
+   if (local == nullptr) {
+      fail_stream_endpoints(input, output);
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                            "API binding plan has no local registry");
+   }
+   if (!exports_api(*this, request.api) ||
+       method_hidden_by_export(*this, request.api, request.method)) {
+      fail_stream_endpoints(input, output);
+      co_return make_api_not_exported_response(request);
+   }
+
+   try {
+      co_await run_before_interceptors(*this, request);
+      auto response = co_await local->dispatch_stream_contextual(
+         std::move(request), input, output, trusted);
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {
          fail_stream_endpoints(input, output);

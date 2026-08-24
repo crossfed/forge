@@ -21,6 +21,7 @@ export module forge.api.core.descriptor;
 
 export import forge.api.core.duplex_stream;
 export import forge.api.core.exceptions;
+export import forge.api.core.server_supplied;
 export import forge.api.core.types;
 export import forge.exceptions;
 export import forge.raw.datastream;
@@ -330,6 +331,89 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
    }
 }
 
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes>
+invoke_contextual_raw(std::shared_ptr<void> implementation, bytes payload, const trusted_invocation& trusted) {
+   auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+   auto arguments = unpack_fixed_arguments<Method>(payload);
+   reset_server_supplied(arguments);
+   apply_server_supplied(arguments, trusted);
+   if constexpr (std::same_as<method_response_t<Method>, void>) {
+      co_await invoke_fixed<Method>(*typed, std::move(arguments),
+                                    std::make_index_sequence<method_argument_count_v<Method>>{});
+      co_return bytes{};
+   } else {
+      auto response = co_await invoke_fixed<Method>(*typed, std::move(arguments),
+                                                     std::make_index_sequence<method_argument_count_v<Method>>{});
+      co_return pack_body(response);
+   }
+}
+
+template <auto Method, typename Interface>
+boost::asio::awaitable<bytes>
+invoke_contextual_stream(std::shared_ptr<void> implementation, bytes fixed_payload,
+                         std::shared_ptr<stream_endpoint> input,
+                         std::shared_ptr<stream_endpoint> output,
+                         const trusted_invocation& trusted) {
+   auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+   auto arguments = unpack_fixed_arguments<Method>(fixed_payload);
+   reset_server_supplied(arguments);
+   apply_server_supplied(arguments, trusted);
+   try {
+      if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream) {
+         if (!output) {
+            throw exceptions::protocol_error{"server stream requires an output endpoint"};
+         }
+         using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
+         auto writer =
+             writer_access::make<typename stream_writer_traits<std::remove_cvref_t<endpoint_type>>::item_type>(output);
+         co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(writer),
+                                        std::make_index_sequence<fixed_argument_count_v<Method>>{});
+         output->close();
+         co_return bytes{};
+      } else if constexpr (inferred_method_kind_v<Method> == method_kind::client_stream) {
+         if (!input) {
+            throw exceptions::protocol_error{"client stream requires an input endpoint"};
+         }
+         using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
+         auto reader =
+             reader_access::make<typename stream_reader_traits<std::remove_cvref_t<endpoint_type>>::item_type>(input);
+         if constexpr (std::same_as<method_response_t<Method>, void>) {
+            co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(reader),
+                                           std::make_index_sequence<fixed_argument_count_v<Method>>{});
+            co_return bytes{};
+         } else {
+            auto result = co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(reader),
+                                                         std::make_index_sequence<fixed_argument_count_v<Method>>{});
+            co_return pack_terminal_result<Method>(result);
+         }
+      } else {
+         if (!input || !output) {
+            throw exceptions::protocol_error{"bidirectional stream requires input and output endpoints"};
+         }
+         using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
+         auto stream = duplex_stream<typename duplex_stream_traits<endpoint_type>::input_type,
+                                     typename duplex_stream_traits<endpoint_type>::output_type>{
+             reader_access::make<typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::input_type>(input),
+             writer_access::make<typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::output_type>(
+                 output)};
+         co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(stream),
+                                        std::make_index_sequence<fixed_argument_count_v<Method>>{});
+         output->close();
+         co_return bytes{};
+      }
+   } catch (...) {
+      auto error = std::current_exception();
+      if (input) {
+         input->fail(error);
+      }
+      if (output) {
+         output->fail(error);
+      }
+      throw;
+   }
+}
+
 } // namespace detail
 
 template <auto Method> inline constexpr method_kind method_kind_v = detail::inferred_method_kind_v<Method>;
@@ -351,6 +435,11 @@ struct error_descriptor {
 
 using raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
     std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>)>;
+using contextual_raw_invoker = std::function<boost::asio::awaitable<bytes>(
+    std::shared_ptr<void>, bytes, const trusted_invocation&)>;
+using contextual_raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
+    std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>,
+    const trusted_invocation&)>;
 
 struct method_descriptor {
    std::string name;
@@ -377,6 +466,8 @@ struct method_descriptor {
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    raw_stream_invoker stream_invoker;
+   contextual_raw_invoker contextual_raw_invoker;
+   contextual_raw_stream_invoker contextual_stream_invoker;
 
    template <typename Trait> [[nodiscard]] bool has_response_trait() const noexcept {
       for (const auto& value : response_traits) {
@@ -500,7 +591,9 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       if constexpr (EnableRaw) {
          using wire_request = detail::method_fixed_request_t<Method>;
          value.request_encoder = [](const void* request) {
-            return pack_body(*static_cast<const wire_request*>(request));
+            auto wire_copy = *static_cast<const wire_request*>(request);
+            reset_server_supplied(wire_copy);
+            return pack_body(wire_copy);
          };
          value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
             static_cast<void>(forge::raw::unpack_exact<wire_request>(payload, limits));
@@ -559,8 +652,10 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                   co_return pack_body(response);
                }
             };
+            value.contextual_raw_invoker = detail::invoke_contextual_raw<Method, Interface>;
          } else {
             value.stream_invoker = detail::invoke_raw_stream<Method, Interface>;
+            value.contextual_stream_invoker = detail::invoke_contextual_stream<Method, Interface>;
          }
       }
 
@@ -580,7 +675,11 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .result_type = typeid(Response),
       };
       if constexpr (EnableRaw) {
-         value.request_encoder = [](const void* request) { return pack_body(*static_cast<const Request*>(request)); };
+         value.request_encoder = [](const void* request) {
+            auto wire_copy = *static_cast<const Request*>(request);
+            reset_server_supplied(wire_copy);
+            return pack_body(wire_copy);
+         };
          value.response_encoder = [](const void* response) {
             return pack_body(*static_cast<const Response*>(response));
          };
@@ -593,6 +692,15 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
+            auto response = co_await std::invoke(Method, *typed, std::move(request));
+            co_return pack_body(response);
+         };
+         value.contextual_raw_invoker = [](std::shared_ptr<void> implementation, bytes payload,
+                                           const trusted_invocation& trusted) -> boost::asio::awaitable<bytes> {
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto request = unpack_body<Request>(payload);
+            reset_server_supplied(request);
+            apply_server_supplied(request, trusted);
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };
