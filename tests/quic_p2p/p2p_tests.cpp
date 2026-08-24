@@ -8889,6 +8889,12 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
    forge::api::core::apply_server_supplied(traversed, trusted);
    BOOST_TEST(std::get<0>(traversed).id.value == authenticated.value);
 
+   auto api_fields = std::tuple{value};
+   forge::api::core::api_traits<p2p_live_types::live_api>::reset_server_fields(api_fields);
+   BOOST_TEST(std::get<0>(api_fields).id.value.empty());
+   forge::api::core::api_traits<p2p_live_types::live_api>::apply_server_fields(api_fields, trusted);
+   BOOST_TEST(std::get<0>(api_fields).id.value == authenticated.value);
+
    forge::api::core::server_supplied<p2p_live_types::caller_peer>::reset(value);
    BOOST_REQUIRE(forge::api::core::server_supplied<p2p_live_types::caller_peer>::apply(value, trusted));
    BOOST_TEST(legacy_metadata.front().value == spoofed.to_string());
