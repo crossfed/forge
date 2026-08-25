@@ -3,14 +3,15 @@
 namespace forge::net::p2p {
 
 struct libp2p_identity_material;
+struct upgraded_session;
 
 class relay_secure_io;
 
-boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+boost::asio::awaitable<upgraded_session>
 upgrade_relay_outbound_session(forge::net::p2p::stream stream, const node::options& options,
                                const libp2p_identity_material& identity, const peer_id& expected_peer);
 
-boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+boost::asio::awaitable<upgraded_session>
 upgrade_relay_inbound_session(forge::net::p2p::stream stream, const node::options& options,
                               const libp2p_identity_material& identity, const peer_id& expected_peer);
 

@@ -41,7 +41,7 @@ namespace forge::api::http::detail {
 
 server_stream_state::server_stream_state(
    boost::asio::any_io_executor executor,
-   forge::api::core::binding_plan plan,
+   forge::api::core::pinned_binding_plan plan,
    forge::api::core::frame request,
    std::uint32_t max_frame_bytes,
    std::uint32_t max_item_bytes,
@@ -128,6 +128,9 @@ boost::asio::awaitable<void> server_stream_state::run() {
          request_, {}, stream_.writer);
       publish_terminal(std::move(terminal));
    } catch (...) {
+      const auto error = std::current_exception();
+      stream_.reader->fail(error);
+      stream_.writer->fail(error);
       publish_terminal(internal_error());
    }
 }

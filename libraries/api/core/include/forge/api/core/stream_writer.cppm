@@ -29,6 +29,12 @@ class writer_access {
    endpoint(const stream_writer<T>& value) {
       return value.endpoint_;
    }
+
+   template <typename T>
+   [[nodiscard]] static std::shared_ptr<stream_endpoint>
+   take_endpoint(stream_writer<T>& value) noexcept {
+      return std::exchange(value.endpoint_, {});
+   }
 };
 
 } // namespace detail

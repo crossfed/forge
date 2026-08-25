@@ -443,6 +443,7 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
           .remote_peer = result.peer,
           .path = path::kind::direct,
       };
+      session->authentication = result.authentication;
       session->connection = std::move(result.session);
       session->resource = std::move(*reservation);
       session->direct_endpoint = endpoint_copy;
@@ -614,6 +615,7 @@ boost::asio::awaitable<void> node::impl::handle_inbound_connection(direct::conne
           .remote_peer = remote,
           .path = path::kind::direct,
       };
+      session->authentication = connection.authentication;
       session->connection = std::move(connection.session);
       session->resource = std::move(reservation);
       session->direct_endpoint = connection.local_endpoint;
@@ -686,6 +688,7 @@ boost::asio::awaitable<void> node::impl::handle_incoming_stream(std::shared_ptr<
    try {
       auto admitted =
           co_await accept_resource_stream(session->info.remote_peer, std::move(raw), std::move(reservation));
+      detail::stream_access::set_authentication(admitted.stream, session->authentication);
       if (admitted.protocol == builtins::ping) {
          co_await handle_ping(std::move(admitted.stream));
       } else if (admitted.protocol == builtins::identify) {

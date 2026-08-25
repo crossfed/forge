@@ -153,7 +153,8 @@ namespace {
          }
          return insecure_legacy_peer_id(certificate->der);
       }
-      return peer_id{.value = "insecure-test-peer"};
+      FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
+                            "P2P insecure QUIC test session has no peer certificate");
    }
 
    const auto certificate = connection.peer_certificate();
@@ -343,6 +344,8 @@ class quic_profile final {
              .session = forge::net::quic::as_transport_session(std::move(quic)),
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
+             .authentication = options_.allow_insecure_test_mode ? peer_authentication::unverified
+                                                                 : peer_authentication::quic_tls,
          };
       } catch (const forge::exceptions::base& error) {
          static_cast<void>(cancel_current->finish());
@@ -390,6 +393,8 @@ class quic_profile final {
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
              .admission = std::move(*admission),
+             .authentication = options_.allow_insecure_test_mode ? peer_authentication::unverified
+                                                                 : peer_authentication::quic_tls,
          };
       } catch (const forge::exceptions::base& error) {
          rethrow_quic_as_p2p(error);

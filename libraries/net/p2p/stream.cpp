@@ -19,6 +19,7 @@ namespace forge::net::p2p {
 
 struct stream::impl {
    forge::net::transport::stream transport;
+   peer_authentication authentication = peer_authentication::unverified;
 };
 
 stream::stream() = default;
@@ -40,6 +41,10 @@ bool stream::valid() const noexcept {
 
 std::int64_t stream::id() const noexcept {
    return impl_ ? impl_->transport.id() : -1;
+}
+
+peer_authentication stream::authentication() const noexcept {
+   return impl_ ? impl_->authentication : peer_authentication::unverified;
 }
 
 boost::asio::awaitable<void> stream::async_write(std::span<const std::uint8_t> bytes) {
@@ -138,6 +143,13 @@ stream detail::stream_access::with_buffer(stream value, std::vector<std::uint8_t
    value.impl_->transport = forge::net::transport::detail::stream_access::with_buffer(
        std::move(value.impl_->transport), std::move(buffered));
    return value;
+}
+
+void detail::stream_access::set_authentication(stream& value,
+                                               peer_authentication authentication) noexcept {
+   if (value.impl_) {
+      value.impl_->authentication = authentication;
+   }
 }
 
 } // namespace forge::net::p2p

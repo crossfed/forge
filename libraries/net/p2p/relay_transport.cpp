@@ -25,22 +25,28 @@ import forge.net.yamux.session;
 
 namespace forge::net::p2p {
 
-boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+boost::asio::awaitable<upgraded_session>
 upgrade_relay_outbound_session(forge::net::p2p::stream stream, const node::options& options,
                                const libp2p_identity_material& identity, const peer_id& expected_peer) {
-   auto upgraded = co_await upgrade_outbound_stream(
-       std::move(stream), options, identity,
-       options.allow_insecure_test_mode ? std::nullopt : std::make_optional(expected_peer));
-   co_return std::move(upgraded.session);
+   auto upgraded =
+       co_await upgrade_outbound_stream(std::move(stream), options, identity, std::make_optional(expected_peer));
+   if (upgraded.peer != expected_peer || upgraded.authentication != peer_authentication::noise) {
+      FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
+                            "P2P relay Noise peer does not match the relay control message");
+   }
+   co_return upgraded;
 }
 
-boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+boost::asio::awaitable<upgraded_session>
 upgrade_relay_inbound_session(forge::net::p2p::stream stream, const node::options& options,
                               const libp2p_identity_material& identity, const peer_id& expected_peer) {
-   auto upgraded = co_await upgrade_inbound_stream(
-       std::move(stream), options, identity,
-       options.allow_insecure_test_mode ? std::nullopt : std::make_optional(expected_peer));
-   co_return std::move(upgraded.session);
+   auto upgraded =
+       co_await upgrade_inbound_stream(std::move(stream), options, identity, std::make_optional(expected_peer));
+   if (upgraded.peer != expected_peer || upgraded.authentication != peer_authentication::noise) {
+      FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
+                            "P2P relay Noise peer does not match the relay control message");
+   }
+   co_return upgraded;
 }
 
 } // namespace forge::net::p2p

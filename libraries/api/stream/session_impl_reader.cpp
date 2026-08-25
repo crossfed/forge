@@ -230,7 +230,7 @@ boost::asio::awaitable<void> session::impl::handle_inbound_frame(forge::api::cor
 }
 
 boost::asio::awaitable<void> session::impl::handle_request(forge::api::core::frame value) {
-   if (!accepting || !dispatcher) {
+   if (!accepting || !plan) {
       FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "API stream session does not admit requests");
    }
    const auto remote_high_side = (next_remote_call_id & call_id_side_bit) != 0;
@@ -250,7 +250,10 @@ boost::asio::awaitable<void> session::impl::handle_request(forge::api::core::fra
       FORGE_THROW_EXCEPTION(forge::api::core::exceptions::resource_exhausted, "API stream max inflight calls exceeded");
    }
 
-   const auto kind = method_kind_for(value);
+   auto selected = plan->pin(value.api);
+   const auto* api = selected.describe(value.api);
+   const auto* descriptor = api == nullptr ? nullptr : forge::api::core::find_method(*api, value.method);
+   const auto kind = descriptor == nullptr ? forge::api::core::method_kind::unary : descriptor->kind;
    const auto required = [&] {
       switch (kind) {
       case forge::api::core::method_kind::unary:
@@ -269,8 +272,19 @@ boost::asio::awaitable<void> session::impl::handle_request(forge::api::core::fra
                             "API stream method kind was not negotiated");
    }
 
-   auto call = make_remote_call(value, kind);
-   if (call->descriptor && call->descriptor->request_decoder) {
+   auto call = make_remote_call(value, kind, descriptor, std::move(selected));
+   const auto has_contextual_invoker = [&] {
+      if (!call->descriptor) {
+         return false;
+      }
+      if (kind == forge::api::core::method_kind::unary) {
+         const auto* invoker = forge::api::core::detail::contextual_unary_for(*call->descriptor);
+         return invoker != nullptr && static_cast<bool>(*invoker);
+      }
+      const auto* invoker = forge::api::core::detail::contextual_stream_for(*call->descriptor);
+      return invoker != nullptr && static_cast<bool>(*invoker);
+   }();
+   if (call->descriptor && call->descriptor->request_decoder && !has_contextual_invoker) {
       const auto bounded =
           static_cast<std::uint32_t>(std::min<std::size_t>(value.payload.size(), negotiated_limits.max_frame_bytes));
       call->descriptor->request_decoder(value.payload, forge::raw::unpack_limits{

@@ -1,3 +1,5 @@
+module;
+
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 #include <forge/api/core/macros.hpp>
@@ -7,16 +9,26 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+
+module forge.api.http.binding;
 
 import forge.api.core.binding;
 import forge.api.core.duplex_stream;
@@ -25,17 +37,18 @@ import forge.api.core.handle;
 import forge.api.core.registry;
 import forge.api.core.stream_reader;
 import forge.api.core.stream_writer;
-import forge.api.http.binding;
 import forge.api.http.parameters;
 import forge.api.http.proxy;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.net.http.base_url;
+import forge.net.http.body;
 import forge.net.http.client;
 import forge.net.http.exceptions;
 import forge.net.http.router;
 import forge.net.http.server;
 import forge.net.http.types;
+import forge.net.transport.frame;
 import forge.raw.raw;
 
 namespace forge::api::http::live_test {
@@ -100,6 +113,9 @@ class live_api
    virtual boost::asio::awaitable<void>
    download(std::string ref, std::uint32_t count,
             forge::api::core::stream_writer<item> output) = 0;
+   virtual boost::asio::awaitable<void>
+   download_totals(std::string ref, std::uint32_t count,
+                   forge::api::core::stream_writer<total> output) = 0;
    virtual boost::asio::awaitable<total>
    upload(std::string ref, forge::api::core::stream_reader<item> input) = 0;
 };
@@ -145,6 +161,7 @@ BOOST_DESCRIBE_STRUCT(::forge::api::http::live_test::metadata, (), (value))
 FORGE_API(::forge::api::http::live_test::live_api,
           FORGE_API_CONTRACT("http.live", 1, 0),
           FORGE_API_METHOD(download, ref, count),
+          FORGE_API_METHOD(download_totals, ref, count),
           FORGE_API_METHOD(upload, ref))
 
 FORGE_API(::forge::api::http::live_test::bidirectional_api,
@@ -176,8 +193,33 @@ FORGE_HTTP_API(
    ::forge::api::http::live_test::route_conflicting_api,
    FORGE_HTTP_POST(upload, "/live/:tenant", ok))
 
+#include "../../libraries/api/http/details/server_stream_state.hxx"
+
 namespace forge::api::http::live_test {
 namespace {
+
+class throwing_copy_interceptor {
+ public:
+   explicit throwing_copy_interceptor(std::shared_ptr<std::atomic_bool> throw_on_copy)
+       : throw_on_copy_{std::move(throw_on_copy)} {}
+
+   throwing_copy_interceptor(const throwing_copy_interceptor& other)
+       : throw_on_copy_{other.throw_on_copy_} {
+      if (throw_on_copy_->load(std::memory_order_acquire)) {
+         throw std::bad_alloc{};
+      }
+   }
+
+   throwing_copy_interceptor(throwing_copy_interceptor&&) noexcept = default;
+
+   boost::asio::awaitable<void>
+   operator()(forge::api::core::call_context&) const {
+      co_return;
+   }
+
+ private:
+   std::shared_ptr<std::atomic_bool> throw_on_copy_;
+};
 
 class live_impl final : public live_api {
  public:
@@ -216,6 +258,12 @@ class live_impl final : public live_api {
             throw std::runtime_error{"download failed"};
          }
       }
+      co_await output.async_close();
+   }
+
+   boost::asio::awaitable<void>
+   download_totals(std::string, std::uint32_t,
+                   forge::api::core::stream_writer<total> output) override {
       co_await output.async_close();
    }
 
@@ -392,6 +440,97 @@ BOOST_AUTO_TEST_CASE(server_stream_interceptor_failure_closes_output) {
    server.stop();
 }
 
+BOOST_AUTO_TEST_CASE(server_stream_synchronous_dispatch_failure_terminates_local_endpoints) {
+   auto runtime = forge::asio::runtime{
+      forge::asio::runtime_options{.worker_threads = 2}};
+   auto registry = forge::api::core::registry{};
+   registry.install<live_api>(live_api::describe(), std::make_shared<live_impl>());
+
+   auto throw_on_copy = std::make_shared<std::atomic_bool>(false);
+   auto plan = forge::api::core::binding()
+                  .serve(registry)
+                  .interceptor(
+                     forge::api::core::interceptor()
+                        .id("copy-failure")
+                        .phase(forge::api::core::interceptor_phase::authorize)
+                        .handler(throwing_copy_interceptor{throw_on_copy})
+                        .build())
+                  .build();
+   auto pinned = plan.pin(live_api::ref());
+   throw_on_copy->store(true, std::memory_order_release);
+
+   auto scenario = [pinned = std::move(pinned)]() mutable -> boost::asio::awaitable<void> {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto state = std::make_shared<forge::api::http::detail::server_stream_state>(
+         executor, std::move(pinned), forge::api::core::frame{
+                                           .kind = forge::api::core::frame_kind::request,
+                                           .id = forge::api::core::call_id{.value = 1},
+                                           .api = live_api::ref(),
+                                           .method = "download",
+                                           .codec = forge::api::core::codec_id{.value = "forge.raw"},
+                                        },
+         64U * 1024U, 64U * 1024U, 1U, 64U * 1024U);
+      auto first = std::make_shared<std::optional<forge::net::http::body_chunk>>();
+      auto read_completed = std::make_shared<std::atomic_bool>(false);
+      auto read_failed = std::make_shared<std::atomic_bool>(false);
+
+      state->start();
+      boost::asio::co_spawn(
+         executor,
+         [state, first, read_completed, read_failed]() -> boost::asio::awaitable<void> {
+            try {
+               *first = co_await state->async_next();
+            } catch (...) {
+               read_failed->store(true, std::memory_order_release);
+            }
+            read_completed->store(true, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      const auto completed_without_cancel = co_await wait_until(
+         [read_completed] { return read_completed->load(std::memory_order_acquire); },
+         std::chrono::seconds{1});
+      if (!completed_without_cancel) {
+         state->cancel();
+         BOOST_REQUIRE(co_await wait_until(
+            [read_completed] { return read_completed->load(std::memory_order_acquire); },
+            std::chrono::seconds{1}));
+      }
+      BOOST_REQUIRE(completed_without_cancel);
+      BOOST_TEST(!read_failed->load(std::memory_order_acquire));
+      BOOST_REQUIRE(first->has_value());
+
+      auto stream_end_packet = forge::net::transport::decode_frame(
+         std::vector<std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(first->value().bytes.data()),
+            reinterpret_cast<const std::uint8_t*>(first->value().bytes.data()) +
+               first->value().bytes.size()),
+         forge::net::transport::frame_options{.max_size = 64U * 1024U});
+      BOOST_REQUIRE(stream_end_packet.status == forge::net::transport::frame_decode_status::complete);
+      auto [stream_wire_major, stream_end] = forge::raw::unpack_exact<
+         std::tuple<std::uint16_t, forge::api::core::frame>>(stream_end_packet.payload);
+      BOOST_TEST(stream_wire_major == 2U);
+      BOOST_CHECK(stream_end.kind == forge::api::core::frame_kind::stream_end);
+
+      auto terminal = co_await state->async_next();
+      BOOST_REQUIRE(terminal.has_value());
+      auto terminal_packet = forge::net::transport::decode_frame(
+         std::vector<std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(terminal->bytes.data()),
+            reinterpret_cast<const std::uint8_t*>(terminal->bytes.data()) + terminal->bytes.size()),
+         forge::net::transport::frame_options{.max_size = 64U * 1024U});
+      BOOST_REQUIRE(terminal_packet.status == forge::net::transport::frame_decode_status::complete);
+      auto [terminal_wire_major, terminal_frame] = forge::raw::unpack_exact<
+         std::tuple<std::uint16_t, forge::api::core::frame>>(terminal_packet.payload);
+      BOOST_TEST(terminal_wire_major == 2U);
+      BOOST_CHECK(terminal_frame.kind == forge::api::core::frame_kind::error);
+      BOOST_CHECK(
+         forge::raw::unpack_exact<forge::api::core::error_payload>(terminal_frame.payload).status_code ==
+         forge::api::core::status::internal);
+   };
+   forge::asio::blocking::run(runtime, std::move(scenario)());
+}
+
 BOOST_AUTO_TEST_CASE(server_stream_abandonment_cancels_handler) {
    auto runtime = forge::asio::runtime{
       forge::asio::runtime_options{.worker_threads = 2}};
@@ -534,6 +673,34 @@ BOOST_AUTO_TEST_CASE(http_rejects_bidirectional_and_client_stream_body_mappings)
       forge::asio::blocking::run(
          runtime, forge::api::http::remote<conflicting_api>(client)),
       forge::net::http::exceptions::bad_request);
+}
+
+BOOST_AUTO_TEST_CASE(http_rejects_stream_route_with_incompatible_descriptor) {
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .route<&live_api::download, std::tuple<std::string, std::uint32_t>, void>(
+                          forge::api::http::route{
+                              .verb = forge::net::http::method::get,
+                              .method_name = "upload",
+                              .target = "/mismatched/live/:ref?count={count}",
+                          })
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
+}
+
+BOOST_AUTO_TEST_CASE(http_rejects_same_kind_stream_route_with_incompatible_item_descriptor) {
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .route<&live_api::download, std::tuple<std::string, std::uint32_t>, void>(
+                          forge::api::http::route{
+                              .verb = forge::net::http::method::get,
+                              .method_name = "download_totals",
+                              .target = "/mismatched/live-items/:ref?count={count}",
+                          })
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -63,6 +63,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
       std::string method;
       forge::api::core::codec_id codec;
       std::optional<forge::api::core::method_descriptor> descriptor;
+      std::optional<forge::api::core::pinned_binding_plan> selection;
       std::uint64_t admission_order = 0;
       bool local_origin = false;
       timer wake;
@@ -85,7 +86,8 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
 
    impl(forge::net::transport::stream stream_value, options settings_value);
    impl(forge::net::transport::stream stream_value, forge::api::core::binding_plan plan_value, options settings_value,
-        forge::api::core::metadata trusted_metadata);
+        forge::api::core::dispatch_options dispatch_options,
+        std::optional<forge::api::core::trusted_invocation> trusted = std::nullopt);
 
    [[nodiscard]] bool valid() const noexcept;
    [[nodiscard]] strand_type ensure_strand(boost::asio::any_io_executor executor);
@@ -140,9 +142,10 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
                       std::shared_ptr<forge::api::core::detail::stream_endpoint> input,
                       std::shared_ptr<forge::api::core::detail::stream_endpoint> output, call_options& value,
                       const forge::api::core::method_descriptor* descriptor);
-   [[nodiscard]] forge::api::core::method_kind method_kind_for(const forge::api::core::frame& request) const;
    [[nodiscard]] std::shared_ptr<call_state> make_remote_call(const forge::api::core::frame& request,
-                                                              forge::api::core::method_kind kind);
+                                                              forge::api::core::method_kind kind,
+                                                              const forge::api::core::method_descriptor* descriptor,
+                                                              forge::api::core::pinned_binding_plan selection);
    boost::asio::awaitable<void> run_remote_call(forge::api::core::frame request,
                                                 const std::shared_ptr<call_state>& call);
    boost::asio::awaitable<void> pump_outbound(const std::shared_ptr<call_state>& call);

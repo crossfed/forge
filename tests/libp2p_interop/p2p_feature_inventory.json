@@ -149,14 +149,16 @@
         "forge.net.p2p.resource_manager":
             [ "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes" ],
         "forge.net.p2p.scoring": [ "topology.connection_manager", "state.peer_store" ],
-        "forge.net.p2p.stream": [ "resource.streams", "resource.queued_bytes" ],
+        "forge.net.p2p.stream": [
+          "identity.secure_transport_authentication", "resource.streams", "resource.queued_bytes"
+        ],
         "forge.net.p2p.topology": [
           "protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "lifecycle.discovery",
           "topology.connection_manager"
         ]
       },
       "header_features": {},
-      "sha256": "2b47bcb433ab8f093d54bc1b1b5667bccdd23ce16b53507df1318481958d3998",
+      "sha256": "f14649702198c781e07e3ab3eff0c047d79cf24eb4ed3b6ea79b0c8dfc84117b",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -344,8 +346,12 @@
       "capabilities": [],
       "evidence": {
         "layers": [ "codec", "state_machine", "raw_node", "donor_interop" ],
-        "source_paths":
-            [ "libraries/net/p2p/identity.cpp", "libraries/net/p2p/node.cpp", "plugins/p2p/node/plugin.cpp" ],
+        "source_paths": [
+          "libraries/net/p2p/identity.cpp",
+          "libraries/net/p2p/node.cpp",
+          "libraries/net/p2p/include/forge/net/p2p/node.cppm",
+          "plugins/p2p/node/plugin.cpp"
+        ],
         "tests": [ "test_forge_stcp", "test_forge_quic_p2p" ],
         "donor_sources": [ "docs/donors/fcl-p2p-libp2p-foundation-v1.md" ],
         "donor_cases": [ "interop.live_ping_identify_autonat_relay" ]

@@ -98,7 +98,8 @@
 #define FORGE_API_DETAIL_DESCRIPTOR_METHOD_DEDUCED(r, INTERFACE, METHOD)                                               \
    {                                                                                                                   \
       auto method = builder.template method<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                       \
-          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD));          \
+          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD),           \
+          server_fields<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>());                                       \
       method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                    \
       BOOST_PP_IF(                                                                                                     \
           FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD), method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )    \
@@ -110,7 +111,8 @@
       auto method =                                                                                                    \
           builder.template method<FORGE_API_DETAIL_TYPED_METHOD_POINTER(INTERFACE, METHOD),                            \
                                   FORGE_API_DETAIL_METHOD_REQUEST(METHOD), FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)>(  \
-              BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)));                                               \
+              BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)),                                                \
+              server_fields<FORGE_API_DETAIL_TYPED_METHOD_POINTER(INTERFACE, METHOD)>());                             \
       method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                    \
       BOOST_PP_IF(                                                                                                     \
           FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD), method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )    \
@@ -276,6 +278,24 @@
       static api_ref ref(std::uint16_t min_revision = version().revision) {                                            \
          const auto value = version();                                                                                 \
          return api_ref{.id = id(), .major = value.major, .min_revision = min_revision};                               \
+      }                                                                                                                \
+      template <auto Method> static ::forge::api::core::detail::server_field_operations server_fields() {            \
+         using wire_type = ::forge::api::core::detail::method_fixed_request_t<Method>;                               \
+         using fixed_type = ::forge::api::core::detail::method_fixed_argument_tuple_t<Method>;                       \
+         return {                                                                                                      \
+            .reset_wire = [](void* value) {                                                                           \
+               ::forge::api::core::reset_server_supplied(*static_cast<wire_type*>(value));                            \
+            },                                                                                                         \
+            .apply_wire = [](void* value, const ::forge::api::core::trusted_invocation& trusted) {                   \
+               ::forge::api::core::apply_server_supplied(*static_cast<wire_type*>(value), trusted);                  \
+            },                                                                                                         \
+            .reset_fixed = [](void* value) {                                                                          \
+               ::forge::api::core::reset_server_supplied(*static_cast<fixed_type*>(value));                           \
+            },                                                                                                         \
+            .apply_fixed = [](void* value, const ::forge::api::core::trusted_invocation& trusted) {                  \
+               ::forge::api::core::apply_server_supplied(*static_cast<fixed_type*>(value), trusted);                 \
+            },                                                                                                         \
+         };                                                                                                            \
       }                                                                                                                \
       static descriptor describe() {                                                                                   \
          auto builder =                                                                                                \

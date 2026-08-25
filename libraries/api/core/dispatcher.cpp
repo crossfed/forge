@@ -49,18 +49,51 @@ void validate_request(const frame& value, const dispatch_options& options) {
    }
 }
 
+template <typename Plan>
+boost::asio::awaitable<frame>
+dispatch_selected(Plan plan, dispatch_options options, std::optional<trusted_invocation> trusted, frame value) {
+   validate_request(value, options);
+   apply_remote_metadata_boundary(value, options.trusted_metadata);
+   if (!trusted) {
+      co_return co_await plan.dispatch(std::move(value));
+   }
+   co_return co_await plan.dispatch_contextual(std::move(value), std::move(*trusted));
+}
+
+template <typename Plan>
+boost::asio::awaitable<frame>
+dispatch_stream_selected(Plan plan, dispatch_options options, std::optional<trusted_invocation> trusted, frame value,
+                         std::shared_ptr<detail::stream_endpoint> input,
+                         std::shared_ptr<detail::stream_endpoint> output) {
+   validate_request(value, options);
+   apply_remote_metadata_boundary(value, options.trusted_metadata);
+   if (!trusted) {
+      co_return co_await plan.dispatch_stream(std::move(value), std::move(input), std::move(output));
+   }
+   co_return co_await plan.dispatch_stream_contextual(
+      std::move(value), std::move(input), std::move(output), std::move(*trusted));
+}
+
 } // namespace
 
 struct frame_dispatcher::impl {
    binding_plan plan;
    dispatch_options options;
+   std::optional<trusted_invocation> trusted;
 
-   impl(binding_plan plan_value, dispatch_options options_value)
-       : plan{std::move(plan_value)}, options{std::move(options_value)} {}
+   impl(binding_plan plan_value, dispatch_options options_value,
+        std::optional<trusted_invocation> trusted_value = std::nullopt)
+       : plan{std::move(plan_value)}, options{std::move(options_value)},
+         trusted{std::move(trusted_value)} {}
 };
 
 frame_dispatcher::frame_dispatcher(binding_plan plan, dispatch_options options)
     : impl_{std::make_shared<impl>(std::move(plan), std::move(options))} {}
+
+frame_dispatcher::frame_dispatcher(binding_plan plan, dispatch_options options,
+                                   trusted_invocation trusted)
+    : impl_{std::make_shared<impl>(std::move(plan), std::move(options),
+                                   std::move(trusted))} {}
 
 frame_dispatcher::~frame_dispatcher() = default;
 frame_dispatcher::frame_dispatcher(frame_dispatcher&&) noexcept = default;
@@ -72,9 +105,17 @@ boost::asio::awaitable<frame> frame_dispatcher::dispatch(frame value) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error,
                             "invalid API frame dispatcher");
    }
-   validate_request(value, impl_->options);
-   apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   co_return co_await impl_->plan.dispatch(std::move(value));
+   co_return co_await dispatch_selected(impl_->plan, impl_->options, impl_->trusted, std::move(value));
+}
+
+boost::asio::awaitable<frame>
+frame_dispatcher::dispatch(frame value, pinned_binding_plan selected) {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error,
+                            "invalid API frame dispatcher");
+   }
+   co_return co_await dispatch_selected(
+      std::move(selected), impl_->options, impl_->trusted, std::move(value));
 }
 
 boost::asio::awaitable<frame>
@@ -85,10 +126,20 @@ frame_dispatcher::dispatch_stream(
       FORGE_THROW_EXCEPTION(exceptions::protocol_error,
                             "invalid API frame dispatcher");
    }
-   validate_request(value, impl_->options);
-   apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   co_return co_await impl_->plan.dispatch_stream(
-      std::move(value), std::move(input), std::move(output));
+   co_return co_await dispatch_stream_selected(
+      impl_->plan, impl_->options, impl_->trusted, std::move(value), std::move(input), std::move(output));
+}
+
+boost::asio::awaitable<frame>
+frame_dispatcher::dispatch_stream(
+   frame value, std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output, pinned_binding_plan selected) {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error,
+                            "invalid API frame dispatcher");
+   }
+   co_return co_await dispatch_stream_selected(
+      std::move(selected), impl_->options, impl_->trusted, std::move(value), std::move(input), std::move(output));
 }
 
 const dispatch_options& frame_dispatcher::options() const noexcept {

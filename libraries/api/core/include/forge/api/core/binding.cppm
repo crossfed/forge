@@ -16,6 +16,7 @@ export module forge.api.core.binding;
 
 export import forge.api.core.context;
 export import forge.api.core.registry;
+export import forge.api.core.trusted_invocation;
 
 export namespace forge::api::core {
 
@@ -51,18 +52,70 @@ class interceptor_builder {
 
 [[nodiscard]] interceptor_builder interceptor();
 
+class pinned_binding_plan;
+
 struct binding_plan {
    const registry* local = nullptr;
    std::vector<descriptor> exports;
    std::vector<api_ref> peer_requirements;
    std::vector<interceptor_step> interceptors;
 
+   [[nodiscard]] pinned_binding_plan pin(api_ref requested) const;
+   [[nodiscard]] const descriptor* describe(api_ref requested) const;
+
+   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const;
+
    boost::asio::awaitable<frame> dispatch(frame request) const;
+   boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
    boost::asio::awaitable<frame>
    dispatch_stream(frame request,
                    std::shared_ptr<detail::stream_endpoint> input,
                    std::shared_ptr<detail::stream_endpoint> output) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request,
+                              std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted) const;
 };
+
+class pinned_binding_plan {
+ public:
+   [[nodiscard]] const descriptor* describe(api_ref requested) const noexcept;
+
+   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const {
+      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+      const auto* selected_descriptor = describe(requested);
+      if (selected_descriptor == nullptr) {
+         throw exceptions::protocol_error{"required API is not available"};
+      }
+      return selected_.get<Interface>();
+   }
+
+   boost::asio::awaitable<frame> dispatch(frame request) const;
+   boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream(frame request,
+                   std::shared_ptr<detail::stream_endpoint> input,
+                   std::shared_ptr<detail::stream_endpoint> output) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request,
+                              std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted) const;
+
+ private:
+   friend struct binding_plan;
+
+   pinned_binding_plan(binding_plan plan, registry::snapshot selected);
+
+   binding_plan plan_;
+   registry::snapshot selected_;
+};
+
+template <typename Interface> handle<Interface> binding_plan::get(api_ref requested) const {
+   auto selected = pin(requested);
+   return selected.get<Interface>(std::move(requested));
+}
 
 class binding_builder {
  public:

@@ -14,6 +14,7 @@ class cancellation_latch;
 struct upgraded_session {
    peer_id peer;
    std::shared_ptr<forge::net::yamux::session> session;
+   peer_authentication authentication = peer_authentication::unverified;
 };
 
 boost::asio::awaitable<upgraded_session> upgrade_outbound_stream(forge::net::p2p::stream stream,

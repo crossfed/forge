@@ -15,6 +15,13 @@ import forge.net.transport.stream;
 
 export namespace forge::net::p2p {
 
+enum class peer_authentication : std::uint8_t {
+   unverified = 0,
+   quic_tls = 1,
+   libp2p_tls = 2,
+   noise = 3,
+};
+
 namespace detail {
 struct stream_access;
 } // namespace detail
@@ -34,6 +41,7 @@ class stream {
 
    [[nodiscard]] bool valid() const noexcept;
    [[nodiscard]] std::int64_t id() const noexcept;
+   [[nodiscard]] peer_authentication authentication() const noexcept;
 
    boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> bytes);
    boost::asio::awaitable<void> async_write(forge::net::transport::chunk bytes);
@@ -63,6 +71,7 @@ namespace detail {
 
 struct stream_access {
    [[nodiscard]] static stream with_buffer(stream value, std::vector<std::uint8_t> buffered);
+   static void set_authentication(stream& value, peer_authentication authentication) noexcept;
 };
 
 } // namespace detail

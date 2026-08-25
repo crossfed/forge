@@ -75,6 +75,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    struct session_state {
       std::uint64_t id = 0;
       node::session_info info;
+      peer_authentication authentication = peer_authentication::unverified;
       forge::net::transport::session connection;
       resource_manager::session_reservation resource;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
@@ -567,7 +568,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void launch_relay_discovery_maintenance();
 
-   boost::asio::awaitable<std::shared_ptr<forge::net::yamux::session>>
+   boost::asio::awaitable<upgraded_session>
    open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<std::shared_ptr<session_state>>
