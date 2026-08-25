@@ -3,6 +3,7 @@ add_library(
    binding.cpp
    call_options.cpp
    call_state.cpp
+   contextual_handler_gate_state.cpp
    context.cpp
    dispatcher.cpp
    descriptor.cpp

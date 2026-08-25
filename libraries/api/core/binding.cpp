@@ -154,8 +154,14 @@ make_before_interceptor_hook(const binding_plan& plan) {
    if (!has_before_interceptors(plan)) {
       return {};
    }
-   return [&plan](frame& request, request_view typed_request,
-                  const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
+   auto before = std::vector<interceptor_step>{};
+   for (const auto& step : plan.interceptors) {
+      if (step.handler && step.phase <= interceptor_phase::before_call) {
+         before.push_back(step);
+      }
+   }
+   return [before = std::move(before)](frame& request, request_view typed_request,
+                                       const canonical_request_encoder& encode) -> boost::asio::awaitable<void> {
       auto canonical_payload = encode();
       auto context = call_context{
          .id = request.id,
@@ -168,12 +174,10 @@ make_before_interceptor_hook(const binding_plan& plan) {
       };
       context.meta = std::move(request.meta);
       try {
-         for (const auto& step : plan.interceptors) {
-            if (step.handler && step.phase <= interceptor_phase::before_call) {
-               co_await step.handler(context);
-               if (context.payload != encode()) {
-                  throw exceptions::protocol_error{"API interceptor must not mutate the canonical request payload"};
-               }
+         for (const auto& step : before) {
+            co_await step.handler(context);
+            if (context.payload != encode()) {
+               throw exceptions::protocol_error{"API interceptor must not mutate the canonical request payload"};
             }
          }
       } catch (...) {
@@ -260,11 +264,6 @@ boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
 }
 
 boost::asio::awaitable<frame>
-binding_plan::dispatch(frame request, trusted_invocation trusted) const {
-   return dispatch_contextual(std::move(request), std::move(trusted));
-}
-
-boost::asio::awaitable<frame>
 binding_plan::dispatch_contextual(frame request, trusted_invocation trusted) const {
    if (local == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
@@ -310,15 +309,6 @@ binding_plan::dispatch_stream(
       fail_stream_endpoints(input, output);
       throw;
    }
-}
-
-boost::asio::awaitable<frame>
-binding_plan::dispatch_stream(
-   frame request, std::shared_ptr<detail::stream_endpoint> input,
-   std::shared_ptr<detail::stream_endpoint> output,
-   trusted_invocation trusted) const {
-   return dispatch_stream_contextual(
-      std::move(request), std::move(input), std::move(output), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>

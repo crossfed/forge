@@ -8,6 +8,7 @@ module;
 #include <memory>
 #include <limits>
 #include <new>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -107,8 +108,61 @@ inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argumen
 using canonical_request_encoder = std::function<bytes()>;
 using contextual_dispatch_hook = std::function<boost::asio::awaitable<void>(
     frame&, request_view, const canonical_request_encoder&)>;
-using contextual_handler_gate = std::function<boost::asio::awaitable<std::shared_ptr<void>>(
-    request_view, const canonical_request_encoder&)>;
+
+namespace detail {
+
+class contextual_handler_gate_state;
+
+} // namespace detail
+
+class contextual_handler_gate {
+ public:
+   contextual_handler_gate(contextual_handler_gate&& other) noexcept;
+   contextual_handler_gate& operator=(contextual_handler_gate&& other) noexcept;
+   ~contextual_handler_gate();
+
+   contextual_handler_gate(const contextual_handler_gate&) = delete;
+   contextual_handler_gate& operator=(const contextual_handler_gate&) = delete;
+
+   boost::asio::awaitable<std::shared_ptr<void>>
+   operator()(request_view request, const canonical_request_encoder& encode);
+
+ private:
+   explicit contextual_handler_gate(std::weak_ptr<detail::contextual_handler_gate_state> state);
+
+   friend class detail::contextual_handler_gate_state;
+
+   std::weak_ptr<detail::contextual_handler_gate_state> state_;
+   bool acquired_ = false;
+};
+
+namespace detail {
+
+class contextual_handler_gate_control {
+ public:
+   contextual_handler_gate_control(frame request, contextual_dispatch_hook before,
+                                   std::function<void(const bytes&)> request_validator,
+                                   std::function<void(const bytes&, const bytes&)> response_validator,
+                                   std::shared_ptr<void> implementation);
+   contextual_handler_gate_control(contextual_handler_gate_control&& other) noexcept;
+   contextual_handler_gate_control& operator=(contextual_handler_gate_control&& other) noexcept;
+   ~contextual_handler_gate_control() noexcept;
+
+   contextual_handler_gate_control(const contextual_handler_gate_control&) = delete;
+   contextual_handler_gate_control& operator=(const contextual_handler_gate_control&) = delete;
+
+   [[nodiscard]] contextual_handler_gate take_gate();
+   void close() noexcept;
+   [[nodiscard]] bool completed_successfully_once() const;
+   void validate_response(const bytes& response) const;
+   void transfer_completion_metadata(frame& response);
+
+ private:
+   std::shared_ptr<contextual_handler_gate_state> state_;
+   bool gate_taken_ = false;
+};
+
+} // namespace detail
 
 namespace detail {
 

@@ -70,17 +70,12 @@ class registry : public service_mount {
 
    [[nodiscard]] const descriptor* describe(api_ref requested) const noexcept;
    boost::asio::awaitable<frame> dispatch(frame request) const;
-   boost::asio::awaitable<frame> dispatch(frame request, trusted_invocation trusted) const;
    boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
    boost::asio::awaitable<frame>
    dispatch_contextual(frame request, trusted_invocation trusted, contextual_dispatch_hook before) const;
    boost::asio::awaitable<frame>
    dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                    std::shared_ptr<detail::stream_endpoint> output) const;
-   boost::asio::awaitable<frame>
-   dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
-                   std::shared_ptr<detail::stream_endpoint> output,
-                   trusted_invocation trusted) const;
    boost::asio::awaitable<frame>
    dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
                               std::shared_ptr<detail::stream_endpoint> output,

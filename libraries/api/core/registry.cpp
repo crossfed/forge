@@ -2,10 +2,10 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
-#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <typeindex>
@@ -91,38 +91,6 @@ void fail_stream_endpoints(
    return make_error_response(request, make_internal_error_payload());
 }
 
-[[nodiscard]] contextual_handler_gate
-make_contextual_handler_gate(const method_descriptor& method, contextual_dispatch_hook before, frame& frame,
-                             std::shared_ptr<bytes> response_request, std::shared_ptr<void> implementation,
-                             std::shared_ptr<std::atomic_size_t> calls) {
-   return [request_validator = method.request_validator,
-           response_validator = method.response_validator,
-           before = std::move(before),
-           &frame,
-           response_request = std::move(response_request),
-           implementation = std::move(implementation),
-           calls = std::move(calls)](request_view request,
-                                     const canonical_request_encoder& encode) -> boost::asio::awaitable<std::shared_ptr<void>> {
-      if (calls->fetch_add(1U, std::memory_order_relaxed) != 0U) {
-         throw exceptions::protocol_error{"contextual API invoker acquired the handler gate more than once"};
-      }
-      if (before) {
-         co_await before(frame, request, encode);
-      }
-      if (request_validator || response_validator) {
-         // Existing byte validators observe the canonical typed request only after authorization succeeds.
-         auto canonical_payload = encode();
-         if (request_validator) {
-            request_validator(canonical_payload);
-         }
-         if (response_validator) {
-            *response_request = std::move(canonical_payload);
-         }
-      }
-      co_return implementation;
-   };
-}
-
 } // namespace
 
 registry::registry() = default;
@@ -135,11 +103,6 @@ const descriptor* registry::describe(api_ref requested) const noexcept {
 
 boost::asio::awaitable<frame> registry::dispatch(frame request) const {
    co_return co_await dispatch_contextual(std::move(request), trusted_invocation{});
-}
-
-boost::asio::awaitable<frame>
-registry::dispatch(frame request, trusted_invocation trusted) const {
-   return dispatch_contextual(std::move(request), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
@@ -171,20 +134,23 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted, context
    }
 
    auto response = make_response_base(request);
+   auto gate_control = std::optional<detail::contextual_handler_gate_control>{};
    try {
       if (contextual != nullptr && *contextual) {
-         auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
-         auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
-         auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
-                                                  entry->implementation, gate_calls);
+         auto payload = std::move(request.payload);
+         gate_control.emplace(
+            make_response_base(request, request.kind), std::move(before),
+            method->request_validator, method->response_validator,
+            entry->implementation);
+         auto gate = gate_control->take_gate();
          response.payload = co_await (*contextual)(
-            std::move(request.payload), std::move(trusted), std::move(gate));
-         if (gate_calls->load(std::memory_order_relaxed) != 1U) {
+            std::move(payload), std::move(trusted), std::move(gate));
+         gate_control->close();
+         if (!gate_control->completed_successfully_once()) {
             throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};
          }
-         if (method->response_validator) {
-            method->response_validator(*canonical_request, response.payload);
-         }
+         gate_control->validate_response(response.payload);
+         gate_control->transfer_completion_metadata(response);
       } else {
          if (before) {
             const auto canonical_payload = [&request] { return request.payload; };
@@ -199,9 +165,16 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted, context
             method->response_validator(request_payload, response.payload);
          }
       }
-      response.meta = request.meta;
+      if (!gate_control) {
+         response.meta = request.meta;
+      }
       co_return response;
    } catch (...) {
+      if (gate_control) {
+         gate_control->close();
+         gate_control->transfer_completion_metadata(response);
+         co_return project_failure(response, *method, std::current_exception());
+      }
       co_return project_failure(request, *method, std::current_exception());
    }
 }
@@ -210,14 +183,6 @@ boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shar
                                                         std::shared_ptr<detail::stream_endpoint> output) const {
    co_return co_await dispatch_stream_contextual(
       std::move(request), std::move(input), std::move(output), trusted_invocation{});
-}
-
-boost::asio::awaitable<frame>
-registry::dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
-                          std::shared_ptr<detail::stream_endpoint> output,
-                          trusted_invocation trusted) const {
-   return dispatch_stream_contextual(
-      std::move(request), std::move(input), std::move(output), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
@@ -269,20 +234,23 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
    }
 
    auto response = make_response_base(request);
+   auto gate_control = std::optional<detail::contextual_handler_gate_control>{};
    try {
       if (contextual != nullptr && *contextual) {
-         auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
-         auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
-         auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
-                                                  entry->implementation, gate_calls);
+         auto payload = std::move(request.payload);
+         gate_control.emplace(
+            make_response_base(request, request.kind), std::move(before),
+            method->request_validator, method->response_validator,
+            entry->implementation);
+         auto gate = gate_control->take_gate();
          response.payload = co_await (*contextual)(
-            std::move(request.payload), input, output, std::move(trusted), std::move(gate));
-         if (gate_calls->load(std::memory_order_relaxed) != 1U) {
+            std::move(payload), input, output, std::move(trusted), std::move(gate));
+         gate_control->close();
+         if (!gate_control->completed_successfully_once()) {
             throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};
          }
-         if (method->response_validator) {
-            method->response_validator(*canonical_request, response.payload);
-         }
+         gate_control->validate_response(response.payload);
+         gate_control->transfer_completion_metadata(response);
       } else {
          if (before) {
             const auto canonical_payload = [&request] { return request.payload; };
@@ -298,10 +266,19 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
             method->response_validator(request_payload, response.payload);
          }
       }
-      response.meta = request.meta;
+      if (!gate_control) {
+         response.meta = request.meta;
+      }
       co_return response;
    } catch (...) {
+      if (gate_control) {
+         gate_control->close();
+      }
       fail_stream_endpoints(input, output);
+      if (gate_control) {
+         gate_control->transfer_completion_metadata(response);
+         co_return project_failure(response, *method, std::current_exception());
+      }
       co_return project_failure(request, *method, std::current_exception());
    }
 }

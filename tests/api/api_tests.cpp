@@ -1,5 +1,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -40,6 +42,7 @@ import forge.api.core.dispatcher;
 import forge.api.core.server_supplied;
 import forge.api.core.trusted_invocation;
 import forge.asio.blocking;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.crypto.digest.sha256;
 import forge.raw.datastream;
@@ -448,6 +451,27 @@ static_assert(!forge::api::core::local_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<overloaded_api>);
 static_assert(forge::api::core::remote_interface<const_exact_api>);
+
+using registry_dispatch_pointer = boost::asio::awaitable<forge::api::core::frame> (
+   forge::api::core::registry::*)(forge::api::core::frame) const;
+using registry_dispatch_stream_pointer = boost::asio::awaitable<forge::api::core::frame> (
+   forge::api::core::registry::*)(
+      forge::api::core::frame, std::shared_ptr<forge::api::core::detail::stream_endpoint>,
+      std::shared_ptr<forge::api::core::detail::stream_endpoint>) const;
+using binding_dispatch_pointer = boost::asio::awaitable<forge::api::core::frame> (
+   forge::api::core::binding_plan::*)(forge::api::core::frame) const;
+using binding_dispatch_stream_pointer = boost::asio::awaitable<forge::api::core::frame> (
+   forge::api::core::binding_plan::*)(
+      forge::api::core::frame, std::shared_ptr<forge::api::core::detail::stream_endpoint>,
+      std::shared_ptr<forge::api::core::detail::stream_endpoint>) const;
+
+static_assert(std::same_as<decltype(&forge::api::core::registry::dispatch), registry_dispatch_pointer>);
+static_assert(std::same_as<decltype(&forge::api::core::registry::dispatch_stream), registry_dispatch_stream_pointer>);
+static_assert(std::same_as<decltype(&forge::api::core::binding_plan::dispatch), binding_dispatch_pointer>);
+static_assert(
+   std::same_as<decltype(&forge::api::core::binding_plan::dispatch_stream), binding_dispatch_stream_pointer>);
+static_assert(std::move_constructible<forge::api::core::contextual_handler_gate>);
+static_assert(!std::copy_constructible<forge::api::core::contextual_handler_gate>);
 
 template <typename T>
 concept request_view_borrowable = requires(T&& value) {
@@ -2526,6 +2550,167 @@ BOOST_AUTO_TEST_CASE(contextual_handler_gate_must_be_acquired_exactly_once) {
    BOOST_CHECK(duplicate_response.kind == forge::api::core::frame_kind::error);
    BOOST_TEST(*duplicate_calls == 2U);
    BOOST_TEST(duplicate_implementation->unary_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(contextual_handler_gate_rejection_cannot_be_swallowed) {
+   auto runtime = forge::asio::runtime{};
+   auto descriptor = trusted_api::describe();
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
+   const auto fields = *forge::api::core::detail::server_fields_for(*method);
+   const auto swallowed_rejections = std::make_shared<std::size_t>(0U);
+   forge::api::core::detail::install_unary_context(
+      *method, fields,
+      [swallowed_rejections](forge::api::core::bytes payload, forge::api::core::trusted_invocation trusted,
+                             forge::api::core::contextual_handler_gate gate)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
+         auto request = forge::api::core::unpack_body<trusted_protocol::request>(payload);
+         forge::api::core::reset_server_supplied(request);
+         forge::api::core::apply_server_supplied(request, trusted);
+         const auto canonical_payload = [&request] { return forge::api::core::pack_body(request); };
+         try {
+            static_cast<void>(co_await gate(forge::api::core::request_view::borrow(request), canonical_payload));
+         } catch (const forge::api::core::exceptions::protocol_error&) {
+            ++*swallowed_rejections;
+         }
+         co_return forge::api::core::pack_body(protocol::chunk{.bytes = "forged"});
+      });
+
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<trusted_impl>();
+   registry.install<trusted_api>(std::move(descriptor), implementation);
+   const auto plan = forge::api::core::binding()
+                         .serve(registry)
+                         .interceptor(
+                            forge::api::core::interceptor()
+                               .id("reject-swallowed-gate")
+                               .phase(forge::api::core::interceptor_phase::authorize)
+                               .handler([](forge::api::core::call_context&) -> boost::asio::awaitable<void> {
+                                  throw forge::api::core::exceptions::protocol_error{"authorization rejected"};
+                               })
+                               .build())
+                         .build();
+
+   const auto response = forge::asio::blocking::run(
+      runtime, plan.dispatch_contextual(
+                   trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request())), trusted_authority()));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::api::core::unpack_body<forge::api::core::error_payload>(response.payload);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::protocol_error));
+   BOOST_TEST(*swallowed_rejections == 1U);
+   BOOST_TEST(implementation->unary_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(contextual_handler_gate_expires_after_invoker_returns) {
+   auto runtime = forge::asio::runtime{};
+   auto descriptor = trusted_api::describe();
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
+   const auto fields = *forge::api::core::detail::server_fields_for(*method);
+   const auto stored_gate = std::make_shared<std::optional<forge::api::core::contextual_handler_gate>>();
+   forge::api::core::detail::install_unary_context(
+      *method, fields,
+      [stored_gate](forge::api::core::bytes, forge::api::core::trusted_invocation,
+                    forge::api::core::contextual_handler_gate gate)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
+         stored_gate->emplace(std::move(gate));
+         co_return forge::api::core::pack_body(protocol::chunk{.bytes = "forged"});
+      });
+
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<trusted_impl>();
+   registry.install<trusted_api>(std::move(descriptor), implementation);
+   const auto response = forge::asio::blocking::run(
+      runtime, registry.dispatch_contextual(
+                   trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request())), trusted_authority()));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   BOOST_REQUIRE(stored_gate->has_value());
+   auto request = spoofed_trusted_request();
+   const auto canonical_payload = [&request] { return forge::api::core::pack_body(request); };
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime, (*stored_gate)->operator()(forge::api::core::request_view::borrow(request), canonical_payload)),
+      forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(implementation->unary_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(contextual_handler_gate_closes_detached_in_flight_acquisition) {
+   auto runtime = forge::asio::runtime{};
+   auto descriptor = trusted_api::describe();
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
+   const auto fields = *forge::api::core::detail::server_fields_for(*method);
+   const auto entered = std::make_shared<forge::asio::notification>();
+   const auto release = std::make_shared<forge::asio::notification>();
+   const auto finished = std::make_shared<forge::asio::notification>();
+   forge::api::core::detail::install_unary_context(
+      *method, fields,
+      [executor = runtime.context().get_executor(), entered, release, finished](
+         forge::api::core::bytes payload, forge::api::core::trusted_invocation trusted,
+         forge::api::core::contextual_handler_gate gate) -> boost::asio::awaitable<forge::api::core::bytes> {
+         auto request = forge::api::core::unpack_body<trusted_protocol::request>(payload);
+         forge::api::core::reset_server_supplied(request);
+         forge::api::core::apply_server_supplied(request, trusted);
+         const auto observed_entry = entered->epoch();
+         boost::asio::co_spawn(
+            executor,
+            [gate = std::move(gate), request = std::move(request), finished]() mutable -> boost::asio::awaitable<void> {
+               const auto canonical_payload = [&request] { return forge::api::core::pack_body(request); };
+               try {
+                  static_cast<void>(co_await gate(forge::api::core::request_view::borrow(request), canonical_payload));
+               } catch (...) {
+                  // A closed gate must not let detached work reach the registered implementation.
+               }
+               finished->notify();
+            },
+            boost::asio::detached);
+         co_await entered->async_wait(observed_entry);
+         co_return forge::api::core::pack_body(protocol::chunk{.bytes = "forged"});
+      });
+
+   auto registry = forge::api::core::registry{};
+   auto implementation = std::make_shared<trusted_impl>();
+   registry.install<trusted_api>(std::move(descriptor), implementation);
+   auto plan = std::optional<forge::api::core::binding_plan>{
+      forge::api::core::binding()
+         .serve(registry)
+         .interceptor(
+            forge::api::core::interceptor()
+               .id("block-detached-gate")
+               .phase(forge::api::core::interceptor_phase::authorize)
+               .handler([entered, release](forge::api::core::call_context& context)
+                           -> boost::asio::awaitable<void> {
+                  context.meta.push_back({.key = "x-interceptor", .value = "late"});
+                  const auto observed_release = release->epoch();
+                  entered->notify();
+                  co_await release->async_wait(observed_release);
+               })
+               .build())
+         .build(),
+   };
+   auto request = trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request()));
+   request.meta = {{.key = "x-original", .value = "preserve"}};
+   const auto observed_finished = finished->epoch();
+
+   const auto response = forge::asio::blocking::run(
+      runtime, plan->dispatch_contextual(std::move(request), trusted_authority()));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::api::core::unpack_body<forge::api::core::error_payload>(response.payload);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::protocol_error));
+   BOOST_REQUIRE_EQUAL(response.meta.size(), 1U);
+   BOOST_TEST(response.meta.front().key == "x-original");
+   BOOST_TEST(response.meta.front().value == "preserve");
+   BOOST_TEST(implementation->unary_calls == 0U);
+
+   plan.reset();
+   release->notify();
+   forge::asio::blocking::run(runtime, finished->async_wait(observed_finished));
+   BOOST_TEST(implementation->unary_calls == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(authorization_rejection_precedes_contextual_validators_and_handlers) {

@@ -3,7 +3,6 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <functional>
-#include <optional>
 #include <string_view>
 #include <string>
 
@@ -11,7 +10,99 @@ module;
 
 module forge.api.core.descriptor;
 
+#include "details/contextual_handler_gate_state.hxx"
+
 namespace forge::api::core {
+
+contextual_handler_gate::contextual_handler_gate(
+   std::weak_ptr<detail::contextual_handler_gate_state> state)
+   : state_{std::move(state)} {}
+
+contextual_handler_gate::contextual_handler_gate(contextual_handler_gate&& other) noexcept
+   : state_{std::move(other.state_)}, acquired_{std::exchange(other.acquired_, true)} {}
+
+contextual_handler_gate&
+contextual_handler_gate::operator=(contextual_handler_gate&& other) noexcept {
+   if (this != &other) {
+      state_ = std::move(other.state_);
+      acquired_ = std::exchange(other.acquired_, true);
+   }
+   return *this;
+}
+
+contextual_handler_gate::~contextual_handler_gate() = default;
+
+boost::asio::awaitable<std::shared_ptr<void>>
+contextual_handler_gate::operator()(request_view request, const canonical_request_encoder& encode) {
+   auto state = state_.lock();
+   if (!state) {
+      throw exceptions::protocol_error{"contextual API handler gate is no longer active"};
+   }
+   if (acquired_) {
+      state->reject_reacquire();
+      throw exceptions::protocol_error{"contextual API invoker acquired the handler gate more than once"};
+   }
+   acquired_ = true;
+   co_return co_await state->acquire(request, encode);
+}
+
+detail::contextual_handler_gate_control::contextual_handler_gate_control(
+   frame request, contextual_dispatch_hook before,
+   std::function<void(const bytes&)> request_validator,
+   std::function<void(const bytes&, const bytes&)> response_validator,
+   std::shared_ptr<void> implementation)
+   : state_{std::make_shared<contextual_handler_gate_state>(
+        std::move(request), std::move(before), std::move(request_validator),
+        std::move(response_validator), std::move(implementation))} {}
+
+detail::contextual_handler_gate_control::contextual_handler_gate_control(
+   contextual_handler_gate_control&& other) noexcept
+   : state_{std::move(other.state_)}, gate_taken_{std::exchange(other.gate_taken_, true)} {}
+
+detail::contextual_handler_gate_control&
+detail::contextual_handler_gate_control::operator=(contextual_handler_gate_control&& other) noexcept {
+   if (this != &other) {
+      close();
+      state_ = std::move(other.state_);
+      gate_taken_ = std::exchange(other.gate_taken_, true);
+   }
+   return *this;
+}
+
+detail::contextual_handler_gate_control::~contextual_handler_gate_control() noexcept {
+   close();
+}
+
+contextual_handler_gate detail::contextual_handler_gate_control::take_gate() {
+   if (!state_ || gate_taken_) {
+      throw exceptions::protocol_error{"contextual API handler gate is no longer active"};
+   }
+   gate_taken_ = true;
+   return contextual_handler_gate_state::make_gate(state_);
+}
+
+void detail::contextual_handler_gate_control::close() noexcept {
+   if (state_) {
+      state_->close();
+   }
+}
+
+bool detail::contextual_handler_gate_control::completed_successfully_once() const {
+   return state_ && state_->completed_successfully_once();
+}
+
+void detail::contextual_handler_gate_control::validate_response(const bytes& response) const {
+   if (!state_) {
+      throw exceptions::protocol_error{"contextual API handler gate is no longer active"};
+   }
+   state_->validate_response(response);
+}
+
+void detail::contextual_handler_gate_control::transfer_completion_metadata(frame& response) {
+   if (state_) {
+      state_->transfer_completion_metadata(response.meta);
+   }
+}
 
 bytes detail::contextual_request_encoder::operator()(const void* request) const {
    return encode(request);
