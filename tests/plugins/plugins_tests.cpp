@@ -5,6 +5,7 @@
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -3688,7 +3689,7 @@ BOOST_AUTO_TEST_CASE(p2p_publication_is_move_only_and_joins_concurrent_closers) 
       }));
    }
    BOOST_TEST(state->close_calls.load(std::memory_order_relaxed) == 1U);
-   static_cast<void>(state->drain_gate->cancel());
+   boost::asio::post(runtime.context(), [gate = state->drain_gate] { static_cast<void>(gate->cancel()); });
    BOOST_REQUIRE(first.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    BOOST_REQUIRE(second.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    BOOST_REQUIRE(third.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -3764,7 +3765,7 @@ BOOST_AUTO_TEST_CASE(p2p_publication_drain_uses_its_owner_runtime_after_first_ca
 
    first_caller_runtime.stop();
    BOOST_CHECK(first.wait_for(std::chrono::milliseconds{50}) != std::future_status::ready);
-   static_cast<void>(state->gate->cancel());
+   boost::asio::post(owner_runtime.context(), [gate = state->gate] { static_cast<void>(gate->cancel()); });
    {
       auto lock = std::unique_lock{state->mutex};
       BOOST_REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2}, [&] {
