@@ -270,7 +270,18 @@ boost::asio::awaitable<void> session::impl::handle_request(forge::api::core::fra
    }
 
    auto call = make_remote_call(value, kind);
-   if (call->descriptor && call->descriptor->request_decoder) {
+   const auto has_contextual_invoker = [&] {
+      if (!call->descriptor) {
+         return false;
+      }
+      if (kind == forge::api::core::method_kind::unary) {
+         const auto* invoker = forge::api::core::detail::contextual_unary_for(*call->descriptor);
+         return invoker != nullptr && static_cast<bool>(*invoker);
+      }
+      const auto* invoker = forge::api::core::detail::contextual_stream_for(*call->descriptor);
+      return invoker != nullptr && static_cast<bool>(*invoker);
+   }();
+   if (call->descriptor && call->descriptor->request_decoder && !has_contextual_invoker) {
       const auto bounded =
           static_cast<std::uint32_t>(std::min<std::size_t>(value.payload.size(), negotiated_limits.max_frame_bytes));
       call->descriptor->request_decoder(value.payload, forge::raw::unpack_limits{

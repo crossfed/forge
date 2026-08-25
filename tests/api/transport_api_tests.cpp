@@ -118,6 +118,7 @@ class live_impl final : public live_api {
    }
 
    boost::asio::awaitable<void> download(std::uint32_t count, forge::api::core::stream_writer<item> output) override {
+      download_calls.fetch_add(1, std::memory_order_release);
       download_started.store(true, std::memory_order_release);
       for (auto index = std::uint32_t{0}; index < count; ++index) {
          co_await output.async_write(item{.value = index + 1});
@@ -194,6 +195,7 @@ class live_impl final : public live_api {
    std::atomic_bool hold_exchange_completion{false};
    std::atomic_bool exchange_ready_to_complete{false};
    std::atomic_uint32_t produced{0};
+   std::atomic_uint32_t download_calls{0};
    std::atomic_uint32_t upload_completions{0};
 };
 
@@ -766,6 +768,112 @@ BOOST_AUTO_TEST_CASE(transport_session_runs_all_method_kinds_incrementally) {
 
       co_await connection.async_close();
       co_await wait_service(service);
+   };
+   forge::asio::blocking::run(runtime, scenario());
+}
+
+BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_isolates_terminal_failure) {
+   auto runtime = forge::asio::runtime{};
+   auto scenario = []() -> boost::asio::awaitable<void> {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto descriptor = live_api::describe();
+      auto method = std::find_if(descriptor.methods.begin(), descriptor.methods.end(),
+                                 [](const auto& value) { return value.name == "download"; });
+      BOOST_REQUIRE(method != descriptor.methods.end());
+
+      const auto* fields = forge::api::core::detail::server_fields_for(*method);
+      const auto* generated = forge::api::core::detail::contextual_stream_for(*method);
+      BOOST_REQUIRE(fields != nullptr);
+      BOOST_REQUIRE(generated != nullptr);
+      BOOST_REQUIRE(static_cast<bool>(*generated));
+
+      auto admission_decodes = std::make_shared<std::atomic_uint32_t>(0);
+      auto contextual_invocations = std::make_shared<std::atomic_uint32_t>(0);
+      const auto generated_invoker = *generated;
+      method->request_decoder = [admission_decodes](const bytes&, forge::raw::unpack_limits) {
+         admission_decodes->fetch_add(1, std::memory_order_release);
+      };
+      forge::api::core::detail::install_stream_context(
+          *method, *fields,
+          [generated_invoker,
+           contextual_invocations](bytes payload, std::shared_ptr<forge::api::core::detail::stream_endpoint> input,
+                                   std::shared_ptr<forge::api::core::detail::stream_endpoint> output,
+                                   forge::api::core::trusted_invocation trusted,
+                                   forge::api::core::contextual_handler_gate gate) -> boost::asio::awaitable<bytes> {
+             contextual_invocations->fetch_add(1, std::memory_order_release);
+             co_return co_await generated_invoker(std::move(payload), std::move(input), std::move(output),
+                                                  std::move(trusted), std::move(gate));
+          });
+
+      auto implementation = std::make_shared<live_impl>();
+      auto registry = forge::api::core::registry{};
+      registry.install<live_api>(std::move(descriptor), implementation);
+
+      auto malformed_client_model = std::make_shared<fake_stream>();
+      auto malformed_server_model = std::make_shared<fake_stream>();
+      auto [malformed_client_stream, malformed_server_stream] =
+          make_stream_pair(malformed_client_model, malformed_server_model);
+      auto neighbor_client_model = std::make_shared<fake_stream>();
+      auto neighbor_server_model = std::make_shared<fake_stream>();
+      auto [neighbor_client_stream, neighbor_server_stream] =
+         make_stream_pair(neighbor_client_model, neighbor_server_model);
+
+      auto malformed_service = start_service(
+         executor, forge::api::transport::serve_stream(std::move(malformed_server_stream),
+                                                       forge::api::core::binding().serve(registry).build()));
+      auto neighbor_service = start_service(
+         executor, forge::api::transport::serve_stream(std::move(neighbor_server_stream),
+                                                       forge::api::core::binding().serve(registry).build()));
+      auto malformed_session = forge::api::stream::session{std::move(malformed_client_stream)};
+      auto neighbor_session = forge::api::stream::session{std::move(neighbor_client_stream)};
+
+      auto malformed_output = forge::api::core::detail::make_local_stream_pair(executor, 4096, 2, 8192);
+      const auto malformed = co_await malformed_session.async_stream_call(
+          forge::api::core::frame{
+              .kind = forge::api::core::frame_kind::request,
+              .api = live_api::ref(),
+              .method = "download",
+              .codec = {.value = "forge.raw"},
+              .payload = {},
+          },
+          forge::api::core::method_kind::server_stream, {}, malformed_output.writer);
+      BOOST_TEST(static_cast<int>(malformed.kind) == static_cast<int>(forge::api::core::frame_kind::error));
+
+      auto neighbor_output = forge::api::core::detail::make_local_stream_pair(executor, 4096, 2, 8192);
+      auto neighbor_result = std::make_shared<std::optional<forge::api::core::frame>>();
+      const auto run_neighbor =
+         [](forge::api::stream::session& session,
+            std::shared_ptr<forge::api::core::detail::stream_endpoint> output,
+            std::shared_ptr<std::optional<forge::api::core::frame>> result) -> boost::asio::awaitable<void> {
+         *result = co_await session.async_stream_call(
+            forge::api::core::frame{
+                .kind = forge::api::core::frame_kind::request,
+                .api = live_api::ref(),
+                .method = "download",
+                .codec = {.value = "forge.raw"},
+                .payload = forge::raw::pack(std::uint32_t{1}),
+            },
+            forge::api::core::method_kind::server_stream, {}, std::move(output));
+      };
+      auto neighbor_call =
+         start_service(executor, run_neighbor(neighbor_session, neighbor_output.writer, neighbor_result));
+      const auto item = co_await neighbor_output.reader->async_read();
+      BOOST_REQUIRE(item.has_value());
+      BOOST_TEST(forge::api::core::unpack_body<transport_live_types::item>(*item).value == 1U);
+      BOOST_TEST(!(co_await neighbor_output.reader->async_read()).has_value());
+      co_await wait_service(neighbor_call);
+      BOOST_REQUIRE(neighbor_result->has_value());
+      BOOST_TEST(static_cast<int>((*neighbor_result)->kind) ==
+                 static_cast<int>(forge::api::core::frame_kind::response));
+
+      BOOST_TEST(admission_decodes->load(std::memory_order_acquire) == 0U);
+      BOOST_TEST(contextual_invocations->load(std::memory_order_acquire) == 2U);
+      BOOST_TEST(implementation->download_calls.load(std::memory_order_acquire) == 1U);
+
+      co_await malformed_session.async_close();
+      co_await neighbor_session.async_close();
+      co_await wait_service(malformed_service);
+      co_await wait_service(neighbor_service);
    };
    forge::asio::blocking::run(runtime, scenario());
 }

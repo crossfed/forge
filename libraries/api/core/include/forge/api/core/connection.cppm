@@ -109,6 +109,10 @@ class remote_invoker {
       if (method_value == nullptr) {
          throw exceptions::protocol_error{"API method is not available"};
       }
+      if (method_value->request_type != typeid(void) &&
+          method_value->request_type != typeid(std::remove_cvref_t<Request>)) {
+         throw exceptions::protocol_error{"API request type does not match its method descriptor"};
+      }
       auto outbound = request{
           .api = std::move(api),
           .method = std::move(method),
@@ -126,9 +130,18 @@ class remote_invoker {
    boost::asio::awaitable<Response> call_arguments(const descriptor& contract, api_ref api, std::string method,
                                                    Args&&... args) {
       using argument_tuple = std::tuple<std::remove_cvref_t<Args>...>;
+      using wire_request = typename method_payload<argument_tuple>::type;
       const auto* method_value = find_method(contract, method);
       if (method_value == nullptr) {
          throw exceptions::protocol_error{"API method is not available"};
+      }
+      const auto request_matches =
+         method_value->request_type == typeid(void) || method_value->request_type == typeid(wire_request);
+      const auto fixed_matches = method_value->fixed_arguments_type == typeid(void) ||
+                                 method_value->fixed_arguments_type == typeid(argument_tuple) ||
+                                 method_value->fixed_arguments_type == typeid(wire_request);
+      if (!request_matches || !fixed_matches) {
+         throw exceptions::protocol_error{"API argument tuple does not match its method descriptor"};
       }
       auto arguments = argument_tuple{std::forward<Args>(args)...};
       if (supports_typed_arguments()) {

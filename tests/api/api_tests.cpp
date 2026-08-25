@@ -2212,6 +2212,8 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    BOOST_REQUIRE(method != descriptor.methods.end());
    forge::api::core::detail::remove_request_context(*method);
    forge::api::core::detail::remove_unary_context(*method);
+   method->request_type = typeid(void);
+   method->fixed_arguments_type = typeid(void);
 
    auto runtime = forge::asio::runtime{};
    auto remote = std::make_shared<invoker>();
@@ -2237,6 +2239,82 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    const auto stream_wire = forge::api::core::detail::encode_fixed_proxy_arguments<&move_only_api::stream_values>(
       *stream_method, fixed_arguments, std::make_index_sequence<1>{});
    BOOST_TEST(*forge::api::core::unpack_body<protocol::move_only_request>(stream_wire).value == "legacy-stream");
+}
+
+BOOST_AUTO_TEST_CASE(remote_invoker_rejects_mismatched_descriptor_types_before_encoding) {
+   class invoker final : public forge::api::core::remote_invoker {
+    public:
+      explicit invoker(bool typed_arguments) : typed_arguments_{typed_arguments} {}
+
+      boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+         ++raw_calls;
+         co_return forge::api::core::response{
+             .api = value.api,
+             .method = value.method,
+             .codec = value.codec,
+             .body = forge::api::core::pack_body(protocol::chunk{}),
+         };
+      }
+
+      bool supports_typed_arguments() const noexcept override {
+         return typed_arguments_;
+      }
+
+      boost::asio::awaitable<void> async_call_arguments(forge::api::core::request, std::type_index, void*,
+                                                        std::type_index, void*) override {
+         ++typed_calls;
+         co_return;
+      }
+
+      std::size_t raw_calls = 0;
+      std::size_t typed_calls = 0;
+
+    private:
+      bool typed_arguments_ = false;
+   };
+
+   auto runtime = forge::asio::runtime{};
+   auto unary_descriptor = cache_api::describe();
+   auto unary = std::ranges::find_if(unary_descriptor.methods,
+                                     [](const auto& value) { return value.name == "read"; });
+   BOOST_REQUIRE(unary != unary_descriptor.methods.end());
+   auto unary_encodes = std::size_t{0};
+   unary->request_encoder = [&unary_encodes](const void*) {
+      ++unary_encodes;
+      return forge::api::core::bytes{};
+   };
+   auto raw = std::make_shared<invoker>(false);
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(
+                        runtime, raw->call<protocol::chunk, protocol::chunk>(
+                                    unary_descriptor, cache_api::ref(), "read", protocol::chunk{})),
+                     forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(unary_encodes == 0U);
+   BOOST_TEST(raw->raw_calls == 0U);
+
+   auto positional_descriptor = positional_api::describe();
+   auto positional = std::ranges::find_if(positional_descriptor.methods,
+                                          [](const auto& value) { return value.name == "concat"; });
+   BOOST_REQUIRE(positional != positional_descriptor.methods.end());
+   auto positional_encodes = std::size_t{0};
+   positional->request_encoder = [&positional_encodes](const void*) {
+      ++positional_encodes;
+      return forge::api::core::bytes{};
+   };
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(
+                        runtime, raw->call_arguments<protocol::chunk>(
+                                    positional_descriptor, positional_api::ref(), "concat", protocol::read_chunk{})),
+                     forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(positional_encodes == 0U);
+   BOOST_TEST(raw->raw_calls == 0U);
+
+   auto typed = std::make_shared<invoker>(true);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(
+                        runtime, typed->call_arguments<protocol::chunk>(
+                                    positional_descriptor, positional_api::ref(), "concat", protocol::read_chunk{})),
+                     forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(typed->typed_calls == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(remote_proxy_encodes_move_only_unary_and_stream_fixed_arguments) {
