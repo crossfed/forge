@@ -5,7 +5,6 @@
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -81,6 +80,7 @@ import forge.app.runner;
 import forge.app.daemon;
 import forge.asio.blocking;
 import forge.asio.compute;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.asio.task;
 import forge.config.core.component;
@@ -3653,22 +3653,19 @@ BOOST_AUTO_TEST_CASE(p2p_publication_is_move_only_and_joins_concurrent_closers) 
    struct close_state {
       std::atomic_size_t close_calls{0};
       std::atomic_size_t drain_calls{0};
-      std::mutex mutex;
-      std::condition_variable changed;
-      std::shared_ptr<boost::asio::steady_timer> drain_gate;
+      forge::asio::notification drain_entered;
+      forge::asio::notification release_drain;
    };
 
    auto state = std::make_shared<close_state>();
-   state->drain_gate = std::make_shared<boost::asio::steady_timer>(
-       runtime.context(), boost::asio::steady_timer::time_point::max());
    auto publication = forge::api::p2p::detail::publication_access::make(
       runtime.context().get_executor(),
       [state] { state->close_calls.fetch_add(1, std::memory_order_relaxed); },
       [state]() -> boost::asio::awaitable<void> {
+         const auto release_epoch = state->release_drain.epoch();
          state->drain_calls.fetch_add(1, std::memory_order_relaxed);
-         state->changed.notify_all();
-         auto error = boost::system::error_code{};
-         co_await state->drain_gate->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+         state->drain_entered.notify();
+         co_await state->release_drain.async_wait(release_epoch);
       },
       [] { return true; });
 
@@ -3679,17 +3676,18 @@ BOOST_AUTO_TEST_CASE(p2p_publication_is_move_only_and_joins_concurrent_closers) 
    moved.close();
    BOOST_TEST(!moved.active());
 
+   const auto drain_entered_epoch = state->drain_entered.epoch();
    auto first = boost::asio::co_spawn(runtime.context(), moved.async_close(), boost::asio::use_future);
    auto second = boost::asio::co_spawn(runtime.context(), moved.async_close(), boost::asio::use_future);
    auto third = boost::asio::co_spawn(runtime.context(), moved.async_close(), boost::asio::use_future);
-   {
-      auto lock = std::unique_lock{state->mutex};
-      BOOST_REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2}, [&] {
-         return state->drain_calls.load(std::memory_order_relaxed) == 1U;
-      }));
-   }
+   auto drain_entered = boost::asio::co_spawn(
+      runtime.context(),
+      state->drain_entered.async_wait_until(drain_entered_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
+      boost::asio::use_future);
+   BOOST_REQUIRE(drain_entered.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   BOOST_REQUIRE(drain_entered.get() != drain_entered_epoch);
    BOOST_TEST(state->close_calls.load(std::memory_order_relaxed) == 1U);
-   boost::asio::post(runtime.context(), [gate = state->drain_gate] { static_cast<void>(gate->cancel()); });
+   state->release_drain.notify();
    BOOST_REQUIRE(first.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    BOOST_REQUIRE(second.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    BOOST_REQUIRE(third.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
@@ -3732,46 +3730,45 @@ BOOST_AUTO_TEST_CASE(p2p_publication_drain_uses_its_owner_runtime_after_first_ca
    struct drain_state {
       std::atomic_size_t close_calls{0};
       std::atomic_size_t drain_calls{0};
-      std::atomic_bool drained = false;
-      std::mutex mutex;
-      std::condition_variable changed;
-      std::shared_ptr<boost::asio::steady_timer> gate;
+      forge::asio::notification drain_entered;
+      forge::asio::notification release_drain;
+      forge::asio::notification drain_completed;
    };
 
    auto state = std::make_shared<drain_state>();
-   state->gate = std::make_shared<boost::asio::steady_timer>(
-       owner_runtime.context(), boost::asio::steady_timer::time_point::max());
    auto publication = forge::api::p2p::detail::publication_access::make(
       owner_runtime.context().get_executor(),
       [state] { state->close_calls.fetch_add(1, std::memory_order_relaxed); },
       [state]() -> boost::asio::awaitable<void> {
+         const auto release_epoch = state->release_drain.epoch();
          state->drain_calls.fetch_add(1, std::memory_order_relaxed);
-         state->changed.notify_all();
-         auto error = boost::system::error_code{};
-         co_await state->gate->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-         state->drained.store(true, std::memory_order_release);
-         state->changed.notify_all();
+         state->drain_entered.notify();
+         co_await state->release_drain.async_wait(release_epoch);
+         state->drain_completed.notify();
       },
       [] { return true; });
 
+   const auto drain_entered_epoch = state->drain_entered.epoch();
    auto first = boost::asio::co_spawn(
       first_caller_runtime.context(), publication.async_close(), boost::asio::use_future);
-   {
-      auto lock = std::unique_lock{state->mutex};
-      BOOST_REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2}, [&] {
-         return state->drain_calls.load(std::memory_order_acquire) == 1U;
-      }));
-   }
+   auto drain_entered = boost::asio::co_spawn(
+      owner_runtime.context(),
+      state->drain_entered.async_wait_until(drain_entered_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
+      boost::asio::use_future);
+   BOOST_REQUIRE(drain_entered.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   BOOST_REQUIRE(drain_entered.get() != drain_entered_epoch);
 
    first_caller_runtime.stop();
    BOOST_CHECK(first.wait_for(std::chrono::milliseconds{50}) != std::future_status::ready);
-   boost::asio::post(owner_runtime.context(), [gate = state->gate] { static_cast<void>(gate->cancel()); });
-   {
-      auto lock = std::unique_lock{state->mutex};
-      BOOST_REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2}, [&] {
-         return state->drained.load(std::memory_order_acquire);
-      }));
-   }
+   const auto drain_completed_epoch = state->drain_completed.epoch();
+   state->release_drain.notify();
+   auto drain_completed = boost::asio::co_spawn(
+      owner_runtime.context(),
+      state->drain_completed.async_wait_until(
+         drain_completed_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
+      boost::asio::use_future);
+   BOOST_REQUIRE(drain_completed.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   BOOST_REQUIRE(drain_completed.get() != drain_completed_epoch);
 
    auto late = boost::asio::co_spawn(
       late_caller_runtime.context(), publication.async_close(), boost::asio::use_future);
@@ -4068,29 +4065,27 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during
    auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
        {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
 
-   auto blocker_started = std::atomic_bool{false};
-   auto blocker_gate = std::make_shared<boost::asio::steady_timer>(
-       app.runtime().context(), boost::asio::steady_timer::time_point::max());
+   auto blocker_started = forge::asio::notification{};
+   auto release_blocker = forge::asio::notification{};
+   const auto blocker_started_epoch = blocker_started.epoch();
    auto blocker = app.scheduler().submit(forge::asio::task::awaitable{
        .priority = forge::asio::task::priority{100},
        .name = "resolver-retirement-blocker",
        .work =
-           [gate = blocker_gate, &blocker_started](forge::asio::task::context&) -> boost::asio::awaitable<void> {
-              blocker_started.store(true, std::memory_order_release);
-              auto error = boost::system::error_code{};
-              co_await gate->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+           [&blocker_started, &release_blocker](forge::asio::task::context&) -> boost::asio::awaitable<void> {
+              const auto release_epoch = release_blocker.epoch();
+              blocker_started.notify();
+              co_await release_blocker.async_wait(release_epoch);
               co_return;
            },
    });
    BOOST_REQUIRE(blocker.accepted());
-   const auto blocker_ready = forge::asio::blocking::run(
-       app.runtime(),
-       async_wait_for_condition([&] { return blocker_started.load(std::memory_order_acquire); }, std::chrono::seconds{2}));
-   if (!blocker_ready) {
-      blocker_gate->expires_at(boost::asio::steady_timer::time_point::min());
-      static_cast<void>(blocker_gate->cancel());
-   }
-   BOOST_REQUIRE(blocker_ready);
+   auto blocker_entered = boost::asio::co_spawn(
+      app.runtime().context(),
+      blocker_started.async_wait_until(blocker_started_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
+      boost::asio::use_future);
+   BOOST_REQUIRE(blocker_entered.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   BOOST_REQUIRE(blocker_entered.get() != blocker_started_epoch);
 
    const auto protocol = std::string{"/forge/api/resolver-retirement-canceled/1"};
    auto publication = resolver->publish_api(
@@ -4105,8 +4100,7 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during
    BOOST_TEST(canceled.stopped);
    BOOST_TEST(canceled.pending == 0U);
    BOOST_TEST(canceled.canceled >= 1U);
-   blocker_gate->expires_at(boost::asio::steady_timer::time_point::min());
-   static_cast<void>(blocker_gate->cancel());
+   release_blocker.notify();
    BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), blocker.wait()));
 
    BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), app.shutdown()));
