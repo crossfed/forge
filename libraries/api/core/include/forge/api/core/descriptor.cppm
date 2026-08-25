@@ -507,6 +507,37 @@ using contextual_raw_stream_invoker = std::function<boost::asio::awaitable<bytes
     bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>, trusted_invocation,
     contextual_handler_gate)>;
 
+namespace detail {
+
+struct contextual_request_encoder {
+   std::function<bytes(const void*)> encode;
+   std::function<bytes(void*)> encode_owned;
+   server_field_operations fields;
+
+   [[nodiscard]] bytes operator()(const void* request) const;
+};
+
+struct contextual_unary_invoker {
+   std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> invoke;
+   contextual_raw_invoker invoke_contextual;
+   server_field_operations fields;
+
+   boost::asio::awaitable<bytes> operator()(std::shared_ptr<void> implementation, bytes payload) const;
+};
+
+struct contextual_stream_invoker {
+   raw_stream_invoker invoke;
+   contextual_raw_stream_invoker invoke_contextual;
+   server_field_operations fields;
+
+   boost::asio::awaitable<bytes>
+   operator()(std::shared_ptr<void> implementation, bytes payload,
+              std::shared_ptr<stream_endpoint> input,
+              std::shared_ptr<stream_endpoint> output) const;
+};
+
+} // namespace detail
+
 struct method_descriptor {
    std::string name;
    method_kind kind = method_kind::unary;
@@ -532,10 +563,6 @@ struct method_descriptor {
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    raw_stream_invoker stream_invoker;
-   detail::server_field_operations server_fields;
-   std::function<bytes(void*)> owned_wire_request_encoder;
-   contextual_raw_invoker contextual_raw_invoker;
-   contextual_raw_stream_invoker contextual_stream_invoker;
 
    template <typename Trait> [[nodiscard]] bool has_response_trait() const noexcept {
       for (const auto& value : response_traits) {
@@ -546,6 +573,37 @@ struct method_descriptor {
       return false;
    }
 };
+
+namespace detail {
+
+void install_request_context(method_descriptor& method,
+                             server_field_operations fields,
+                             std::function<bytes(void*)> encode_owned);
+void install_unary_context(method_descriptor& method,
+                           server_field_operations fields,
+                           contextual_raw_invoker invoke);
+void install_stream_context(method_descriptor& method,
+                            server_field_operations fields,
+                            contextual_raw_stream_invoker invoke);
+void remove_request_context(method_descriptor& method);
+void remove_unary_context(method_descriptor& method);
+void remove_stream_context(method_descriptor& method);
+
+[[nodiscard]] const server_field_operations*
+server_fields_for(const method_descriptor& method) noexcept;
+[[nodiscard]] const contextual_raw_invoker*
+contextual_unary_for(const method_descriptor& method) noexcept;
+[[nodiscard]] const contextual_raw_stream_invoker*
+contextual_stream_for(const method_descriptor& method) noexcept;
+[[nodiscard]] std::optional<bytes>
+encode_owned_request(const method_descriptor& method, void* request);
+void reset_fixed_request(const method_descriptor& method, void* request);
+void apply_wire_request(const method_descriptor& method, void* request,
+                        const trusted_invocation& trusted);
+void apply_fixed_request(const method_descriptor& method, void* request,
+                         const trusted_invocation& trusted);
+
+} // namespace detail
 
 struct descriptor {
    api_id id;
@@ -675,7 +733,6 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .fixed_arguments_type = typeid(detail::method_fixed_argument_tuple_t<Method>),
           .result_type = typeid(method_response_t<Method>),
           .argument_names = std::move(argument_names),
-          .server_fields = fields,
       };
 
       if constexpr (kind == method_kind::server_stream) {
@@ -695,12 +752,13 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          value.request_encoder = [](const void* request) {
             return pack_body(*static_cast<const wire_request*>(request));
          };
-         value.owned_wire_request_encoder = [reset = fields.reset_wire](void* request) {
-            if (reset) {
-               reset(request);
-            }
-            return pack_body(*static_cast<wire_request*>(request));
-         };
+         detail::install_request_context(
+            value, fields, [reset = fields.reset_wire](void* request) {
+               if (reset) {
+                  reset(request);
+               }
+               return pack_body(*static_cast<wire_request*>(request));
+            });
          value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
             static_cast<void>(forge::raw::unpack_exact<wire_request>(payload, limits));
          };
@@ -758,14 +816,16 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                   co_return pack_body(response);
                }
             };
-            value.contextual_raw_invoker =
+            detail::install_unary_context(
+               value, fields,
                [fields](bytes payload, trusted_invocation trusted, contextual_handler_gate gate) {
                   return detail::invoke_contextual_raw<Method, Interface>(
                      std::move(payload), std::move(trusted), fields, std::move(gate));
-               };
+               });
          } else {
             value.stream_invoker = detail::invoke_raw_stream<Method, Interface>;
-            value.contextual_stream_invoker =
+            detail::install_stream_context(
+               value, fields,
                [fields](bytes payload,
                         std::shared_ptr<detail::stream_endpoint> input,
                         std::shared_ptr<detail::stream_endpoint> output,
@@ -773,7 +833,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
                   return detail::invoke_contextual_stream<Method, Interface>(
                      std::move(payload), std::move(input), std::move(output), std::move(trusted), fields,
                      std::move(gate));
-               };
+               });
          }
       }
 
@@ -792,18 +852,18 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .response_type = typeid(Response),
           .fixed_arguments_type = typeid(Request),
           .result_type = typeid(Response),
-          .server_fields = fields,
       };
       if constexpr (EnableRaw) {
          value.request_encoder = [](const void* request) {
             return pack_body(*static_cast<const Request*>(request));
          };
-         value.owned_wire_request_encoder = [reset = fields.reset_wire](void* request) {
-            if (reset) {
-               reset(request);
-            }
-            return pack_body(*static_cast<Request*>(request));
-         };
+         detail::install_request_context(
+            value, fields, [reset = fields.reset_wire](void* request) {
+               if (reset) {
+                  reset(request);
+               }
+               return pack_body(*static_cast<Request*>(request));
+            });
          value.response_encoder = [](const void* response) {
             return pack_body(*static_cast<const Response*>(response));
          };
@@ -819,17 +879,19 @@ template <typename Interface, bool EnableRaw> class contract_builder {
             auto response = co_await std::invoke(Method, *typed, std::move(request));
             co_return pack_body(response);
          };
-         value.contextual_raw_invoker = [fields](bytes payload, trusted_invocation trusted, contextual_handler_gate gate)
-            -> boost::asio::awaitable<bytes> {
-            auto request = unpack_body<Request>(payload);
-            fields.reset_wire(&request);
-            fields.apply_wire(&request, trusted);
-            const auto canonical_payload = [&request] { return pack_body(request); };
-            auto implementation = co_await gate(request_view::borrow(request), canonical_payload);
-            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-            auto response = co_await std::invoke(Method, *typed, std::move(request));
-            co_return pack_body(response);
-         };
+         detail::install_unary_context(
+            value, fields,
+            [fields](bytes payload, trusted_invocation trusted, contextual_handler_gate gate)
+               -> boost::asio::awaitable<bytes> {
+               auto request = unpack_body<Request>(payload);
+               fields.reset_wire(&request);
+               fields.apply_wire(&request, trusted);
+               const auto canonical_payload = [&request] { return pack_body(request); };
+               auto implementation = co_await gate(request_view::borrow(request), canonical_payload);
+               auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+               auto response = co_await std::invoke(Method, *typed, std::move(request));
+               co_return pack_body(response);
+            });
       }
       descriptor_.methods.push_back(std::move(value));
       return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};

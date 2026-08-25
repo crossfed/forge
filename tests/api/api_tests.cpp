@@ -1021,6 +1021,40 @@ BOOST_AUTO_TEST_CASE(method_descriptor_preserves_legacy_positional_request_encod
    BOOST_TEST(forge::api::core::unpack_body<protocol::read_chunk>(payload).ref == "legacy");
 }
 
+BOOST_AUTO_TEST_CASE(method_descriptor_preserves_legacy_structured_binding_shape) {
+   auto [name, kind, since_revision, deprecated, deprecation_reason,
+         request_type, response_type, fixed_arguments_type, input_type,
+         output_type, result_type, argument_names, response_traits, errors,
+         request_encoder, response_encoder, request_decoder, response_decoder,
+         input_decoder, output_decoder, request_validator, response_validator,
+         raw_invoker, stream_invoker] = forge::api::core::method_descriptor{};
+   BOOST_TEST(name.empty());
+   BOOST_TEST(static_cast<std::uint8_t>(kind) ==
+              static_cast<std::uint8_t>(forge::api::core::method_kind::unary));
+   BOOST_TEST(since_revision == 0U);
+   BOOST_TEST(!deprecated);
+   BOOST_TEST(deprecation_reason.empty());
+   BOOST_TEST((request_type == std::type_index{typeid(void)}));
+   BOOST_TEST((response_type == std::type_index{typeid(void)}));
+   BOOST_TEST((fixed_arguments_type == std::type_index{typeid(void)}));
+   BOOST_TEST((input_type == std::type_index{typeid(void)}));
+   BOOST_TEST((output_type == std::type_index{typeid(void)}));
+   BOOST_TEST((result_type == std::type_index{typeid(void)}));
+   BOOST_TEST(argument_names.empty());
+   BOOST_TEST(response_traits.empty());
+   BOOST_TEST(errors.empty());
+   BOOST_TEST(!request_encoder);
+   BOOST_TEST(!response_encoder);
+   BOOST_TEST(!request_decoder);
+   BOOST_TEST(!response_decoder);
+   BOOST_TEST(!input_decoder);
+   BOOST_TEST(!output_decoder);
+   BOOST_TEST(!request_validator);
+   BOOST_TEST(!response_validator);
+   BOOST_TEST(!raw_invoker);
+   BOOST_TEST(!stream_invoker);
+}
+
 BOOST_AUTO_TEST_CASE(generated_api_descriptor_supports_typed_overload_methods) {
    const auto descriptor = overloaded_api::describe();
 
@@ -1558,7 +1592,6 @@ BOOST_AUTO_TEST_CASE(remote_owned_wire_request_encoder_resets_only_owned_storage
    const auto* method = forge::api::core::find_method(descriptor, "unary");
    BOOST_REQUIRE(method != nullptr);
    BOOST_REQUIRE(static_cast<bool>(method->request_encoder));
-   BOOST_REQUIRE(static_cast<bool>(method->owned_wire_request_encoder));
 
    const auto caller_request = spoofed_trusted_request();
    const auto caller_wire = method->request_encoder(&caller_request);
@@ -1568,8 +1601,10 @@ BOOST_AUTO_TEST_CASE(remote_owned_wire_request_encoder_resets_only_owned_storage
    BOOST_TEST(caller_decoded.claimed_peer.value == "spoofed");
 
    auto owned_wire_request = spoofed_trusted_request();
-   const auto wire = method->owned_wire_request_encoder(&owned_wire_request);
-   const auto decoded = forge::api::core::unpack_body<trusted_protocol::request>(wire);
+   const auto wire = forge::api::core::detail::encode_owned_request(
+      *method, &owned_wire_request);
+   BOOST_REQUIRE(wire.has_value());
+   const auto decoded = forge::api::core::unpack_body<trusted_protocol::request>(*wire);
 
    BOOST_TEST(owned_wire_request.claimed_peer.value.empty());
    BOOST_TEST(owned_wire_request.claimed_optional.value.empty());
@@ -2151,8 +2186,8 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    auto descriptor = remote_only_api::describe();
    auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "read"; });
    BOOST_REQUIRE(method != descriptor.methods.end());
-   method->owned_wire_request_encoder = {};
-   method->server_fields = {};
+   forge::api::core::detail::remove_request_context(*method);
+   forge::api::core::detail::remove_unary_context(*method);
 
    auto runtime = forge::asio::runtime{};
    auto remote = std::make_shared<invoker>();
@@ -2172,8 +2207,8 @@ BOOST_AUTO_TEST_CASE(remote_clients_preserve_legacy_descriptors_without_optional
    auto stream_method = std::ranges::find_if(
       stream_descriptor.methods, [](const auto& value) { return value.name == "stream_values"; });
    BOOST_REQUIRE(stream_method != stream_descriptor.methods.end());
-   stream_method->owned_wire_request_encoder = {};
-   stream_method->server_fields = {};
+   forge::api::core::detail::remove_request_context(*stream_method);
+   forge::api::core::detail::remove_stream_context(*stream_method);
    auto fixed_arguments = std::tuple{protocol::move_only_request{"legacy-stream"}};
    const auto stream_wire = forge::api::core::detail::encode_fixed_proxy_arguments<&move_only_api::stream_values>(
       *stream_method, fixed_arguments, std::make_index_sequence<1>{});
@@ -2324,10 +2359,10 @@ BOOST_AUTO_TEST_CASE(contextual_dispatch_rejects_legacy_fallback_when_server_fie
       descriptor.methods, [](const auto& value) { return value.name == "server_stream"; });
    BOOST_REQUIRE(unary != descriptor.methods.end());
    BOOST_REQUIRE(stream != descriptor.methods.end());
-   BOOST_CHECK(unary->server_fields.active());
-   BOOST_CHECK(stream->server_fields.active());
-   unary->contextual_raw_invoker = {};
-   stream->contextual_stream_invoker = {};
+   BOOST_REQUIRE(forge::api::core::detail::server_fields_for(*unary) != nullptr);
+   BOOST_REQUIRE(forge::api::core::detail::server_fields_for(*stream) != nullptr);
+   forge::api::core::detail::remove_unary_context(*unary);
+   forge::api::core::detail::remove_stream_context(*stream);
 
    auto registry = forge::api::core::registry{};
    auto implementation = std::make_shared<trusted_impl>();
@@ -2361,9 +2396,9 @@ BOOST_AUTO_TEST_CASE(contextual_dispatch_falls_back_for_legacy_descriptors_witho
    auto descriptor = trusted_api::describe();
    auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
    BOOST_REQUIRE(method != descriptor.methods.end());
-   method->server_fields = {};
-   method->contextual_raw_invoker = {};
-   BOOST_CHECK(method->server_fields.empty());
+   forge::api::core::detail::remove_unary_context(*method);
+   forge::api::core::detail::remove_request_context(*method);
+   BOOST_CHECK(forge::api::core::detail::server_fields_for(*method) == nullptr);
 
    auto registry = forge::api::core::registry{};
    auto implementation = std::make_shared<trusted_impl>();
@@ -2384,19 +2419,25 @@ BOOST_AUTO_TEST_CASE(contextual_invokers_cannot_bypass_framework_handler_gate) {
       descriptor.methods, [](const auto& value) { return value.name == "server_stream"; });
    BOOST_REQUIRE(unary != descriptor.methods.end());
    BOOST_REQUIRE(stream != descriptor.methods.end());
-   unary->contextual_raw_invoker = [](forge::api::core::bytes, forge::api::core::trusted_invocation,
-                                       forge::api::core::contextual_handler_gate)
-      -> boost::asio::awaitable<forge::api::core::bytes> {
-      co_return forge::api::core::pack_body(protocol::chunk{.bytes = "forged"});
-   };
-   stream->contextual_stream_invoker = [](forge::api::core::bytes,
-                                           std::shared_ptr<forge::api::core::detail::stream_endpoint>,
-                                           std::shared_ptr<forge::api::core::detail::stream_endpoint>,
-                                           forge::api::core::trusted_invocation,
-                                           forge::api::core::contextual_handler_gate)
-      -> boost::asio::awaitable<forge::api::core::bytes> {
-      co_return forge::api::core::bytes{};
-   };
+   const auto unary_fields = *forge::api::core::detail::server_fields_for(*unary);
+   const auto stream_fields = *forge::api::core::detail::server_fields_for(*stream);
+   forge::api::core::detail::install_unary_context(
+      *unary, unary_fields,
+      [](forge::api::core::bytes, forge::api::core::trusted_invocation,
+         forge::api::core::contextual_handler_gate)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
+         co_return forge::api::core::pack_body(protocol::chunk{.bytes = "forged"});
+      });
+   forge::api::core::detail::install_stream_context(
+      *stream, stream_fields,
+      [](forge::api::core::bytes,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint>,
+         std::shared_ptr<forge::api::core::detail::stream_endpoint>,
+         forge::api::core::trusted_invocation,
+         forge::api::core::contextual_handler_gate)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
+         co_return forge::api::core::bytes{};
+      });
 
    auto registry = forge::api::core::registry{};
    auto implementation = std::make_shared<trusted_impl>();
@@ -2453,7 +2494,9 @@ BOOST_AUTO_TEST_CASE(contextual_handler_gate_must_be_acquired_exactly_once) {
       once_descriptor.methods, [](const auto& value) { return value.name == "unary"; });
    BOOST_REQUIRE(once_method != once_descriptor.methods.end());
    const auto once_calls = std::make_shared<std::size_t>(0U);
-   once_method->contextual_raw_invoker = make_invoker(once_calls, false);
+   const auto once_fields = *forge::api::core::detail::server_fields_for(*once_method);
+   forge::api::core::detail::install_unary_context(
+      *once_method, once_fields, make_invoker(once_calls, false));
    auto once_registry = forge::api::core::registry{};
    auto once_implementation = std::make_shared<trusted_impl>();
    once_registry.install<trusted_api>(std::move(once_descriptor), once_implementation);
@@ -2470,7 +2513,9 @@ BOOST_AUTO_TEST_CASE(contextual_handler_gate_must_be_acquired_exactly_once) {
       duplicate_descriptor.methods, [](const auto& value) { return value.name == "unary"; });
    BOOST_REQUIRE(duplicate_method != duplicate_descriptor.methods.end());
    const auto duplicate_calls = std::make_shared<std::size_t>(0U);
-   duplicate_method->contextual_raw_invoker = make_invoker(duplicate_calls, true);
+   const auto duplicate_fields = *forge::api::core::detail::server_fields_for(*duplicate_method);
+   forge::api::core::detail::install_unary_context(
+      *duplicate_method, duplicate_fields, make_invoker(duplicate_calls, true));
    auto duplicate_registry = forge::api::core::registry{};
    auto duplicate_implementation = std::make_shared<trusted_impl>();
    duplicate_registry.install<trusted_api>(std::move(duplicate_descriptor), duplicate_implementation);
@@ -2535,8 +2580,8 @@ BOOST_AUTO_TEST_CASE(authorization_rejection_precedes_legacy_raw_validation) {
    BOOST_REQUIRE(method != descriptor.methods.end());
    const auto validator_calls = std::make_shared<std::size_t>(0U);
    const auto handler_calls = std::make_shared<std::size_t>(0U);
-   method->server_fields = {};
-   method->contextual_raw_invoker = {};
+   forge::api::core::detail::remove_unary_context(*method);
+   forge::api::core::detail::remove_request_context(*method);
    method->request_validator = [validator_calls](const forge::api::core::bytes&) { ++*validator_calls; };
    method->raw_invoker = [handler_calls](std::shared_ptr<void>, forge::api::core::bytes)
       -> boost::asio::awaitable<forge::api::core::bytes> {
@@ -2622,10 +2667,13 @@ BOOST_AUTO_TEST_CASE(contextual_gate_keeps_canonical_encoding_lazy_without_hooks
    auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "unary"; });
    BOOST_REQUIRE(method != descriptor.methods.end());
    const auto canonical_encodes = std::make_shared<std::size_t>(0U);
-   method->contextual_raw_invoker = [canonical_encodes](forge::api::core::bytes payload,
-                                                        forge::api::core::trusted_invocation trusted,
-                                                        forge::api::core::contextual_handler_gate gate)
-      -> boost::asio::awaitable<forge::api::core::bytes> {
+   const auto fields = *forge::api::core::detail::server_fields_for(*method);
+   forge::api::core::detail::install_unary_context(
+      *method, fields,
+      [canonical_encodes](forge::api::core::bytes payload,
+                          forge::api::core::trusted_invocation trusted,
+                          forge::api::core::contextual_handler_gate gate)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
       auto request = forge::api::core::unpack_body<trusted_protocol::request>(payload);
       forge::api::core::reset_server_supplied(request);
       forge::api::core::apply_server_supplied(request, trusted);
@@ -2637,7 +2685,7 @@ BOOST_AUTO_TEST_CASE(contextual_gate_keeps_canonical_encoding_lazy_without_hooks
       auto typed = std::static_pointer_cast<trusted_api>(std::move(implementation));
       auto response = co_await typed->unary(std::move(request));
       co_return forge::api::core::pack_body(response);
-   };
+      });
 
    auto registry = forge::api::core::registry{};
    auto implementation = std::make_shared<trusted_impl>();
@@ -2791,8 +2839,8 @@ BOOST_AUTO_TEST_CASE(binding_skips_payload_and_metadata_context_when_no_intercep
          *observed = payload.data();
          co_return forge::api::core::pack_body(protocol::chunk{.bytes = "ok"});
    };
-   method->server_fields = {};
-   method->contextual_raw_invoker = {};
+   forge::api::core::detail::remove_unary_context(*method);
+   forge::api::core::detail::remove_request_context(*method);
    registry.install<cache_api>(std::move(descriptor), std::make_shared<cache_impl>());
    const auto plan = forge::api::core::binding().serve(registry).build();
    auto request = forge::api::core::frame{

@@ -162,19 +162,22 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted, context
    }
 
    const auto* method = find_method(entry->descriptor, request.method);
+   const auto* contextual = method == nullptr ? nullptr : detail::contextual_unary_for(*method);
+   const auto* fields = method == nullptr ? nullptr : detail::server_fields_for(*method);
    if (method == nullptr || method->since_revision > request.api.min_revision || method->kind != method_kind::unary ||
-       (!method->contextual_raw_invoker && (method->server_fields.active() || !method->raw_invoker))) {
+       ((contextual == nullptr || !*contextual) &&
+        ((fields != nullptr && fields->active()) || !method->raw_invoker))) {
       co_return make_method_not_found_response(request);
    }
 
    auto response = make_response_base(request);
    try {
-      if (method->contextual_raw_invoker) {
+      if (contextual != nullptr && *contextual) {
          auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
          auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
          auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
                                                   entry->implementation, gate_calls);
-         response.payload = co_await method->contextual_raw_invoker(
+         response.payload = co_await (*contextual)(
             std::move(request.payload), std::move(trusted), std::move(gate));
          if (gate_calls->load(std::memory_order_relaxed) != 1U) {
             throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};
@@ -245,8 +248,11 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
    }
 
    const auto* method = find_method(entry->descriptor, request.method);
+   const auto* contextual = method == nullptr ? nullptr : detail::contextual_stream_for(*method);
+   const auto* fields = method == nullptr ? nullptr : detail::server_fields_for(*method);
    if (method == nullptr || method->since_revision > request.api.min_revision || method->kind == method_kind::unary ||
-       (!method->contextual_stream_invoker && (method->server_fields.active() || !method->stream_invoker))) {
+       ((contextual == nullptr || !*contextual) &&
+        ((fields != nullptr && fields->active()) || !method->stream_invoker))) {
       fail_stream_endpoints(input, output);
       co_return make_method_not_found_response(request);
    }
@@ -264,12 +270,12 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
 
    auto response = make_response_base(request);
    try {
-      if (method->contextual_stream_invoker) {
+      if (contextual != nullptr && *contextual) {
          auto canonical_request = method->response_validator ? std::make_shared<bytes>() : std::shared_ptr<bytes>{};
          auto gate_calls = std::make_shared<std::atomic_size_t>(0U);
          auto gate = make_contextual_handler_gate(*method, std::move(before), request, canonical_request,
                                                   entry->implementation, gate_calls);
-         response.payload = co_await method->contextual_stream_invoker(
+         response.payload = co_await (*contextual)(
             std::move(request.payload), input, output, std::move(trusted), std::move(gate));
          if (gate_calls->load(std::memory_order_relaxed) != 1U) {
             throw exceptions::protocol_error{"contextual API invoker must acquire the handler gate exactly once"};

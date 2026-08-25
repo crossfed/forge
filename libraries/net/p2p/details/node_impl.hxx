@@ -75,6 +75,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    struct session_state {
       std::uint64_t id = 0;
       node::session_info info;
+      peer_authentication authentication = peer_authentication::unverified;
       forge::net::transport::session connection;
       resource_manager::session_reservation resource;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;

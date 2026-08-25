@@ -45,8 +45,8 @@ session::session(forge::net::transport::stream stream, forge::api::core::binding
          std::move(stream), std::move(plan), std::move(value),
          forge::api::core::dispatch_options{
             .trusted_metadata = std::move(trusted_metadata),
-            .trusted = std::move(trusted),
-         })} {}
+         },
+         std::move(trusted))} {}
 
 session::~session() {
    cancel();

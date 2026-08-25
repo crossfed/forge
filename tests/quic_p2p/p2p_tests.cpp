@@ -996,11 +996,11 @@ void run_live_api_over(endpoint::protocol_kind transport) {
    const auto expected_authentication = transport == endpoint::protocol_kind::quic_v1
                                             ? peer_authentication::quic_tls
                                             : peer_authentication::libp2p_tls;
-   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
-              static_cast<std::uint8_t>(expected_authentication));
    auto stream =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), binding.protocol(),
                                                                              node::open_options{.allow_relay = false}));
+   BOOST_TEST(static_cast<std::uint8_t>(stream.authentication()) ==
+              static_cast<std::uint8_t>(expected_authentication));
    auto connection = forge::api::transport::connection{std::move(stream).into_transport_stream(), binding.options()};
    forge::asio::blocking::run(runtime, exercise_live_api(connection));
    BOOST_TEST(implementation->caller.value == client.local_peer().value);
@@ -1852,6 +1852,18 @@ void seed_dht_provider_records(forge::asio::runtime& runtime, const dht::profile
 }
 
 } // namespace
+
+BOOST_AUTO_TEST_CASE(p2p_session_info_preserves_legacy_structured_binding_shape) {
+   auto [remote_peer, capabilities, path, relay_peer, identify_state] =
+      node::session_info{};
+   BOOST_TEST(remote_peer.value.empty());
+   BOOST_TEST(capabilities.bits == 0U);
+   BOOST_TEST(static_cast<std::uint8_t>(path) ==
+              static_cast<std::uint8_t>(forge::net::p2p::path::kind::direct));
+   BOOST_TEST(!relay_peer.has_value());
+   BOOST_TEST(static_cast<std::uint8_t>(identify_state) ==
+              static_cast<std::uint8_t>(forge::net::p2p::identify::state::unknown));
+}
 
 BOOST_AUTO_TEST_CASE(p2p_quic_client_token_cache_close_rejects_late_callbacks) {
    auto cache = std::make_shared<direct::detail::quic_client_token_cache>(2);
@@ -4097,11 +4109,10 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames) {
    const auto session = forge::asio::blocking::run(
        runtime, client.async_connect(server_endpoint, node::connect_options{.expected_peer = server.local_peer()}));
    BOOST_TEST(session.remote_peer.value == server.local_peer().value);
-   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
-              static_cast<std::uint8_t>(peer_authentication::libp2p_tls));
-
    auto stream =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo));
+   BOOST_TEST(static_cast<std::uint8_t>(stream.authentication()) ==
+              static_cast<std::uint8_t>(peer_authentication::libp2p_tls));
    auto payload = std::vector<std::uint8_t>(192 * 1024);
    for (auto index = std::size_t{}; index < payload.size(); ++index) {
       payload[index] = static_cast<std::uint8_t>(index % 251U);
@@ -8647,14 +8658,17 @@ BOOST_AUTO_TEST_CASE(p2p_relay_transport_opens_arbitrary_registered_protocol) {
    auto target = node{runtime, options_for(target_identity, capability_set{.bits = capabilities::direct_quic |
                                                                                    capabilities::relay_reservation})};
    auto observed_session = std::make_shared<std::optional<node::session_info>>();
+   auto observed_authentication = std::make_shared<std::optional<peer_authentication>>();
    auto observed_session_mutex = std::make_shared<std::mutex>();
    target.register_protocol_handler(
-       protocol, [observed_session, observed_session_mutex](node::incoming_protocol_stream incoming)
+       protocol, [observed_session, observed_authentication,
+                  observed_session_mutex](node::incoming_protocol_stream incoming)
                      -> boost::asio::awaitable<void> {
           {
              auto lock = std::scoped_lock{*observed_session_mutex};
              if (!observed_session->has_value()) {
                 observed_session->emplace(incoming.session);
+                observed_authentication->emplace(incoming.stream.authentication());
              }
           }
           auto payload = co_await incoming.stream.async_read_frame();
@@ -8690,13 +8704,16 @@ BOOST_AUTO_TEST_CASE(p2p_relay_transport_opens_arbitrary_registered_protocol) {
    BOOST_TEST(relay_node.metrics().relays_opened >= 1U);
    BOOST_TEST(source.metrics().path_relay_opens >= 1U);
    auto source_session = std::optional<node::session_info>{};
+   auto source_authentication = std::optional<peer_authentication>{};
    {
       auto lock = std::scoped_lock{*observed_session_mutex};
       source_session = *observed_session;
+      source_authentication = *observed_authentication;
    }
    BOOST_REQUIRE(source_session.has_value());
+   BOOST_REQUIRE(source_authentication.has_value());
    BOOST_TEST(source_session->remote_peer.value == source.local_peer().value);
-   BOOST_TEST(static_cast<std::uint8_t>(source_session->authentication) ==
+   BOOST_TEST(static_cast<std::uint8_t>(*source_authentication) ==
               static_cast<std::uint8_t>(peer_authentication::noise));
 
    const auto relay_session_count = [](const node& value, const peer_id& remote, const peer_id& relay,
@@ -8937,11 +8954,11 @@ BOOST_AUTO_TEST_CASE(p2p_api_binding_rejects_unverified_quic_peer) {
                                                       .expected_peer = server.local_peer(),
                                                       .allow_relay = false,
                                                   }));
-   BOOST_TEST(static_cast<std::uint8_t>(session.authentication) ==
-              static_cast<std::uint8_t>(peer_authentication::unverified));
    auto stream =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(server.local_peer(), binding.protocol(),
                                                                              node::open_options{.allow_relay = false}));
+   BOOST_TEST(static_cast<std::uint8_t>(stream.authentication()) ==
+              static_cast<std::uint8_t>(peer_authentication::unverified));
    auto connection = forge::api::transport::connection{std::move(stream).into_transport_stream(), binding.options()};
    forge::asio::blocking::run(runtime, exercise_unverified_live_api(connection));
    BOOST_TEST(implementation->calls.load(std::memory_order_acquire) == 0U);
@@ -8974,9 +8991,11 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
    const auto descriptor = p2p_live_types::live_api::describe();
    const auto* method = forge::api::core::find_method(descriptor, "exchange");
    BOOST_REQUIRE(method != nullptr);
-   method->server_fields.reset_fixed(&api_fields);
+   const auto* fields = forge::api::core::detail::server_fields_for(*method);
+   BOOST_REQUIRE(fields != nullptr);
+   fields->reset_fixed(&api_fields);
    BOOST_TEST(std::get<0>(api_fields).id.value.empty());
-   method->server_fields.apply_fixed(&api_fields, trusted);
+   fields->apply_fixed(&api_fields, trusted);
    BOOST_TEST(std::get<0>(api_fields).id.value == authenticated.value);
 
    forge::api::core::server_supplied<p2p_live_types::caller_peer>::reset(value);

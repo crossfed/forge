@@ -638,8 +638,8 @@ node::impl::ensure_relay_session(const peer_id& peer, const peer_id& relay_peer,
        .remote_peer = std::move(upgraded.peer),
        .path = path::kind::relay,
        .relay_peer = relay_peer,
-       .authentication = upgraded.authentication,
    };
+   session->authentication = upgraded.authentication;
    session->connection = std::move(*upgraded.session).as_transport();
    session->resource = std::move(*reservation);
    co_await remember_session(session, connection_manager::direction::outbound);
@@ -661,6 +661,7 @@ boost::asio::awaitable<void> node::impl::handle_relayed_yamux_stream(std::shared
                                                                      resource_manager::stream_reservation reservation) {
    auto admitted =
        co_await accept_resource_stream(session->info.remote_peer, std::move(stream), std::move(reservation));
+   detail::stream_access::set_authentication(admitted.stream, session->authentication);
    if (admitted.protocol == builtins::ping) {
       co_await handle_ping(std::move(admitted.stream));
    } else if (admitted.protocol == builtins::identify) {
@@ -728,8 +729,8 @@ boost::asio::awaitable<void> node::impl::handle_relay_stop(std::shared_ptr<node:
        .remote_peer = std::move(upgraded.peer),
        .path = path::kind::relay,
        .relay_peer = session->info.remote_peer,
-       .authentication = upgraded.authentication,
    };
+   relayed_session->authentication = upgraded.authentication;
    relayed_session->connection = std::move(*upgraded.session).as_transport();
    relayed_session->resource = std::move(*reservation);
    co_await remember_session(relayed_session, connection_manager::direction::inbound);

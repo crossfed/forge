@@ -59,11 +59,8 @@ namespace detail {
 
 template <typename Request>
 [[nodiscard]] bytes encode_owned_request(const method_descriptor& descriptor, Request& request) {
-   if (descriptor.owned_wire_request_encoder) {
-      return descriptor.owned_wire_request_encoder(&request);
-   }
-   if (descriptor.server_fields.reset_wire) {
-      descriptor.server_fields.reset_wire(&request);
+   if (auto encoded = detail::encode_owned_request(descriptor, &request)) {
+      return std::move(*encoded);
    }
    if (descriptor.request_encoder) {
       return descriptor.request_encoder(&request);
@@ -135,9 +132,7 @@ class remote_invoker {
       }
       auto arguments = argument_tuple{std::forward<Args>(args)...};
       if (supports_typed_arguments()) {
-         if (method_value->server_fields.reset_fixed) {
-            method_value->server_fields.reset_fixed(&arguments);
-         }
+         detail::reset_fixed_request(*method_value, &arguments);
          auto output = std::optional<Response>{};
          auto outbound = request{
              .api = std::move(api),

@@ -149,14 +149,16 @@
         "forge.net.p2p.resource_manager":
             [ "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes" ],
         "forge.net.p2p.scoring": [ "topology.connection_manager", "state.peer_store" ],
-        "forge.net.p2p.stream": [ "resource.streams", "resource.queued_bytes" ],
+        "forge.net.p2p.stream": [
+          "identity.secure_transport_authentication", "resource.streams", "resource.queued_bytes"
+        ],
         "forge.net.p2p.topology": [
           "protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "lifecycle.discovery",
           "topology.connection_manager"
         ]
       },
       "header_features": {},
-      "sha256": "ff0d2cef1a41725f19f2aa2cacc2765e61876c47f1f9b31b90e0c3c3466ee1f0",
+      "sha256": "f14649702198c781e07e3ab3eff0c047d79cf24eb4ed3b6ea79b0c8dfc84117b",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",

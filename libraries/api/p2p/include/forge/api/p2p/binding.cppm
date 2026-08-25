@@ -71,7 +71,7 @@ class api_binding {
          },
       };
       auto invocation = forge::api::core::trusted_invocation{};
-      switch (stream.session.authentication) {
+      switch (stream.stream.authentication()) {
       case forge::net::p2p::peer_authentication::quic_tls:
       case forge::net::p2p::peer_authentication::libp2p_tls:
       case forge::net::p2p::peer_authentication::noise:

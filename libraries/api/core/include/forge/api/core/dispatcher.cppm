@@ -18,12 +18,12 @@ struct dispatch_options {
    std::size_t max_inflight = 128;
    std::chrono::milliseconds deadline{0};
    metadata trusted_metadata;
-   std::optional<trusted_invocation> trusted;
 };
 
 class frame_dispatcher {
  public:
    frame_dispatcher(binding_plan plan, dispatch_options options = {});
+   frame_dispatcher(binding_plan plan, dispatch_options options, trusted_invocation trusted);
    ~frame_dispatcher();
 
    frame_dispatcher(frame_dispatcher&&) noexcept;

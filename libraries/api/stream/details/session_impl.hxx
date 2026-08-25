@@ -85,7 +85,8 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
 
    impl(forge::net::transport::stream stream_value, options settings_value);
    impl(forge::net::transport::stream stream_value, forge::api::core::binding_plan plan_value, options settings_value,
-        forge::api::core::dispatch_options dispatch_options);
+        forge::api::core::dispatch_options dispatch_options,
+        std::optional<forge::api::core::trusted_invocation> trusted = std::nullopt);
 
    [[nodiscard]] bool valid() const noexcept;
    [[nodiscard]] strand_type ensure_strand(boost::asio::any_io_executor executor);

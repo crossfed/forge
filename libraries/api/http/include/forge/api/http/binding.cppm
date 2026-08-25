@@ -1636,10 +1636,8 @@ class binding_builder {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
                                "HTTP API method is not installed in the local registry");
       }
-      if (method->server_fields.reset_wire && method->server_fields.apply_wire) {
-         method->server_fields.reset_wire(&request);
-         method->server_fields.apply_wire(&request, forge::api::core::trusted_invocation{});
-      }
+      forge::api::core::detail::apply_wire_request(
+         *method, &request, forge::api::core::trusted_invocation{});
       auto request_payload = validate_local_request<Interface>(plan, name, request);
       auto implementation = plan.local->get<Interface>(Interface::ref());
       auto response = co_await std::invoke(Method, *implementation.shared(), std::move(request));
@@ -1656,10 +1654,8 @@ class binding_builder {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
                                "HTTP API method is not installed in the local registry");
       }
-      if (method->server_fields.reset_fixed && method->server_fields.apply_fixed) {
-         method->server_fields.reset_fixed(&arguments);
-         method->server_fields.apply_fixed(&arguments, forge::api::core::trusted_invocation{});
-      }
+      forge::api::core::detail::apply_fixed_request(
+         *method, &arguments, forge::api::core::trusted_invocation{});
       auto request_payload = validate_local_request<Interface>(plan, name, arguments);
       auto implementation = plan.local->get<Interface>(Interface::ref());
       auto response = co_await std::apply(
