@@ -140,7 +140,7 @@ inline void append_index_prefix(std::vector<std::byte>& out, entry_kind kind, fo
 template <typename Object>
 [[nodiscard]] forge::db::core::record_key object_record_key(forge::db::object::id_t_of<Object> id) {
    static_assert(forge::db::object::object_model<Object>);
-   return forge::db::object::detail::record_key::object(id.as_object_id());
+   return forge::db::object::detail::record_key::object(forge::db::ids::to_object_id(id));
 }
 
 template <typename Object, typename Tag>

@@ -29,7 +29,7 @@ class owner_ref final {
    explicit owner_ref(forge::db::ids::object_id value);
 
    template <forge::db::ids::typed_id_like Id>
-   explicit owner_ref(Id value) : owner_ref{value.as_object_id()} {}
+   explicit owner_ref(Id value) : owner_ref{forge::db::ids::to_object_id(value)} {}
 
    [[nodiscard]] bool empty() const noexcept {
       return bytes.empty();

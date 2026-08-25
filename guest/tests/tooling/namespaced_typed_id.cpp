@@ -1,23 +1,23 @@
 #include <cstdint>
 
-import forge.chain.protocol.typed_id;
+import forge.db.ids.typed_id;
 import forge.contract;
 
 namespace application {
 
-using id = forge::chain::protocol::typed_id<1, 2>;
+using id = forge::db::ids::typed_id<1, 2>;
 
 } // namespace application
 
 namespace workspace {
 
-using id = forge::chain::protocol::typed_id<1, 1>;
+using id = forge::db::ids::typed_id<1, 1>;
 
 } // namespace workspace
 
 namespace repair {
 
-using id = forge::chain::protocol::typed_id<6, 1>;
+using id = forge::db::ids::typed_id<6, 1>;
 
 } // namespace repair
 

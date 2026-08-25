@@ -7,4 +7,6 @@ target_link_libraries(
    forge_db_ids PUBLIC
       forge_raw
       forge_variant
+      forge_exceptions
 )
+forge_target_contract_guest_component(forge_db_ids ID forge.db.ids)

@@ -593,6 +593,10 @@ install(
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/raw"
 )
 install(
+   FILES "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/db/ids/include/forge/db/ids/typed_id.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/db/ids"
+)
+install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha256.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha256_value.cppm"
@@ -624,7 +628,6 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/time.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/typed_id.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action_value.cppm"

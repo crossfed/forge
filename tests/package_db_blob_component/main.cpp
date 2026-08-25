@@ -40,7 +40,7 @@ int main() {
    forge::from_variant(encoded, decoded);
    const auto typed_id = owner_id{42};
    const auto typed_owner = forge::db::blob::owner_ref{typed_id};
-   const auto object_owner = forge::db::blob::owner_ref{typed_id.as_object_id()};
+   const auto object_owner = forge::db::blob::owner_ref{forge::db::ids::to_object_id(typed_id)};
    return decoded.size != reference.size || decoded.digest != reference.digest ||
                  typed_owner.empty() || typed_owner != object_owner
             ? 1

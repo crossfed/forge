@@ -42,6 +42,7 @@ module forge.tooling.abi.generator;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.types;
 import forge.codec.json;
+import forge.db.ids.typed_id;
 import forge.variant.value;
 
 namespace {
@@ -723,7 +724,7 @@ class type_encoder {
              !arguments.empty() && arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType());
          }
-         if (template_qualified == "forge::chain::protocol::typed_id") {
+         if (template_qualified == "forge::db::ids::typed_id") {
             return "uint64";
          }
          if (template_qualified == "forge::contract::binary_extension" && !arguments.empty() &&
@@ -1034,7 +1035,7 @@ class type_encoder {
       const auto* specialization =
           record == nullptr ? nullptr : llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
       return specialization != nullptr &&
-             specialization->getSpecializedTemplate()->getQualifiedNameAsString() == "forge::chain::protocol::typed_id";
+             specialization->getSpecializedTemplate()->getQualifiedNameAsString() == "forge::db::ids::typed_id";
    }
 
    void fail(std::string_view type, clang::SourceLocation location) const {

@@ -140,7 +140,6 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/time.cppm"
       "${_protocol}/include/forge/chain/protocol/types_value.cppm"
       "${_protocol}/include/forge/chain/protocol/types.cppm"
-      "${_protocol}/include/forge/chain/protocol/typed_id.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key_value.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key.cppm"
       "${_protocol}/include/forge/chain/protocol/action_value.cppm"

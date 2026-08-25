@@ -16,6 +16,14 @@ forge_contract_register_guest_component(
 )
 
 forge_contract_register_guest_component(
+   ID forge.db.ids
+   TARGET forge_db_ids
+   PUBLIC_LIBRARIES forge.raw
+   MODULES forge/db/ids/typed_id.cppm
+   MODULE_NAMES forge.db.ids.typed_id
+)
+
+forge_contract_register_guest_component(
    ID forge.codec.base64
    TARGET forge_codec_base64
    ARCHIVE libforge_guest_codec_base64.a
@@ -120,7 +128,6 @@ forge_contract_register_guest_component(
       forge/chain/protocol/time.cppm
       forge/chain/protocol/types_value.cppm
       forge/chain/protocol/types.cppm
-      forge/chain/protocol/typed_id.cppm
       forge/chain/protocol/fixed_key_value.cppm
       forge/chain/protocol/fixed_key.cppm
       forge/chain/protocol/action_value.cppm
@@ -149,7 +156,6 @@ forge_contract_register_guest_component(
       forge.chain.protocol.time
       forge.chain.protocol.types:value
       forge.chain.protocol.types
-      forge.chain.protocol.typed_id
       forge.chain.protocol.fixed_key:value
       forge.chain.protocol.fixed_key
       forge.chain.protocol.action:value
@@ -185,6 +191,7 @@ forge_contract_register_guest_component(
       forge.codec.base64
       forge.codec.base58
       forge.codec.hex
+      forge.db.ids
       forge.chain.protocol
    MODULES
       forge/contract/intrinsics.cppm

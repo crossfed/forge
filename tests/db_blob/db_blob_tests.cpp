@@ -424,7 +424,7 @@ BOOST_AUTO_TEST_CASE(db_blob_object_id_owner_interoperates_with_legacy_binary_ow
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto id = forge::db::ids::typed_id<201, 7>{42};
-      const auto packed = forge::raw::pack(id.as_object_id());
+      const auto packed = forge::raw::pack(forge::db::ids::to_object_id(id));
       const auto legacy_bytes =
           std::vector<std::byte>{reinterpret_cast<const std::byte*>(packed.data()),
                                  reinterpret_cast<const std::byte*>(packed.data() + packed.size())};

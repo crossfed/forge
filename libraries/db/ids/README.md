@@ -7,17 +7,17 @@ transaction, Object store or application runtime.
 Use it when a type needs a compact, typed `space/type/instance` identity:
 
 ```cpp
-import forge.db.ids.object_id;
+import forge.db.ids.typed_id;
 
 using account_id = forge::db::ids::typed_id<1, 2>;
 
 auto account = account_id{42};
-auto generic = account.as_object_id(); // {space=1, type=2, instance=42}
 ```
 
 ## Public Modules
 
-- `forge.db.ids.object_id` defines `forge::db::ids::object_id`, `typed_id<Space, Type>`, typed-id traits, a generic `type_for_id` extension point, conversion helpers, string formatting, raw serialization, and variant conversion.
+- `forge.db.ids.typed_id` defines guest-safe `typed_id<Space, Type>`, typed-id traits, the `type_for_id` extension point and instance-only Raw serialization.
+- `forge.db.ids.object_id` re-exports `forge.db.ids.typed_id` and adds `object_id`, object-id conversion and matching, `try_typed`, string formatting, and host Variant conversion.
 
 The CMake target is `forge_db_ids`; the installed Forge component is `db_ids`.
 
@@ -29,7 +29,7 @@ The CMake target is `forge_db_ids`; the installed Forge component is `db_ids`.
 - `type`: object kind inside the space.
 - `instance`: object instance number.
 
-`typed_id<Space, Type>` is the strongly typed form for APIs that know the exact object kind at compile time. Convert to a generic `object_id` with `as_object_id()`, and use `try_typed<Space, Type>(...)` when decoding generic IDs.
+`typed_id<Space, Type>` is the strongly typed form for APIs that know the exact object kind at compile time. Host code can import `forge.db.ids.object_id`, convert it with `to_object_id(...)`, and use `try_typed<Space, Type>(...)` when decoding generic IDs.
 
 ## Serialization
 
@@ -39,7 +39,7 @@ Raw serialization writes fields in this exact order:
 space, type, instance
 ```
 
-Variant conversion for `object_id` uses an object with `space`, `type`, and `instance`. Variant conversion for `typed_id<Space, Type>` keeps the compact instance-only representation.
+Variant conversion for `object_id` uses an object with `space`, `type`, and `instance`. The host `forge.db.ids.object_id` module also provides instance-only Variant conversion for `typed_id<Space, Type>`.
 
 ## Boundaries
 

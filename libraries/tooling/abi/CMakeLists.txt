@@ -17,6 +17,7 @@ target_link_libraries(
       forge_chain_protocol
       forge_codec_json
    PRIVATE
+      forge_db_ids
       clang-cpp
       LLVM
 )

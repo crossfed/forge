@@ -110,6 +110,10 @@ _require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "add_library(\"\${_target}_arc
 _require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ID forge.contract.runtime")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ARCHIVE libforge_guest_contract.a")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ID forge.db.ids")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "MODULE_NAMES forge.db.ids.typed_id")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.db.ids\n      forge.chain.protocol")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.typed_id")
 _require_text(
    "${FORGE_CONTRACT_LIBRARIES_CMAKE}"
    "These values are compared verbatim only. Forge never interprets them as"
