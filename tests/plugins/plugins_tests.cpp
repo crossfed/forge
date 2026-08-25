@@ -4075,12 +4075,12 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during
    [[maybe_unused]] auto release_on_exit =
        boost::scope::scope_exit{[state = blocker_state] { state->release.notify(); }};
    const auto blocker_started_epoch = blocker_state->started.epoch();
+   const auto release_epoch = blocker_state->release.epoch();
    auto blocker = app.scheduler().submit(forge::asio::task::awaitable{
        .priority = forge::asio::task::priority{100},
        .name = "resolver-retirement-blocker",
        .work =
-           [state = blocker_state](forge::asio::task::context&) -> boost::asio::awaitable<void> {
-              const auto release_epoch = state->release.epoch();
+           [state = blocker_state, release_epoch](forge::asio::task::context&) -> boost::asio::awaitable<void> {
               state->started.notify();
               co_await state->release.async_wait(release_epoch);
               co_return;
