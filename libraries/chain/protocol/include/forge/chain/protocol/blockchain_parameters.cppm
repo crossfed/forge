@@ -30,6 +30,8 @@ struct blockchain_parameters {
    std::uint32_t max_inline_action_size = 0;
    std::uint16_t max_inline_action_depth = 0;
    std::uint16_t max_authority_depth = 0;
+
+   bool operator==(const blockchain_parameters&) const = default;
 };
 
 template <typename Stream> void raw_pack(Stream& stream, const blockchain_parameters& value) {

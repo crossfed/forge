@@ -701,6 +701,8 @@ class type_encoder {
           {"forge::chain::protocol::time_point", "time_point"},
           {"forge::chain::protocol::time_point_sec", "time_point_sec"},
           {"forge::chain::protocol::block_timestamp", "block_timestamp_type"},
+          {"forge::chain::protocol::float64", "float64"},
+          {"forge::chain::protocol::float128", "float128"},
           {"forge::unsigned_int", "varuint32"},
           {"forge::signed_int", "varint32"},
           {"forge::crypto::digest::sha256", "checksum256"},

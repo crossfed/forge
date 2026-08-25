@@ -114,6 +114,15 @@ _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ID forge.db.ids")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "MODULE_NAMES forge.db.ids.typed_id")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.db.ids\n      forge.chain.protocol")
 _reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.typed_id")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.native_ids")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.entity_selector")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float64:value")
+_require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float128:value")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float64:ordered")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float128:ordered")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float64:variant")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.float128:variant")
+_reject_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "forge.chain.protocol.exceptions")
 _require_text(
    "${FORGE_CONTRACT_LIBRARIES_CMAKE}"
    "These values are compared verbatim only. Forge never interprets them as"

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <compare>
 #include <concepts>
 #include <deque>
 #include <flat_map>
@@ -33,16 +34,27 @@ import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.admin;
 import forge.chain.protocol.block;
 import forge.chain.protocol.blockchain_parameters;
+import forge.chain.protocol.chain_config;
 import forge.chain.protocol.call_access_mode;
 import forge.chain.protocol.call_data_header;
 import forge.chain.protocol.code_hash_result;
+import forge.chain.protocol.elastic_limit_parameters;
+import forge.chain.protocol.entity_selector;
+import forge.chain.protocol.exceptions;
 import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.fixed_key;
+import forge.chain.protocol.float128;
+import forge.chain.protocol.float64;
 import forge.chain.protocol.hash_id;
 import forge.chain.protocol.kv_parameters;
+import forge.chain.protocol.native_ids;
+import forge.chain.protocol.ratio;
 import forge.chain.protocol.system;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
+import forge.chain.protocol.usage_accumulator;
+import forge.chain.protocol.wasm_parameters;
+import forge.chain.protocol.activated_protocol_feature;
 
 namespace core = forge::chain::core;
 namespace protocol = forge::chain::protocol;
@@ -265,6 +277,229 @@ BOOST_AUTO_TEST_SUITE(forge_chain_protocol_compatibility)
 
 static_assert(std::is_same_v<protocol::public_key, forge::crypto::asymmetric::public_key>);
 static_assert(std::is_same_v<protocol::signature, forge::crypto::asymmetric::signature>);
+static_assert(std::same_as<protocol::account_id, forge::db::ids::typed_id<1, 10>>);
+static_assert(std::same_as<protocol::metadata_id, forge::db::ids::typed_id<1, 11>>);
+static_assert(std::same_as<protocol::account_ram_correction_id, forge::db::ids::typed_id<1, 12>>);
+static_assert(std::same_as<protocol::code_id, forge::db::ids::typed_id<1, 13>>);
+static_assert(std::same_as<protocol::permission_usage_id, forge::db::ids::typed_id<1, 20>>);
+static_assert(std::same_as<protocol::permission_id, forge::db::ids::typed_id<1, 21>>);
+static_assert(std::same_as<protocol::permission_link_id, forge::db::ids::typed_id<1, 22>>);
+static_assert(std::same_as<protocol::table_id, forge::db::ids::typed_id<1, 30>>);
+static_assert(std::same_as<protocol::generated_transaction_id, forge::db::ids::typed_id<1, 51>>);
+static_assert(std::same_as<protocol::resource_limits_id, forge::db::ids::typed_id<1, 60>>);
+static_assert(std::same_as<protocol::resource_usage_id, forge::db::ids::typed_id<1, 61>>);
+static_assert(std::same_as<protocol::resource_config_id, forge::db::ids::typed_id<1, 62>>);
+static_assert(std::same_as<protocol::resource_state_id, forge::db::ids::typed_id<1, 63>>);
+static_assert(noexcept(protocol::selects_exactly_one(protocol::account_selector{})));
+
+BOOST_AUTO_TEST_CASE(native_entity_selector_requires_exactly_one_selector) {
+   const auto by_id = protocol::account_selector{.id = protocol::account_id{42}};
+   const auto by_key = protocol::account_selector{.key = protocol::account_name{24}};
+   const auto unset = protocol::account_selector{};
+   const auto ambiguous =
+       protocol::account_selector{.id = protocol::account_id{42}, .key = protocol::account_name{24}};
+
+   BOOST_TEST(protocol::selects_exactly_one(by_id));
+   BOOST_TEST(protocol::selects_exactly_one(by_key));
+   BOOST_TEST(!protocol::selects_exactly_one(unset));
+   BOOST_TEST(!protocol::selects_exactly_one(ambiguous));
+   BOOST_CHECK((by_id == protocol::account_selector{.id = protocol::account_id{42}}));
+
+   BOOST_TEST(pack_hex(by_id) == "012a0000000000000000");
+   BOOST_TEST(pack_hex(by_key) == "00011800000000000000");
+   BOOST_CHECK((forge::raw::unpack<protocol::account_selector>(forge::raw::pack(by_id)) == by_id));
+   BOOST_CHECK((forge::raw::unpack<protocol::account_selector>(forge::raw::pack(by_key)) == by_key));
+
+   auto malformed = forge::raw::pack(by_id);
+   malformed.pop_back();
+   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::account_selector>(malformed), forge::raw::exceptions::range_error);
+
+   auto encoded = forge::variant{};
+   forge::to_variant(by_id, encoded);
+   BOOST_TEST(encoded.get_object().contains("id"));
+   BOOST_TEST(!encoded.get_object().contains("key"));
+   auto decoded = protocol::account_selector{};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded == by_id);
+
+   forge::to_variant(by_key, encoded);
+   BOOST_TEST(!encoded.get_object().contains("id"));
+   BOOST_TEST(encoded.get_object().contains("key"));
+   decoded = {};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded == by_key);
+}
+
+BOOST_AUTO_TEST_CASE(protocol_state_values_preserve_raw_variant_and_malformed_contracts) {
+   const auto ratio = protocol::ratio{.numerator = 0x0102030405060708ULL, .denominator = 0x1112131415161718ULL};
+   BOOST_TEST(pack_hex(ratio) == "08070605040302011817161514131211");
+   BOOST_CHECK((forge::raw::unpack<protocol::ratio>(forge::raw::pack(ratio)) == ratio));
+
+   auto malformed_ratio = forge::raw::pack(ratio);
+   malformed_ratio.pop_back();
+   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::ratio>(malformed_ratio), forge::raw::exceptions::range_error);
+
+   const auto elastic = protocol::elastic_limit_parameters{
+       .target = 1U,
+       .max = 2U,
+       .periods = 3U,
+       .max_multiplier = 4U,
+       .contract_rate = {.numerator = 5U, .denominator = 6U},
+       .expand_rate = {.numerator = 7U, .denominator = 8U},
+   };
+   BOOST_TEST(pack_hex(elastic) ==
+              "010000000000000002000000000000000300000004000000050000000000000006000000000000000700000000000000"
+              "0800000000000000");
+   BOOST_CHECK((forge::raw::unpack<protocol::elastic_limit_parameters>(forge::raw::pack(elastic)) == elastic));
+
+   const auto usage = protocol::usage_accumulator{.last_ordinal = 1U,
+                                                  .value_ex = 0x0102030405060708ULL,
+                                                  .consumed = 0x1112131415161718ULL};
+   BOOST_TEST(pack_hex(usage) == "0100000008070605040302011817161514131211");
+   BOOST_CHECK((forge::raw::unpack<protocol::usage_accumulator>(forge::raw::pack(usage)) == usage));
+
+   const auto wasm = protocol::wasm_parameters{};
+   BOOST_TEST(pack_hex(wasm) ==
+              "00040000000400000020000000000100002000000004000000200000000040010000400110020000fb000000");
+   BOOST_CHECK((forge::raw::unpack<protocol::wasm_parameters>(forge::raw::pack(wasm)) == wasm));
+
+   auto config = protocol::chain_config{};
+   config.max_block_net_usage = 1U;
+   config.max_action_return_value_size = 0x01020304U;
+   const auto config_bytes = forge::raw::pack(config);
+   const auto parameter_bytes = forge::raw::pack(static_cast<const protocol::blockchain_parameters&>(config));
+   BOOST_TEST(config_bytes.size() == parameter_bytes.size() + sizeof(config.max_action_return_value_size));
+   BOOST_TEST(hex(std::span<const std::uint8_t>{config_bytes}.last(sizeof(config.max_action_return_value_size))) ==
+              "04030201");
+   BOOST_CHECK((forge::raw::unpack<protocol::chain_config>(config_bytes) == config));
+   BOOST_TEST(protocol::chain_config{}.max_block_net_usage == 1'024U * 1'024U);
+   BOOST_TEST(protocol::chain_config{}.max_action_return_value_size == 256U);
+
+   const auto feature = protocol::activated_protocol_feature{
+       .feature_digest = protocol::digest::hash(std::string{"activated-feature"}), .activation_block_num = 42U};
+   BOOST_CHECK((forge::raw::unpack<protocol::activated_protocol_feature>(forge::raw::pack(feature)) == feature));
+
+   const auto check_variant_roundtrip = []<typename T>(const T& value) {
+      auto encoded = forge::variant{};
+      forge::to_variant(value, encoded);
+      auto decoded = T{};
+      forge::from_variant(encoded, decoded);
+      BOOST_CHECK(decoded == value);
+   };
+   check_variant_roundtrip(ratio);
+   check_variant_roundtrip(elastic);
+   check_variant_roundtrip(usage);
+   check_variant_roundtrip(wasm);
+   check_variant_roundtrip(config);
+   check_variant_roundtrip(feature);
+}
+
+BOOST_AUTO_TEST_CASE(protocol_float_values_match_spine_raw_variant_and_ordered_keys) {
+   const auto float64 = protocol::float64{.bits = 0x0102030405060708ULL};
+   BOOST_TEST(pack_hex(float64) == "0807060504030201");
+   BOOST_CHECK((forge::raw::unpack<protocol::float64>(forge::raw::pack(float64)) == float64));
+
+   const auto float128_bits = (protocol::uint128_t{0x0102030405060708ULL} << 64U) |
+                              protocol::uint128_t{0x1112131415161718ULL};
+   const auto float128 = protocol::float128{.bits = float128_bits};
+   BOOST_TEST(pack_hex(float128) == "18171615141312110807060504030201");
+   BOOST_CHECK((forge::raw::unpack<protocol::float128>(forge::raw::pack(float128)) == float128));
+
+   auto encoded = forge::variant{};
+   forge::to_variant(float64, encoded);
+   auto decoded64 = protocol::float64{};
+   forge::from_variant(encoded, decoded64);
+   BOOST_CHECK(decoded64 == float64);
+   const forge::variant wrong_float_type = forge::mutable_variant_object()("unexpected", true);
+   BOOST_CHECK_THROW(forge::from_variant(wrong_float_type, decoded64), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{"not-a-double"}, decoded64),
+                     forge::variant_exceptions::decode_error);
+
+   forge::to_variant(float128, encoded);
+   BOOST_TEST(encoded.get_string() == "0x18171615141312110807060504030201");
+   auto decoded128 = protocol::float128{};
+   forge::from_variant(encoded, decoded128);
+   BOOST_CHECK(decoded128 == float128);
+   BOOST_CHECK_THROW(forge::from_variant(wrong_float_type, decoded128), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{"0x0000000000000000000000000000000z"}, decoded128),
+                     forge::variant_exceptions::decode_error);
+
+   const auto positive_one64 = protocol::float64{.bits = 0x3ff0000000000000ULL};
+   const auto negative_one64 = protocol::float64{.bits = 0xbff0000000000000ULL};
+   BOOST_CHECK(protocol::compare(negative_one64, positive_one64) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(protocol::float64{.bits = 0U}, protocol::float64{.bits = 0x8000000000000000ULL}) ==
+               std::partial_ordering::equivalent);
+   BOOST_TEST(hex(protocol::ordered_key(positive_one64).extract_as_byte_array()) == "bff0000000000000");
+   BOOST_TEST(hex(protocol::ordered_key(negative_one64).extract_as_byte_array()) == "400fffffffffffff");
+   BOOST_TEST(hex(protocol::ordered_key(protocol::float64{.bits = 0x8000000000000000ULL}).extract_as_byte_array()) ==
+              "8000000000000000");
+   BOOST_CHECK_THROW((void)protocol::ordered_key(protocol::float64{.bits = 0x7ff8000000000000ULL}),
+                     protocol::exceptions::unordered_value);
+
+   const auto positive_one128 = protocol::float128{.bits = protocol::uint128_t{0x3fffU} << 112U};
+   const auto negative_one128 = protocol::float128{.bits = protocol::uint128_t{0xbfffU} << 112U};
+   BOOST_CHECK(protocol::compare(negative_one128, positive_one128) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(protocol::float128{.bits = 0U},
+                                 protocol::float128{.bits = protocol::uint128_t{1U} << 127U}) ==
+               std::partial_ordering::equivalent);
+   BOOST_TEST(hex(protocol::ordered_key(positive_one128).extract_as_byte_array()) == "bfff0000000000000000000000000000");
+   BOOST_TEST(hex(protocol::ordered_key(negative_one128).extract_as_byte_array()) == "4000ffffffffffffffffffffffffffff");
+   BOOST_CHECK_THROW((void)protocol::ordered_key(
+                         protocol::float128{.bits = (protocol::uint128_t{0x7fffU} << 112U) | 1U}),
+                     protocol::exceptions::unordered_value);
+
+   const auto positive_subnormal64 = protocol::float64{.bits = 1U};
+   const auto negative_subnormal64 = protocol::float64{.bits = 0x8000000000000001ULL};
+   const auto positive_infinity64 = protocol::float64{.bits = 0x7ff0000000000000ULL};
+   const auto negative_infinity64 = protocol::float64{.bits = 0xfff0000000000000ULL};
+   const auto signaling_nan64 = protocol::float64{.bits = 0x7ff0000000000001ULL};
+   const auto quiet_nan64 = protocol::float64{.bits = 0x7ff8000000000000ULL};
+   const auto positive_zero64 = protocol::float64{.bits = 0U};
+   const auto negative_zero64 = protocol::float64{.bits = 0x8000000000000000ULL};
+   BOOST_CHECK(protocol::compare(negative_subnormal64, positive_subnormal64) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(negative_infinity64, positive_infinity64) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(positive_zero64, negative_zero64) == std::partial_ordering::equivalent);
+   BOOST_CHECK(protocol::ordered_key(positive_zero64) == protocol::ordered_key(negative_zero64));
+   BOOST_CHECK(hex(protocol::ordered_key(positive_subnormal64).extract_as_byte_array()) == "8000000000000001");
+   BOOST_CHECK(hex(protocol::ordered_key(negative_subnormal64).extract_as_byte_array()) == "7ffffffffffffffe");
+   BOOST_CHECK(hex(protocol::ordered_key(positive_infinity64).extract_as_byte_array()) == "fff0000000000000");
+   BOOST_CHECK(hex(protocol::ordered_key(negative_infinity64).extract_as_byte_array()) == "000fffffffffffff");
+   BOOST_CHECK(protocol::is_nan(signaling_nan64));
+   BOOST_CHECK(protocol::is_nan(quiet_nan64));
+   BOOST_CHECK(protocol::compare(signaling_nan64, positive_infinity64) == std::partial_ordering::unordered);
+   BOOST_CHECK(protocol::compare(quiet_nan64, signaling_nan64) == std::partial_ordering::unordered);
+   BOOST_CHECK_THROW((void)protocol::ordered_key(signaling_nan64), protocol::exceptions::unordered_value);
+   BOOST_CHECK_THROW((void)protocol::ordered_key(quiet_nan64), protocol::exceptions::unordered_value);
+
+   const auto float128_sign = protocol::uint128_t{1U} << 127U;
+   const auto float128_exponent = protocol::uint128_t{0x7fffU} << 112U;
+   const auto positive_subnormal128 = protocol::float128{.bits = 1U};
+   const auto negative_subnormal128 = protocol::float128{.bits = float128_sign | 1U};
+   const auto positive_infinity128 = protocol::float128{.bits = float128_exponent};
+   const auto negative_infinity128 = protocol::float128{.bits = float128_sign | float128_exponent};
+   const auto signaling_nan128 = protocol::float128{.bits = float128_exponent | 1U};
+   const auto quiet_nan128 = protocol::float128{.bits = float128_exponent | (protocol::uint128_t{1U} << 111U)};
+   const auto positive_zero128 = protocol::float128{.bits = 0U};
+   const auto negative_zero128 = protocol::float128{.bits = float128_sign};
+   BOOST_CHECK(protocol::compare(negative_subnormal128, positive_subnormal128) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(negative_infinity128, positive_infinity128) == std::partial_ordering::less);
+   BOOST_CHECK(protocol::compare(positive_zero128, negative_zero128) == std::partial_ordering::equivalent);
+   BOOST_CHECK(protocol::ordered_key(positive_zero128) == protocol::ordered_key(negative_zero128));
+   BOOST_CHECK(hex(protocol::ordered_key(positive_subnormal128).extract_as_byte_array()) ==
+               "80000000000000000000000000000001");
+   BOOST_CHECK(hex(protocol::ordered_key(negative_subnormal128).extract_as_byte_array()) ==
+               "7ffffffffffffffffffffffffffffffe");
+   BOOST_CHECK(hex(protocol::ordered_key(positive_infinity128).extract_as_byte_array()) ==
+               "ffff0000000000000000000000000000");
+   BOOST_CHECK(hex(protocol::ordered_key(negative_infinity128).extract_as_byte_array()) ==
+               "0000ffffffffffffffffffffffffffff");
+   BOOST_CHECK(protocol::is_nan(signaling_nan128));
+   BOOST_CHECK(protocol::is_nan(quiet_nan128));
+   BOOST_CHECK(protocol::compare(signaling_nan128, positive_infinity128) == std::partial_ordering::unordered);
+   BOOST_CHECK(protocol::compare(quiet_nan128, signaling_nan128) == std::partial_ordering::unordered);
+   BOOST_CHECK_THROW((void)protocol::ordered_key(signaling_nan128), protocol::exceptions::unordered_value);
+   BOOST_CHECK_THROW((void)protocol::ordered_key(quiet_nan128), protocol::exceptions::unordered_value);
+}
 
 BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |

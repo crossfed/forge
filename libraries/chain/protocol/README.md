@@ -26,6 +26,17 @@ Package component: `chain_protocol`. Public namespace:
   keys, signatures, timestamps and scalar wire vocabulary.
 - `forge.chain.protocol.fixed_key`: `fixed_key<Size>` and `key256`, with
   ordered word construction, canonical raw bytes and fixed-width hex variants.
+- `forge.chain.protocol.native_ids`: canonical native object-ID aliases backed
+  directly by `forge.db.ids.typed_id`.
+- `forge.chain.protocol.entity_selector`: exact entity selection by one native
+  ID or one natural key; it carries no lookup behavior.
+- `forge.chain.protocol.chain_config`, `wasm_parameters`, `ratio`,
+  `elastic_limit_parameters`, `usage_accumulator`,
+  `activated_protocol_feature`: canonical state values with Raw and host
+  Variant contracts, but no controller policy.
+- `forge.chain.protocol.float64`, `float128`: bit-preserving floating values;
+  their host ordered-key helpers reject NaN and use the canonical Spine byte
+  order.
 - `forge.chain.protocol.authority`: permission weights and authority thresholds.
 - `forge.chain.protocol.producer_schedule`: legacy producer keys and schedules
   used by block headers and contract APIs.
@@ -58,9 +69,10 @@ Package component: `chain_protocol`. Public namespace:
   `state_anchor` on every batch; product protocol does not expose raw proof
   keys, point/range records or authenticated change-range DTOs.
 
-The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,
-`forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric`
-and `forge_crypto_digest`.
+The target publicly links `forge_db_ids`, `forge_exceptions`, `forge_chain_core`,
+`forge_compression`, `forge_raw`, `forge_variant`,
+`forge_crypto_asymmetric_values`, `forge_crypto_asymmetric` and
+`forge_crypto_digest`.
 
 Authority, producer schedule, producer authority and finalizer policy modules
 share guest-safe value partitions with host wrappers. Host wrappers provide the
