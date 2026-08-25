@@ -61,6 +61,7 @@ import forge.api.core.dispatcher;
 import forge.asio.blocking;
 import forge.asio.compute;
 import forge.asio.exceptions;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.api.http.binding;
 import forge.net.http.base_url;
@@ -2011,11 +2012,13 @@ class delayed_body_source final : public body_reader::source {
 class cancellable_body_source final : public body_reader::source {
  public:
    boost::asio::awaitable<std::optional<body_chunk>> async_read() override {
+      co_await boost::asio::this_coro::reset_cancellation_state(
+         boost::asio::disable_cancellation{});
       started.store(true, std::memory_order_release);
-      auto timer = boost::asio::steady_timer{
-         co_await boost::asio::this_coro::executor,
-         (std::chrono::steady_clock::time_point::max)()};
-      co_await timer.async_wait(boost::asio::use_awaitable);
+      const auto observed = canceled_.epoch();
+      if (cancel_calls.load(std::memory_order_acquire) == 0U) {
+         static_cast<void>(co_await canceled_.async_wait(observed));
+      }
       co_return std::nullopt;
    }
 
@@ -2023,7 +2026,17 @@ class cancellable_body_source final : public body_reader::source {
       return 0;
    }
 
+   void cancel() noexcept override {
+      cancel_calls.fetch_add(1U, std::memory_order_acq_rel);
+      canceled_.notify();
+   }
+
    std::atomic_bool started = false;
+
+   std::atomic_uint32_t cancel_calls = 0;
+
+ private:
+   forge::asio::notification canceled_;
 };
 
 class failing_body_source final : public body_reader::source {
@@ -3311,6 +3324,7 @@ BOOST_AUTO_TEST_CASE(http_connection_cancellation_interrupts_streaming_request_b
    cancellation.emit(boost::asio::cancellation_type::all);
    BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
    BOOST_CHECK_THROW(static_cast<void>(pending.get()), forge::asio::exceptions::canceled);
+   BOOST_TEST(source->cancel_calls.load(std::memory_order_acquire) == 1U);
    server.stop();
 }
 
@@ -8796,6 +8810,11 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
    auto registry = forge::api::core::registry{};
    registry.install<api_cache>(api_cache::describe(), std::make_shared<routed_api_cache>());
 
+   auto response_mutex = std::make_shared<std::mutex>();
+   auto response_cv = std::make_shared<std::condition_variable>();
+   auto response = std::make_shared<std::string>();
+   auto response_ready = std::make_shared<bool>(false);
+   auto connection_closed = std::make_shared<bool>(false);
    auto observed_peer = std::make_shared<std::string>();
    auto observed_public = std::make_shared<std::string>();
    auto plan =
@@ -8804,8 +8823,9 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
            .interceptor(forge::api::core::interceptor()
                             .id("websocket-metadata")
                             .phase(forge::api::core::interceptor_phase::authorize)
-                            .handler([observed_peer, observed_public](
+                            .handler([response_mutex, observed_peer, observed_public](
                                          forge::api::core::call_context& context) -> boost::asio::awaitable<void> {
+                               const auto lock = std::scoped_lock{*response_mutex};
                                *observed_peer = forge::api::core::metadata_value(
                                                     context.meta, forge::api::core::p2p_remote_peer_metadata_key)
                                                     .value_or("missing");
@@ -8830,19 +8850,26 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
    auto ws_client = forge::net::websocket::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(port))};
    auto connection = ws_client.connect("/api");
 
-   auto response_mutex = std::mutex{};
-   auto response_cv = std::condition_variable{};
-   auto response = std::string{};
-   auto response_ready = false;
-   connection->on_message([&](forge::net::websocket::connection&, std::string message) -> boost::asio::awaitable<void> {
+   connection->on_message([response_mutex, response_cv, response, response_ready](
+                             forge::net::websocket::connection&,
+                             std::string message) -> boost::asio::awaitable<void> {
       {
-         const auto lock = std::scoped_lock{response_mutex};
-         response = std::move(message);
-         response_ready = true;
+         const auto lock = std::scoped_lock{*response_mutex};
+         *response = std::move(message);
+         *response_ready = true;
       }
-      response_cv.notify_all();
+      response_cv->notify_all();
       co_return;
    });
+   connection->on_close(
+      [response_mutex, response_cv, connection_closed](
+         forge::net::websocket::connection&) {
+         {
+            const auto lock = std::scoped_lock{*response_mutex};
+            *connection_closed = true;
+         }
+         response_cv->notify_all();
+      });
 
    auto request = forge::api::core::frame{
        .kind = forge::api::core::frame_kind::request,
@@ -8862,25 +8889,42 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
       runtime, connection->send_binary(pack_websocket_api_frame(websocket_api_hello())));
 
    {
-      auto lock = std::unique_lock{response_mutex};
-      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
-      BOOST_TEST(static_cast<int>(unpack_websocket_api_frame(response).kind) ==
+      auto lock = std::unique_lock{*response_mutex};
+      BOOST_REQUIRE(response_cv->wait_for(
+         lock, std::chrono::seconds{5},
+         [response_ready, connection_closed] {
+            return *response_ready || *connection_closed;
+         }));
+      BOOST_REQUIRE_MESSAGE(*response_ready,
+                            "WebSocket closed before API session hello");
+      BOOST_TEST(static_cast<int>(unpack_websocket_api_frame(*response).kind) ==
                  static_cast<int>(forge::api::core::frame_kind::session_hello));
-      response.clear();
-      response_ready = false;
+      response->clear();
+      *response_ready = false;
    }
 
    forge::asio::blocking::run(runtime, connection->send_binary(pack_websocket_api_frame(request)));
 
+   auto response_snapshot = std::string{};
    {
-      auto lock = std::unique_lock{response_mutex};
-      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
+      auto lock = std::unique_lock{*response_mutex};
+      BOOST_REQUIRE(response_cv->wait_for(
+         lock, std::chrono::seconds{5},
+         [response_ready, connection_closed] {
+            return *response_ready || *connection_closed;
+         }));
+      BOOST_REQUIRE_MESSAGE(*response_ready,
+                            "WebSocket closed before API response");
+      response_snapshot = *response;
    }
 
-   const auto frame = unpack_websocket_api_frame(response);
+   const auto frame = unpack_websocket_api_frame(response_snapshot);
    BOOST_CHECK(static_cast<int>(frame.kind) == static_cast<int>(forge::api::core::frame_kind::response));
-   BOOST_TEST(*observed_peer == "missing");
-   BOOST_TEST(*observed_public == "trace-2");
+   {
+      const auto lock = std::scoped_lock{*response_mutex};
+      BOOST_TEST(*observed_peer == "missing");
+      BOOST_TEST(*observed_public == "trace-2");
+   }
 
    forge::asio::blocking::run(runtime, connection->close());
    server.stop();

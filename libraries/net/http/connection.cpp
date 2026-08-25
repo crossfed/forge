@@ -299,10 +299,46 @@ awaitable<bool> cancel_body_at_deadline(body_reader& body, transport_deadline de
 awaitable<std::optional<body_chunk>> read_body_until(body_reader& body, transport_deadline deadline) {
    require_deadline(deadline);
    const auto executor = co_await asio::this_coro::executor;
+   const auto inherited_cancellation =
+      co_await asio::this_coro::cancellation_state;
+   auto parent_cancellation_slot = inherited_cancellation.slot();
+   auto body_cancellation = asio::cancellation_state{
+      parent_cancellation_slot,
+      [&body](asio::cancellation_type type) noexcept {
+         if (type != asio::cancellation_type::none) {
+            body.cancel();
+         }
+         return type;
+      },
+      asio::enable_total_cancellation{}};
+   const auto clear_cancellation =
+      [](asio::cancellation_slot* slot) noexcept {
+         try {
+            slot->clear();
+         } catch (...) {
+            // Cancellation cleanup cannot escape the body-read boundary.
+         }
+      };
+   auto cancellation_cleanup =
+      std::unique_ptr<asio::cancellation_slot, decltype(clear_cancellation)>{
+         &parent_cancellation_slot, clear_cancellation};
+   if (inherited_cancellation.cancelled() !=
+       asio::cancellation_type::none) {
+      body.cancel();
+      throw forge::asio::exceptions::canceled{
+         "HTTP request body read was canceled"};
+   }
    using namespace asio::experimental::awaitable_operators;
-   auto outcome = co_await (
-      asio::co_spawn(executor, body.async_read(), asio::as_tuple(use_awaitable)) ||
-      cancel_body_at_deadline(body, deadline));
+   auto outcome = co_await asio::co_spawn(
+      executor,
+      asio::co_spawn(executor, body.async_read(),
+                     asio::as_tuple(use_awaitable)) ||
+         cancel_body_at_deadline(body, deadline),
+      asio::bind_cancellation_slot(body_cancellation.slot(), use_awaitable));
+   if (body_cancellation.cancelled() != asio::cancellation_type::none) {
+      throw forge::asio::exceptions::canceled{
+         "HTTP request body read was canceled"};
+   }
    if (outcome.index() != 0U) {
       if (std::get<1>(outcome)) {
          raise_deadline();

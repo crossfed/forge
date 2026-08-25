@@ -17,8 +17,8 @@ struct dispatch_options {
    codec_id codec{.value = "forge.raw"};
    std::size_t max_inflight = 128;
    std::chrono::milliseconds deadline{0};
-   std::optional<trusted_invocation> trusted;
    metadata trusted_metadata;
+   std::optional<trusted_invocation> trusted;
 };
 
 class frame_dispatcher {

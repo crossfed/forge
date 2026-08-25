@@ -46,10 +46,11 @@ into an unknown-call session failure. Destroying an unfinished typed call
 cancels only that call; callers still use `async_finish()` to observe the
 terminal result.
 
-Server-side `session` and `serve_stream` overloads accept core
-`dispatch_options` in addition to the existing trusted-metadata overloads.
-This keeps metadata interception behavior intact while carrying immutable typed
-trusted invocation values separately into contextual request dispatch.
+Server-side `session` and `serve_stream` preserve their trusted-metadata
+arguments and accept an optional typed trusted invocation after that metadata.
+This keeps existing calls, including calls that pass `{}` for metadata,
+unambiguous while carrying immutable typed values separately into contextual
+request dispatch.
 
 ## Boundaries
 

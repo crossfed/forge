@@ -84,10 +84,7 @@ class api_binding {
       }
       return forge::api::stream::session{
          std::move(stream.stream).into_transport_stream(), plan_, options_,
-         forge::api::core::dispatch_options{
-            .trusted = std::move(invocation),
-            .trusted_metadata = std::move(trusted),
-         }};
+         std::move(trusted), std::move(invocation)};
    }
 
    boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {

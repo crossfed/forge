@@ -39,13 +39,14 @@ session::session(forge::net::transport::stream stream, options value)
     : impl_{std::make_shared<impl>(std::move(stream), std::move(value))} {}
 
 session::session(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
-                 forge::api::core::metadata trusted_metadata)
-    : session{std::move(stream), std::move(plan), std::move(value),
-              forge::api::core::dispatch_options{.trusted_metadata = std::move(trusted_metadata)}} {}
-
-session::session(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
-                 forge::api::core::dispatch_options dispatch)
-    : impl_{std::make_shared<impl>(std::move(stream), std::move(plan), std::move(value), std::move(dispatch))} {}
+                 forge::api::core::metadata trusted_metadata,
+                 std::optional<forge::api::core::trusted_invocation> trusted)
+    : impl_{std::make_shared<impl>(
+         std::move(stream), std::move(plan), std::move(value),
+         forge::api::core::dispatch_options{
+            .trusted_metadata = std::move(trusted_metadata),
+            .trusted = std::move(trusted),
+         })} {}
 
 session::~session() {
    cancel();
