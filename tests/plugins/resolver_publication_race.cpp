@@ -75,6 +75,7 @@ boost::asio::any_io_executor resolver_publish_barrier::owner_executor() const {
 
 void resolver_publish_barrier::track_protocol(std::string protocol) {
    const auto lock = std::scoped_lock{mutex_};
+   drain_calls_.try_emplace(protocol, 0U);
    close_calls_.try_emplace(std::move(protocol), 0U);
 }
 
@@ -89,6 +90,19 @@ std::size_t resolver_publish_barrier::close_calls(const std::string& protocol) c
    const auto lock = std::scoped_lock{mutex_};
    const auto found = close_calls_.find(protocol);
    return found == close_calls_.end() ? 0U : found->second;
+}
+
+void resolver_publish_barrier::record_drain(const std::string& protocol) noexcept {
+   const auto lock = std::scoped_lock{mutex_};
+   if (const auto found = drain_calls_.find(protocol); found != drain_calls_.end()) {
+      ++found->second;
+   }
+}
+
+std::size_t resolver_publish_barrier::drain_calls(const std::string& protocol) const noexcept {
+   const auto lock = std::scoped_lock{mutex_};
+   const auto found = drain_calls_.find(protocol);
+   return found == drain_calls_.end() ? 0U : found->second;
 }
 
 resolver_publication_race_node::resolver_publication_race_node(std::shared_ptr<resolver_publish_barrier> barrier)
@@ -127,10 +141,14 @@ resolver_publication_race_node::publish_api(forge::api::core::binding_plan plan,
    barrier_->wait_if_armed();
    return forge::api::p2p::detail::publication_access::make(
       barrier_->owner_executor(),
-      [barrier = barrier_, published_protocol = std::move(published_protocol)] {
+      [barrier = barrier_, published_protocol] {
          barrier->record_close(published_protocol);
       },
-      []() -> boost::asio::awaitable<void> { co_return; }, [] { return true; });
+      [barrier = barrier_, published_protocol]() -> boost::asio::awaitable<void> {
+         barrier->record_drain(published_protocol);
+         co_return;
+      },
+      [] { return true; });
 }
 
 void resolver_publication_race_node::publish_protocol(forge::net::p2p::protocol_id protocol,

@@ -27,6 +27,8 @@ class resolver_publish_barrier final {
    void track_protocol(std::string protocol);
    void record_close(const std::string& protocol) noexcept;
    [[nodiscard]] std::size_t close_calls(const std::string& protocol) const noexcept;
+   void record_drain(const std::string& protocol) noexcept;
+   [[nodiscard]] std::size_t drain_calls(const std::string& protocol) const noexcept;
 
  private:
    mutable std::mutex mutex_;
@@ -36,6 +38,7 @@ class resolver_publish_barrier final {
    bool entered_ = false;
    bool released_ = false;
    std::map<std::string, std::size_t, std::less<>> close_calls_;
+   std::map<std::string, std::size_t, std::less<>> drain_calls_;
 };
 
 class resolver_publication_race_node final : public forge::plugins::p2p::node::api {

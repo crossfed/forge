@@ -327,8 +327,6 @@ void publication_catalog::schedule_retirement(const std::shared_ptr<generation>&
                notify = inflight_retirements_ == 0;
             }
          }
-         remember_retirement_failure_locked(std::make_exception_ptr(
-            forge::asio::exceptions::rejected{"P2P resolver publication retirement was rejected"}));
       }
    } catch (...) {
       reject_retirement(generation.get(), std::current_exception());

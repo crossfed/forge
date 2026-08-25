@@ -3698,6 +3698,31 @@ BOOST_AUTO_TEST_CASE(p2p_publication_is_move_only_and_joins_concurrent_closers) 
    BOOST_TEST(state->drain_calls.load(std::memory_order_relaxed) == 1U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_publication_move_assignment_transfers_new_owner_before_reentrant_old_close) {
+   auto runtime = forge::asio::runtime{};
+   auto old_close_calls = std::atomic_size_t{0};
+   auto new_close_calls = std::atomic_size_t{0};
+   auto owner = std::unique_ptr<forge::api::p2p::publication>{};
+
+   auto replacement = forge::api::p2p::detail::publication_access::make(
+      runtime.context().get_executor(),
+      [&new_close_calls] { new_close_calls.fetch_add(1, std::memory_order_relaxed); },
+      []() -> boost::asio::awaitable<void> { co_return; }, [] { return true; });
+   owner = std::make_unique<forge::api::p2p::publication>(
+      forge::api::p2p::detail::publication_access::make(
+         runtime.context().get_executor(),
+         [&old_close_calls, &owner] {
+            old_close_calls.fetch_add(1, std::memory_order_relaxed);
+            owner.reset();
+         },
+         []() -> boost::asio::awaitable<void> { co_return; }, [] { return true; }));
+
+   BOOST_CHECK_NO_THROW(static_cast<void>(*owner = std::move(replacement)));
+   BOOST_TEST(!owner);
+   BOOST_TEST(old_close_calls.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(new_close_calls.load(std::memory_order_relaxed) == 1U);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_publication_drain_uses_its_owner_runtime_after_first_caller_stops) {
    auto owner_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto first_caller_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
@@ -3996,6 +4021,34 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_repeated_publication_replacement_retires_befor
    const auto after_shutdown = server.scheduler().snapshot();
    BOOST_TEST(after_shutdown.pending == 0U);
    BOOST_TEST(after_shutdown.running_awaitable == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_resolver_rejected_retirement_drains_on_shutdown_without_poisoning_close) {
+   auto barrier = std::make_shared<forge::tests::plugins::resolver_publish_barrier>();
+   auto app = forge::tests::plugins::resolver_publication_race_application{barrier};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
+
+   const auto protocol = std::string{"/forge/api/resolver-retirement-rejected/1"};
+   auto publication = resolver->publish_api(
+      node_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol});
+   BOOST_TEST(publication.active());
+
+   const auto before_rejection = app.scheduler().snapshot();
+   app.scheduler().request_stop();
+   publication.close();
+   const auto after_rejection = app.scheduler().snapshot();
+
+   BOOST_TEST(after_rejection.stopped);
+   BOOST_TEST(after_rejection.rejected == before_rejection.rejected + 1U);
+   BOOST_TEST(barrier->close_calls(protocol) == 1U);
+   BOOST_TEST(barrier->drain_calls(protocol) == 0U);
+
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), app.shutdown()));
+   BOOST_TEST(barrier->drain_calls(protocol) == 1U);
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), publication.async_close()));
+   BOOST_TEST(barrier->drain_calls(protocol) == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_resolver_publish_racing_shutdown_returns_no_usable_publication) {

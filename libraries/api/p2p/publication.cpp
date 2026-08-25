@@ -26,11 +26,14 @@ publication::~publication() noexcept {
 publication::publication(publication&& other) noexcept = default;
 
 publication& publication::operator=(publication&& other) noexcept {
-   if (this != &other) {
-      close();
-      state_ = std::move(other.state_);
+   if (this == &other) {
+      return *this;
    }
-   return *this;
+
+   auto& result = *this;
+   auto replaced = std::exchange(state_, std::move(other.state_));
+   detail::close_publication(std::move(replaced));
+   return result;
 }
 
 bool publication::active() const noexcept {
