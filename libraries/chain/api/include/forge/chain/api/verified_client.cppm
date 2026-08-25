@@ -115,6 +115,9 @@ class projection_verifier {
                        audit_verifier& verifier);
    virtual void verify(const protocol::code_request& request, const protocol::code_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::permission_links_request& request,
+                       const protocol::permission_links_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
    virtual void verify(const protocol::table_rows_request& request, const protocol::table_rows_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
    virtual void verify(const protocol::table_changes_request& request, const protocol::table_changes_response& response,
@@ -158,6 +161,8 @@ class verified_client {
    boost::asio::awaitable<protocol::account_changes_response>
    get_account_changes(protocol::account_changes_request request);
    boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request request);
+   boost::asio::awaitable<protocol::permission_links_response>
+   get_permission_links(protocol::permission_links_request request);
    boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request request);
    boost::asio::awaitable<protocol::table_changes_response> get_table_changes(protocol::table_changes_request request);
    boost::asio::awaitable<protocol::table_scope_response> get_table_scope(protocol::table_scope_request request);

@@ -70,6 +70,8 @@ class state_implementation final : public chain_api::state {
    boost::asio::awaitable<protocol::account_changes_response>
    get_account_changes(protocol::account_changes_request request) override;
    boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request request) override;
+   boost::asio::awaitable<protocol::permission_links_response>
+   get_permission_links(protocol::permission_links_request request) override;
    boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request request) override;
    boost::asio::awaitable<protocol::table_changes_response>
    get_table_changes(protocol::table_changes_request request) override;

@@ -61,6 +61,13 @@ struct openapi_field {
    bool json_parameter = false;
 };
 
+struct openapi_query_object {
+   std::string name;
+   forge::variant schema;
+   std::vector<std::string> fields;
+   bool required = true;
+};
+
 enum class openapi_response_body {
    codec,
    binary,
@@ -72,11 +79,13 @@ struct openapi_operation {
    forge::variant request_schema;
    forge::variant response_schema;
    std::vector<openapi_field> request_fields;
+   std::vector<openapi_query_object> query_objects;
    bool positional_request = false;
    openapi_response_body response_body = openapi_response_body::codec;
 };
 
 template <typename T> struct json_schema_traits;
+template <typename T> struct openapi_query_object_traits;
 
 namespace detail {
 
@@ -336,6 +345,15 @@ template <typename Request> [[nodiscard]] std::vector<openapi_field> request_fie
    return output;
 }
 
+template <typename Request> [[nodiscard]] std::vector<openapi_query_object> query_objects() {
+   using request_type = clean_type<Request>;
+   if constexpr (requires { openapi_query_object_traits<request_type>::make(); }) {
+      return openapi_query_object_traits<request_type>::make();
+   } else {
+      return {};
+   }
+}
+
 template <typename Tuple, std::size_t... Index>
 [[nodiscard]] std::vector<openapi_field> positional_fields(std::index_sequence<Index...>) {
    auto output = std::vector<openapi_field>{};
@@ -367,6 +385,8 @@ template <auto Method, typename Request, typename Response>
                             .request_schema = make_json_schema<Request>(),
                             .response_schema = make_json_schema<Response>(),
                             .request_fields = positional ? positional_fields<Method>() : request_fields<Request>(),
+                            .query_objects =
+                                positional ? std::vector<openapi_query_object>{} : query_objects<Request>(),
                             .positional_request = positional,
                             .response_body = response_body};
 }

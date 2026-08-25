@@ -179,6 +179,11 @@ boost::asio::awaitable<protocol::code_response> state_implementation::get_code(p
    co_return protocol::code_response{};
 }
 
+boost::asio::awaitable<protocol::permission_links_response>
+state_implementation::get_permission_links(protocol::permission_links_request) {
+   co_return protocol::permission_links_response{};
+}
+
 boost::asio::awaitable<protocol::table_rows_response> state_implementation::get_table_rows(protocol::table_rows_request) {
    co_return protocol::table_rows_response{};
 }

@@ -11,9 +11,15 @@ module;
 
 export module forge.chain.protocol.state_query;
 
+import forge.chain.protocol.account_authority;
 import forge.chain.protocol.action;
-import forge.chain.protocol.code_hash_result;
-import forge.chain.protocol.transaction;
+import forge.chain.protocol.code;
+import forge.chain.protocol.currency_stats;
+import forge.chain.protocol.entity_selector;
+import forge.chain.protocol.full_account;
+import forge.chain.protocol.generated_transaction;
+import forge.chain.protocol.permission_link;
+import forge.chain.protocol.table;
 import forge.variant.containers;
 import forge.variant.described;
 
@@ -23,8 +29,7 @@ export import forge.variant.value;
 
 export namespace forge::chain::protocol {
 
-struct account_request {
-   forge::chain::protocol::account_name account;
+struct account_request : account_selector {
    std::optional<block_id> anchor;
    std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
@@ -32,31 +37,14 @@ struct account_request {
    bool operator==(const account_request&) const = default;
 };
 
-struct account_permission {
-   forge::chain::protocol::permission_name name;
-   forge::chain::protocol::permission_name parent;
-   forge::chain::protocol::authority auth;
-
-   bool operator==(const account_permission&) const = default;
-};
-
-struct account_state {
-   forge::chain::protocol::block_timestamp creation_date;
-   std::vector<account_permission> permissions;
-
-   bool operator==(const account_state&) const = default;
-};
-
 struct account_response : audited_response {
-   forge::chain::protocol::account_name account;
-   account_state state;
+   full_account account;
 
    bool operator==(const account_response&) const = default;
 };
 
-struct code_request {
-   forge::chain::protocol::account_name account;
-   bool include_code = true;
+struct code_request : account_selector {
+   bool include_wasm = true;
    bool include_abi = true;
    std::optional<digest> known_abi_hash;
    std::optional<block_id> anchor;
@@ -67,13 +55,30 @@ struct code_request {
 };
 
 struct code_response : audited_response {
-   forge::chain::protocol::account_name account;
-   forge::chain::protocol::code_hash_result hash;
-   digest abi_hash;
+   forge::chain::protocol::code code;
    std::optional<bytes> wasm;
-   std::optional<bytes> raw_abi;
+   std::optional<bytes> abi;
 
    bool operator==(const code_response&) const = default;
+};
+
+struct permission_links_request : account_selector {
+   std::optional<account_name> code;
+   std::optional<action_name> message_type;
+   std::uint32_t limit = 10;
+   std::optional<bytes> cursor;
+   std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
+   audit_mode audit = audit_mode::none;
+
+   bool operator==(const permission_links_request&) const = default;
+};
+
+struct permission_links_response : audited_response {
+   std::vector<permission_link> links;
+   std::optional<bytes> next;
+
+   bool operator==(const permission_links_response&) const = default;
 };
 
 enum class table_index_kind : std::uint8_t {
@@ -105,7 +110,7 @@ struct table_row {
 struct table_rows_request {
    forge::chain::protocol::account_name code;
    forge::chain::protocol::name scope;
-   forge::chain::protocol::name table;
+   forge::chain::protocol::table_name table;
    table_index index;
    std::optional<bytes> lower_bound;
    std::optional<bytes> upper_bound;
@@ -129,7 +134,7 @@ struct table_rows_response : audited_response {
 struct table_change_selector {
    forge::chain::protocol::account_name code;
    forge::chain::protocol::name scope;
-   forge::chain::protocol::name table;
+   forge::chain::protocol::table_name table;
 
    constexpr auto operator<=>(const table_change_selector&) const = default;
 };
@@ -170,7 +175,7 @@ struct table_changes_response : audited_response {
 
 struct account_mutation {
    forge::chain::protocol::account_name account;
-   std::optional<account_state> state;
+   std::optional<account_authority> authority;
 
    bool operator==(const account_mutation&) const = default;
 };
@@ -203,7 +208,7 @@ struct account_changes_response : audited_response {
 
 struct table_scope_request {
    forge::chain::protocol::account_name code;
-   forge::chain::protocol::name table;
+   forge::chain::protocol::table_name table;
    std::string lower_bound;
    std::string upper_bound;
    std::uint32_t limit = 10;
@@ -216,18 +221,8 @@ struct table_scope_request {
    bool operator==(const table_scope_request&) const = default;
 };
 
-struct table_scope_row {
-   forge::chain::protocol::name code;
-   forge::chain::protocol::name scope;
-   forge::chain::protocol::name table;
-   forge::chain::protocol::account_name payer;
-   std::uint32_t count = 0;
-
-   bool operator==(const table_scope_row&) const = default;
-};
-
 struct table_scope_response : audited_response {
-   std::vector<table_scope_row> rows;
+   std::vector<table> tables;
    std::optional<bytes> next;
 
    bool operator==(const table_scope_response&) const = default;
@@ -261,16 +256,16 @@ struct currency_balance_response : audited_response {
 };
 
 struct currency_stats_response : audited_response {
-   forge::variant stats;
+   forge::chain::protocol::currency_stats stats;
 
    bool operator==(const currency_stats_response&) const = default;
 };
 
 struct scheduled_request {
-   bool json = false;
-   std::string lower_bound;
+   std::optional<time_point> lower_bound;
+   std::optional<time_point> upper_bound;
    std::uint32_t limit = 50;
-   std::optional<std::uint32_t> time_limit_ms;
+   std::optional<bytes> cursor;
    std::optional<block_id> anchor;
    std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
@@ -278,44 +273,18 @@ struct scheduled_request {
    bool operator==(const scheduled_request&) const = default;
 };
 
-struct scheduled_transaction {
-   transaction_id trx_id;
-   account_name sender;
-   uint128_t sender_id = 0;
-   account_name payer;
-   time_point delay_until{microseconds{}};
-   time_point expiration{microseconds{}};
-   time_point published{microseconds{}};
-   forge::variant transaction;
-
-   bool operator==(const scheduled_transaction&) const = default;
-};
-
 struct scheduled_response : audited_response {
-   std::vector<scheduled_transaction> transactions;
-   std::string more;
+   std::vector<generated_transaction> transactions;
+   std::optional<bytes> next;
 
    bool operator==(const scheduled_response&) const = default;
-};
-
-enum class authorizer_source : std::uint8_t {
-   account = 0,
-   key = 1,
-};
-
-struct authorizers_cursor {
-   authorizer_source source = authorizer_source::account;
-   std::uint32_t input = 0;
-   std::optional<bytes> lower;
-
-   bool operator==(const authorizers_cursor&) const = default;
 };
 
 struct authorizers_request {
    std::vector<forge::chain::protocol::permission_level> accounts;
    std::vector<forge::chain::protocol::public_key> keys;
    std::uint32_t limit = 256;
-   std::optional<authorizers_cursor> cursor;
+   std::optional<bytes> cursor;
    std::optional<block_id> anchor;
    std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
@@ -336,18 +305,19 @@ struct authorizer_match {
 
 struct authorizers_response : audited_response {
    std::vector<authorizer_match> accounts;
-   std::optional<authorizers_cursor> next;
+   std::optional<bytes> next;
 
    bool operator==(const authorizers_response&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(account_request, (), (account, anchor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(account_permission, (), (name, parent, auth))
-BOOST_DESCRIBE_STRUCT(account_state, (), (creation_date, permissions))
-BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, state))
-BOOST_DESCRIBE_STRUCT(code_request, (),
-                      (account, include_code, include_abi, known_abi_hash, anchor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (account, hash, abi_hash, wasm, raw_abi))
+BOOST_DESCRIBE_STRUCT(account_request, (account_selector), (anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account))
+BOOST_DESCRIBE_STRUCT(code_request, (account_selector),
+                      (include_wasm, include_abi, known_abi_hash, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (code, wasm, abi))
+BOOST_DESCRIBE_STRUCT(permission_links_request, (account_selector),
+                      (code, message_type, limit, cursor, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(permission_links_response, (audited_response), (links, next))
 BOOST_DESCRIBE_ENUM(table_index_kind, primary, secondary_u64, secondary_u128, secondary_u256, secondary_f64,
                     secondary_f128)
 BOOST_DESCRIBE_STRUCT(table_index, (), (kind, position))
@@ -361,25 +331,20 @@ BOOST_DESCRIBE_STRUCT(table_mutation, (), (table, primary, row))
 BOOST_DESCRIBE_STRUCT(table_change_batch, (), (anchor, mutations))
 BOOST_DESCRIBE_STRUCT(table_changes_request, (), (from_block, to_block, tables, limit, cursor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(table_changes_response, (audited_response), (blocks, next))
-BOOST_DESCRIBE_STRUCT(account_mutation, (), (account, state))
+BOOST_DESCRIBE_STRUCT(account_mutation, (), (account, authority))
 BOOST_DESCRIBE_STRUCT(account_change_batch, (), (anchor, mutations))
 BOOST_DESCRIBE_STRUCT(account_changes_request, (),
                       (from_block, to_block, accounts, limit, cursor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(account_changes_response, (audited_response), (blocks, next))
 BOOST_DESCRIBE_STRUCT(table_scope_request, (),
                       (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(table_scope_row, (), (code, scope, table, payer, count))
-BOOST_DESCRIBE_STRUCT(table_scope_response, (audited_response), (rows, next))
+BOOST_DESCRIBE_STRUCT(table_scope_response, (audited_response), (tables, next))
 BOOST_DESCRIBE_STRUCT(currency_balance_request, (), (code, account, symbol, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(currency_stats_request, (), (code, symbol, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(currency_balance_response, (audited_response), (balances))
 BOOST_DESCRIBE_STRUCT(currency_stats_response, (audited_response), (stats))
-BOOST_DESCRIBE_STRUCT(scheduled_request, (), (json, lower_bound, limit, time_limit_ms, anchor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(scheduled_transaction, (),
-                      (trx_id, sender, sender_id, payer, delay_until, expiration, published, transaction))
-BOOST_DESCRIBE_STRUCT(scheduled_response, (audited_response), (transactions, more))
-BOOST_DESCRIBE_ENUM(authorizer_source, account, key)
-BOOST_DESCRIBE_STRUCT(authorizers_cursor, (), (source, input, lower))
+BOOST_DESCRIBE_STRUCT(scheduled_request, (), (lower_bound, upper_bound, limit, cursor, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(scheduled_response, (audited_response), (transactions, next))
 BOOST_DESCRIBE_STRUCT(authorizers_request, (), (accounts, keys, limit, cursor, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(authorizer_match, (),
                       (account_name, permission_name, authorizing_account, authorizing_key, weight, threshold))

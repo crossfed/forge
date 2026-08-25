@@ -3,7 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
+import forge.chain.protocol.account_authority;
+import forge.chain.protocol.full_account;
 import forge.chain.protocol.state_query;
+import forge.chain.protocol.table;
 import forge.chain.protocol.transaction_query;
 import forge.codec.json;
 import forge.crypto.digest.sha256;
@@ -106,10 +109,11 @@ BOOST_AUTO_TEST_CASE(table_scope_pagination_roundtrips_opaque_bytes_in_exact_jso
    BOOST_CHECK(exact.value == request);
 
    auto response = protocol::table_scope_response{};
-   response.rows = {{
-       .code = protocol::name{"eosio.token"},
+   response.tables = {{
+       .id = protocol::table_id{1U},
+       .code = protocol::account_name{"eosio.token"},
        .scope = protocol::name{"alice"},
-       .table = protocol::name{"accounts"},
+       .table = protocol::table_name{"accounts"},
        .payer = protocol::account_name{"eosio.token"},
        .count = 1U,
    }};
@@ -119,6 +123,8 @@ BOOST_AUTO_TEST_CASE(table_scope_pagination_roundtrips_opaque_bytes_in_exact_jso
    const auto response_value = forge::codec::json::read_value(response_json.text);
    BOOST_REQUIRE(response_value.ok());
    const auto& object = response_value.value.get_object();
+   BOOST_TEST(object.contains("tables"));
+   BOOST_TEST(!object.contains("rows"));
    BOOST_TEST(object.contains("next"));
    BOOST_TEST(!object.contains("more"));
    BOOST_TEST(!object.contains("next_key"));
@@ -129,7 +135,7 @@ BOOST_AUTO_TEST_CASE(table_scope_pagination_roundtrips_opaque_bytes_in_exact_jso
    BOOST_CHECK(exact_response.value == response);
 }
 
-BOOST_AUTO_TEST_CASE(typed_state_changes_roundtrip_opaque_cursors_and_shared_account_state) {
+BOOST_AUTO_TEST_CASE(typed_state_changes_roundtrip_opaque_cursors_and_canonical_account_projections) {
    const auto table_request = protocol::table_changes_request{
        .from_block = 10U,
        .to_block = 12U,
@@ -179,26 +185,46 @@ BOOST_AUTO_TEST_CASE(typed_state_changes_roundtrip_opaque_cursors_and_shared_acc
    BOOST_TEST(table_response_value.value.get_object().contains("blocks"));
    BOOST_TEST(!table_response_value.value.get_object().contains("changes"));
 
-   const auto account = protocol::account_state{
-       .permissions = {{.name = protocol::permission_name{"active"}}},
-   };
    const auto account_name = protocol::account_name{"alice"};
-   const auto account_response = protocol::account_response{.account = account_name, .state = account};
+   auto account = protocol::full_account{};
+   account.name = account_name;
+   auto authority = protocol::account_authority{};
+   authority.name = account_name;
+   const auto account_response = protocol::account_response{.account = account};
    const auto changes = protocol::account_changes_response{
        .blocks = {{.anchor = target_anchor,
-                   .mutations = {{.account = account_name, .state = account},
+                   .mutations = {{.account = account_name, .authority = authority},
                                  {.account = protocol::account_name{"bob"}}}}},
        .next = protocol::bytes{0x01U, 0x02U},
    };
    const auto decoded_account =
        forge::raw::unpack_exact<protocol::account_response>(forge::raw::pack(account_response));
-   BOOST_CHECK(decoded_account.account == account_name);
-   BOOST_CHECK(decoded_account.state == account);
+   BOOST_CHECK(decoded_account.account == account);
    const auto decoded_changes = forge::raw::unpack_exact<protocol::account_changes_response>(forge::raw::pack(changes));
    BOOST_CHECK(decoded_changes == changes);
-   BOOST_REQUIRE(decoded_changes.blocks.front().mutations.front().state);
-   BOOST_CHECK(decoded_changes.blocks.front().mutations.front().state == account_response.state);
-   BOOST_TEST(!decoded_changes.blocks.front().mutations.back().state.has_value());
+   BOOST_REQUIRE(decoded_changes.blocks.front().mutations.front().authority);
+   BOOST_CHECK(decoded_changes.blocks.front().mutations.front().authority == authority);
+   BOOST_TEST(!decoded_changes.blocks.front().mutations.back().authority.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(authorizer_pagination_roundtrips_opaque_bytes) {
+   const auto request = protocol::authorizers_request{
+       .accounts = {protocol::permission_level{protocol::account_name{"alice"}, protocol::permission_name{"active"}}},
+       .limit = 25U,
+       .cursor = protocol::bytes{0x00U, 0x2fU, 0xffU},
+       .audit = protocol::audit_mode::required,
+   };
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::authorizers_request>(forge::raw::pack(request)) == request);
+
+   const auto encoded = forge::codec::json::write(request);
+   BOOST_REQUIRE(encoded.ok());
+   const auto decoded = forge::codec::json::read<protocol::authorizers_request>(
+       encoded.text, {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_CHECK(decoded.value == request);
+
+   const auto response = protocol::authorizers_response{.next = protocol::bytes{0x01U, 0x02U}};
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::authorizers_response>(forge::raw::pack(response)) == response);
 }
 
 BOOST_AUTO_TEST_CASE(transaction_trace_is_one_typed_protocol_record_across_api_surfaces) {

@@ -28,9 +28,6 @@ import forge.variant.value;
 bool producer_authority_json_roundtrip();
 bool state_projection_package_contract();
 
-template <typename T>
-concept has_account_member = requires(T value) { value.account; };
-
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::table_scope_request{}.cursor),
@@ -41,15 +38,18 @@ int main() {
                               std::optional<forge::chain::protocol::bytes>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::account_changes_request{}.cursor),
                               std::optional<forge::chain::protocol::bytes>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::authorizers_request{}.cursor),
+                              std::optional<forge::chain::protocol::bytes>>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::authorizers_response{}.next),
+                              std::optional<forge::chain::protocol::bytes>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::table_mutation{}.table),
                               forge::chain::protocol::table_change_selector>);
    static_assert(std::same_as<decltype(forge::chain::protocol::table_changes_response{}.blocks),
                               std::vector<forge::chain::protocol::table_change_batch>>);
    static_assert(std::same_as<decltype(forge::chain::protocol::account_changes_response{}.blocks),
                               std::vector<forge::chain::protocol::account_change_batch>>);
-   static_assert(
-       std::same_as<decltype(forge::chain::protocol::account_response{}.state), forge::chain::protocol::account_state>);
-   static_assert(!has_account_member<forge::chain::protocol::account_state>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::account_response{}.account),
+                              forge::chain::protocol::full_account>);
    static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_point) == 2U);
    static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_range) == 3U);
    static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_changes) == 4U);
@@ -82,8 +82,8 @@ int main() {
    forge::from_variant(float64_variant, decoded_float64);
    forge::from_variant(float128_variant, decoded_float128);
    try {
-      static_cast<void>(forge::chain::protocol::ordered_key(
-          forge::chain::protocol::float64{.bits = 0x7ff8000000000000ULL}));
+      static_cast<void>(
+          forge::chain::protocol::ordered_key(forge::chain::protocol::float64{.bits = 0x7ff8000000000000ULL}));
       return 1;
    } catch (const forge::chain::protocol::exceptions::unordered_value&) {
    }

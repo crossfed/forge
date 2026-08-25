@@ -18,9 +18,14 @@ import forge.chain.api.submission;
 import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
+import forge.chain.protocol.account_authority;
 import forge.chain.protocol.audit;
 import forge.chain.protocol.block_query;
+import forge.chain.protocol.currency_stats;
+import forge.chain.protocol.full_account;
+import forge.chain.protocol.generated_transaction;
 import forge.chain.protocol.state_query;
+import forge.chain.protocol.table;
 import forge.chain.protocol.transaction_query;
 
 namespace chain_api = forge::chain::api;
@@ -42,14 +47,22 @@ int main() {
    static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_changes_request{}.cursor), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::account_changes_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::authorizers_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::authorizers_response{}.next), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_mutation{}.table), protocol::table_change_selector>);
    static_assert(
        std::is_same_v<decltype(protocol::table_changes_response{}.blocks), std::vector<protocol::table_change_batch>>);
    static_assert(std::is_same_v<decltype(protocol::account_changes_response{}.blocks),
                                 std::vector<protocol::account_change_batch>>);
-   static_assert(std::is_same_v<decltype(protocol::account_response{}.state), protocol::account_state>);
-   package_chain_api_component::require(chain_api::state::ref().major == 2U,
-                                        "installed state API does not expose version 2");
+   static_assert(std::is_same_v<decltype(protocol::account_response{}.account), protocol::full_account>);
+   static_assert(
+       std::is_same_v<decltype(protocol::account_mutation{}.authority), std::optional<protocol::account_authority>>);
+   static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.tables), std::vector<protocol::table>>);
+   static_assert(std::is_same_v<decltype(protocol::currency_stats_response{}.stats), protocol::currency_stats>);
+   static_assert(std::is_same_v<decltype(protocol::scheduled_response{}.transactions),
+                                std::vector<protocol::generated_transaction>>);
+   package_chain_api_component::require(chain_api::state::ref().major == 3U,
+                                        "installed state API does not expose version 3");
 
    package_chain_api_component::run_verifier_component_checks();
 

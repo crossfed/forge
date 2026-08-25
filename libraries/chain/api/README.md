@@ -88,7 +88,7 @@ own typed Forge error contracts. Asio operation cancellation remains a typed
 
 ## Verified state synchronization
 
-`forge.chain.api.state` is contract version `2.0`. It exposes typed
+`forge.chain.api.state` is contract version `3.0`. It exposes typed
 `get_table_changes` and `get_account_changes` methods; the old remote
 `get_point`, `get_range` and `get_changes` surface does not exist. Both change
 methods use `POST` because selectors and proof pagination are structured
@@ -109,10 +109,9 @@ mutations to one `state_anchor`, and `table_changes_response.blocks` preserves
 the ordered multi-block `(from_block, to_block]` history. Page limits apply to
 the aggregate mutation count across all returned blocks.
 
-`account_state` contains only `creation_date` and `permissions`.
-`account_response` carries the requested account beside that state, while
-`account_mutation` carries an account and optional `account_state`; an absent
-state is a deletion. `account_change_batch` and
+`account_response` carries the canonical `full_account`, while
+`account_mutation` carries an account name and optional canonical
+`account_authority`; an absent authority is a deletion. `account_change_batch` and
 `account_changes_response.blocks` use the same per-block history shape. Within
 each block, mutations are last-write-wins by logical identity: a batch cannot
 contain two mutations for the same table primary key or account.

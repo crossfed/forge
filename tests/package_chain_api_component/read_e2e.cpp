@@ -156,7 +156,7 @@ read_responses run_p2p_read_e2e(read_services& services) {
               .serve(context.apis())
               .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
               .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
-              .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 2, .min_revision = 0})
+              .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})
               .build();
        },
    }};

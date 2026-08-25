@@ -14,7 +14,7 @@ import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
-struct table_record {
+struct table {
    table_id id;
    account_name code;
    name scope;
@@ -22,12 +22,10 @@ struct table_record {
    account_name payer;
    std::uint32_t count = 0;
 
-   bool operator==(const table_record&) const = default;
+   bool operator==(const struct table&) const = default;
 };
 
-using table = table_record;
-
-template <typename Stream> void raw_pack(Stream& stream, const table_record& value) {
+template <typename Stream> void raw_pack(Stream& stream, const table& value) {
    forge::raw::pack(stream, value.id);
    forge::raw::pack(stream, value.code);
    forge::raw::pack(stream, value.scope);
@@ -36,7 +34,7 @@ template <typename Stream> void raw_pack(Stream& stream, const table_record& val
    forge::raw::pack(stream, value.count);
 }
 
-template <typename Stream> void raw_unpack(Stream& stream, table_record& value) {
+template <typename Stream> void raw_unpack(Stream& stream, table& value) {
    forge::raw::unpack(stream, value.id);
    forge::raw::unpack(stream, value.code);
    forge::raw::unpack(stream, value.scope);
@@ -49,6 +47,6 @@ template <typename Stream> void raw_unpack(Stream& stream, table_record& value) 
 
 #if !defined(FORGE_CONTRACT_GUEST)
 export namespace forge::chain::protocol {
-BOOST_DESCRIBE_STRUCT(table_record, (), (id, code, scope, table, payer, count))
+BOOST_DESCRIBE_STRUCT(table, (), (id, code, scope, table, payer, count))
 } // namespace forge::chain::protocol
 #endif

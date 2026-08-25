@@ -401,11 +401,47 @@ struct request_body_description {
       parameters.push_back(parameter(request_fields, field, std::move(wire_name), std::move(location), force_required));
    };
    const auto target = describe_target(operation.mapping.target);
+   auto query_object_fields = std::vector<std::string>{};
+   for (const auto& query_object : operation.query_objects) {
+      if (query_object.name.empty() || query_object.fields.empty() || !query_object.schema.is_object()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI query object metadata is incomplete"};
+      }
+      const auto& schema = query_object.schema.get_object();
+      const auto properties = schema.find("properties");
+      if (properties == schema.end() || !properties->value().is_object()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI query object schema has no properties"};
+      }
+      for (const auto& field : query_object.fields) {
+         if (find_field(request_fields, field) == nullptr ||
+             !properties->value().get_object().contains(field.c_str())) {
+            throw forge::api::core::exceptions::protocol_error{"OpenAPI query object field is not described"};
+         }
+         const auto binding = std::ranges::find(target.query, field, &field_binding::field);
+         if (binding == target.query.end() || binding->name != field ||
+             std::ranges::find(query_object_fields, field) != query_object_fields.end()) {
+            throw forge::api::core::exceptions::protocol_error{
+                "OpenAPI query object fields require unique flat query bindings"};
+         }
+         query_object_fields.push_back(field);
+      }
+      const auto duplicate = std::ranges::find_if(parameter_identities, [&](const parameter_identity& identity) {
+         return identity.location == "query" && identity.wire_name == query_object.name;
+      });
+      if (duplicate != parameter_identities.end()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI query object parameter name is ambiguous"};
+      }
+      parameter_identities.push_back(
+          parameter_identity{.field = query_object.name, .wire_name = query_object.name, .location = "query"});
+      parameters.emplace_back(forge::mutable_variant_object{}("name", query_object.name)("in", "query")(
+          "required", query_object.required)("style", "form")("explode", true)("schema", query_object.schema));
+   }
    for (const auto& name : target.path_fields) {
       append_parameter(name, name, "path", true);
    }
    for (const auto& entry : target.query) {
-      append_parameter(entry.field, entry.name, "query", false);
+      if (std::ranges::find(query_object_fields, entry.field) == query_object_fields.end()) {
+         append_parameter(entry.field, entry.name, "query", false);
+      }
    }
    for (const auto& entry : operation.mapping.headers) {
       append_parameter(entry.field, entry.name, "header", false);
@@ -413,7 +449,8 @@ struct request_body_description {
    for (const auto& field : request_fields) {
       switch (field.source) {
       case openapi_field_source::query:
-         if (!has_binding(target.query, field.name)) {
+         if (!has_binding(target.query, field.name) &&
+             std::ranges::find(query_object_fields, field.name) == query_object_fields.end()) {
             append_parameter(field.name, field.name, "query", false);
          }
          break;

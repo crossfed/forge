@@ -28,6 +28,7 @@ enum class code : std::uint16_t {
    conflict = 13,
    admission_rejected = 14,
    history_unavailable = 15,
+   not_found = 16,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -46,6 +47,7 @@ using resource_exhausted = forge::exceptions::coded_exception<code, code::resour
 using conflict = forge::exceptions::coded_exception<code, code::conflict>;
 using admission_rejected = forge::exceptions::coded_exception<code, code::admission_rejected>;
 using history_unavailable = forge::exceptions::coded_exception<code, code::history_unavailable>;
+using not_found = forge::exceptions::coded_exception<code, code::not_found>;
 
 namespace descriptor {
 
@@ -73,6 +75,11 @@ template <auto Method, typename Builder> void declare_historical_query(Builder& 
    declare_audited_query<Method>(method);
    method.template error<history_unavailable>(
        "history_unavailable", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
+}
+
+template <typename Builder> void declare_not_found(Builder& method) {
+   method.template error<not_found>("not_found",
+                                    {.status_code = forge::api::core::status::not_found, .retryable = false});
 }
 
 template <typename Builder> void declare_deadline(Builder& method) {
