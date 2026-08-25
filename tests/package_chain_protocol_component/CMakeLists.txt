@@ -12,6 +12,7 @@ add_executable(
    forge_package_chain_protocol_component
    main.cpp
    producer_schedule.cpp
+   state_projections.cpp
    transaction_reexport.cpp
 )
 target_link_libraries(

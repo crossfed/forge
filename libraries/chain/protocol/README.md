@@ -37,6 +37,17 @@ Package component: `chain_protocol`. Public namespace:
   `full_account`: flat canonical account and authority projections. Persisted
   primitives retain explicit native IDs and Spine field order; composed views
   use inheritance without depending on ObjectDB records.
+- `forge.chain.protocol.code` and `table`: canonical native code and contract
+  table projections with stable named IDs. `code_hash` is also the digest of
+  the persisted code blob, so the public code projection carries only its size
+  and never duplicates that digest in a second blob-reference field.
+- `forge.chain.protocol.currency_stats`: the donor-compatible token statistics
+  row in exact `supply`, `max_supply`, `issuer` order.
+- `forge.chain.protocol.generated_transaction`: host projection of persisted
+  deferred-transaction metadata plus `packed_transaction`. The canonical
+  mapping from the persisted blob uses no signatures, `compression::none`,
+  empty context-free data and the donor transaction bytes in `packed_trx`;
+  construction remains the responsibility of a future builder.
 - `forge.chain.protocol.resource_limits`, `resource_usage`,
   `resource_limits_config`, `resource_limits_state`,
   `account_ram_correction`, `resource_meter` and `account_resources`: objective
@@ -93,6 +104,10 @@ Authority, producer schedule, producer authority and finalizer policy modules
 share guest-safe value partitions with host wrappers. Host wrappers provide the
 same full Raw and Variant serialization contract; `block_signing_authority`
 uses the Spring/FC `[index, payload]` JSON representation.
+
+Code, table and currency-stat projection values use only guest-safe protocol
+scalars and Raw mechanics. The generated-transaction projection is intentionally
+host-only because `packed_transaction` is not part of the guest value surface.
 
 The `finalizer_authority` leaf remains as an import-compatible forwarding
 module only. It does not own a second type or serialization implementation.
@@ -184,8 +199,9 @@ fields are absent; exact API readers are responsible for validating requests.
 ## Tests
 
 `test_forge_chain_protocol` covers raw and variant fixtures, fixed keys, names
-and assets, transactions, compression, signatures, ABI compatibility, block
-IDs, transaction receipt roots and Spring-compatible Savanna action receipts.
+and assets, native state projections, transactions, compression, signatures,
+ABI compatibility, block IDs, transaction receipt roots and Spring-compatible
+Savanna action receipts.
 `test_forge_package_chain_protocol_component` verifies the installed
 `chain_protocol` component, protocol imports and the transitive core digest
 dependency.

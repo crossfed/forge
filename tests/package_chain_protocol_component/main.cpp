@@ -26,6 +26,7 @@ import forge.chain.protocol.wasm_parameters;
 import forge.variant.value;
 
 bool producer_authority_json_roundtrip();
+bool state_projection_package_contract();
 
 template <typename T>
 concept has_account_member = requires(T value) { value.account; };
@@ -111,7 +112,8 @@ int main() {
    (void)resource_config;
    (void)resource_state;
    return forge::chain::protocol::selects_exactly_one(selector) && decoded_float64 == float64 &&
-                  decoded_float128 == float128 && producer_authority_json_roundtrip()
+                  decoded_float128 == float128 && producer_authority_json_roundtrip() &&
+                  state_projection_package_contract()
               ? 0
               : 1;
 }

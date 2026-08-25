@@ -5,13 +5,17 @@ import forge.contract;
 import forge.chain.protocol.activated_protocol_feature;
 import forge.chain.protocol.blockchain_parameters;
 import forge.chain.protocol.chain_config;
+import forge.chain.protocol.code;
+import forge.chain.protocol.currency_stats;
 import forge.chain.protocol.elastic_limit_parameters;
 import forge.chain.protocol.entity_selector;
 import forge.chain.protocol.float128;
 import forge.chain.protocol.float64;
 import forge.chain.protocol.native_ids;
+import forge.chain.protocol.table;
 import forge.chain.protocol.usage_accumulator;
 import forge.chain.protocol.wasm_parameters;
+import forge.raw.codec;
 
 namespace application {
 
@@ -56,11 +60,20 @@ class [[forge::contract("typedids")]] typed_ids final : public forge::contract::
       static_cast<void>(forge::chain::protocol::activated_protocol_feature{});
       static_cast<void>(forge::chain::protocol::float64{});
       static_cast<void>(forge::chain::protocol::float128{});
+      const auto code_value = forge::raw::unpack_exact<forge::chain::protocol::code>(
+         forge::raw::pack(forge::chain::protocol::code{}));
+      const auto table_value = forge::raw::unpack_exact<forge::chain::protocol::table>(
+         forge::raw::pack(forge::chain::protocol::table{}));
+      const auto stats_value = forge::raw::unpack_exact<forge::chain::protocol::currency_stats>(
+         forge::raw::pack(forge::chain::protocol::currency_stats{}));
       static_cast<void>(application_id);
       static_cast<void>(workspace_id);
       static_cast<void>(repair_id);
       static_cast<void>(selector);
       static_cast<void>(coding);
+      static_cast<void>(code_value);
+      static_cast<void>(table_value);
+      static_cast<void>(stats_value);
    }
 
    [[forge::action]] void statevalues(

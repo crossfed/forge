@@ -104,6 +104,18 @@ foreach(_module IN LISTS _guest_component_modules)
       "export module fixture;\n"
    )
 endforeach()
+foreach(_module IN ITEMS
+   forge/chain/protocol/code.cppm
+   forge/chain/protocol/table.cppm
+   forge/chain/protocol/currency_stats.cppm
+)
+   if(NOT EXISTS "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/${_module}")
+      message(FATAL_ERROR "guest package prefix is missing ${_module}")
+   endif()
+endforeach()
+if(EXISTS "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/protocol/generated_transaction.cppm")
+   message(FATAL_ERROR "host-only generated_transaction leaked into the guest package prefix")
+endif()
 set(_foundation_manifest "{\n  \"version\": 1,\n  \"archives\": [")
 set(_separator "")
 foreach(_archive IN ITEMS

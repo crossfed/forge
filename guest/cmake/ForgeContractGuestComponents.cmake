@@ -157,6 +157,9 @@ forge_contract_register_guest_component(
       forge/chain/protocol/float128.cppm
       forge/chain/protocol/native_ids.cppm
       forge/chain/protocol/entity_selector.cppm
+      forge/chain/protocol/code.cppm
+      forge/chain/protocol/table.cppm
+      forge/chain/protocol/currency_stats.cppm
       forge/chain/protocol/kv_parameters.cppm
       forge/chain/protocol/finalizer_authority.cppm
       forge/chain/protocol/finalizer_policy_value.cppm
@@ -197,6 +200,9 @@ forge_contract_register_guest_component(
       forge.chain.protocol.float128
       forge.chain.protocol.native_ids
       forge.chain.protocol.entity_selector
+      forge.chain.protocol.code
+      forge.chain.protocol.table
+      forge.chain.protocol.currency_stats
       forge.chain.protocol.kv_parameters
       forge.chain.protocol.finalizer_authority
       forge.chain.protocol.finalizer_policy:value

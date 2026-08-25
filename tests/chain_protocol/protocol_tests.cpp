@@ -42,7 +42,9 @@ import forge.chain.protocol.blockchain_parameters;
 import forge.chain.protocol.chain_config;
 import forge.chain.protocol.call_access_mode;
 import forge.chain.protocol.call_data_header;
+import forge.chain.protocol.code;
 import forge.chain.protocol.code_hash_result;
+import forge.chain.protocol.currency_stats;
 import forge.chain.protocol.elastic_limit_parameters;
 import forge.chain.protocol.entity_selector;
 import forge.chain.protocol.exceptions;
@@ -52,6 +54,7 @@ import forge.chain.protocol.float128;
 import forge.chain.protocol.float64;
 import forge.chain.protocol.full_account;
 import forge.chain.protocol.full_permission;
+import forge.chain.protocol.generated_transaction;
 import forge.chain.protocol.hash_id;
 import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.native_ids;
@@ -65,6 +68,7 @@ import forge.chain.protocol.resource_limits_state;
 import forge.chain.protocol.resource_meter;
 import forge.chain.protocol.resource_usage;
 import forge.chain.protocol.system;
+import forge.chain.protocol.table;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
 import forge.chain.protocol.usage_accumulator;
@@ -171,6 +175,9 @@ static_assert(protocol::fixed_key<1>::num_words() == 1U && protocol::fixed_key<1
 static_assert(protocol::fixed_key<20>::num_words() == 2U && protocol::fixed_key<20>::padded_bytes() == 12U);
 static_assert(protocol::fixed_key<32>::num_words() == 2U && protocol::fixed_key<32>::padded_bytes() == 0U);
 static_assert(protocol::fixed_key<64>::num_words() == 4U && protocol::fixed_key<64>::padded_bytes() == 0U);
+static_assert(std::same_as<protocol::code_id, forge::db::ids::typed_id<1, 13>>);
+static_assert(std::same_as<protocol::table_id, forge::db::ids::typed_id<1, 30>>);
+static_assert(std::same_as<protocol::generated_transaction_id, forge::db::ids::typed_id<1, 51>>);
 
 protocol::signature parse_spring_signature(std::string_view value) {
    return forge::crypto::asymmetric::encoding::antelope().parse_signature(value);
@@ -667,6 +674,107 @@ BOOST_AUTO_TEST_CASE(protocol_time_variant_decode_uses_typed_failures) {
 
    auto point_sec = protocol::time_point_sec{};
    BOOST_CHECK_THROW(protocol::from_variant(invalid_iso, point_sec), forge::variant_exceptions::decode_error);
+}
+
+BOOST_AUTO_TEST_CASE(code_table_currency_and_generated_transaction_projections_preserve_contracts) {
+   const auto code = protocol::code{
+       .id = protocol::code_id{1U},
+       .code_hash = {},
+       .code_size = 2U,
+       .code_ref_count = 3U,
+       .first_block_used = 4U,
+       .vm_type = 5U,
+       .vm_version = 6U,
+   };
+   BOOST_TEST(pack_hex(code) ==
+              "0100000000000000"
+              "0000000000000000000000000000000000000000000000000000000000000000"
+              "02000000000000000300000000000000040000000506");
+
+   const auto table = protocol::table{
+       .id = protocol::table_id{7U},
+       .code = protocol::account_name{8U},
+       .scope = protocol::name{9U},
+       .table = protocol::table_name{10U},
+       .payer = protocol::account_name{11U},
+       .count = 12U,
+   };
+   BOOST_TEST(pack_hex(table) ==
+              "0700000000000000080000000000000009000000000000000a000000000000000b000000000000000c000000");
+
+   const auto symbol = protocol::make_symbol("SYS", 4U);
+   const auto stats = protocol::currency_stats{
+       .supply = protocol::asset{13, symbol},
+       .max_supply = protocol::asset{14, symbol},
+       .issuer = protocol::account_name{15U},
+   };
+   BOOST_TEST(pack_hex(stats) ==
+              "0d000000000000000453595300000000"
+              "0e000000000000000453595300000000"
+              "0f00000000000000");
+
+   auto packed_transaction = protocol::packed_transaction{};
+   packed_transaction.packed_trx = {0xaaU, 0xbbU};
+   const auto generated = protocol::generated_transaction{
+       .id = protocol::generated_transaction_id{16U},
+       .trx_id = {},
+       .sender = protocol::account_name{17U},
+       .sender_id = 18U,
+       .payer = protocol::account_name{19U},
+       .delay_until = protocol::time_point{protocol::microseconds{20U}},
+       .expiration = protocol::time_point{protocol::microseconds{21U}},
+       .published = protocol::time_point{protocol::microseconds{22U}},
+       .transaction = packed_transaction,
+   };
+   BOOST_TEST(pack_hex(generated) ==
+              "1000000000000000"
+              "0000000000000000000000000000000000000000000000000000000000000000"
+              "1100000000000000120000000000000000000000000000001300000000000000"
+              "14000000000000001500000000000000160000000000000000000002aabb");
+
+   const auto check_raw_roundtrip = []<typename T>(const T& value) {
+      BOOST_CHECK(forge::raw::unpack<T>(forge::raw::pack(value)) == value);
+   };
+   check_raw_roundtrip(code);
+   check_raw_roundtrip(table);
+   check_raw_roundtrip(stats);
+   check_raw_roundtrip(generated);
+
+   const auto check_variant_roundtrip = []<typename T>(const T& value) {
+      auto encoded = forge::variant{};
+      forge::to_variant(value, encoded);
+      auto decoded = T{};
+      forge::from_variant(encoded, decoded);
+      BOOST_CHECK(decoded == value);
+   };
+   check_variant_roundtrip(code);
+   check_variant_roundtrip(table);
+   check_variant_roundtrip(stats);
+   check_variant_roundtrip(generated);
+
+   auto encoded_code = forge::variant{};
+   forge::to_variant(code, encoded_code);
+   BOOST_CHECK(encoded_code.get_object().contains("code_hash"));
+   BOOST_CHECK(encoded_code.get_object().contains("code_size"));
+   BOOST_CHECK(!encoded_code.get_object().contains("code"));
+
+   auto encoded_generated = forge::variant{};
+   forge::to_variant(generated, encoded_generated);
+   const auto& encoded_transaction = encoded_generated.get_object()["transaction"].get_object();
+   BOOST_CHECK(encoded_transaction.contains("signatures"));
+   BOOST_CHECK(encoded_transaction.contains("compression"));
+   BOOST_CHECK(encoded_transaction.contains("packed_context_free_data"));
+   BOOST_CHECK(encoded_transaction.contains("packed_trx"));
+
+   const auto check_truncated_raw = []<typename T>(const T& value) {
+      auto malformed = forge::raw::pack(value);
+      malformed.pop_back();
+      BOOST_CHECK_THROW((void)forge::raw::unpack<T>(malformed), forge::raw::exceptions::range_error);
+   };
+   check_truncated_raw(code);
+   check_truncated_raw(table);
+   check_truncated_raw(stats);
+   check_truncated_raw(generated);
 }
 
 BOOST_AUTO_TEST_CASE(protocol_float_values_match_spine_raw_variant_and_ordered_keys) {
