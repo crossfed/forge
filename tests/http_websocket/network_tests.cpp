@@ -4772,6 +4772,73 @@ BOOST_AUTO_TEST_CASE(http_api_rejects_explicit_routes_with_incompatible_descript
    BOOST_CHECK_THROW(positional_router.mount(positional), forge::api::core::exceptions::protocol_error);
 }
 
+BOOST_AUTO_TEST_CASE(http_api_rejects_incompatible_installed_descriptor_before_encoder) {
+   auto installed = api_cache::describe();
+   auto read = std::find_if(installed.methods.begin(), installed.methods.end(),
+                            [](const auto& method) { return method.name == "read"; });
+   BOOST_REQUIRE(read != installed.methods.end());
+
+   auto encoder_calls = std::make_shared<std::size_t>();
+   read->request_type = typeid(api_chunk);
+   read->request_encoder = [encoder_calls](const void*) {
+      ++*encoder_calls;
+      return forge::api::core::bytes{};
+   };
+
+   auto apis = forge::api::core::registry{};
+   apis.install<api_cache>(std::move(installed), std::make_shared<routed_api_cache>());
+
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .use(forge::api::core::binding().serve(apis).build())
+                      .get<&api_cache::read, api_read_chunk, api_chunk>("/installed-mismatch/:ref")
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(*encoder_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_mounts_safe_legacy_installed_raw_descriptor) {
+   auto runtime = forge::asio::runtime{};
+   auto installed = api_cache::describe();
+   auto read = std::find_if(installed.methods.begin(), installed.methods.end(),
+                            [](const auto& method) { return method.name == "read"; });
+   BOOST_REQUIRE(read != installed.methods.end());
+
+   forge::api::core::detail::remove_request_context(*read);
+   forge::api::core::detail::remove_unary_context(*read);
+   read->request_type = typeid(void);
+   read->response_type = typeid(void);
+   read->fixed_arguments_type = typeid(void);
+   read->input_type = typeid(void);
+   read->output_type = typeid(void);
+   read->result_type = typeid(void);
+   read->request_encoder = {};
+   read->response_encoder = {};
+
+   auto apis = forge::api::core::registry{};
+   apis.install<api_cache>(std::move(installed), std::make_shared<routed_api_cache>());
+
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .use(forge::api::core::binding().serve(apis).build())
+                      .get<&api_cache::read, api_read_chunk, api_chunk>("/legacy-raw/:ref")
+                      .build();
+
+   BOOST_CHECK_NO_THROW(router.mount(binding));
+
+   auto request = make_request(method::get, "/legacy-raw/abc");
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+
+   const auto response = handle(router, context);
+   const auto decoded = forge::codec::json::read<api_chunk>(response.body());
+
+   BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(decoded.value.bytes.empty());
+}
+
 BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto files = temp_directory{};
