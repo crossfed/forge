@@ -1053,7 +1053,9 @@ add_executable(
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
    plugins/plugins_tests.cpp
+   plugins/resolver_publication_race.cpp
    plugins/log_otlp_tests.cpp
+   plugins/details/resolver_publication_race.hxx
 )
 target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

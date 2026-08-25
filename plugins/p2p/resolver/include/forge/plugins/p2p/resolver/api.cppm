@@ -17,6 +17,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.p2p.publication;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.types;
@@ -27,8 +28,9 @@ class api : public forge::api::core::contract<api> {
  public:
    virtual ~api() = default;
 
-   virtual void publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                            publish_options options = {}) = 0;
+   [[nodiscard]] virtual forge::api::p2p::publication
+   publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+               publish_options options = {}) = 0;
    [[nodiscard]] virtual std::vector<entry> local_apis() const = 0;
    virtual boost::asio::awaitable<std::vector<entry>> peer_apis(forge::net::p2p::peer_id peer,
                                                                 resolve_options options = {}) = 0;
@@ -53,4 +55,4 @@ class api : public forge::api::core::contract<api> {
 
 } // namespace forge::plugins::p2p::resolver
 
-FORGE_EXPORT_API(::forge::plugins::p2p::resolver::api, FORGE_API_CONTRACT("forge.plugins.p2p.resolver", 1, 0))
+FORGE_EXPORT_API(::forge::plugins::p2p::resolver::api, FORGE_API_CONTRACT("forge.plugins.p2p.resolver", 2, 0))

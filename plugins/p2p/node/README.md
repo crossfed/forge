@@ -44,6 +44,8 @@ isolated codec and interop fixtures do not promote this plugin to production.
 - Package component: `plugins_p2p_node`
 - Plugin id: `forge.plugins.p2p.node`
 - Main API id: `forge.plugins.p2p.node`
+- Plugin version: `5.0.0`
+- Main API contract: `2.0`
 - Extra API ids:
   - `forge.plugins.p2p.node.diagnostics_source`
   - `forge.plugins.p2p.node.pubsub_source`
@@ -67,7 +69,8 @@ isolated codec and interop fixtures do not promote this plugin to production.
   Peer Exchange policy into the node-owned topology manager.
 - Passes bootstrap policy to the node, which owns bounded startup, reconnect
   backoff and connection-manager protection.
-- Lets application plugins publish typed APIs over a P2P protocol id.
+- Lets application plugins publish typed APIs over a P2P protocol id and retain
+  an owned publication handle for explicit close/drain.
 - Opens typed remote API handles to peers through `remote<Interface>()`.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
@@ -182,7 +185,15 @@ client activity is limited to explicitly configured points and namespaces;
 Forge Peer Exchange is a Forge extension and is queried only on identified
 peers that advertise its exact protocol. Set `topology.mode: static-only` to
 disable autonomous discovery, dialing and pruning. The local plugin API
-contract remains `1.0`.
+contract at that version remains `1.0`.
+
+Plugin 5.0 upgrades the local node API contract to `2.0`. `publish_api(...)`
+returns a move-only `forge::api::p2p::publication`: destroying or closing it
+stops new API-session admission for that protocol and `async_close()` waits for
+its in-flight API sessions. Publishing the same API protocol replaces its
+generation behind one stable node handler; an older handle cannot unregister
+the replacement. Raw `publish_protocol(...)` remains a pre-start-only route
+contribution and cannot share a protocol id with an API publication.
 
 ## Dependencies
 
@@ -201,6 +212,7 @@ contract remains `1.0`.
 
 ```cpp
 import forge.api.core.binding;
+import forge.api.p2p.publication;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 
@@ -208,16 +220,20 @@ class catalog_p2p_plugin final : public forge::app::plugin {
  public:
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
-         {.id = {"forge.plugins.p2p.node"}, .major = 1});
+         {.id = {"forge.plugins.p2p.node"}, .major = 2});
 
       auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
+      publication_ = p2p->publish_api(
+         std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 ```
 

@@ -25,7 +25,9 @@ contracts it exposes before opening a typed API connection.
 - Package component: `plugins_p2p_resolver`
 - Plugin id: `forge.plugins.p2p.resolver`
 - Main API id: `forge.plugins.p2p.resolver`
+- Main API contract: `2.0`
 - Extra protocol API id: `forge.plugins.p2p.resolver.protocol`
+- Resolver protocol route: `/forge/api/resolver/2`
 - Config section: `plugins.p2p.resolver`
 - Depends on plugin id: `forge.plugins.p2p.node`
 - Public modules:
@@ -43,6 +45,22 @@ contracts it exposes before opening a typed API connection.
 - Opens typed remote API handles with compatibility projection.
 - Opens stable managed handles over an ordered peer set with sticky selection,
   single-flight reconnect and bounded backoff.
+
+## Publication Ownership
+
+`api::publish_api(...)` returns a move-only `forge::api::p2p::publication`
+lease. Keep this lease alive while the route should remain advertised. `close()`
+stops admission synchronously; `async_close()` additionally waits for admitted
+node sessions to drain.
+
+Publishing the same protocol replaces its current generation atomically. A
+lease for the old generation cannot close or remove the replacement. API ids
+remain unique across different protocols.
+
+The resolver API contract is now `2.0` and requires
+`forge.plugins.p2p.node` major `2`. Consumers upgrading from resolver `1.x`
+must request resolver major `2`, retain the returned publication lease, and
+explicitly close or await it during their own shutdown.
 
 It does not own the P2P node lifecycle; it composes through
 `forge.plugins.p2p.node`.
@@ -83,21 +101,25 @@ plugins:
 ```cpp
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.plugin;
+import forge.api.p2p.publication;
 
 class catalog_resolver_plugin final : public forge::app::plugin {
  public:
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
-         {.id = {"forge.plugins.p2p.resolver"}, .major = 1});
+         {.id = {"forge.plugins.p2p.resolver"}, .major = 2});
 
       auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
+      publication_ = resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
+
+ private:
+   forge::api::p2p::publication publication_;
 };
 ```
 

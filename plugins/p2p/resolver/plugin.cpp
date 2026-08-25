@@ -4,6 +4,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <exception>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -16,6 +17,7 @@ module forge.plugins.p2p.resolver.plugin;
 
 import forge.api.core.binding;
 import forge.api.core.registry;
+import forge.api.p2p.publication;
 import forge.api.transport.options;
 import forge.app.plugin;
 import forge.app.plugin_context;
@@ -50,7 +52,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.1.0";
+   return "2.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -72,19 +74,44 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 }
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
-   impl_->p2p =
+   auto p2p =
        context.apis()
-           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
-           .operator->();
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0})
+           .shared();
+   auto publications = detail::make_publication_catalog(context.scheduler());
+   {
+      auto lock = std::scoped_lock{impl_->mutex};
+      impl_->p2p = p2p;
+      impl_->local_publications = std::move(publications);
+      impl_->initialized = false;
+      impl_->stopping = false;
+   }
+
    try {
-      impl_->install_protocol();
+      impl_->install_protocol(p2p);
    } catch (const forge::plugins::p2p::node::exceptions::route_conflict& error) {
+      auto lock = std::scoped_lock{impl_->mutex};
+      impl_->protocol_registry.clear();
+      impl_->p2p = nullptr;
+      impl_->initialized = false;
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "P2P API resolver protocol conflicts with an existing route",
                             forge::exceptions::ctx("protocol", impl_->protocol.value),
                             forge::exceptions::ctx("error", error.message()));
+   } catch (...) {
+      auto lock = std::scoped_lock{impl_->mutex};
+      impl_->protocol_registry.clear();
+      impl_->p2p = nullptr;
+      impl_->initialized = false;
+      throw;
    }
-   impl_->initialized = true;
-   impl_->stopping = false;
+
+   {
+      auto lock = std::scoped_lock{impl_->mutex};
+      if (impl_->stopping) {
+         FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P API resolver plugin is stopping");
+      }
+      impl_->initialized = true;
+   }
    co_return;
 }
 
@@ -94,14 +121,37 @@ boost::asio::awaitable<void> plugin::startup() {
 
 void plugin::request_stop() noexcept {
    impl_->request_stop_managed();
+   impl_->request_stop_publications();
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
-   co_await impl_->shutdown_managed();
-   impl_->initialized = false;
-   impl_->p2p = nullptr;
-   auto lock = std::scoped_lock{impl_->mutex};
-   impl_->cache.clear();
+   request_stop();
+
+   auto failure = std::exception_ptr{};
+   try {
+      co_await impl_->shutdown_publications();
+   } catch (...) {
+      failure = std::current_exception();
+   }
+
+   try {
+      co_await impl_->shutdown_managed();
+   } catch (...) {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   }
+
+   {
+      auto lock = std::scoped_lock{impl_->mutex};
+      impl_->initialized = false;
+      impl_->p2p = nullptr;
+      impl_->cache.clear();
+   }
+
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
    co_return;
 }
 

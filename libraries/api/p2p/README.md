@@ -29,3 +29,11 @@ The P2P session has already authenticated `remote_peer` through its negotiated
 security channel before `api_binding::make_session(...)` constructs the typed
 context; that factory exposes the configured stream session when the caller owns
 its serve lifecycle.
+
+`forge.api.p2p.publication` is the move-only ownership token used by P2P API
+publishers. Destroying it, or calling `close()`, closes admission for that API
+generation and requests cancellation of only its owned API sessions.
+`async_close()` additionally waits for those sessions to drain. Replacing a
+publication installs a new generation atomically; an older token cannot remove
+the replacement. This is application-level lifecycle ownership and does not
+change libp2p negotiation, Identify, or raw stream semantics.

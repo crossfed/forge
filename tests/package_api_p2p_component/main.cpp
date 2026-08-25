@@ -1,5 +1,6 @@
 import forge.api.p2p.binding;
 import forge.api.p2p.authenticated_peer;
+import forge.api.p2p.publication;
 import forge.api.core.server_supplied;
 import forge.api.core.trusted_invocation;
 
@@ -27,6 +28,8 @@ template <> struct forge::api::core::server_supplied<stream_open_proof> {
 
 int main() {
    auto builder = forge::api::p2p::api();
+   auto publication = forge::api::p2p::publication{};
+   publication.close();
    auto trusted = forge::api::core::trusted_invocation_builder{}
                       .set(forge::api::p2p::authenticated_peer{})
                       .build();
