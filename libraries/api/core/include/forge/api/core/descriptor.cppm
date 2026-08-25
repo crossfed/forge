@@ -904,7 +904,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .kind = method_kind::unary,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
-          .fixed_arguments_type = typeid(Request),
+          .fixed_arguments_type = typeid(detail::method_fixed_argument_tuple_t<Method>),
           .result_type = typeid(Response),
       };
       if constexpr (EnableRaw) {

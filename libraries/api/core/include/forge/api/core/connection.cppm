@@ -138,8 +138,7 @@ class remote_invoker {
       const auto request_matches =
          method_value->request_type == typeid(void) || method_value->request_type == typeid(wire_request);
       const auto fixed_matches = method_value->fixed_arguments_type == typeid(void) ||
-                                 method_value->fixed_arguments_type == typeid(argument_tuple) ||
-                                 method_value->fixed_arguments_type == typeid(wire_request);
+                                 method_value->fixed_arguments_type == typeid(argument_tuple);
       if (!request_matches || !fixed_matches) {
          throw exceptions::protocol_error{"API argument tuple does not match its method descriptor"};
       }

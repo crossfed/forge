@@ -1172,6 +1172,13 @@ BOOST_AUTO_TEST_CASE(generated_proxy_invokes_remote_through_typed_handle) {
 }
 
 BOOST_AUTO_TEST_CASE(generated_proxy_invokes_typed_overload_method) {
+   const auto descriptor = overloaded_api::describe();
+   const auto* sign = forge::api::core::find_method(descriptor, "sign");
+   BOOST_REQUIRE(sign != nullptr);
+   BOOST_TEST((sign->request_type == std::type_index{typeid(protocol::read_chunk)}));
+   BOOST_TEST((sign->fixed_arguments_type ==
+               std::type_index{typeid(std::tuple<protocol::read_chunk>)}));
+
    auto runtime = forge::asio::runtime{};
    auto invoker = std::make_shared<recording_invoker>();
    auto handle =
@@ -2315,6 +2322,20 @@ BOOST_AUTO_TEST_CASE(remote_invoker_rejects_mismatched_descriptor_types_before_e
                                     positional_descriptor, positional_api::ref(), "concat", protocol::read_chunk{})),
                      forge::api::core::exceptions::protocol_error);
    BOOST_TEST(typed->typed_calls == 0U);
+
+   auto singleton_descriptor = cache_api::describe();
+   auto singleton = std::ranges::find_if(singleton_descriptor.methods,
+                                         [](const auto& value) { return value.name == "read"; });
+   BOOST_REQUIRE(singleton != singleton_descriptor.methods.end());
+   singleton->fixed_arguments_type = typeid(protocol::read_chunk);
+
+   auto singleton_typed = std::make_shared<invoker>(true);
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime, singleton_typed->call_arguments<protocol::chunk>(
+                      singleton_descriptor, cache_api::ref(), "read", protocol::read_chunk{})),
+      forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(singleton_typed->typed_calls == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(remote_proxy_encodes_move_only_unary_and_stream_fixed_arguments) {

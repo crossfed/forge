@@ -56,6 +56,7 @@ import forge.api.core.error_projection;
 import forge.api.core.handle;
 import forge.api.core.connection;
 import forge.api.core.registry;
+import forge.api.core.server_supplied;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.asio.blocking;
@@ -293,6 +294,15 @@ struct api_chunk {
    std::string bytes;
 };
 
+struct http_required_authority {
+   std::string value;
+};
+
+struct http_trusted_request {
+   std::string value;
+   http_required_authority authority;
+};
+
 struct macro_read_request {
    std::string ref;
    std::uint32_t offset = 0;
@@ -478,6 +488,8 @@ struct mixed_download_request {
 BOOST_DESCRIBE_STRUCT(api_read_chunk, (), ())
 BOOST_DESCRIBE_STRUCT(api_routed_read_chunk, (), (ref, offset, limit))
 BOOST_DESCRIBE_STRUCT(api_chunk, (), (bytes))
+BOOST_DESCRIBE_STRUCT(http_required_authority, (), (value))
+BOOST_DESCRIBE_STRUCT(http_trusted_request, (), (value, authority))
 BOOST_DESCRIBE_STRUCT(macro_read_request, (), (ref, offset, limit))
 BOOST_DESCRIBE_STRUCT(macro_write_request, (), (ref, bytes))
 BOOST_DESCRIBE_STRUCT(optional_query_request, (), (ref, limit))
@@ -524,6 +536,14 @@ class api_cache : public forge::api::core::contract<api_cache, forge::api::core:
    virtual boost::asio::awaitable<api_chunk> read(api_read_chunk request) = 0;
    virtual boost::asio::awaitable<api_chunk> routed_read(api_routed_read_chunk request) = 0;
    virtual boost::asio::awaitable<api_chunk> write(api_chunk request) = 0;
+};
+
+class trusted_http_api : public forge::api::core::contract<trusted_http_api, forge::api::core::surface::local |
+                                                                              forge::api::core::surface::remote> {
+ public:
+   virtual ~trusted_http_api() = default;
+
+   virtual boost::asio::awaitable<api_chunk> read(http_trusted_request request) = 0;
 };
 
 class websocket_positional_api
@@ -815,6 +835,26 @@ class positional_timeout_api : public http_contract<positional_timeout_api> {
 
 } // namespace test_api
 } // namespace forge::net::http
+
+namespace forge::api::core {
+
+template <> struct server_supplied<::forge::net::http::test_api::http_required_authority> {
+   static constexpr bool required = true;
+
+   static void reset(::forge::net::http::test_api::http_required_authority& value) {
+      value = {};
+   }
+
+   [[nodiscard]] static bool apply(::forge::net::http::test_api::http_required_authority&,
+                                   const trusted_invocation&) {
+      return false;
+   }
+};
+
+} // namespace forge::api::core
+
+FORGE_API(::forge::net::http::test_api::trusted_http_api, FORGE_API_CONTRACT("trusted.http", 1, 0),
+          FORGE_API_METHOD(read))
 
 FORGE_API(::forge::net::http::test_api::macro_cache, FORGE_API_CONTRACT("cache.macro", 1, 0), FORGE_API_METHOD(read),
           FORGE_API_METHOD(write))
@@ -1277,6 +1317,8 @@ using test_api::stream_body_echo_api;
 using test_api::stream_body_echo_request;
 using test_api::stream_buffered_api;
 using test_api::stream_buffered_request;
+using test_api::trusted_http_api;
+using test_api::http_trusted_request;
 using test_api::to_beast_response;
 using test_api::to_http_request;
 using test_api::to_http_response;
@@ -1403,6 +1445,19 @@ class routed_api_cache final : public api_cache {
    boost::asio::awaitable<api_chunk> write(api_chunk request) override {
       co_return request;
    }
+};
+
+class trusted_http_api_impl final : public trusted_http_api {
+ public:
+   explicit trusted_http_api_impl(std::shared_ptr<std::size_t> calls) : calls_{std::move(calls)} {}
+
+   boost::asio::awaitable<api_chunk> read(http_trusted_request request) override {
+      ++*calls_;
+      co_return api_chunk{.bytes = std::move(request.authority.value)};
+   }
+
+ private:
+   std::shared_ptr<std::size_t> calls_;
 };
 
 class websocket_positional_impl final : public websocket_positional_api {
@@ -4772,18 +4827,14 @@ BOOST_AUTO_TEST_CASE(http_api_rejects_explicit_routes_with_incompatible_descript
    BOOST_CHECK_THROW(positional_router.mount(positional), forge::api::core::exceptions::protocol_error);
 }
 
-BOOST_AUTO_TEST_CASE(http_api_rejects_incompatible_installed_descriptor_before_encoder) {
+BOOST_AUTO_TEST_CASE(http_api_rejects_incompatible_installed_descriptor_without_registering_route) {
+   auto runtime = forge::asio::runtime{};
    auto installed = api_cache::describe();
    auto read = std::find_if(installed.methods.begin(), installed.methods.end(),
                             [](const auto& method) { return method.name == "read"; });
    BOOST_REQUIRE(read != installed.methods.end());
 
-   auto encoder_calls = std::make_shared<std::size_t>();
    read->request_type = typeid(api_chunk);
-   read->request_encoder = [encoder_calls](const void*) {
-      ++*encoder_calls;
-      return forge::api::core::bytes{};
-   };
 
    auto apis = forge::api::core::registry{};
    apis.install<api_cache>(std::move(installed), std::make_shared<routed_api_cache>());
@@ -4795,7 +4846,11 @@ BOOST_AUTO_TEST_CASE(http_api_rejects_incompatible_installed_descriptor_before_e
                       .build();
 
    BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
-   BOOST_TEST(*encoder_calls == 0U);
+
+   auto request = make_request(method::get, "/installed-mismatch/abc");
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+   BOOST_TEST(handle(router, context).result_int() == static_cast<unsigned>(status::not_found));
 }
 
 BOOST_AUTO_TEST_CASE(http_api_mounts_safe_legacy_installed_raw_descriptor) {
@@ -4819,6 +4874,19 @@ BOOST_AUTO_TEST_CASE(http_api_mounts_safe_legacy_installed_raw_descriptor) {
    auto apis = forge::api::core::registry{};
    apis.install<api_cache>(std::move(installed), std::make_shared<routed_api_cache>());
 
+   const auto raw_response = forge::asio::blocking::run(
+      runtime, apis.dispatch_contextual(
+                   forge::api::core::frame{
+                       .kind = forge::api::core::frame_kind::request,
+                       .api = api_cache::ref(),
+                       .method = "read",
+                       .codec = {.value = "forge.raw"},
+                       .payload = forge::api::core::pack_body(api_read_chunk{}),
+                   },
+                   forge::api::core::trusted_invocation{}));
+   BOOST_REQUIRE(raw_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::api::core::unpack_body<api_chunk>(raw_response.payload).bytes.empty());
+
    auto router = forge::net::http::router{};
    auto binding = forge::api::http::binding()
                       .use(forge::api::core::binding().serve(apis).build())
@@ -4837,6 +4905,111 @@ BOOST_AUTO_TEST_CASE(http_api_mounts_safe_legacy_installed_raw_descriptor) {
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.bytes.empty());
+}
+
+BOOST_AUTO_TEST_CASE(http_api_preserves_mounted_server_supplied_authority_for_legacy_installed_descriptor) {
+   auto runtime = forge::asio::runtime{};
+   auto installed = trusted_http_api::describe();
+   auto read = std::find_if(installed.methods.begin(), installed.methods.end(),
+                            [](const auto& method) { return method.name == "read"; });
+   BOOST_REQUIRE(read != installed.methods.end());
+
+   forge::api::core::detail::remove_request_context(*read);
+   forge::api::core::detail::remove_unary_context(*read);
+   read->request_type = typeid(void);
+   read->response_type = typeid(void);
+   read->fixed_arguments_type = typeid(void);
+   read->input_type = typeid(void);
+   read->output_type = typeid(void);
+   read->result_type = typeid(void);
+   read->request_encoder = {};
+   read->response_encoder = {};
+
+   auto handler_calls = std::make_shared<std::size_t>();
+   auto apis = forge::api::core::registry{};
+   apis.install<trusted_http_api>(std::move(installed), std::make_shared<trusted_http_api_impl>(handler_calls));
+
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .use(forge::api::core::binding().serve(apis).build())
+                      .put<&trusted_http_api::read, http_trusted_request, api_chunk>("/trusted-canonical")
+                      .build();
+   BOOST_CHECK_NO_THROW(router.mount(binding));
+
+   auto request = make_request(method::put, "/trusted-canonical");
+   request.set(field::content_type, "application/json");
+   request.body() = R"({"value":"client","authority":{"value":"spoofed"}})";
+   request.prepare_payload();
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+
+   const auto response = handle(router, context);
+   const auto error = forge::codec::json::read<forge::api::core::error_payload>(response.body());
+
+   BOOST_TEST(response.result_int() ==
+              static_cast<unsigned>(forge::api::core::status::failed_precondition));
+   BOOST_REQUIRE(error.ok());
+   BOOST_TEST(error.value.error == "server_supplied_unavailable");
+   BOOST_TEST(error.value.identity.category == "forge.api");
+   BOOST_TEST(error.value.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::server_supplied_unavailable));
+   BOOST_TEST(*handler_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_revalidates_reinstalled_descriptor_before_local_invocation) {
+   auto runtime = forge::asio::runtime{};
+   auto apis = forge::api::core::registry{};
+   apis.install<api_cache>(api_cache::describe(), std::make_shared<throwing_api_cache>());
+
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .use(forge::api::core::binding().serve(apis).build())
+                      .get<&api_cache::read, api_read_chunk, api_chunk>("/reinstalled-mismatch/:ref")
+                      .build();
+   router.mount(binding);
+
+   auto incompatible = api_cache::describe();
+   auto read = std::find_if(incompatible.methods.begin(), incompatible.methods.end(),
+                            [](const auto& method) { return method.name == "read"; });
+   BOOST_REQUIRE(read != incompatible.methods.end());
+
+   auto encoder_calls = std::make_shared<std::size_t>();
+   auto context_hook_calls = std::make_shared<std::size_t>();
+   read->response_type = typeid(api_read_chunk);
+   read->request_encoder = [encoder_calls](const void*) {
+      ++*encoder_calls;
+      return forge::api::core::bytes{};
+   };
+   read->request_validator = [](const forge::api::core::bytes&) {};
+   forge::api::core::detail::install_unary_context(
+      *read,
+      forge::api::core::detail::server_field_operations{
+          .apply_wire = [context_hook_calls](void*, const forge::api::core::trusted_invocation&) {
+             ++*context_hook_calls;
+          },
+      },
+      [](forge::api::core::bytes, forge::api::core::trusted_invocation,
+         forge::api::core::contextual_handler_gate) -> boost::asio::awaitable<forge::api::core::bytes> {
+         co_return forge::api::core::bytes{};
+      });
+
+   apis.clear();
+   apis.install<api_cache>(std::move(incompatible), std::make_shared<throwing_api_cache>());
+
+   auto request = make_request(method::get, "/reinstalled-mismatch/abc");
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+   const auto response = handle(router, context);
+   const auto error = forge::codec::json::read<forge::api::core::error_payload>(response.body());
+
+   BOOST_TEST(response.result_int() == static_cast<unsigned>(status::bad_request));
+   BOOST_REQUIRE(error.ok());
+   BOOST_TEST(error.value.error == "protocol_error");
+   BOOST_TEST(error.value.identity.category == "forge.api");
+   BOOST_TEST(error.value.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::protocol_error));
+   BOOST_TEST(*encoder_calls == 0U);
+   BOOST_TEST(*context_hook_calls == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) {
