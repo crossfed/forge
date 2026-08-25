@@ -75,6 +75,7 @@ boost::asio::any_io_executor resolver_publish_barrier::owner_executor() const {
 
 void resolver_publish_barrier::track_protocol(std::string protocol) {
    const auto lock = std::scoped_lock{mutex_};
+   ++publish_calls_[protocol];
    drain_calls_.try_emplace(protocol, 0U);
    close_calls_.try_emplace(std::move(protocol), 0U);
 }
@@ -103,6 +104,12 @@ std::size_t resolver_publish_barrier::drain_calls(const std::string& protocol) c
    const auto lock = std::scoped_lock{mutex_};
    const auto found = drain_calls_.find(protocol);
    return found == drain_calls_.end() ? 0U : found->second;
+}
+
+std::size_t resolver_publish_barrier::publish_calls(const std::string& protocol) const noexcept {
+   const auto lock = std::scoped_lock{mutex_};
+   const auto found = publish_calls_.find(protocol);
+   return found == publish_calls_.end() ? 0U : found->second;
 }
 
 resolver_publication_race_node::resolver_publication_race_node(std::shared_ptr<resolver_publish_barrier> barrier)
@@ -201,8 +208,9 @@ boost::asio::awaitable<void> resolver_publication_race_node_plugin::shutdown() {
 }
 
 resolver_publication_race_application::resolver_publication_race_application(
-   std::shared_ptr<resolver_publish_barrier> barrier)
-    : barrier_{std::move(barrier)} {}
+   std::shared_ptr<resolver_publish_barrier> barrier,
+   forge::app::application_shell_options options)
+    : application_shell{std::move(options)}, barrier_{std::move(barrier)} {}
 
 void resolver_publication_race_application::on_register_plugins(forge::app::plugin_registry& registry) {
    registry.register_plugin(forge::app::plugin_descriptor{

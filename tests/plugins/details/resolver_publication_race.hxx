@@ -29,6 +29,7 @@ class resolver_publish_barrier final {
    [[nodiscard]] std::size_t close_calls(const std::string& protocol) const noexcept;
    void record_drain(const std::string& protocol) noexcept;
    [[nodiscard]] std::size_t drain_calls(const std::string& protocol) const noexcept;
+   [[nodiscard]] std::size_t publish_calls(const std::string& protocol) const noexcept;
 
  private:
    mutable std::mutex mutex_;
@@ -39,6 +40,7 @@ class resolver_publish_barrier final {
    bool released_ = false;
    std::map<std::string, std::size_t, std::less<>> close_calls_;
    std::map<std::string, std::size_t, std::less<>> drain_calls_;
+   std::map<std::string, std::size_t, std::less<>> publish_calls_;
 };
 
 class resolver_publication_race_node final : public forge::plugins::p2p::node::api {
@@ -80,7 +82,9 @@ class resolver_publication_race_node_plugin final : public forge::app::plugin {
 
 class resolver_publication_race_application final : public forge::app::application_shell {
  public:
-   explicit resolver_publication_race_application(std::shared_ptr<resolver_publish_barrier> barrier);
+   explicit resolver_publication_race_application(
+      std::shared_ptr<resolver_publish_barrier> barrier,
+      forge::app::application_shell_options options = {});
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override;

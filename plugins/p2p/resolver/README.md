@@ -57,6 +57,11 @@ Publishing the same protocol replaces its current generation atomically. A
 lease for the old generation cannot close or remove the replacement. API ids
 remain unique across different protocols.
 
+`max-apis-per-peer` also bounds retained closing local generations.
+Replacements fail closed with a typed resolver error when that backlog reaches
+the bound; completed retirement or shutdown fallback drains it. This prevents
+unbounded retention if the background retirement queue cannot admit work.
+
 The resolver API contract is now `2.0` and requires
 `forge.plugins.p2p.node` major `2`. Consumers upgrading from resolver `1.x`
 must request resolver major `2`, retain the returned publication lease, and

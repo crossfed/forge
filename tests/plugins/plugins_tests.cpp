@@ -4051,6 +4051,100 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_rejected_retirement_drains_on_shutdown_without
    BOOST_TEST(barrier->drain_calls(protocol) == 1U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during_shutdown) {
+   auto barrier = std::make_shared<forge::tests::plugins::resolver_publish_barrier>();
+   auto app = forge::tests::plugins::resolver_publication_race_application{
+      barrier,
+      forge::app::application_shell_options{
+         .runtime = forge::asio::runtime_options{.worker_threads = 2},
+         .scheduler = forge::asio::task::scheduler::options{
+            .max_blocking_tasks = 1,
+            .max_awaitable_tasks = 1,
+            .max_pending_tasks = 4,
+         },
+      }};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
+
+   auto blocker_started = std::atomic_bool{false};
+   auto blocker_gate = std::make_shared<boost::asio::steady_timer>(
+       app.runtime().context(), boost::asio::steady_timer::time_point::max());
+   auto blocker = app.scheduler().submit(forge::asio::task::awaitable{
+       .priority = forge::asio::task::priority{100},
+       .name = "resolver-retirement-blocker",
+       .work =
+           [gate = blocker_gate, &blocker_started](forge::asio::task::context&) -> boost::asio::awaitable<void> {
+              blocker_started.store(true, std::memory_order_release);
+              auto error = boost::system::error_code{};
+              co_await gate->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+              co_return;
+           },
+   });
+   BOOST_REQUIRE(blocker.accepted());
+   const auto blocker_ready = forge::asio::blocking::run(
+       app.runtime(),
+       async_wait_for_condition([&] { return blocker_started.load(std::memory_order_acquire); }, std::chrono::seconds{2}));
+   if (!blocker_ready) {
+      blocker_gate->expires_at(boost::asio::steady_timer::time_point::min());
+      static_cast<void>(blocker_gate->cancel());
+   }
+   BOOST_REQUIRE(blocker_ready);
+
+   const auto protocol = std::string{"/forge/api/resolver-retirement-canceled/1"};
+   auto publication = resolver->publish_api(
+      node_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol});
+   publication.close();
+   const auto queued = app.scheduler().snapshot();
+   BOOST_TEST(queued.running_awaitable == 1U);
+   BOOST_TEST(queued.pending == 1U);
+
+   app.scheduler().request_stop();
+   const auto canceled = app.scheduler().snapshot();
+   BOOST_TEST(canceled.stopped);
+   BOOST_TEST(canceled.pending == 0U);
+   BOOST_TEST(canceled.canceled >= 1U);
+   blocker_gate->expires_at(boost::asio::steady_timer::time_point::min());
+   static_cast<void>(blocker_gate->cancel());
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), blocker.wait()));
+
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), app.shutdown()));
+   BOOST_TEST(barrier->close_calls(protocol) == 1U);
+   BOOST_TEST(barrier->drain_calls(protocol) == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_resolver_rejected_retirement_backlog_fails_closed_before_new_child_publication) {
+   auto barrier = std::make_shared<forge::tests::plugins::resolver_publish_barrier>();
+   auto app = forge::tests::plugins::resolver_publication_race_application{barrier};
+   auto config = forge::config::core::document{};
+   config.set("plugins.p2p.resolver.max-apis-per-peer", std::uint64_t{2});
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
+       {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
+
+   const auto protocol = std::string{"/forge/api/resolver-retirement-backlog/1"};
+   auto first = resolver->publish_api(
+      node_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol});
+   app.scheduler().request_stop();
+   auto second = resolver->publish_api(
+      peer_context_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol});
+   auto third = resolver->publish_api(
+      node_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol});
+
+   BOOST_TEST(barrier->publish_calls(protocol) == 3U);
+   BOOST_CHECK_THROW(
+      static_cast<void>(resolver->publish_api(
+         peer_context_test_plan(app.apis()), forge::net::p2p::protocol_id{.value = protocol})),
+      forge::plugins::p2p::resolver::exceptions::protocol_error);
+   BOOST_TEST(barrier->publish_calls(protocol) == 3U);
+   BOOST_TEST(app.scheduler().snapshot().rejected == 2U);
+
+   BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), app.shutdown()));
+   BOOST_TEST(barrier->close_calls(protocol) == 3U);
+   BOOST_TEST(barrier->drain_calls(protocol) == 3U);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_resolver_publish_racing_shutdown_returns_no_usable_publication) {
    auto barrier = std::make_shared<forge::tests::plugins::resolver_publish_barrier>();
    auto app = forge::tests::plugins::resolver_publication_race_application{barrier};

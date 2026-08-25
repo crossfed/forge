@@ -149,6 +149,7 @@ publication_catalog::publish(forge::plugins::p2p::node::api& p2p, forge::api::co
       }
 
       validate_publish_locked(protocol_value, next->entries(), max_apis);
+      validate_retirement_backlog_locked(max_apis);
       const auto inserted = pending_.try_emplace(protocol_value, next).second;
       if (!inserted) {
          FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "resolver API protocol publication is pending",
@@ -288,11 +289,10 @@ void publication_catalog::schedule_retirement(const std::shared_ptr<generation>&
          return;
       }
 
-      auto record = retirement_record{
+      const auto inserted = retirements_.emplace(retirements_.end(), retirement_record{
           .identity = generation.get(),
           .value = generation,
-      };
-      static_cast<void>(retirements_.emplace(retirements_.end(), std::move(record)));
+      });
       ++inflight_retirements_;
       auto submission = scheduler_->submit(forge::asio::task::awaitable{
           .priority = forge::asio::task::priority{100},
@@ -318,15 +318,13 @@ void publication_catalog::schedule_retirement(const std::shared_ptr<generation>&
           },
       });
       if (!submission.accepted()) {
-         const auto rejected = std::ranges::find_if(
-            retirements_, [&](const retirement_record& retirement) { return retirement.identity == generation.get(); });
-         if (rejected != retirements_.end()) {
-            retirements_.erase(rejected);
-            if (inflight_retirements_ > 0) {
-               --inflight_retirements_;
-               notify = inflight_retirements_ == 0;
-            }
+         retirements_.erase(inserted);
+         if (inflight_retirements_ > 0) {
+            --inflight_retirements_;
+            notify = inflight_retirements_ == 0;
          }
+      } else {
+         inserted->handle = std::move(submission);
       }
    } catch (...) {
       reject_retirement(generation.get(), std::current_exception());
@@ -358,6 +356,27 @@ void publication_catalog::finish_retirement(const generation* generation, std::e
          } else {
             ++closing;
          }
+      }
+   }
+   if (notify) {
+      retirements_ready_.notify();
+   }
+}
+
+void publication_catalog::abandon_retirement(const generation* generation) noexcept {
+   auto notify = false;
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      const auto found = std::ranges::find_if(
+         retirements_, [&](const retirement_record& retirement) { return retirement.identity == generation; });
+      if (found == retirements_.end()) {
+         return;
+      }
+
+      retirements_.erase(found);
+      if (inflight_retirements_ > 0) {
+         --inflight_retirements_;
+         notify = inflight_retirements_ == 0;
       }
    }
    if (notify) {
@@ -499,6 +518,13 @@ void publication_catalog::validate_publish_locked(const std::string& protocol, c
    }
 }
 
+void publication_catalog::validate_retirement_backlog_locked(std::size_t max_apis) const {
+   if (closing_.size() >= max_apis) {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "resolver publication retirement backlog limit exceeded",
+                            forge::exceptions::ctx("limit", std::to_string(max_apis)));
+   }
+}
+
 bool publication_catalog::cancel_reservation(const std::string& protocol, const std::shared_ptr<generation>& generation,
                                               bool remove_order) noexcept {
    auto closed = false;
@@ -548,11 +574,28 @@ boost::asio::awaitable<void> publication_catalog::wait_for_publishes() {
 boost::asio::awaitable<void> publication_catalog::wait_for_retirements() {
    for (;;) {
       const auto observed = retirements_ready_.epoch();
+      auto identity = static_cast<const generation*>(nullptr);
+      auto handle = forge::asio::task::handle{};
       {
          const auto lock = std::scoped_lock{mutex_};
+         const auto retirement = std::ranges::find_if(retirements_, [](const retirement_record& value) {
+            return value.handle.accepted();
+         });
+         if (retirement != retirements_.end()) {
+            identity = retirement->identity;
+            handle = std::move(retirement->handle);
+         }
          if (inflight_retirements_ == 0) {
             co_return;
          }
+      }
+      if (handle.valid()) {
+         try {
+            co_await handle.wait();
+         } catch (...) {
+            abandon_retirement(identity);
+         }
+         continue;
       }
       co_await retirements_ready_.async_wait(observed);
    }

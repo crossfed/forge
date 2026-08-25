@@ -57,15 +57,18 @@ class publication_catalog final : public std::enable_shared_from_this<publicatio
    struct retirement_record {
       const generation* identity = nullptr;
       std::shared_ptr<generation> value;
+      forge::asio::task::handle handle;
    };
 
    void close_generation(const std::shared_ptr<generation>& generation) noexcept;
    void schedule_retirement(const std::shared_ptr<generation>& generation) noexcept;
    void finish_retirement(const generation* generation, std::exception_ptr failure) noexcept;
+   void abandon_retirement(const generation* generation) noexcept;
    void reject_retirement(const generation* generation, std::exception_ptr failure) noexcept;
    void remember_retirement_failure_locked(std::exception_ptr failure) noexcept;
    void validate_publish_locked(const std::string& protocol, const std::vector<entry>& entries,
                                 std::size_t max_apis) const;
+   void validate_retirement_backlog_locked(std::size_t max_apis) const;
    [[nodiscard]] bool cancel_reservation(const std::string& protocol,
                                          const std::shared_ptr<generation>& generation,
                                          bool remove_order) noexcept;
