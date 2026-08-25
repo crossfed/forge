@@ -128,6 +128,9 @@ boost::asio::awaitable<void> server_stream_state::run() {
          request_, {}, stream_.writer);
       publish_terminal(std::move(terminal));
    } catch (...) {
+      const auto error = std::current_exception();
+      stream_.reader->fail(error);
+      stream_.writer->fail(error);
       publish_terminal(internal_error());
    }
 }
