@@ -5,7 +5,17 @@ module;
 #include <limits>
 #include <string>
 
+#if !defined(FORGE_CONTRACT_GUEST)
+#include <stdexcept>
+#include <typeinfo>
+#endif
+
 module forge.chain.protocol.time;
+
+#if !defined(FORGE_CONTRACT_GUEST)
+import forge.exceptions;
+import forge.variant.exceptions;
+#endif
 
 namespace forge::chain::protocol {
 
@@ -218,12 +228,31 @@ block_timestamp& block_timestamp::operator=(time_point value) noexcept {
 }
 
 #if !defined(FORGE_CONTRACT_GUEST)
+namespace {
+
+template <typename Time>
+void decode_time_variant(const forge::variant& value, Time& output, const char* error_message) {
+   try {
+      output = Time::from_iso_string(value.as_string());
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::bad_cast&) {
+      throw forge::variant_exceptions::decode_error{error_message};
+   } catch (const std::invalid_argument&) {
+      throw forge::variant_exceptions::decode_error{error_message};
+   } catch (const std::out_of_range&) {
+      throw forge::variant_exceptions::decode_error{error_message};
+   }
+}
+
+} // namespace
+
 void to_variant(const time_point& value, forge::variant& output) {
    output = value.to_string();
 }
 
 void from_variant(const forge::variant& value, time_point& output) {
-   output = time_point::from_iso_string(value.as_string());
+   decode_time_variant(value, output, "time_point variant must contain a valid ISO timestamp");
 }
 
 void to_variant(const time_point_sec& value, forge::variant& output) {
@@ -231,7 +260,7 @@ void to_variant(const time_point_sec& value, forge::variant& output) {
 }
 
 void from_variant(const forge::variant& value, time_point_sec& output) {
-   output = time_point_sec::from_iso_string(value.as_string());
+   decode_time_variant(value, output, "time_point_sec variant must contain a valid ISO timestamp");
 }
 
 void to_variant(const block_timestamp& value, forge::variant& output) {
@@ -239,7 +268,7 @@ void to_variant(const block_timestamp& value, forge::variant& output) {
 }
 
 void from_variant(const forge::variant& value, block_timestamp& output) {
-   output = block_timestamp::from_iso_string(value.as_string());
+   decode_time_variant(value, output, "block_timestamp variant must contain a valid ISO timestamp");
 }
 #endif
 

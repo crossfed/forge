@@ -27,9 +27,24 @@ Package component: `chain_protocol`. Public namespace:
 - `forge.chain.protocol.fixed_key`: `fixed_key<Size>` and `key256`, with
   ordered word construction, canonical raw bytes and fixed-width hex variants.
 - `forge.chain.protocol.native_ids`: canonical native object-ID aliases backed
-  directly by `forge.db.ids.typed_id`.
+  directly by `forge.db.ids.typed_id`. These named IDs are the stable public
+  identity of native protocol records; they do not expose generic ObjectDB
+  access and this library intentionally provides no `get_object` operation.
 - `forge.chain.protocol.entity_selector`: exact entity selection by one native
   ID or one natural key; it carries no lookup behavior.
+- `forge.chain.protocol.account`, `account_metadata`, `permission_usage`,
+  `permission`, `full_permission`, `permission_link`, `account_authority` and
+  `full_account`: flat canonical account and authority projections. Persisted
+  primitives retain explicit native IDs and Spine field order; composed views
+  use inheritance without depending on ObjectDB records.
+- `forge.chain.protocol.resource_limits`, `resource_usage`,
+  `resource_limits_config`, `resource_limits_state`,
+  `account_ram_correction`, `resource_meter` and `account_resources`: objective
+  persisted resource primitives plus transport-neutral account resource views.
+  A meter is unlimited when both `max` and `available` are absent and bounded
+  when both are present. Mixed presence is invalid; `valid(resource_meter
+  const&)` reports this invariant for later API validators. Meter fields are
+  supplied data and this library performs no recovery or limit policy.
 - `forge.chain.protocol.chain_config`, `wasm_parameters`, `ratio`,
   `elastic_limit_parameters`, `usage_accumulator`,
   `activated_protocol_feature`: canonical state values with Raw and host
@@ -160,7 +175,11 @@ key custody and signing authorization belong to the product runtime.
 This library does not provide state storage, controller behavior, transaction
 execution, action trace collection, sequence allocation, consensus, finality,
 P2P synchronization, block production, Merkle proofs or finality-tree
-construction.
+construction. Account/resource projections are public protocol snapshots, not
+ObjectDB models, persisted indexes or calculation services.
+Their defaults intentionally mirror the current Spine donor state. Generic
+described Variant decoding is permissive and preserves declared defaults when
+fields are absent; exact API readers are responsible for validating requests.
 
 ## Tests
 

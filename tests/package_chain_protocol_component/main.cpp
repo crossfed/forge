@@ -7,14 +7,19 @@
 
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
+import forge.chain.protocol.account_authority;
 import forge.chain.protocol.block;
 import forge.chain.protocol.chain_config;
 import forge.chain.protocol.entity_selector;
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.float128;
 import forge.chain.protocol.float64;
+import forge.chain.protocol.full_account;
 import forge.chain.protocol.native_ids;
+import forge.chain.protocol.permission_link;
 import forge.chain.protocol.ratio;
+import forge.chain.protocol.resource_limits_config;
+import forge.chain.protocol.resource_limits_state;
 import forge.chain.protocol.state_query;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.wasm_parameters;
@@ -49,6 +54,8 @@ int main() {
    static_assert(static_cast<std::uint8_t>(forge::chain::protocol::audit_class::state_changes) == 4U);
    static_assert(std::same_as<forge::chain::protocol::account_id, forge::db::ids::typed_id<1, 10>>);
    static_assert(std::same_as<forge::chain::protocol::resource_state_id, forge::db::ids::typed_id<1, 63>>);
+   static_assert(std::derived_from<forge::chain::protocol::account_authority, forge::chain::protocol::account>);
+   static_assert(std::derived_from<forge::chain::protocol::full_account, forge::chain::protocol::account>);
    const auto digest = forge::chain::protocol::digest::hash(std::string{"package-chain-protocol"});
    const auto selector = forge::chain::protocol::account_selector{
        .id = forge::chain::protocol::account_id{42},
@@ -58,6 +65,11 @@ int main() {
    const auto ratio = forge::chain::protocol::ratio{};
    const auto float64 = forge::chain::protocol::float64{.bits = 0x3ff0000000000000ULL};
    const auto float128 = forge::chain::protocol::float128{.bits = forge::chain::protocol::uint128_t{1U} << 112U};
+   const auto authority = forge::chain::protocol::account_authority{};
+   const auto full_account = forge::chain::protocol::full_account{};
+   const auto permission_link = forge::chain::protocol::permission_link{};
+   const auto resource_config = forge::chain::protocol::resource_limits_config{};
+   const auto resource_state = forge::chain::protocol::resource_limits_state{};
    const auto float64_key = forge::chain::protocol::ordered_key(float64);
    const auto float128_key = forge::chain::protocol::ordered_key(float128);
    auto float64_variant = forge::variant{};
@@ -93,6 +105,11 @@ int main() {
    (void)ratio;
    (void)float64_key;
    (void)float128_key;
+   (void)authority;
+   (void)full_account;
+   (void)permission_link;
+   (void)resource_config;
+   (void)resource_state;
    return forge::chain::protocol::selects_exactly_one(selector) && decoded_float64 == float64 &&
                   decoded_float128 == float128 && producer_authority_json_roundtrip()
               ? 0

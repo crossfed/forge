@@ -1,6 +1,9 @@
 export module forge.chain.protocol.native_ids;
 
 export import forge.db.ids.typed_id;
+#if !defined(FORGE_CONTRACT_GUEST)
+export import forge.db.ids.object_id;
+#endif
 
 export namespace forge::chain::protocol {
 

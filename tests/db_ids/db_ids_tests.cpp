@@ -8,6 +8,7 @@ import forge.db.ids.object_id;
 import forge.db.ids.typed_id;
 import forge.exceptions;
 import forge.raw.raw;
+import forge.variant.exceptions;
 import forge.variant.value;
 
 namespace {
@@ -119,6 +120,15 @@ BOOST_AUTO_TEST_CASE(db_ids_object_id_variant_rejects_out_of_range_fields_with_f
 
    auto decoded = forge::db::ids::object_id{};
    BOOST_CHECK_THROW(from_variant(encoded, decoded), forge::exceptions::context_error);
+}
+
+BOOST_AUTO_TEST_CASE(db_ids_typed_id_variant_rejects_wrong_types_with_forge_error) {
+   auto decoded = fake_id{};
+   const auto wrong_type = forge::variant{forge::mutable_variant_object{}("unexpected", true)};
+
+   BOOST_CHECK_THROW(from_variant(wrong_type, decoded), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(from_variant(forge::variant{"not-an-instance"}, decoded),
+                     forge::variant_exceptions::decode_error);
 }
 
 BOOST_AUTO_TEST_CASE(db_ids_to_string_uses_space_type_instance) {

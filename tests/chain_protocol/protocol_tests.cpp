@@ -29,6 +29,11 @@ import forge.variant.exceptions;
 import forge.variant.value;
 import forge.chain.core.merkle;
 import forge.chain.protocol.abi;
+import forge.chain.protocol.account;
+import forge.chain.protocol.account_authority;
+import forge.chain.protocol.account_metadata;
+import forge.chain.protocol.account_ram_correction;
+import forge.chain.protocol.account_resources;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.admin;
@@ -45,10 +50,20 @@ import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.float128;
 import forge.chain.protocol.float64;
+import forge.chain.protocol.full_account;
+import forge.chain.protocol.full_permission;
 import forge.chain.protocol.hash_id;
 import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.native_ids;
+import forge.chain.protocol.permission;
+import forge.chain.protocol.permission_link;
+import forge.chain.protocol.permission_usage;
 import forge.chain.protocol.ratio;
+import forge.chain.protocol.resource_limits;
+import forge.chain.protocol.resource_limits_config;
+import forge.chain.protocol.resource_limits_state;
+import forge.chain.protocol.resource_meter;
+import forge.chain.protocol.resource_usage;
 import forge.chain.protocol.system;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
@@ -291,6 +306,9 @@ static_assert(std::same_as<protocol::resource_usage_id, forge::db::ids::typed_id
 static_assert(std::same_as<protocol::resource_config_id, forge::db::ids::typed_id<1, 62>>);
 static_assert(std::same_as<protocol::resource_state_id, forge::db::ids::typed_id<1, 63>>);
 static_assert(noexcept(protocol::selects_exactly_one(protocol::account_selector{})));
+static_assert(std::derived_from<protocol::account_authority, protocol::account>);
+static_assert(std::derived_from<protocol::full_permission, protocol::permission>);
+static_assert(std::derived_from<protocol::full_account, protocol::account>);
 
 BOOST_AUTO_TEST_CASE(native_entity_selector_requires_exactly_one_selector) {
    const auto by_id = protocol::account_selector{.id = protocol::account_id{42}};
@@ -392,6 +410,263 @@ BOOST_AUTO_TEST_CASE(protocol_state_values_preserve_raw_variant_and_malformed_co
    check_variant_roundtrip(wasm);
    check_variant_roundtrip(config);
    check_variant_roundtrip(feature);
+}
+
+BOOST_AUTO_TEST_CASE(account_and_resource_projections_preserve_raw_variant_and_inheritance) {
+   const auto account = protocol::account{
+       .id = protocol::account_id{1U},
+       .name = protocol::account_name{2U},
+       .creation_date = protocol::block_timestamp{3U},
+       .abi_hash = {},
+       .abi_size = 4U,
+   };
+   BOOST_TEST(pack_hex(account) ==
+              "0100000000000000020000000000000003000000"
+              "0000000000000000000000000000000000000000000000000000000000000000"
+              "0400000000000000");
+
+   const auto metadata = protocol::account_metadata{
+       .id = protocol::metadata_id{5U},
+       .name = account.name,
+       .recv_sequence = 6U,
+       .auth_sequence = 7U,
+       .code_sequence = 8U,
+       .abi_sequence = 9U,
+       .code_hash = protocol::digest::hash(std::string{"code"}),
+       .last_code_update = protocol::time_point{protocol::microseconds{10U}},
+       .flags = 11U,
+       .vm_type = 12U,
+       .vm_version = 13U,
+   };
+   const auto usage = protocol::permission_usage{
+       .id = protocol::permission_usage_id{14U},
+       .last_used = protocol::time_point{protocol::microseconds{15U}},
+   };
+   const auto permission = protocol::permission{
+       .id = protocol::permission_id{16U},
+       .usage_id = usage.id,
+       .parent = protocol::permission_id{17U},
+       .owner = account.name,
+       .name = protocol::permission_name{18U},
+       .last_updated = protocol::time_point{protocol::microseconds{19U}},
+       .auth = {.threshold = 1U},
+   };
+   auto full_permission = protocol::full_permission{};
+   static_cast<protocol::permission&>(full_permission) = permission;
+   full_permission.usage = usage;
+
+   const auto link = protocol::permission_link{
+       .id = protocol::permission_link_id{20U},
+       .account = account.name,
+       .code = protocol::account_name{21U},
+       .message_type = protocol::action_name{22U},
+       .required_permission = permission.name,
+   };
+   auto account_authority = protocol::account_authority{};
+   static_cast<protocol::account&>(account_authority) = account;
+   account_authority.permissions = {permission};
+
+   const auto current_limits = protocol::resource_limits{
+       .id = protocol::resource_limits_id{23U},
+       .owner = account.name,
+       .pending = false,
+       .net_weight = 24,
+       .cpu_weight = 25,
+       .ram_bytes = 26,
+   };
+   const auto pending_limits = protocol::resource_limits{
+       .id = protocol::resource_limits_id{27U},
+       .owner = account.name,
+       .pending = true,
+       .net_weight = -1,
+       .cpu_weight = -1,
+       .ram_bytes = -1,
+   };
+   const auto native_usage = protocol::resource_usage{
+       .id = protocol::resource_usage_id{28U},
+       .owner = account.name,
+       .net_usage = {.last_ordinal = 29U, .value_ex = 30U, .consumed = 31U},
+       .cpu_usage = {.last_ordinal = 32U, .value_ex = 33U, .consumed = 34U},
+       .ram_usage = 35U,
+   };
+   const auto correction = protocol::account_ram_correction{
+       .id = protocol::account_ram_correction_id{36U},
+       .name = account.name,
+       .ram_correction = 37U,
+   };
+   const auto cpu = protocol::resource_meter{
+       .used = 38U,
+       .max = 100U,
+       .available = 62U,
+       .window = 172'800U,
+       .last_ordinal = 39U,
+       .fully_recovered_at = protocol::time_point{protocol::microseconds{40U}},
+   };
+   const auto net = protocol::resource_meter{.used = 41U, .window = 172'800U, .last_ordinal = 42U};
+   const auto ram = protocol::resource_meter{.used = 43U, .max = 200U, .available = 157U};
+   const auto resources = protocol::account_resources{
+       .current_limits = current_limits,
+       .pending_limits = pending_limits,
+       .native_usage = native_usage,
+       .ram_correction = correction,
+       .cpu = cpu,
+       .net = net,
+       .ram = ram,
+   };
+   const auto config = protocol::resource_limits_config{.id = protocol::resource_config_id{44U}};
+   const auto state = protocol::resource_limits_state{
+       .id = protocol::resource_state_id{45U},
+       .average_block_net_usage = {.last_ordinal = 46U, .value_ex = 47U, .consumed = 48U},
+       .average_block_cpu_usage = {.last_ordinal = 49U, .value_ex = 50U, .consumed = 51U},
+       .pending_net_usage = 52U,
+       .pending_cpu_usage = 53U,
+       .total_net_weight = 54U,
+       .total_cpu_weight = 55U,
+       .total_ram_bytes = 56U,
+       .virtual_net_limit = 57U,
+       .virtual_cpu_limit = 58U,
+   };
+   auto full_account = protocol::full_account{};
+   static_cast<protocol::account&>(full_account) = account;
+   full_account.metadata = metadata;
+   full_account.permissions = {full_permission};
+   full_account.resources = resources;
+
+   const auto check_raw_roundtrip = []<typename T>(const T& value) {
+      BOOST_CHECK((forge::raw::unpack<T>(forge::raw::pack(value)) == value));
+   };
+   check_raw_roundtrip(account);
+   check_raw_roundtrip(metadata);
+   check_raw_roundtrip(usage);
+   check_raw_roundtrip(permission);
+   check_raw_roundtrip(full_permission);
+   check_raw_roundtrip(link);
+   check_raw_roundtrip(account_authority);
+   check_raw_roundtrip(current_limits);
+   check_raw_roundtrip(native_usage);
+   check_raw_roundtrip(config);
+   check_raw_roundtrip(state);
+   check_raw_roundtrip(correction);
+   check_raw_roundtrip(cpu);
+   check_raw_roundtrip(resources);
+   check_raw_roundtrip(full_account);
+
+   const auto check_variant_roundtrip = []<typename T>(const T& value) {
+      auto encoded = forge::variant{};
+      forge::to_variant(value, encoded);
+      auto decoded = T{};
+      forge::from_variant(encoded, decoded);
+      BOOST_CHECK(decoded == value);
+   };
+   check_variant_roundtrip(account);
+   check_variant_roundtrip(metadata);
+   check_variant_roundtrip(usage);
+   check_variant_roundtrip(permission);
+   check_variant_roundtrip(full_permission);
+   check_variant_roundtrip(link);
+   check_variant_roundtrip(account_authority);
+   check_variant_roundtrip(current_limits);
+   check_variant_roundtrip(native_usage);
+   check_variant_roundtrip(config);
+   check_variant_roundtrip(state);
+   check_variant_roundtrip(correction);
+   check_variant_roundtrip(cpu);
+   check_variant_roundtrip(resources);
+   check_variant_roundtrip(full_account);
+
+   const auto account_bytes = forge::raw::pack(account);
+   const auto authority_bytes = forge::raw::pack(account_authority);
+   const auto full_permission_bytes = forge::raw::pack(full_permission);
+   const auto permission_bytes = forge::raw::pack(permission);
+   const auto full_account_bytes = forge::raw::pack(full_account);
+   BOOST_CHECK(std::ranges::equal(account_bytes, std::span{authority_bytes}.first(account_bytes.size())));
+   BOOST_CHECK(std::ranges::equal(permission_bytes,
+                                  std::span{full_permission_bytes}.first(permission_bytes.size())));
+   BOOST_CHECK(std::ranges::equal(account_bytes, std::span{full_account_bytes}.first(account_bytes.size())));
+
+   auto encoded_full = forge::variant{};
+   forge::to_variant(full_account, encoded_full);
+   BOOST_CHECK(encoded_full.get_object().contains("id"));
+   BOOST_CHECK(encoded_full.get_object().contains("metadata"));
+   BOOST_CHECK(encoded_full.get_object().contains("permissions"));
+   BOOST_CHECK(encoded_full.get_object().contains("resources"));
+   auto encoded_unlimited = forge::variant{};
+   forge::to_variant(net, encoded_unlimited);
+   BOOST_CHECK(!encoded_unlimited.get_object().contains("max"));
+   BOOST_CHECK(!encoded_unlimited.get_object().contains("available"));
+   BOOST_CHECK(!encoded_unlimited.get_object().contains("fully_recovered_at"));
+
+   auto malformed = full_account_bytes;
+   malformed.pop_back();
+   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::full_account>(malformed),
+                     forge::raw::exceptions::range_error);
+
+   BOOST_TEST(config.cpu_limit_parameters.target == 20'000U);
+   BOOST_TEST(config.net_limit_parameters.max == 1'048'576U);
+   BOOST_TEST(config.account_cpu_usage_average_window == 172'800U);
+   BOOST_TEST(config.account_net_usage_average_window == 172'800U);
+   BOOST_TEST(protocol::resource_limits{}.net_weight == -1);
+   BOOST_TEST(protocol::resource_limits{}.cpu_weight == -1);
+   BOOST_TEST(protocol::resource_limits{}.ram_bytes == -1);
+}
+
+BOOST_AUTO_TEST_CASE(resource_meter_requires_paired_bounds) {
+   const auto unlimited = protocol::resource_meter{};
+   const auto bounded = protocol::resource_meter{.max = 100U, .available = 75U};
+   const auto max_only = protocol::resource_meter{.max = 100U};
+   const auto available_only = protocol::resource_meter{.available = 75U};
+
+   BOOST_CHECK(protocol::valid(unlimited));
+   BOOST_CHECK(protocol::valid(bounded));
+   BOOST_CHECK(!protocol::valid(max_only));
+   BOOST_CHECK(!protocol::valid(available_only));
+}
+
+BOOST_AUTO_TEST_CASE(account_resource_variant_decode_preserves_defaults_and_uses_typed_failures) {
+   const auto empty_object = forge::variant{forge::mutable_variant_object{}};
+
+   auto limits = protocol::resource_limits{};
+   forge::from_variant(empty_object, limits);
+   BOOST_CHECK(limits == protocol::resource_limits{});
+   BOOST_TEST(limits.net_weight == -1);
+   BOOST_TEST(limits.cpu_weight == -1);
+   BOOST_TEST(limits.ram_bytes == -1);
+
+   auto config = protocol::resource_limits_config{};
+   forge::from_variant(empty_object, config);
+   BOOST_CHECK(config == protocol::resource_limits_config{});
+   BOOST_TEST(config.cpu_limit_parameters.target == 20'000U);
+   BOOST_TEST(config.net_limit_parameters.max == 1'048'576U);
+   BOOST_TEST(config.account_cpu_usage_average_window == 172'800U);
+   BOOST_TEST(config.account_net_usage_average_window == 172'800U);
+
+   const auto wrong_id = forge::variant{
+       forge::mutable_variant_object{}("id", forge::mutable_variant_object{}("unexpected", true))};
+   BOOST_CHECK_THROW(forge::from_variant(wrong_id, limits), forge::variant_exceptions::decode_error);
+
+   auto metadata = protocol::account_metadata{};
+   const auto wrong_time = forge::variant{forge::mutable_variant_object{}(
+       "last_code_update", forge::mutable_variant_object{}("unexpected", true))};
+   BOOST_CHECK_THROW(forge::from_variant(wrong_time, metadata), forge::variant_exceptions::decode_error);
+
+   auto account = protocol::account{};
+   const auto wrong_creation_date = forge::variant{forge::mutable_variant_object{}(
+       "creation_date", forge::mutable_variant_object{}("unexpected", true))};
+   BOOST_CHECK_THROW(forge::from_variant(wrong_creation_date, account), forge::variant_exceptions::decode_error);
+
+   const auto invalid_creation_date =
+       forge::variant{forge::mutable_variant_object{}("creation_date", "not-an-ISO-timestamp")};
+   BOOST_CHECK_THROW(forge::from_variant(invalid_creation_date, account), forge::variant_exceptions::decode_error);
+}
+
+BOOST_AUTO_TEST_CASE(protocol_time_variant_decode_uses_typed_failures) {
+   const auto invalid_iso = forge::variant{"not-an-ISO-timestamp"};
+
+   auto point = protocol::time_point{};
+   BOOST_CHECK_THROW(protocol::from_variant(invalid_iso, point), forge::variant_exceptions::decode_error);
+
+   auto point_sec = protocol::time_point_sec{};
+   BOOST_CHECK_THROW(protocol::from_variant(invalid_iso, point_sec), forge::variant_exceptions::decode_error);
 }
 
 BOOST_AUTO_TEST_CASE(protocol_float_values_match_spine_raw_variant_and_ordered_keys) {

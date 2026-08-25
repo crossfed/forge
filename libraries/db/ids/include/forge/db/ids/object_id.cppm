@@ -3,13 +3,17 @@ module;
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <typeinfo>
 
 export module forge.db.ids.object_id;
 
 export import forge.db.ids.typed_id;
 
+import forge.exceptions;
 import forge.raw.raw;
+import forge.variant.exceptions;
 import forge.variant.value;
 
 export namespace forge::db::ids {
@@ -71,9 +75,19 @@ template <std::uint8_t Space, std::uint16_t Type> void to_variant(const typed_id
 }
 
 template <std::uint8_t Space, std::uint16_t Type> void from_variant(const forge::variant& input, typed_id<Space, Type>& out) {
-   auto instance = std::uint64_t{};
-   forge::from_variant(input, instance);
-   out = typed_id<Space, Type>{instance};
+   try {
+      auto instance = std::uint64_t{};
+      forge::from_variant(input, instance);
+      out = typed_id<Space, Type>{instance};
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::bad_cast&) {
+      throw forge::variant_exceptions::decode_error{"typed ID variant must contain an integer"};
+   } catch (const std::invalid_argument&) {
+      throw forge::variant_exceptions::decode_error{"typed ID variant must contain an integer"};
+   } catch (const std::out_of_range&) {
+      throw forge::variant_exceptions::decode_error{"typed ID variant integer is out of range"};
+   }
 }
 
 } // namespace forge::db::ids
