@@ -4451,7 +4451,7 @@ BOOST_AUTO_TEST_CASE(http_api_native_responses_bypass_xml_codec_options) {
                    .response_body_codec(forge::api::http::body_codec::xml)
                    .build())
            .route<&control_api::accepted, control_request, forge::api::http::empty_response>(
-               forge::api::http::route_builder{method::get, "mismatched", "/xml/native/:id/mismatched", status::ok}
+               forge::api::http::route_builder{method::get, "accepted", "/xml/native/:id/mismatched", status::ok}
                    .response_body_codec(forge::api::http::body_codec::xml)
                    .build())
            .route<&object_api::get_object, object_get_request, forge::net::http::file_response>(
@@ -4747,6 +4747,29 @@ BOOST_AUTO_TEST_CASE(http_api_preserves_explicit_method_name_for_same_dto_method
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.value == "legacy:abc");
+}
+
+BOOST_AUTO_TEST_CASE(http_api_rejects_explicit_routes_with_incompatible_descriptors) {
+   auto unary_router = forge::net::http::router{};
+   auto unary = forge::api::http::binding()
+                    .route<&api_cache::read, api_read_chunk, api_chunk>(forge::api::http::route{
+                        .verb = method::get,
+                        .method_name = "write",
+                        .target = "/mismatched/unary/:ref",
+                    })
+                    .build();
+   BOOST_CHECK_THROW(unary_router.mount(unary), forge::api::core::exceptions::protocol_error);
+
+   auto positional_router = forge::net::http::router{};
+   auto positional = forge::api::http::binding()
+                         .route<&mixed_proxy_api::read, std::tuple<std::string, std::string>, control_response>(
+                             forge::api::http::route{
+                                 .verb = method::get,
+                                 .method_name = "download",
+                                 .target = "/mismatched/positional/:collection/:key",
+                             })
+                         .build();
+   BOOST_CHECK_THROW(positional_router.mount(positional), forge::api::core::exceptions::protocol_error);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) {

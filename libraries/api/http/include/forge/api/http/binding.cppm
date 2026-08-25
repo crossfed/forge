@@ -325,6 +325,51 @@ class binding_builder {
       return *result;
    }
 
+   template <auto Method, typename Request, typename Response>
+   static void validate_route_method_descriptor(const forge::api::core::method_descriptor& descriptor,
+                                                std::string_view name) {
+      using request_type = std::remove_cvref_t<Request>;
+      using wire_request_type = std::remove_cvref_t<detail::http_method_request_t<Method>>;
+      using argument_tuple = detail::http_method_argument_tuple_t<Method>;
+      using response_type = std::remove_cvref_t<Response>;
+
+      constexpr auto positional = detail::is_positional_http_method_v<Method, request_type>;
+      const auto request_matches = descriptor.request_type == typeid(request_type) &&
+                                   descriptor.request_type == typeid(wire_request_type);
+      const auto response_matches = descriptor.response_type == typeid(response_type) &&
+                                    descriptor.result_type == typeid(response_type);
+      const auto fixed_arguments_match = !positional || descriptor.fixed_arguments_type == typeid(argument_tuple);
+      const auto stream_items_match = [&] {
+         constexpr auto kind = forge::api::core::method_kind_v<Method>;
+         if constexpr (kind == forge::api::core::method_kind::unary) {
+            return descriptor.input_type == typeid(void) && descriptor.output_type == typeid(void);
+         } else {
+            using endpoint_type = std::remove_cvref_t<forge::api::core::method_argument_t<
+                Method, forge::api::core::method_argument_count_v<Method> - 1U>>;
+            if constexpr (kind == forge::api::core::method_kind::server_stream) {
+               return descriptor.input_type == typeid(void) &&
+                      descriptor.output_type ==
+                         typeid(typename forge::api::core::stream_writer_traits<endpoint_type>::item_type);
+            } else if constexpr (kind == forge::api::core::method_kind::client_stream) {
+               return descriptor.input_type ==
+                         typeid(typename forge::api::core::stream_reader_traits<endpoint_type>::item_type) &&
+                      descriptor.output_type == typeid(void);
+            } else {
+               return descriptor.input_type ==
+                         typeid(typename forge::api::core::duplex_stream_traits<endpoint_type>::input_type) &&
+                      descriptor.output_type ==
+                         typeid(typename forge::api::core::duplex_stream_traits<endpoint_type>::output_type);
+            }
+         }
+      }();
+      if (descriptor.kind != forge::api::core::method_kind_v<Method> || !request_matches || !response_matches ||
+          !fixed_arguments_match || !stream_items_match) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP route method descriptor is incompatible with its method binding",
+                               forge::exceptions::ctx("method", std::string{name}));
+      }
+   }
+
    [[nodiscard]] static std::string encode_error_payload(const forge::api::core::error_payload& error,
                                                          error_codec codec) {
       switch (codec) {
@@ -1725,17 +1770,22 @@ class binding_builder {
       return [plan = std::move(plan), verb, path = std::move(path), options = std::move(options),
               name = std::move(name)](router& target, std::string_view base_path) {
          validate_response_file_option<Response>(options);
+         const auto api_descriptor = interface_type::describe();
+         const auto* mount_method_descriptor = forge::api::core::find_method(api_descriptor, name);
+         if (mount_method_descriptor == nullptr) {
+            FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                                  "HTTP API route method is not declared by descriptor",
+                                  forge::exceptions::ctx("method", name));
+         }
+         validate_route_method_descriptor<Method, Request, Response>(*mount_method_descriptor, name);
          if constexpr (forge::api::core::method_kind_v<Method> ==
                        forge::api::core::method_kind::bidirectional_stream) {
             FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version,
                                   "HTTP/1.1 does not support bidirectional API streams",
                                   forge::exceptions::ctx("method", name));
          }
-         const auto api_descriptor = interface_type::describe();
-         const auto* mount_method_descriptor = forge::api::core::find_method(api_descriptor, name);
          if constexpr (is_positional_http_method_v<Method, Request>) {
-            if (mount_method_descriptor == nullptr ||
-                (std::tuple_size_v<argument_tuple> != 0U && mount_method_descriptor->argument_names.empty())) {
+            if (std::tuple_size_v<argument_tuple> != 0U && mount_method_descriptor->argument_names.empty()) {
                FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                      "HTTP API positional method is missing argument metadata");
             }

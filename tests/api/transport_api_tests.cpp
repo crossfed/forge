@@ -772,7 +772,7 @@ BOOST_AUTO_TEST_CASE(transport_session_runs_all_method_kinds_incrementally) {
    forge::asio::blocking::run(runtime, scenario());
 }
 
-BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_isolates_terminal_failure) {
+BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_allows_same_session_follow_up) {
    auto runtime = forge::asio::runtime{};
    auto scenario = []() -> boost::asio::awaitable<void> {
       const auto executor = co_await boost::asio::this_coro::executor;
@@ -813,19 +813,11 @@ BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_isolates_termi
       auto malformed_server_model = std::make_shared<fake_stream>();
       auto [malformed_client_stream, malformed_server_stream] =
           make_stream_pair(malformed_client_model, malformed_server_model);
-      auto neighbor_client_model = std::make_shared<fake_stream>();
-      auto neighbor_server_model = std::make_shared<fake_stream>();
-      auto [neighbor_client_stream, neighbor_server_stream] =
-         make_stream_pair(neighbor_client_model, neighbor_server_model);
 
-      auto malformed_service = start_service(
+      auto service = start_service(
          executor, forge::api::transport::serve_stream(std::move(malformed_server_stream),
                                                        forge::api::core::binding().serve(registry).build()));
-      auto neighbor_service = start_service(
-         executor, forge::api::transport::serve_stream(std::move(neighbor_server_stream),
-                                                       forge::api::core::binding().serve(registry).build()));
       auto malformed_session = forge::api::stream::session{std::move(malformed_client_stream)};
-      auto neighbor_session = forge::api::stream::session{std::move(neighbor_client_stream)};
 
       auto malformed_output = forge::api::core::detail::make_local_stream_pair(executor, 4096, 2, 8192);
       const auto malformed = co_await malformed_session.async_stream_call(
@@ -856,7 +848,7 @@ BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_isolates_termi
             forge::api::core::method_kind::server_stream, {}, std::move(output));
       };
       auto neighbor_call =
-         start_service(executor, run_neighbor(neighbor_session, neighbor_output.writer, neighbor_result));
+         start_service(executor, run_neighbor(malformed_session, neighbor_output.writer, neighbor_result));
       const auto item = co_await neighbor_output.reader->async_read();
       BOOST_REQUIRE(item.has_value());
       BOOST_TEST(forge::api::core::unpack_body<transport_live_types::item>(*item).value == 1U);
@@ -871,9 +863,7 @@ BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_isolates_termi
       BOOST_TEST(implementation->download_calls.load(std::memory_order_acquire) == 1U);
 
       co_await malformed_session.async_close();
-      co_await neighbor_session.async_close();
-      co_await wait_service(malformed_service);
-      co_await wait_service(neighbor_service);
+      co_await wait_service(service);
    };
    forge::asio::blocking::run(runtime, scenario());
 }

@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include <boost/asio/awaitable.hpp>
@@ -100,6 +101,9 @@ class live_api
    virtual boost::asio::awaitable<void>
    download(std::string ref, std::uint32_t count,
             forge::api::core::stream_writer<item> output) = 0;
+   virtual boost::asio::awaitable<void>
+   download_totals(std::string ref, std::uint32_t count,
+                   forge::api::core::stream_writer<total> output) = 0;
    virtual boost::asio::awaitable<total>
    upload(std::string ref, forge::api::core::stream_reader<item> input) = 0;
 };
@@ -145,6 +149,7 @@ BOOST_DESCRIBE_STRUCT(::forge::api::http::live_test::metadata, (), (value))
 FORGE_API(::forge::api::http::live_test::live_api,
           FORGE_API_CONTRACT("http.live", 1, 0),
           FORGE_API_METHOD(download, ref, count),
+          FORGE_API_METHOD(download_totals, ref, count),
           FORGE_API_METHOD(upload, ref))
 
 FORGE_API(::forge::api::http::live_test::bidirectional_api,
@@ -216,6 +221,12 @@ class live_impl final : public live_api {
             throw std::runtime_error{"download failed"};
          }
       }
+      co_await output.async_close();
+   }
+
+   boost::asio::awaitable<void>
+   download_totals(std::string, std::uint32_t,
+                   forge::api::core::stream_writer<total> output) override {
       co_await output.async_close();
    }
 
@@ -534,6 +545,34 @@ BOOST_AUTO_TEST_CASE(http_rejects_bidirectional_and_client_stream_body_mappings)
       forge::asio::blocking::run(
          runtime, forge::api::http::remote<conflicting_api>(client)),
       forge::net::http::exceptions::bad_request);
+}
+
+BOOST_AUTO_TEST_CASE(http_rejects_stream_route_with_incompatible_descriptor) {
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .route<&live_api::download, std::tuple<std::string, std::uint32_t>, void>(
+                          forge::api::http::route{
+                              .verb = forge::net::http::method::get,
+                              .method_name = "upload",
+                              .target = "/mismatched/live/:ref?count={count}",
+                          })
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
+}
+
+BOOST_AUTO_TEST_CASE(http_rejects_same_kind_stream_route_with_incompatible_item_descriptor) {
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .route<&live_api::download, std::tuple<std::string, std::uint32_t>, void>(
+                          forge::api::http::route{
+                              .verb = forge::net::http::method::get,
+                              .method_name = "download_totals",
+                              .target = "/mismatched/live-items/:ref?count={count}",
+                          })
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::api::core::exceptions::protocol_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
