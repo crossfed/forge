@@ -17,6 +17,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/describe.hpp>
+#include <boost/scope/scope_exit.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
 #include <forge/api/core/macros.hpp>
@@ -4050,6 +4051,11 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_rejected_retirement_drains_on_shutdown_without
 }
 
 BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during_shutdown) {
+   struct retirement_blocker_state {
+      forge::asio::notification started;
+      forge::asio::notification release;
+   };
+
    auto barrier = std::make_shared<forge::tests::plugins::resolver_publish_barrier>();
    auto app = forge::tests::plugins::resolver_publication_race_application{
       barrier,
@@ -4065,24 +4071,26 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during
    auto resolver = app.apis().get<forge::plugins::p2p::resolver::api>(
        {.id = {"forge.plugins.p2p.resolver"}, .major = 2, .min_revision = 0});
 
-   auto blocker_started = forge::asio::notification{};
-   auto release_blocker = forge::asio::notification{};
-   const auto blocker_started_epoch = blocker_started.epoch();
+   auto blocker_state = std::make_shared<retirement_blocker_state>();
+   [[maybe_unused]] auto release_on_exit =
+       boost::scope::scope_exit{[state = blocker_state] { state->release.notify(); }};
+   const auto blocker_started_epoch = blocker_state->started.epoch();
    auto blocker = app.scheduler().submit(forge::asio::task::awaitable{
        .priority = forge::asio::task::priority{100},
        .name = "resolver-retirement-blocker",
        .work =
-           [&blocker_started, &release_blocker](forge::asio::task::context&) -> boost::asio::awaitable<void> {
-              const auto release_epoch = release_blocker.epoch();
-              blocker_started.notify();
-              co_await release_blocker.async_wait(release_epoch);
+           [state = blocker_state](forge::asio::task::context&) -> boost::asio::awaitable<void> {
+              const auto release_epoch = state->release.epoch();
+              state->started.notify();
+              co_await state->release.async_wait(release_epoch);
               co_return;
            },
    });
    BOOST_REQUIRE(blocker.accepted());
    auto blocker_entered = boost::asio::co_spawn(
       app.runtime().context(),
-      blocker_started.async_wait_until(blocker_started_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
+      blocker_state->started.async_wait_until(
+          blocker_started_epoch, std::chrono::steady_clock::now() + std::chrono::seconds{2}),
       boost::asio::use_future);
    BOOST_REQUIRE(blocker_entered.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
    BOOST_REQUIRE(blocker_entered.get() != blocker_started_epoch);
@@ -4100,7 +4108,7 @@ BOOST_AUTO_TEST_CASE(p2p_resolver_canceled_accepted_retirement_falls_back_during
    BOOST_TEST(canceled.stopped);
    BOOST_TEST(canceled.pending == 0U);
    BOOST_TEST(canceled.canceled >= 1U);
-   release_blocker.notify();
+   blocker_state->release.notify();
    BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), blocker.wait()));
 
    BOOST_CHECK_NO_THROW(forge::asio::blocking::run(app.runtime(), app.shutdown()));
