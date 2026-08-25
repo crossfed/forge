@@ -67,13 +67,13 @@ void validate_live_stream_headers(const forge::net::http::request& request,
                                   forge::api::core::method_kind kind);
 
 boost::asio::awaitable<forge::net::http::stream_response>
-make_live_server_stream_response(forge::api::core::binding_plan plan,
+make_live_server_stream_response(forge::api::core::pinned_binding_plan plan,
                                  forge::api::core::frame request,
                                  forge::net::http::stream_request& http_request,
                                  forge::net::http::status success_status);
 
 boost::asio::awaitable<forge::api::core::frame>
-dispatch_live_client_stream(forge::api::core::binding_plan plan,
+dispatch_live_client_stream(forge::api::core::pinned_binding_plan plan,
                             forge::api::core::frame request,
                             forge::net::http::body_reader body,
                             std::function<void(const forge::api::core::bytes&,
@@ -1715,7 +1715,7 @@ class binding_builder {
    }
 
    template <typename Interface, typename Request>
-   [[nodiscard]] static forge::api::core::bytes validate_local_request(const forge::api::core::binding_plan& plan,
+   [[nodiscard]] static forge::api::core::bytes validate_local_request(const forge::api::core::pinned_binding_plan& plan,
                                                                        std::string_view name, const Request& request) {
       const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
@@ -1738,7 +1738,7 @@ class binding_builder {
    }
 
    template <typename Interface, typename Response>
-   static void validate_local_response(const forge::api::core::binding_plan& plan, std::string_view name,
+   static void validate_local_response(const forge::api::core::pinned_binding_plan& plan, std::string_view name,
                                        const forge::api::core::bytes& request, const Response& response) {
       const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
@@ -1753,7 +1753,7 @@ class binding_builder {
    }
 
    template <auto Method, typename Interface, typename Request, typename Response>
-   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::binding_plan& plan,
+   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::pinned_binding_plan& plan,
                                                         std::string_view name,
                                                         const forge::api::core::method_descriptor& canonical_method,
                                                         Request request) {
@@ -1774,7 +1774,7 @@ class binding_builder {
    }
 
    template <auto Method, typename Interface, typename Request, typename Tuple, typename Response>
-   static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::binding_plan& plan,
+   static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::pinned_binding_plan& plan,
                                                                   std::string_view name,
                                                                   const forge::api::core::method_descriptor& canonical_method,
                                                                   Tuple arguments) {

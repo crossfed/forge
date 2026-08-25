@@ -116,14 +116,18 @@ session::impl::impl(forge::net::transport::stream stream_value, options settings
 session::impl::impl(forge::net::transport::stream stream_value, forge::api::core::binding_plan plan_value,
                     options settings_value, forge::api::core::dispatch_options dispatch_options,
                     std::optional<forge::api::core::trusted_invocation> trusted)
-    : stream{std::move(stream_value)}, settings{std::move(settings_value)}, plan{std::move(plan_value)},
-      dispatch_settings{std::move(dispatch_options)}, trusted{std::move(trusted)} {
+    : stream{std::move(stream_value)}, settings{std::move(settings_value)}, plan{std::move(plan_value)} {
    validate_options();
    next_call_id = std::uint64_t{1} << 63U;
    next_remote_call_id = 1;
-   dispatch_settings.codec = settings.codec;
-   dispatch_settings.max_inflight = settings.max_inflight;
-   dispatch_settings.deadline = settings.deadline;
+   dispatch_options.codec = settings.codec;
+   dispatch_options.max_inflight = settings.max_inflight;
+   dispatch_options.deadline = settings.deadline;
+   if (trusted) {
+      dispatcher.emplace(*plan, std::move(dispatch_options), std::move(*trusted));
+   } else {
+      dispatcher.emplace(*plan, std::move(dispatch_options));
+   }
 }
 
 bool session::impl::valid() const noexcept {

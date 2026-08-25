@@ -41,7 +41,7 @@ namespace forge::api::http::detail {
 
 server_stream_state::server_stream_state(
    boost::asio::any_io_executor executor,
-   forge::api::core::binding_plan plan,
+   forge::api::core::pinned_binding_plan plan,
    forge::api::core::frame request,
    std::uint32_t max_frame_bytes,
    std::uint32_t max_item_bytes,

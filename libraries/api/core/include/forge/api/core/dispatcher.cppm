@@ -33,9 +33,13 @@ class frame_dispatcher {
    frame_dispatcher& operator=(const frame_dispatcher&) = delete;
 
    boost::asio::awaitable<frame> dispatch(frame value);
+   boost::asio::awaitable<frame> dispatch(frame value, pinned_binding_plan selected);
    boost::asio::awaitable<frame>
    dispatch_stream(frame value, std::shared_ptr<detail::stream_endpoint> input,
                    std::shared_ptr<detail::stream_endpoint> output);
+   boost::asio::awaitable<frame>
+   dispatch_stream(frame value, std::shared_ptr<detail::stream_endpoint> input,
+                   std::shared_ptr<detail::stream_endpoint> output, pinned_binding_plan selected);
 
    [[nodiscard]] const dispatch_options& options() const noexcept;
 

@@ -470,6 +470,7 @@ static_assert(std::same_as<decltype(&forge::api::core::registry::dispatch_stream
 static_assert(std::same_as<decltype(&forge::api::core::binding_plan::dispatch), binding_dispatch_pointer>);
 static_assert(
    std::same_as<decltype(&forge::api::core::binding_plan::dispatch_stream), binding_dispatch_stream_pointer>);
+static_assert(std::is_aggregate_v<forge::api::core::binding_plan>);
 static_assert(std::move_constructible<forge::api::core::contextual_handler_gate>);
 static_assert(!std::copy_constructible<forge::api::core::contextual_handler_gate>);
 
@@ -1491,6 +1492,19 @@ BOOST_AUTO_TEST_CASE(binding_plan_dispatches_positional_method) {
 
    BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "left:right");
+}
+
+BOOST_AUTO_TEST_CASE(binding_plan_retains_four_field_aggregate_construction) {
+   const auto plan = forge::api::core::binding_plan{
+       nullptr,
+       std::vector<forge::api::core::descriptor>{},
+       std::vector<forge::api::core::api_ref>{},
+       std::vector<forge::api::core::interceptor_step>{},
+   };
+   BOOST_TEST(plan.local == nullptr);
+   BOOST_TEST(plan.exports.empty());
+   BOOST_TEST(plan.peer_requirements.empty());
+   BOOST_TEST(plan.interceptors.empty());
 }
 
 BOOST_AUTO_TEST_CASE(binding_plan_pins_in_flight_generation_when_interceptor_clears_registry) {

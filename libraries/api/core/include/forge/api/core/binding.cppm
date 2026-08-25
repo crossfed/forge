@@ -7,7 +7,6 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <string>
 #include <typeinfo>
 #include <utility>
@@ -53,26 +52,43 @@ class interceptor_builder {
 
 [[nodiscard]] interceptor_builder interceptor();
 
+class pinned_binding_plan;
+
 struct binding_plan {
    const registry* local = nullptr;
    std::vector<descriptor> exports;
    std::vector<api_ref> peer_requirements;
    std::vector<interceptor_step> interceptors;
 
-   [[nodiscard]] binding_plan pin(api_ref requested) const;
+   [[nodiscard]] pinned_binding_plan pin(api_ref requested) const;
+   [[nodiscard]] const descriptor* describe(api_ref requested) const;
+
+   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const;
+
+   boost::asio::awaitable<frame> dispatch(frame request) const;
+   boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream(frame request,
+                   std::shared_ptr<detail::stream_endpoint> input,
+                   std::shared_ptr<detail::stream_endpoint> output) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request,
+                              std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted) const;
+};
+
+class pinned_binding_plan {
+ public:
    [[nodiscard]] const descriptor* describe(api_ref requested) const noexcept;
 
    template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const {
       static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
-      if (local == nullptr) {
-         throw exceptions::protocol_error{"API binding plan has no local registry"};
-      }
-      auto selected = selected_generation(requested);
-      const auto* selected_descriptor = selected.describe();
-      if (selected_descriptor == nullptr || !compatible(*selected_descriptor, requested)) {
+      const auto* selected_descriptor = describe(requested);
+      if (selected_descriptor == nullptr) {
          throw exceptions::protocol_error{"required API is not available"};
       }
-      return selected.get<Interface>();
+      return selected_.get<Interface>();
    }
 
    boost::asio::awaitable<frame> dispatch(frame request) const;
@@ -88,10 +104,18 @@ struct binding_plan {
                               trusted_invocation trusted) const;
 
  private:
-   [[nodiscard]] registry::snapshot selected_generation(api_ref requested) const;
+   friend struct binding_plan;
 
-   std::optional<registry::snapshot> pinned_;
+   pinned_binding_plan(binding_plan plan, registry::snapshot selected);
+
+   binding_plan plan_;
+   registry::snapshot selected_;
 };
+
+template <typename Interface> handle<Interface> binding_plan::get(api_ref requested) const {
+   auto selected = pin(requested);
+   return selected.get<Interface>(std::move(requested));
+}
 
 class binding_builder {
  public:

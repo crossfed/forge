@@ -217,6 +217,47 @@ run_terminal_interceptors(const binding_plan& plan, frame& response) {
    response.payload = std::move(context.payload);
 }
 
+boost::asio::awaitable<frame>
+dispatch_selected(binding_plan plan, registry::snapshot selected, frame request,
+                  trusted_invocation trusted) {
+   if (!exports_api(plan, request.api) ||
+       method_hidden_by_export(plan, selected, request.api, request.method)) {
+      co_return make_api_not_exported_response(request);
+   }
+
+   auto before = make_before_interceptor_hook(plan);
+   auto response = co_await selected.dispatch_contextual(
+      std::move(request), std::move(trusted), std::move(before));
+   co_await run_terminal_interceptors(plan, response);
+   co_return response;
+}
+
+boost::asio::awaitable<frame>
+dispatch_stream_selected(binding_plan plan, registry::snapshot selected, frame request,
+                         std::shared_ptr<detail::stream_endpoint> input,
+                         std::shared_ptr<detail::stream_endpoint> output,
+                         trusted_invocation trusted) {
+   if (!exports_api(plan, request.api) ||
+       method_hidden_by_export(plan, selected, request.api, request.method)) {
+      fail_stream_endpoints(input, output);
+      co_return make_api_not_exported_response(request);
+   }
+
+   try {
+      auto before = make_before_interceptor_hook(plan);
+      auto response = co_await selected.dispatch_stream_contextual(
+         std::move(request), input, output, std::move(trusted), std::move(before));
+      co_await run_terminal_interceptors(plan, response);
+      if (response.kind == frame_kind::error) {
+         fail_stream_endpoints(input, output);
+      }
+      co_return response;
+   } catch (...) {
+      fail_stream_endpoints(input, output);
+      throw;
+   }
+}
+
 } // namespace
 
 interceptor_builder& interceptor_builder::id(std::string value) {
@@ -249,68 +290,35 @@ interceptor_builder interceptor() {
    return interceptor_builder{};
 }
 
-binding_plan binding_plan::pin(api_ref requested) const {
+pinned_binding_plan binding_plan::pin(api_ref requested) const {
    if (local == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
-   auto result = *this;
-   if (!result.pinned_) {
-      result.pinned_.emplace(local->pin(std::move(requested)));
-   }
-   return result;
+   return pinned_binding_plan{*this, local->pin(std::move(requested))};
 }
 
-const descriptor* binding_plan::describe(api_ref requested) const noexcept {
-   if (pinned_) {
-      const auto* selected = pinned_->describe();
-      return selected != nullptr && compatible(*selected, requested) ? selected : nullptr;
-   }
+pinned_binding_plan::pinned_binding_plan(binding_plan plan, registry::snapshot selected)
+    : plan_{std::move(plan)}, selected_{std::move(selected)} {}
+
+const descriptor* binding_plan::describe(api_ref requested) const {
    return local == nullptr ? nullptr : local->describe(std::move(requested));
 }
 
-registry::snapshot binding_plan::selected_generation(api_ref requested) const {
-   if (pinned_) {
-      return *pinned_;
-   }
-   return local == nullptr ? registry::snapshot{} : local->pin(std::move(requested));
+const descriptor* pinned_binding_plan::describe(api_ref requested) const noexcept {
+   const auto* selected = selected_.describe();
+   return selected != nullptr && compatible(*selected, requested) ? selected : nullptr;
 }
 
 boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
-   if (local == nullptr) {
-      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
-                            "API binding plan has no local registry");
-   }
-   auto selected = selected_generation(request.api);
-   if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, selected, request.api, request.method)) {
-      co_return make_api_not_exported_response(request);
-   }
-
-   auto before = make_before_interceptor_hook(*this);
-   auto response = co_await selected.dispatch_contextual(
-      std::move(request), trusted_invocation{}, std::move(before));
-   co_await run_terminal_interceptors(*this, response);
-   co_return response;
+   auto selected = pin(request.api);
+   co_return co_await selected.dispatch(std::move(request));
 }
 
 boost::asio::awaitable<frame>
 binding_plan::dispatch_contextual(frame request, trusted_invocation trusted) const {
-   if (local == nullptr) {
-      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
-                            "API binding plan has no local registry");
-   }
-   auto selected = selected_generation(request.api);
-   if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, selected, request.api, request.method)) {
-      co_return make_api_not_exported_response(request);
-   }
-
-   auto before = make_before_interceptor_hook(*this);
-   auto response = co_await selected.dispatch_contextual(
-      std::move(request), std::move(trusted), std::move(before));
-   co_await run_terminal_interceptors(*this, response);
-   co_return response;
+   auto selected = pin(request.api);
+   co_return co_await selected.dispatch_contextual(std::move(request), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
@@ -322,26 +330,8 @@ binding_plan::dispatch_stream(
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
-   auto selected = selected_generation(request.api);
-   if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, selected, request.api, request.method)) {
-      fail_stream_endpoints(input, output);
-      co_return make_api_not_exported_response(request);
-   }
-
-   try {
-      auto before = make_before_interceptor_hook(*this);
-      auto response = co_await selected.dispatch_stream_contextual(
-         std::move(request), input, output, trusted_invocation{}, std::move(before));
-      co_await run_terminal_interceptors(*this, response);
-      if (response.kind == frame_kind::error) {
-         fail_stream_endpoints(input, output);
-      }
-      co_return response;
-   } catch (...) {
-      fail_stream_endpoints(input, output);
-      throw;
-   }
+   auto selected = pin(request.api);
+   co_return co_await selected.dispatch_stream(std::move(request), std::move(input), std::move(output));
 }
 
 boost::asio::awaitable<frame>
@@ -354,26 +344,35 @@ binding_plan::dispatch_stream_contextual(
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
-   auto selected = selected_generation(request.api);
-   if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, selected, request.api, request.method)) {
-      fail_stream_endpoints(input, output);
-      co_return make_api_not_exported_response(request);
-   }
+   auto selected = pin(request.api);
+   co_return co_await selected.dispatch_stream_contextual(
+      std::move(request), std::move(input), std::move(output), std::move(trusted));
+}
 
-   try {
-      auto before = make_before_interceptor_hook(*this);
-      auto response = co_await selected.dispatch_stream_contextual(
-         std::move(request), input, output, std::move(trusted), std::move(before));
-      co_await run_terminal_interceptors(*this, response);
-      if (response.kind == frame_kind::error) {
-         fail_stream_endpoints(input, output);
-      }
-      co_return response;
-   } catch (...) {
-      fail_stream_endpoints(input, output);
-      throw;
-   }
+boost::asio::awaitable<frame> pinned_binding_plan::dispatch(frame request) const {
+   return dispatch_selected(plan_, selected_, std::move(request), trusted_invocation{});
+}
+
+boost::asio::awaitable<frame>
+pinned_binding_plan::dispatch_contextual(frame request, trusted_invocation trusted) const {
+   return dispatch_selected(plan_, selected_, std::move(request), std::move(trusted));
+}
+
+boost::asio::awaitable<frame>
+pinned_binding_plan::dispatch_stream(
+   frame request, std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output) const {
+   return dispatch_stream_selected(
+      plan_, selected_, std::move(request), std::move(input), std::move(output), trusted_invocation{});
+}
+
+boost::asio::awaitable<frame>
+pinned_binding_plan::dispatch_stream_contextual(
+   frame request, std::shared_ptr<detail::stream_endpoint> input,
+   std::shared_ptr<detail::stream_endpoint> output,
+   trusted_invocation trusted) const {
+   return dispatch_stream_selected(
+      plan_, selected_, std::move(request), std::move(input), std::move(output), std::move(trusted));
 }
 
 binding_builder& binding_builder::serve(const registry& apis) {
