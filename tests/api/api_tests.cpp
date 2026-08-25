@@ -1493,6 +1493,113 @@ BOOST_AUTO_TEST_CASE(binding_plan_dispatches_positional_method) {
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "left:right");
 }
 
+BOOST_AUTO_TEST_CASE(binding_plan_pins_in_flight_generation_when_interceptor_clears_registry) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto trusted = std::make_shared<trusted_impl>();
+   registry.install<trusted_api>(trusted_api::describe(), trusted);
+   const auto contextual_plan = forge::api::core::binding()
+                                   .serve(registry)
+                                   .interceptor(
+                                      forge::api::core::interceptor()
+                                         .id("clear-contextual-generation")
+                                         .phase(forge::api::core::interceptor_phase::authorize)
+                                         .handler([&registry](forge::api::core::call_context&)
+                                                     -> boost::asio::awaitable<void> {
+                                            registry.clear();
+                                            co_return;
+                                         })
+                                         .build())
+                                   .build();
+
+   const auto contextual_response = forge::asio::blocking::run(
+      runtime, contextual_plan.dispatch_contextual(
+                   trusted_request_frame("unary", pack_api_payload(spoofed_trusted_request())), trusted_authority()));
+   BOOST_CHECK(contextual_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(contextual_response.payload).bytes == "authenticated");
+   BOOST_TEST(trusted->unary_calls == 1U);
+   BOOST_TEST(registry.size() == 0U);
+
+   auto descriptor = cache_api::describe();
+   auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "read"; });
+   BOOST_REQUIRE(method != descriptor.methods.end());
+   forge::api::core::detail::remove_unary_context(*method);
+   forge::api::core::detail::remove_request_context(*method);
+   registry.install<cache_api>(std::move(descriptor), std::make_shared<cache_impl>());
+   const auto legacy_plan = forge::api::core::binding()
+                                .serve(registry)
+                                .interceptor(
+                                   forge::api::core::interceptor()
+                                      .id("clear-legacy-generation")
+                                      .phase(forge::api::core::interceptor_phase::authorize)
+                                      .handler([&registry](forge::api::core::call_context&)
+                                                  -> boost::asio::awaitable<void> {
+                                         registry.clear();
+                                         co_return;
+                                      })
+                                      .build())
+                                .build();
+   const auto legacy_request = forge::api::core::frame{
+      .kind = forge::api::core::frame_kind::request,
+      .id = {.value = 1'501},
+      .api = cache_api::ref(),
+      .method = "read",
+      .codec = {.value = "forge.raw"},
+      .payload = pack_api_payload(protocol::read_chunk{.ref = "legacy"}),
+   };
+
+   const auto legacy_response = forge::asio::blocking::run(runtime, legacy_plan.dispatch(legacy_request));
+   BOOST_CHECK(legacy_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(legacy_response.payload).bytes == "legacy");
+   BOOST_TEST(registry.size() == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(binding_plan_pin_preserves_generation_across_registry_reinstall) {
+   const auto make_generation_descriptor = [](std::string response) {
+      auto descriptor = cache_api::describe();
+      auto method = std::ranges::find_if(descriptor.methods, [](const auto& value) { return value.name == "read"; });
+      if (method == descriptor.methods.end()) {
+         throw forge::api::core::exceptions::protocol_error{"cache read method is unavailable"};
+      }
+      forge::api::core::detail::remove_unary_context(*method);
+      forge::api::core::detail::remove_request_context(*method);
+      method->raw_invoker = [response = std::move(response)](std::shared_ptr<void>, forge::api::core::bytes)
+         -> boost::asio::awaitable<forge::api::core::bytes> {
+         co_return forge::api::core::pack_body(protocol::chunk{.bytes = response});
+      };
+      return descriptor;
+   };
+   const auto make_request = [] {
+      return forge::api::core::frame{
+         .kind = forge::api::core::frame_kind::request,
+         .id = {.value = 1'502},
+         .api = cache_api::ref(),
+         .method = "read",
+         .codec = {.value = "forge.raw"},
+         .payload = pack_api_payload(protocol::read_chunk{.ref = "generation"}),
+      };
+   };
+
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   registry.install<cache_api>(make_generation_descriptor("first"), std::make_shared<cache_impl>());
+   const auto plan = forge::api::core::binding().serve(registry).build();
+   const auto pinned = plan.pin(cache_api::ref());
+   BOOST_REQUIRE(pinned.describe(cache_api::ref()) != nullptr);
+   BOOST_REQUIRE(static_cast<bool>(pinned.get<cache_api>(cache_api::ref())));
+
+   registry.clear();
+   registry.install<cache_api>(make_generation_descriptor("replacement"), std::make_shared<cache_impl>());
+
+   const auto pinned_response = forge::asio::blocking::run(runtime, pinned.dispatch(make_request()));
+   BOOST_CHECK(pinned_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(pinned_response.payload).bytes == "first");
+
+   const auto unpinned_response = forge::asio::blocking::run(runtime, plan.dispatch(make_request()));
+   BOOST_CHECK(unpinned_response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(unpinned_response.payload).bytes == "replacement");
+}
+
 BOOST_AUTO_TEST_CASE(binding_plan_interceptor_sees_request_payload) {
    auto runtime = forge::asio::runtime{};
    auto registry = forge::api::core::registry{};
@@ -2336,6 +2443,75 @@ BOOST_AUTO_TEST_CASE(remote_invoker_rejects_mismatched_descriptor_types_before_e
                       singleton_descriptor, cache_api::ref(), "read", protocol::read_chunk{})),
       forge::api::core::exceptions::protocol_error);
    BOOST_TEST(singleton_typed->typed_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(remote_stream_proxy_rejects_mismatched_descriptor_types_before_encoding) {
+   const auto install_counting_request_context = [](auto& method,
+                                                     std::size_t& resets,
+                                                     std::size_t& encodes) {
+      auto fields = forge::api::core::detail::server_field_operations{
+         .reset_wire = [&resets](void*) { ++resets; },
+      };
+      forge::api::core::detail::install_request_context(
+         method, fields, [reset = fields.reset_wire, &encodes](void* request) {
+            reset(request);
+            ++encodes;
+            return forge::api::core::bytes{};
+         });
+   };
+
+   auto server_descriptor = trusted_api::describe();
+   auto server = std::ranges::find_if(server_descriptor.methods,
+                                      [](const auto& method) { return method.name == "server_stream"; });
+   BOOST_REQUIRE(server != server_descriptor.methods.end());
+   std::size_t server_resets{};
+   std::size_t server_encodes{};
+   install_counting_request_context(*server, server_resets, server_encodes);
+   server->request_type = typeid(protocol::chunk);
+   auto server_arguments = std::tuple{trusted_protocol::request{}};
+   const auto encode_server = [&] {
+      static_cast<void>(forge::api::core::detail::encode_fixed_proxy_arguments<
+         &trusted_api::server_stream>(*server, server_arguments, std::make_index_sequence<1>{}));
+   };
+   BOOST_CHECK_THROW(encode_server(), forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(server_resets == 0U);
+   BOOST_TEST(server_encodes == 0U);
+
+   auto client_descriptor = trusted_api::describe();
+   auto client = std::ranges::find_if(client_descriptor.methods,
+                                      [](const auto& method) { return method.name == "client_stream"; });
+   BOOST_REQUIRE(client != client_descriptor.methods.end());
+   std::size_t client_resets{};
+   std::size_t client_encodes{};
+   install_counting_request_context(*client, client_resets, client_encodes);
+   client->fixed_arguments_type = typeid(trusted_protocol::request);
+   auto client_arguments = std::tuple{trusted_protocol::request{}};
+   const auto encode_client = [&] {
+      static_cast<void>(forge::api::core::detail::encode_fixed_proxy_arguments<
+         &trusted_api::client_stream>(*client, client_arguments, std::make_index_sequence<1>{}));
+   };
+   BOOST_CHECK_THROW(encode_client(), forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(client_resets == 0U);
+   BOOST_TEST(client_encodes == 0U);
+
+   auto bidirectional_descriptor = trusted_api::describe();
+   auto bidirectional = std::ranges::find_if(bidirectional_descriptor.methods, [](const auto& method) {
+      return method.name == "bidirectional_stream";
+   });
+   BOOST_REQUIRE(bidirectional != bidirectional_descriptor.methods.end());
+   std::size_t bidirectional_resets{};
+   std::size_t bidirectional_encodes{};
+   install_counting_request_context(*bidirectional, bidirectional_resets, bidirectional_encodes);
+   bidirectional->fixed_arguments_type = typeid(protocol::chunk);
+   auto bidirectional_arguments = std::tuple{trusted_protocol::request{}};
+   const auto encode_bidirectional = [&] {
+      static_cast<void>(forge::api::core::detail::encode_fixed_proxy_arguments<
+         &trusted_api::bidirectional_stream>(
+         *bidirectional, bidirectional_arguments, std::make_index_sequence<1>{}));
+   };
+   BOOST_CHECK_THROW(encode_bidirectional(), forge::api::core::exceptions::protocol_error);
+   BOOST_TEST(bidirectional_resets == 0U);
+   BOOST_TEST(bidirectional_encodes == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(remote_proxy_encodes_move_only_unary_and_stream_fixed_arguments) {

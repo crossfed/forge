@@ -868,6 +868,85 @@ BOOST_AUTO_TEST_CASE(contextual_stream_admission_decodes_once_and_allows_same_se
    forge::asio::blocking::run(runtime, scenario());
 }
 
+BOOST_AUTO_TEST_CASE(stream_session_keeps_admitted_generation_for_decoder_and_handler) {
+   auto runtime = forge::asio::runtime{};
+   auto scenario = []() -> boost::asio::awaitable<void> {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto registry = forge::api::core::registry{};
+      const auto old_decodes = std::make_shared<std::atomic_uint32_t>(0U);
+      const auto replaced = std::make_shared<std::atomic_bool>(false);
+      auto original = std::make_shared<live_impl>();
+      auto replacement = std::make_shared<live_impl>();
+      auto replacement_descriptor = std::make_shared<forge::api::core::descriptor>(live_api::describe());
+      auto replacement_method = std::find_if(replacement_descriptor->methods.begin(), replacement_descriptor->methods.end(),
+                                             [](const auto& value) { return value.name == "download"; });
+      BOOST_REQUIRE(replacement_method != replacement_descriptor->methods.end());
+      forge::api::core::detail::remove_stream_context(*replacement_method);
+      forge::api::core::detail::remove_request_context(*replacement_method);
+
+      auto original_descriptor = live_api::describe();
+      auto original_method = std::find_if(original_descriptor.methods.begin(), original_descriptor.methods.end(),
+                                          [](const auto& value) { return value.name == "download"; });
+      BOOST_REQUIRE(original_method != original_descriptor.methods.end());
+      forge::api::core::detail::remove_stream_context(*original_method);
+      forge::api::core::detail::remove_request_context(*original_method);
+      const auto original_request_decoder = original_method->request_decoder;
+      original_method->request_decoder = [old_decodes, replaced, &registry, replacement_descriptor,
+                                          replacement, original_request_decoder](const bytes& payload,
+                                                                                forge::raw::unpack_limits limits) {
+         original_request_decoder(payload, limits);
+         old_decodes->fetch_add(1, std::memory_order_release);
+         if (!replaced->exchange(true, std::memory_order_acq_rel)) {
+            registry.clear();
+            registry.install<live_api>(*replacement_descriptor, replacement);
+         }
+      };
+      registry.install<live_api>(std::move(original_descriptor), original);
+
+      auto client_model = std::make_shared<fake_stream>();
+      auto server_model = std::make_shared<fake_stream>();
+      auto [client_stream, server_stream] = make_stream_pair(client_model, server_model);
+      auto service = start_service(
+         executor, forge::api::transport::serve_stream(std::move(server_stream),
+                                                       forge::api::core::binding().serve(registry).build()));
+      auto client = forge::api::stream::session{std::move(client_stream)};
+      auto output = forge::api::core::detail::make_local_stream_pair(executor, 4096, 2, 8192);
+      auto result = std::make_shared<std::optional<forge::api::core::frame>>();
+      const auto run_call =
+         [](forge::api::stream::session& session,
+            std::shared_ptr<forge::api::core::detail::stream_endpoint> stream_output,
+            std::shared_ptr<std::optional<forge::api::core::frame>> call_result)
+         -> boost::asio::awaitable<void> {
+            *call_result = co_await session.async_stream_call(
+               forge::api::core::frame{
+                   .kind = forge::api::core::frame_kind::request,
+                   .api = live_api::ref(),
+                   .method = "download",
+                   .codec = {.value = "forge.raw"},
+                   .payload = forge::raw::pack(std::uint32_t{1}),
+               },
+               forge::api::core::method_kind::server_stream, {}, std::move(stream_output));
+         };
+      auto call = start_service(executor, run_call(client, output.writer, result));
+
+      const auto item = co_await output.reader->async_read();
+      BOOST_REQUIRE(item.has_value());
+      BOOST_TEST(forge::api::core::unpack_body<transport_live_types::item>(*item).value == 1U);
+      BOOST_TEST(!(co_await output.reader->async_read()).has_value());
+      co_await wait_service(call);
+      BOOST_REQUIRE(result->has_value());
+      BOOST_TEST(static_cast<int>(result->value().kind) == static_cast<int>(forge::api::core::frame_kind::response));
+      BOOST_TEST(old_decodes->load(std::memory_order_acquire) == 1U);
+      BOOST_TEST(replaced->load(std::memory_order_acquire));
+      BOOST_TEST(original->download_calls.load(std::memory_order_acquire) == 1U);
+      BOOST_TEST(replacement->download_calls.load(std::memory_order_acquire) == 0U);
+
+      co_await client.async_close();
+      co_await wait_service(service);
+   };
+   forge::asio::blocking::run(runtime, scenario());
+}
+
 BOOST_AUTO_TEST_CASE(duplex_data_progresses_under_continuous_window_updates) {
    auto runtime = forge::asio::runtime{};
    auto scenario = []() -> boost::asio::awaitable<void> {

@@ -7,6 +7,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <typeinfo>
 #include <utility>
@@ -58,6 +59,22 @@ struct binding_plan {
    std::vector<api_ref> peer_requirements;
    std::vector<interceptor_step> interceptors;
 
+   [[nodiscard]] binding_plan pin(api_ref requested) const;
+   [[nodiscard]] const descriptor* describe(api_ref requested) const noexcept;
+
+   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const {
+      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+      if (local == nullptr) {
+         throw exceptions::protocol_error{"API binding plan has no local registry"};
+      }
+      auto selected = selected_generation(requested);
+      const auto* selected_descriptor = selected.describe();
+      if (selected_descriptor == nullptr || !compatible(*selected_descriptor, requested)) {
+         throw exceptions::protocol_error{"required API is not available"};
+      }
+      return selected.get<Interface>();
+   }
+
    boost::asio::awaitable<frame> dispatch(frame request) const;
    boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
    boost::asio::awaitable<frame>
@@ -69,6 +86,11 @@ struct binding_plan {
                               std::shared_ptr<detail::stream_endpoint> input,
                               std::shared_ptr<detail::stream_endpoint> output,
                               trusted_invocation trusted) const;
+
+ private:
+   [[nodiscard]] registry::snapshot selected_generation(api_ref requested) const;
+
+   std::optional<registry::snapshot> pinned_;
 };
 
 class binding_builder {

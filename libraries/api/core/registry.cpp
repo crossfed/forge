@@ -5,6 +5,7 @@ module;
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -96,28 +97,50 @@ void fail_stream_endpoints(
 registry::registry() = default;
 registry::~registry() = default;
 
-const descriptor* registry::describe(api_ref requested) const noexcept {
-   const auto* entry = find(std::move(requested));
-   return entry == nullptr ? nullptr : &entry->descriptor;
+const descriptor* registry::describe(api_ref requested) const {
+   return pin(std::move(requested)).describe();
+}
+
+registry::snapshot registry::pin(api_ref requested) const {
+   return snapshot{find(std::move(requested))};
 }
 
 boost::asio::awaitable<frame> registry::dispatch(frame request) const {
-   co_return co_await dispatch_contextual(std::move(request), trusted_invocation{});
+   auto selected = pin(request.api);
+   return selected.dispatch_contextual(std::move(request), trusted_invocation{});
 }
 
 boost::asio::awaitable<frame>
 registry::dispatch_contextual(frame request, trusted_invocation trusted) const {
-   return dispatch_contextual(std::move(request), std::move(trusted), {});
+   auto selected = pin(request.api);
+   return selected.dispatch_contextual(std::move(request), std::move(trusted));
 }
 
 boost::asio::awaitable<frame>
 registry::dispatch_contextual(frame request, trusted_invocation trusted, contextual_dispatch_hook before) const {
+   auto selected = pin(request.api);
+   return selected.dispatch_contextual(std::move(request), std::move(trusted), std::move(before));
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_contextual(frame request, trusted_invocation trusted) const {
+   return dispatch_contextual_entry(entry_, std::move(request), std::move(trusted), {});
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_contextual(frame request, trusted_invocation trusted,
+                                        contextual_dispatch_hook before) const {
+   return dispatch_contextual_entry(entry_, std::move(request), std::move(trusted), std::move(before));
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_contextual_entry(std::shared_ptr<const registry::entry> entry, frame request,
+                                              trusted_invocation trusted, contextual_dispatch_hook before) {
    if (request.kind != frame_kind::request) {
       co_return make_protocol_error(request, "API dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
    }
-   const auto* entry = find(request.api);
-   if (entry == nullptr) {
+   if (entry == nullptr || !compatible(entry->descriptor, request.api)) {
       co_return make_unavailable_response(request);
    }
    if (!supports(entry->descriptor.supported_surfaces, surface::remote)) {
@@ -181,7 +204,8 @@ registry::dispatch_contextual(frame request, trusted_invocation trusted, context
 
 boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                                         std::shared_ptr<detail::stream_endpoint> output) const {
-   co_return co_await dispatch_stream_contextual(
+   auto selected = pin(request.api);
+   return selected.dispatch_stream_contextual(
       std::move(request), std::move(input), std::move(output), trusted_invocation{});
 }
 
@@ -189,7 +213,8 @@ boost::asio::awaitable<frame>
 registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                      std::shared_ptr<detail::stream_endpoint> output,
                                      trusted_invocation trusted) const {
-   return dispatch_stream_contextual(
+   auto selected = pin(request.api);
+   return selected.dispatch_stream_contextual(
       std::move(request), std::move(input), std::move(output), std::move(trusted), {});
 }
 
@@ -197,13 +222,38 @@ boost::asio::awaitable<frame>
 registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                      std::shared_ptr<detail::stream_endpoint> output,
                                      trusted_invocation trusted, contextual_dispatch_hook before) const {
+   auto selected = pin(request.api);
+   return selected.dispatch_stream_contextual(
+      std::move(request), std::move(input), std::move(output), std::move(trusted), std::move(before));
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                                               std::shared_ptr<detail::stream_endpoint> output,
+                                               trusted_invocation trusted) const {
+   return dispatch_stream_contextual_entry(
+      entry_, std::move(request), std::move(input), std::move(output), std::move(trusted), {});
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                                               std::shared_ptr<detail::stream_endpoint> output,
+                                               trusted_invocation trusted, contextual_dispatch_hook before) const {
+   return dispatch_stream_contextual_entry(
+      entry_, std::move(request), std::move(input), std::move(output), std::move(trusted), std::move(before));
+}
+
+boost::asio::awaitable<frame>
+registry::snapshot::dispatch_stream_contextual_entry(std::shared_ptr<const registry::entry> entry, frame request,
+                                                     std::shared_ptr<detail::stream_endpoint> input,
+                                                     std::shared_ptr<detail::stream_endpoint> output,
+                                                     trusted_invocation trusted, contextual_dispatch_hook before) {
    if (request.kind != frame_kind::request) {
       fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
    }
-   const auto* entry = find(request.api);
-   if (entry == nullptr) {
+   if (entry == nullptr || !compatible(entry->descriptor, request.api)) {
       fail_stream_endpoints(input, output);
       co_return make_unavailable_response(request);
    }
@@ -283,12 +333,17 @@ registry::dispatch_stream_contextual(frame request, std::shared_ptr<detail::stre
    }
 }
 
-std::size_t registry::size() const noexcept {
+std::size_t registry::size() const {
+   std::scoped_lock lock{entries_mutex_};
    return entries_.size();
 }
 
-void registry::clear() noexcept {
-   entries_.clear();
+void registry::clear() {
+   decltype(entries_) removed;
+   {
+      std::scoped_lock lock{entries_mutex_};
+      removed.swap(entries_);
+   }
 }
 
 void registry::register_api(descriptor value, std::shared_ptr<void> implementation, std::type_index type) {
@@ -299,10 +354,13 @@ void registry::register_api(descriptor value, std::shared_ptr<void> implementati
       value.interface_type = type;
    }
    const auto key = key_for(value.id.value, value.version.major);
+   auto entry = std::make_shared<const registry::entry>(
+      registry::entry{std::move(value), std::move(implementation), type});
+   std::scoped_lock lock{entries_mutex_};
    if (entries_.contains(key)) {
       throw exceptions::protocol_error{"duplicate API implementation"};
    }
-   entries_.emplace(key, entry{std::move(value), std::move(implementation), type});
+   entries_.emplace(key, std::move(entry));
 }
 
 std::string registry::key_for(std::string_view id, std::uint16_t major) {
@@ -311,15 +369,17 @@ std::string registry::key_for(std::string_view id, std::uint16_t major) {
    return out.str();
 }
 
-const registry::entry* registry::find(api_ref requested) const noexcept {
-   const auto iterator = entries_.find(key_for(requested.id.value, requested.major));
+std::shared_ptr<const registry::entry> registry::find(api_ref requested) const {
+   const auto key = key_for(requested.id.value, requested.major);
+   std::scoped_lock lock{entries_mutex_};
+   const auto iterator = entries_.find(key);
    if (iterator == entries_.end()) {
-      return nullptr;
+      return {};
    }
-   if (!compatible(iterator->second.descriptor, requested)) {
-      return nullptr;
+   if (!compatible(iterator->second->descriptor, requested)) {
+      return {};
    }
-   return &iterator->second;
+   return iterator->second;
 }
 
 } // namespace forge::api::core

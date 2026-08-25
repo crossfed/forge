@@ -88,31 +88,22 @@ constexpr auto call_id_side_bit = std::uint64_t{1} << 63U;
 
 } // namespace
 
-forge::api::core::method_kind session::impl::method_kind_for(const forge::api::core::frame& request) const {
-   if (!plan || plan->local == nullptr) {
-      return forge::api::core::method_kind::unary;
-   }
-   const auto* descriptor = plan->local->describe(request.api);
-   if (descriptor == nullptr) {
-      return forge::api::core::method_kind::unary;
-   }
-   const auto* method = forge::api::core::find_method(*descriptor, request.method);
-   return method == nullptr ? forge::api::core::method_kind::unary : method->kind;
-}
-
 std::shared_ptr<session::impl::call_state> session::impl::make_remote_call(const forge::api::core::frame& request,
-                                                                           forge::api::core::method_kind kind) {
+                                                                           forge::api::core::method_kind kind,
+                                                                           const forge::api::core::method_descriptor* descriptor,
+                                                                           forge::api::core::binding_plan plan) {
    auto call = std::make_shared<call_state>(*strand, request.id, kind, false);
    call->api = request.api;
    call->method = request.method;
    call->codec = request.codec;
    call->admission_order = next_admission_order++;
-   if (plan && plan->local != nullptr) {
-      if (const auto* api = plan->local->describe(request.api)) {
-         if (const auto* descriptor = forge::api::core::find_method(*api, request.method)) {
-            call->descriptor = *descriptor;
-         }
-      }
+   if (descriptor != nullptr) {
+      call->descriptor = *descriptor;
+   }
+   if (trusted) {
+      call->dispatcher.emplace(std::move(plan), dispatch_settings, *trusted);
+   } else {
+      call->dispatcher.emplace(std::move(plan), dispatch_settings);
    }
    const auto per_call_bytes = static_cast<std::size_t>(negotiated_limits.max_buffered_bytes);
    const auto make_pipe = [&] {
@@ -512,12 +503,17 @@ boost::asio::awaitable<void> session::impl::run_remote_call(forge::api::core::fr
                                                             const std::shared_ptr<call_state>& call) {
    try {
       auto response = forge::api::core::frame{};
+      if (!call->dispatcher) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "API stream call has no pinned dispatcher");
+      }
       if (call->kind == forge::api::core::method_kind::unary) {
-         response = co_await dispatcher->dispatch(std::move(request));
+         response = co_await call->dispatcher->dispatch(std::move(request));
       } else {
          response =
-             co_await dispatcher->dispatch_stream(std::move(request), call->inbound ? call->inbound->endpoint : nullptr,
-                                                  call->outbound ? call->outbound->endpoint : nullptr);
+             co_await call->dispatcher->dispatch_stream(std::move(request),
+                                                         call->inbound ? call->inbound->endpoint : nullptr,
+                                                         call->outbound ? call->outbound->endpoint : nullptr);
       }
       discard_inbound(call);
       if (call->outbound) {
@@ -819,8 +815,8 @@ void session::impl::replenish_inbound_credit() {
 }
 
 boost::asio::awaitable<void> session::impl::async_serve_on_strand() {
-   if (!dispatcher) {
-      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "API stream session has no dispatcher");
+   if (!plan) {
+      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "API stream session has no binding plan");
    }
    co_await ensure_handshake_on_strand();
    while (!closed.load(std::memory_order_acquire)) {

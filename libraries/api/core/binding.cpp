@@ -87,11 +87,16 @@ find_export(const std::vector<descriptor>& exports,
 }
 
 [[nodiscard]] bool method_hidden_by_export(const binding_plan& plan,
+                                           const registry::snapshot& selected,
                                            api_ref requested,
                                            std::string_view method) noexcept {
+   const auto* local_descriptor = selected.describe();
+   if (local_descriptor != nullptr && !compatible(*local_descriptor, requested)) {
+      local_descriptor = nullptr;
+   }
    const auto* exported =
       plan.exports.empty()
-         ? (plan.local == nullptr ? nullptr : plan.local->describe(requested))
+         ? local_descriptor
          : find_export(plan.exports, requested);
    if (exported == nullptr) {
       return false;
@@ -99,12 +104,10 @@ find_export(const std::vector<descriptor>& exports,
    if (const auto* exported_method = find_method(*exported, method)) {
       return exported_method->since_revision > requested.min_revision;
    }
-   if (plan.exports.empty() || plan.local == nullptr) {
+   if (plan.exports.empty() || local_descriptor == nullptr) {
       return false;
    }
-   const auto* local_descriptor = plan.local->describe(std::move(requested));
-   return local_descriptor != nullptr &&
-          find_method(*local_descriptor, method) != nullptr;
+   return find_method(*local_descriptor, method) != nullptr;
 }
 
 void sort_interceptors(std::vector<interceptor_step>& interceptors) {
@@ -246,18 +249,46 @@ interceptor_builder interceptor() {
    return interceptor_builder{};
 }
 
+binding_plan binding_plan::pin(api_ref requested) const {
+   if (local == nullptr) {
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                            "API binding plan has no local registry");
+   }
+   auto result = *this;
+   if (!result.pinned_) {
+      result.pinned_.emplace(local->pin(std::move(requested)));
+   }
+   return result;
+}
+
+const descriptor* binding_plan::describe(api_ref requested) const noexcept {
+   if (pinned_) {
+      const auto* selected = pinned_->describe();
+      return selected != nullptr && compatible(*selected, requested) ? selected : nullptr;
+   }
+   return local == nullptr ? nullptr : local->describe(std::move(requested));
+}
+
+registry::snapshot binding_plan::selected_generation(api_ref requested) const {
+   if (pinned_) {
+      return *pinned_;
+   }
+   return local == nullptr ? registry::snapshot{} : local->pin(std::move(requested));
+}
+
 boost::asio::awaitable<frame> binding_plan::dispatch(frame request) const {
    if (local == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
+   auto selected = selected_generation(request.api);
    if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, request.api, request.method)) {
+       method_hidden_by_export(*this, selected, request.api, request.method)) {
       co_return make_api_not_exported_response(request);
    }
 
    auto before = make_before_interceptor_hook(*this);
-   auto response = co_await local->dispatch_contextual(
+   auto response = co_await selected.dispatch_contextual(
       std::move(request), trusted_invocation{}, std::move(before));
    co_await run_terminal_interceptors(*this, response);
    co_return response;
@@ -269,13 +300,14 @@ binding_plan::dispatch_contextual(frame request, trusted_invocation trusted) con
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
+   auto selected = selected_generation(request.api);
    if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, request.api, request.method)) {
+       method_hidden_by_export(*this, selected, request.api, request.method)) {
       co_return make_api_not_exported_response(request);
    }
 
    auto before = make_before_interceptor_hook(*this);
-   auto response = co_await local->dispatch_contextual(
+   auto response = co_await selected.dispatch_contextual(
       std::move(request), std::move(trusted), std::move(before));
    co_await run_terminal_interceptors(*this, response);
    co_return response;
@@ -290,15 +322,16 @@ binding_plan::dispatch_stream(
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
+   auto selected = selected_generation(request.api);
    if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, request.api, request.method)) {
+       method_hidden_by_export(*this, selected, request.api, request.method)) {
       fail_stream_endpoints(input, output);
       co_return make_api_not_exported_response(request);
    }
 
    try {
       auto before = make_before_interceptor_hook(*this);
-      auto response = co_await local->dispatch_stream_contextual(
+      auto response = co_await selected.dispatch_stream_contextual(
          std::move(request), input, output, trusted_invocation{}, std::move(before));
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {
@@ -321,15 +354,16 @@ binding_plan::dispatch_stream_contextual(
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
+   auto selected = selected_generation(request.api);
    if (!exports_api(*this, request.api) ||
-       method_hidden_by_export(*this, request.api, request.method)) {
+       method_hidden_by_export(*this, selected, request.api, request.method)) {
       fail_stream_endpoints(input, output);
       co_return make_api_not_exported_response(request);
    }
 
    try {
       auto before = make_before_interceptor_hook(*this);
-      auto response = co_await local->dispatch_stream_contextual(
+      auto response = co_await selected.dispatch_stream_contextual(
          std::move(request), input, output, std::move(trusted), std::move(before));
       co_await run_terminal_interceptors(*this, response);
       if (response.kind == frame_kind::error) {

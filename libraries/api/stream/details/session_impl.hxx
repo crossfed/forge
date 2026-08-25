@@ -63,6 +63,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
       std::string method;
       forge::api::core::codec_id codec;
       std::optional<forge::api::core::method_descriptor> descriptor;
+      std::optional<forge::api::core::frame_dispatcher> dispatcher;
       std::uint64_t admission_order = 0;
       bool local_origin = false;
       timer wake;
@@ -141,9 +142,10 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
                       std::shared_ptr<forge::api::core::detail::stream_endpoint> input,
                       std::shared_ptr<forge::api::core::detail::stream_endpoint> output, call_options& value,
                       const forge::api::core::method_descriptor* descriptor);
-   [[nodiscard]] forge::api::core::method_kind method_kind_for(const forge::api::core::frame& request) const;
    [[nodiscard]] std::shared_ptr<call_state> make_remote_call(const forge::api::core::frame& request,
-                                                              forge::api::core::method_kind kind);
+                                                              forge::api::core::method_kind kind,
+                                                              const forge::api::core::method_descriptor* descriptor,
+                                                              forge::api::core::binding_plan plan);
    boost::asio::awaitable<void> run_remote_call(forge::api::core::frame request,
                                                 const std::shared_ptr<call_state>& call);
    boost::asio::awaitable<void> pump_outbound(const std::shared_ptr<call_state>& call);
@@ -178,7 +180,8 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    forge::net::transport::stream stream;
    options settings;
    std::optional<forge::api::core::binding_plan> plan;
-   std::optional<forge::api::core::frame_dispatcher> dispatcher;
+   forge::api::core::dispatch_options dispatch_settings;
+   std::optional<forge::api::core::trusted_invocation> trusted;
    forge::api::core::session_limits negotiated_limits;
    forge::api::core::capability_set negotiated_capabilities;
    std::vector<std::uint8_t> read_buffer;

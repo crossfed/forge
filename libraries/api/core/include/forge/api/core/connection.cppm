@@ -186,6 +186,15 @@ template <auto Method, typename Tuple, std::size_t... Index>
 [[nodiscard]] bytes encode_fixed_proxy_arguments(const method_descriptor& descriptor,
                                                   Tuple& arguments,
                                                   std::index_sequence<Index...>) {
+   const auto request_matches = descriptor.request_type == typeid(void) ||
+                                descriptor.request_type == typeid(method_fixed_request_t<Method>);
+   const auto fixed_matches =
+      descriptor.fixed_arguments_type == typeid(void) ||
+      descriptor.fixed_arguments_type == typeid(method_fixed_argument_tuple_t<Method>);
+   if (!request_matches || !fixed_matches) {
+      throw exceptions::protocol_error{"API stream arguments do not match its method descriptor"};
+   }
+
    constexpr auto count = sizeof...(Index);
    if constexpr (count == 0) {
       return {};
