@@ -13,7 +13,9 @@ module;
 #include <coroutine>
 #include <cstdint>
 #include <exception>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,6 +33,8 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.p2p.binding;
+import forge.api.p2p.publication;
 import forge.api.transport.exceptions;
 import forge.api.transport.options;
 import forge.api.transport.client;
@@ -69,7 +73,6 @@ import forge.net.p2p.stream;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.node;
-import forge.api.p2p.binding;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.exceptions;
 import forge.plugins.p2p.node.types;
@@ -112,7 +115,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "4.0.0";
+   return "5.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -134,6 +137,8 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
    impl_->runtime = &context.scheduler().runtime_context();
+   detail::bind_api_publication_registry_executor(
+      impl_->api_publications, impl_->runtime->context().get_executor());
    if (!impl_->peer_store_name.empty()) {
       impl_->stores =
           context.apis()
@@ -267,6 +272,7 @@ boost::asio::awaitable<void> plugin::startup() {
 void plugin::request_stop() noexcept {
    impl_->stop_requested.store(true, std::memory_order_release);
    impl_->phase.store(lifecycle_phase::stopping, std::memory_order_release);
+   detail::request_close_api_publication_registry(impl_->api_publications);
    if (auto node = impl_->node_snapshot()) {
       try {
          node->request_stop();
@@ -279,6 +285,11 @@ void plugin::request_stop() noexcept {
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
    auto failure = std::exception_ptr{};
+   try {
+      co_await detail::async_close_api_publication_registry(impl_->api_publications);
+   } catch (...) {
+      failure = std::current_exception();
+   }
    auto node = impl_->node_snapshot();
    auto peer_state_closed = !node && !impl_->peer_state && impl_->dht_state.empty();
    if (node) {

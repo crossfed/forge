@@ -81,6 +81,7 @@ struct handle::state {
    std::shared_ptr<detail::async_waiter> completion_waiter;
    std::uint64_t id = 0;
    detail::stop_state stop_state;
+   std::atomic_bool accepted = false;
    std::atomic_bool started = false;
    std::atomic_bool completion_claimed = false;
    std::atomic_bool completed = false;
@@ -149,6 +150,10 @@ void context::throw_if_cancel_requested() const {
 
 bool handle::valid() const noexcept {
    return state_ != nullptr;
+}
+
+bool handle::accepted() const noexcept {
+   return state_ != nullptr && state_->accepted.load(std::memory_order_acquire);
 }
 
 std::uint64_t handle::id() const noexcept {
@@ -288,6 +293,7 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
          }
 
          ++current_metrics.submitted;
+         state->accepted.store(true, std::memory_order_release);
          if (queued.ready_at <= std::chrono::steady_clock::now()) {
             ready_heap.push_back(std::move(queued));
             std::push_heap(ready_heap.begin(), ready_heap.end(), ready_priority_less{});

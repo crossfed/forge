@@ -17,6 +17,7 @@ module;
 module forge.plugins.p2p.resolver.plugin;
 
 import forge.api.core.descriptor;
+import forge.api.p2p.publication;
 import forge.api.transport.connection;
 import forge.exceptions;
 import forge.net.p2p.identity;
@@ -34,19 +35,22 @@ namespace forge::plugins::p2p::resolver {
 
 plugin::api_impl::api_impl(std::shared_ptr<plugin::impl> impl) : impl_{std::move(impl)} {}
 
-void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                                   publish_options options) {
-   impl_->add_local(std::move(plan), std::move(protocol), std::move(options));
+forge::api::p2p::publication
+plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+                              publish_options options) {
+   return impl_->add_local(std::move(plan), std::move(protocol), std::move(options));
 }
 
 std::vector<entry> plugin::api_impl::local_apis() const {
-   (void)impl_->require_p2p();
+   auto p2p = impl_->require_p2p();
+   static_cast<void>(p2p);
    return impl_->local_snapshot();
 }
 
 boost::asio::awaitable<std::vector<entry>> plugin::api_impl::peer_apis(forge::net::p2p::peer_id peer,
                                                                        resolve_options options) {
-   (void)impl_->require_p2p();
+   auto p2p = impl_->require_p2p();
+   static_cast<void>(p2p);
    if (auto cached = impl_->cached_peer(peer, options)) {
       co_return *cached;
    }
@@ -59,6 +63,8 @@ boost::asio::awaitable<std::vector<entry>> plugin::api_impl::peer_apis(forge::ne
 
 boost::asio::awaitable<resolution> plugin::api_impl::resolve(forge::net::p2p::peer_id peer,
                                                              forge::api::core::api_ref api, resolve_options options) {
+   auto p2p = impl_->require_p2p();
+   static_cast<void>(p2p);
    co_return co_await impl_->resolve_remote(std::move(peer), std::move(api), options);
 }
 

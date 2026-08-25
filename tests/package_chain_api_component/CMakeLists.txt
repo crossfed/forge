@@ -11,6 +11,8 @@ find_package(
    COMPONENTS
       api_core
       api_http
+      api_p2p
+      api_transport
       app
       asio
       chain_api
@@ -24,12 +26,37 @@ find_package(
       plugins_p2p_resolver
 )
 
-add_executable(forge_package_chain_api_component main.cpp)
+add_executable(
+   forge_package_chain_api_component
+   main.cpp
+   p2p_runtime.cpp
+   read_fixture.cpp
+   read_e2e.cpp
+   test_support.cpp
+   verifier_fixture.cpp
+   write_fixture.cpp
+   write_e2e.cpp
+)
+target_sources(
+   forge_package_chain_api_component
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES
+         p2p_runtime.cppm
+         read_e2e.cppm
+         read_fixture.cppm
+         test_support.cppm
+         verifier_fixture.cppm
+         write_e2e.cppm
+         write_fixture.cppm
+)
 target_link_libraries(
    forge_package_chain_api_component
    PRIVATE
       Forge::forge_api_core
       Forge::forge_api_http
+      Forge::forge_api_p2p
+      Forge::forge_api_transport
       Forge::forge_app
       Forge::forge_asio
       Forge::forge_chain_api
