@@ -35,6 +35,7 @@ target_link_libraries(
       forge_variant
       forge_crypto_asymmetric_values
       forge_crypto_asymmetric
+      forge_crypto_bls
       forge_crypto_digest
 )
 forge_target_contract_guest_component(forge_chain_protocol ID forge.chain.protocol)

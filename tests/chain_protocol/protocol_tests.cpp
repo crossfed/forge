@@ -26,6 +26,7 @@ import forge.raw.raw;
 import forge.raw.exceptions;
 import forge.variant.described;
 import forge.variant.exceptions;
+import forge.variant.static_variant;
 import forge.variant.value;
 import forge.chain.core.merkle;
 import forge.chain.protocol.abi;
@@ -49,6 +50,7 @@ import forge.chain.protocol.elastic_limit_parameters;
 import forge.chain.protocol.entity_selector;
 import forge.chain.protocol.exceptions;
 import forge.chain.protocol.finalizer_policy;
+import forge.chain.protocol.finalizer_vote_record;
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.float128;
 import forge.chain.protocol.float64;
@@ -61,6 +63,7 @@ import forge.chain.protocol.native_ids;
 import forge.chain.protocol.permission;
 import forge.chain.protocol.permission_link;
 import forge.chain.protocol.permission_usage;
+import forge.chain.protocol.producer_info;
 import forge.chain.protocol.ratio;
 import forge.chain.protocol.resource_limits;
 import forge.chain.protocol.resource_limits_config;
@@ -321,8 +324,7 @@ BOOST_AUTO_TEST_CASE(native_entity_selector_requires_exactly_one_selector) {
    const auto by_id = protocol::account_selector{.id = protocol::account_id{42}};
    const auto by_key = protocol::account_selector{.key = protocol::account_name{24}};
    const auto unset = protocol::account_selector{};
-   const auto ambiguous =
-       protocol::account_selector{.id = protocol::account_id{42}, .key = protocol::account_name{24}};
+   const auto ambiguous = protocol::account_selector{.id = protocol::account_id{42}, .key = protocol::account_name{24}};
 
    BOOST_TEST(protocol::selects_exactly_one(by_id));
    BOOST_TEST(protocol::selects_exactly_one(by_key));
@@ -337,7 +339,8 @@ BOOST_AUTO_TEST_CASE(native_entity_selector_requires_exactly_one_selector) {
 
    auto malformed = forge::raw::pack(by_id);
    malformed.pop_back();
-   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::account_selector>(malformed), forge::raw::exceptions::range_error);
+   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::account_selector>(malformed),
+                     forge::raw::exceptions::range_error);
 
    auto encoded = forge::variant{};
    forge::to_variant(by_id, encoded);
@@ -377,9 +380,8 @@ BOOST_AUTO_TEST_CASE(protocol_state_values_preserve_raw_variant_and_malformed_co
               "0800000000000000");
    BOOST_CHECK((forge::raw::unpack<protocol::elastic_limit_parameters>(forge::raw::pack(elastic)) == elastic));
 
-   const auto usage = protocol::usage_accumulator{.last_ordinal = 1U,
-                                                  .value_ex = 0x0102030405060708ULL,
-                                                  .consumed = 0x1112131415161718ULL};
+   const auto usage = protocol::usage_accumulator{
+       .last_ordinal = 1U, .value_ex = 0x0102030405060708ULL, .consumed = 0x1112131415161718ULL};
    BOOST_TEST(pack_hex(usage) == "0100000008070605040302011817161514131211");
    BOOST_CHECK((forge::raw::unpack<protocol::usage_accumulator>(forge::raw::pack(usage)) == usage));
 
@@ -427,10 +429,9 @@ BOOST_AUTO_TEST_CASE(account_and_resource_projections_preserve_raw_variant_and_i
        .abi_hash = {},
        .abi_size = 4U,
    };
-   BOOST_TEST(pack_hex(account) ==
-              "0100000000000000020000000000000003000000"
-              "0000000000000000000000000000000000000000000000000000000000000000"
-              "0400000000000000");
+   BOOST_TEST(pack_hex(account) == "0100000000000000020000000000000003000000"
+                                   "0000000000000000000000000000000000000000000000000000000000000000"
+                                   "0400000000000000");
 
    const auto metadata = protocol::account_metadata{
        .id = protocol::metadata_id{5U},
@@ -587,8 +588,7 @@ BOOST_AUTO_TEST_CASE(account_and_resource_projections_preserve_raw_variant_and_i
    const auto permission_bytes = forge::raw::pack(permission);
    const auto full_account_bytes = forge::raw::pack(full_account);
    BOOST_CHECK(std::ranges::equal(account_bytes, std::span{authority_bytes}.first(account_bytes.size())));
-   BOOST_CHECK(std::ranges::equal(permission_bytes,
-                                  std::span{full_permission_bytes}.first(permission_bytes.size())));
+   BOOST_CHECK(std::ranges::equal(permission_bytes, std::span{full_permission_bytes}.first(permission_bytes.size())));
    BOOST_CHECK(std::ranges::equal(account_bytes, std::span{full_account_bytes}.first(account_bytes.size())));
 
    auto encoded_full = forge::variant{};
@@ -605,8 +605,7 @@ BOOST_AUTO_TEST_CASE(account_and_resource_projections_preserve_raw_variant_and_i
 
    auto malformed = full_account_bytes;
    malformed.pop_back();
-   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::full_account>(malformed),
-                     forge::raw::exceptions::range_error);
+   BOOST_CHECK_THROW((void)forge::raw::unpack<protocol::full_account>(malformed), forge::raw::exceptions::range_error);
 
    BOOST_TEST(config.cpu_limit_parameters.target == 20'000U);
    BOOST_TEST(config.net_limit_parameters.max == 1'048'576U);
@@ -647,18 +646,18 @@ BOOST_AUTO_TEST_CASE(account_resource_variant_decode_preserves_defaults_and_uses
    BOOST_TEST(config.account_cpu_usage_average_window == 172'800U);
    BOOST_TEST(config.account_net_usage_average_window == 172'800U);
 
-   const auto wrong_id = forge::variant{
-       forge::mutable_variant_object{}("id", forge::mutable_variant_object{}("unexpected", true))};
+   const auto wrong_id =
+       forge::variant{forge::mutable_variant_object{}("id", forge::mutable_variant_object{}("unexpected", true))};
    BOOST_CHECK_THROW(forge::from_variant(wrong_id, limits), forge::variant_exceptions::decode_error);
 
    auto metadata = protocol::account_metadata{};
-   const auto wrong_time = forge::variant{forge::mutable_variant_object{}(
-       "last_code_update", forge::mutable_variant_object{}("unexpected", true))};
+   const auto wrong_time = forge::variant{
+       forge::mutable_variant_object{}("last_code_update", forge::mutable_variant_object{}("unexpected", true))};
    BOOST_CHECK_THROW(forge::from_variant(wrong_time, metadata), forge::variant_exceptions::decode_error);
 
    auto account = protocol::account{};
-   const auto wrong_creation_date = forge::variant{forge::mutable_variant_object{}(
-       "creation_date", forge::mutable_variant_object{}("unexpected", true))};
+   const auto wrong_creation_date = forge::variant{
+       forge::mutable_variant_object{}("creation_date", forge::mutable_variant_object{}("unexpected", true))};
    BOOST_CHECK_THROW(forge::from_variant(wrong_creation_date, account), forge::variant_exceptions::decode_error);
 
    const auto invalid_creation_date =
@@ -686,10 +685,9 @@ BOOST_AUTO_TEST_CASE(code_table_currency_and_generated_transaction_projections_p
        .vm_type = 5U,
        .vm_version = 6U,
    };
-   BOOST_TEST(pack_hex(code) ==
-              "0100000000000000"
-              "0000000000000000000000000000000000000000000000000000000000000000"
-              "02000000000000000300000000000000040000000506");
+   BOOST_TEST(pack_hex(code) == "0100000000000000"
+                                "0000000000000000000000000000000000000000000000000000000000000000"
+                                "02000000000000000300000000000000040000000506");
 
    const auto table = protocol::table{
        .id = protocol::table_id{7U},
@@ -708,10 +706,9 @@ BOOST_AUTO_TEST_CASE(code_table_currency_and_generated_transaction_projections_p
        .max_supply = protocol::asset{14, symbol},
        .issuer = protocol::account_name{15U},
    };
-   BOOST_TEST(pack_hex(stats) ==
-              "0d000000000000000453595300000000"
-              "0e000000000000000453595300000000"
-              "0f00000000000000");
+   BOOST_TEST(pack_hex(stats) == "0d000000000000000453595300000000"
+                                 "0e000000000000000453595300000000"
+                                 "0f00000000000000");
 
    auto packed_transaction = protocol::packed_transaction{};
    packed_transaction.packed_trx = {0xaaU, 0xbbU};
@@ -726,11 +723,10 @@ BOOST_AUTO_TEST_CASE(code_table_currency_and_generated_transaction_projections_p
        .published = protocol::time_point{protocol::microseconds{22U}},
        .transaction = packed_transaction,
    };
-   BOOST_TEST(pack_hex(generated) ==
-              "1000000000000000"
-              "0000000000000000000000000000000000000000000000000000000000000000"
-              "1100000000000000120000000000000000000000000000001300000000000000"
-              "14000000000000001500000000000000160000000000000000000002aabb");
+   BOOST_TEST(pack_hex(generated) == "1000000000000000"
+                                     "0000000000000000000000000000000000000000000000000000000000000000"
+                                     "1100000000000000120000000000000000000000000000001300000000000000"
+                                     "14000000000000001500000000000000160000000000000000000002aabb");
 
    const auto check_raw_roundtrip = []<typename T>(const T& value) {
       BOOST_CHECK(forge::raw::unpack<T>(forge::raw::pack(value)) == value);
@@ -777,13 +773,152 @@ BOOST_AUTO_TEST_CASE(code_table_currency_and_generated_transaction_projections_p
    check_truncated_raw(generated);
 }
 
+BOOST_AUTO_TEST_CASE(producer_info_preserves_spring_trailing_binary_extension_wire) {
+   const auto without_authority = protocol::producer_info{
+       .owner = protocol::account_name{spring::name_eosio_value},
+       .total_votes = protocol::float64{.bits = 0x4000000000000000ULL},
+       .producer_key = parse_spring_public_key(spring::test_public_key),
+       .is_active = true,
+       .url = "p",
+       .unpaid_blocks = 2U,
+       .last_claim_time = protocol::time_point{protocol::microseconds{3}},
+       .location = 4U,
+   };
+   const auto without_authority_raw = forge::raw::pack(without_authority);
+   BOOST_TEST(pack_hex(without_authority) == "0000000000ea3055"
+                                             "0000000000000040"
+                                             "0002c0ded2bc1f1305fb0faac5e6c03ee3a1924234985427b6167ca569d13df435cf"
+                                             "0101700200000003000000000000000400");
+
+   auto reused = without_authority;
+   reused.producer_authority = protocol::block_signing_authority{
+       protocol::block_signing_authority_v0{.threshold = 9U},
+   };
+   forge::raw::unpack_exact(without_authority_raw, reused);
+   BOOST_CHECK(reused == without_authority);
+   BOOST_CHECK(!reused.producer_authority.has_value());
+
+   auto with_authority = without_authority;
+   with_authority.producer_authority = protocol::block_signing_authority{
+       protocol::block_signing_authority_v0{.threshold = 5U},
+   };
+   const auto authority_raw = forge::raw::pack(*with_authority.producer_authority);
+   const auto with_authority_raw = forge::raw::pack(with_authority);
+   BOOST_TEST(pack_hex(*with_authority.producer_authority) == "000500000000");
+   BOOST_TEST(pack_hex(with_authority) == "0000000000ea3055"
+                                          "0000000000000040"
+                                          "0002c0ded2bc1f1305fb0faac5e6c03ee3a1924234985427b6167ca569d13df435cf"
+                                          "0101700200000003000000000000000400"
+                                          "000500000000");
+   BOOST_TEST(with_authority_raw.size() == without_authority_raw.size() + authority_raw.size());
+   BOOST_CHECK(std::equal(without_authority_raw.begin(), without_authority_raw.end(), with_authority_raw.begin()));
+   BOOST_CHECK(std::equal(authority_raw.begin(), authority_raw.end(),
+                          with_authority_raw.begin() + without_authority_raw.size()));
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::producer_info>(with_authority_raw) == with_authority);
+
+   auto encoded = forge::variant{};
+   forge::to_variant(with_authority, encoded);
+   auto decoded = protocol::producer_info{};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded == with_authority);
+
+   const auto exact_options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto written = forge::codec::json::write(with_authority);
+   const auto write_error = written.diagnostics.empty() ? std::string{"JSON write failed without diagnostics"}
+                                                        : written.diagnostics.front().message;
+   BOOST_REQUIRE_MESSAGE(written.ok(), write_error);
+   const auto exact = forge::codec::json::read<protocol::producer_info>(written.text, exact_options);
+   const auto read_error = exact.diagnostics.empty()
+                               ? std::string{"JSON read failed without diagnostics"}
+                               : exact.diagnostics.front().path + ": " + exact.diagnostics.front().message;
+   BOOST_REQUIRE_MESSAGE(exact.ok(), read_error);
+   BOOST_CHECK(exact.value == with_authority);
+
+   auto missing_key = forge::mutable_variant_object{};
+   for (const auto& entry : encoded.get_object()) {
+      if (entry.key() != "producer_key") {
+         missing_key(entry.key(), entry.value());
+      }
+   }
+   const auto missing_key_json = forge::codec::json::write_value(forge::variant{std::move(missing_key)});
+   BOOST_REQUIRE(missing_key_json.ok());
+   const auto missing_key_result =
+       forge::codec::json::read<protocol::producer_info>(missing_key_json.text, exact_options);
+   BOOST_REQUIRE(!missing_key_result.ok());
+   BOOST_TEST(missing_key_result.diagnostics.front().code == "json.missing");
+   BOOST_TEST(missing_key_result.diagnostics.front().path == "producer_key");
+
+   auto malformed_extension = without_authority_raw;
+   malformed_extension.push_back(0U);
+   BOOST_CHECK_THROW((void)forge::raw::unpack_exact<protocol::producer_info>(malformed_extension),
+                     forge::raw::exceptions::range_error);
+
+   auto trailing = with_authority_raw;
+   trailing.push_back(0xffU);
+   BOOST_CHECK_THROW((void)forge::raw::unpack_exact<protocol::producer_info>(trailing),
+                     forge::raw::exceptions::codec_error);
+}
+
+BOOST_AUTO_TEST_CASE(finalizer_vote_record_preserves_typed_raw_and_variant_contracts) {
+   const auto vote = protocol::finalizer_vote_record{
+       .description = "f",
+       .public_key =
+           bls_key("f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c58050bd"
+                   "5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e"),
+       .is_vote_strong = true,
+       .finalizer_policy_generation = 2U,
+       .voted_for_block_id = {},
+       .voted_for_block_num = 3U,
+       .voted_for_block_timestamp = protocol::block_timestamp{4U},
+   };
+   const auto raw = forge::raw::pack(vote);
+   BOOST_TEST(pack_hex(vote) ==
+              "016660"
+              "f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c58050bd"
+              "5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e"
+              "0102000000"
+              "0000000000000000000000000000000000000000000000000000000000000000"
+              "0300000004000000");
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::finalizer_vote_record>(raw) == vote);
+
+   auto encoded = forge::variant{};
+   forge::to_variant(vote, encoded);
+   auto decoded = protocol::finalizer_vote_record{};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded == vote);
+
+   const auto exact_options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   auto missing_key = forge::mutable_variant_object{};
+   for (const auto& entry : encoded.get_object()) {
+      if (entry.key() != "public_key") {
+         missing_key(entry.key(), entry.value());
+      }
+   }
+   const auto missing_key_json = forge::codec::json::write_value(forge::variant{std::move(missing_key)});
+   BOOST_REQUIRE(missing_key_json.ok());
+   const auto missing_key_result =
+       forge::codec::json::read<protocol::finalizer_vote_record>(missing_key_json.text, exact_options);
+   BOOST_REQUIRE(!missing_key_result.ok());
+   BOOST_TEST(missing_key_result.diagnostics.front().code == "json.missing");
+   BOOST_TEST(missing_key_result.diagnostics.front().path == "public_key");
+
+   auto malformed = raw;
+   malformed[2] = 0x5fU;
+   BOOST_CHECK_THROW((void)forge::raw::unpack_exact<protocol::finalizer_vote_record>(malformed),
+                     forge::raw::exceptions::codec_error);
+}
+
 BOOST_AUTO_TEST_CASE(protocol_float_values_match_spine_raw_variant_and_ordered_keys) {
    const auto float64 = protocol::float64{.bits = 0x0102030405060708ULL};
    BOOST_TEST(pack_hex(float64) == "0807060504030201");
    BOOST_CHECK((forge::raw::unpack<protocol::float64>(forge::raw::pack(float64)) == float64));
 
-   const auto float128_bits = (protocol::uint128_t{0x0102030405060708ULL} << 64U) |
-                              protocol::uint128_t{0x1112131415161718ULL};
+   const auto float128_bits =
+       (protocol::uint128_t{0x0102030405060708ULL} << 64U) | protocol::uint128_t{0x1112131415161718ULL};
    const auto float128 = protocol::float128{.bits = float128_bits};
    BOOST_TEST(pack_hex(float128) == "18171615141312110807060504030201");
    BOOST_CHECK((forge::raw::unpack<protocol::float128>(forge::raw::pack(float128)) == float128));
@@ -822,14 +957,16 @@ BOOST_AUTO_TEST_CASE(protocol_float_values_match_spine_raw_variant_and_ordered_k
    const auto positive_one128 = protocol::float128{.bits = protocol::uint128_t{0x3fffU} << 112U};
    const auto negative_one128 = protocol::float128{.bits = protocol::uint128_t{0xbfffU} << 112U};
    BOOST_CHECK(protocol::compare(negative_one128, positive_one128) == std::partial_ordering::less);
-   BOOST_CHECK(protocol::compare(protocol::float128{.bits = 0U},
-                                 protocol::float128{.bits = protocol::uint128_t{1U} << 127U}) ==
-               std::partial_ordering::equivalent);
-   BOOST_TEST(hex(protocol::ordered_key(positive_one128).extract_as_byte_array()) == "bfff0000000000000000000000000000");
-   BOOST_TEST(hex(protocol::ordered_key(negative_one128).extract_as_byte_array()) == "4000ffffffffffffffffffffffffffff");
-   BOOST_CHECK_THROW((void)protocol::ordered_key(
-                         protocol::float128{.bits = (protocol::uint128_t{0x7fffU} << 112U) | 1U}),
-                     protocol::exceptions::unordered_value);
+   BOOST_CHECK(
+       protocol::compare(protocol::float128{.bits = 0U}, protocol::float128{.bits = protocol::uint128_t{1U} << 127U}) ==
+       std::partial_ordering::equivalent);
+   BOOST_TEST(hex(protocol::ordered_key(positive_one128).extract_as_byte_array()) ==
+              "bfff0000000000000000000000000000");
+   BOOST_TEST(hex(protocol::ordered_key(negative_one128).extract_as_byte_array()) ==
+              "4000ffffffffffffffffffffffffffff");
+   BOOST_CHECK_THROW(
+       (void)protocol::ordered_key(protocol::float128{.bits = (protocol::uint128_t{0x7fffU} << 112U) | 1U}),
+       protocol::exceptions::unordered_value);
 
    const auto positive_subnormal64 = protocol::float64{.bits = 1U};
    const auto negative_subnormal64 = protocol::float64{.bits = 0x8000000000000001ULL};

@@ -68,6 +68,12 @@ Package component: `chain_protocol`. Public namespace:
   used by block headers and contract APIs.
 - `forge.chain.protocol.producer_authority`: weighted block-signing authorities
   and producer authority schedules.
+- `forge.chain.protocol.producer_info`: canonical `eosio.system` producer row.
+  Its optional block-signing authority is a trailing binary extension: omission
+  contributes no Raw bytes, while a present authority uses its ordinary
+  `[index, payload]` wire representation without an optional presence marker.
+- `forge.chain.protocol.finalizer_vote_record`: typed finalizer vote diagnostics
+  with the canonical BLS public key, block ID and block timestamp values.
 - `forge.chain.protocol.finalizer_authority`: import-compatible alias that
   preserves the public type name while forwarding ownership to the canonical
   typed `forge.chain.savanna.values` finalizer record. Its `public_key` field
@@ -108,6 +114,8 @@ uses the Spring/FC `[index, payload]` JSON representation.
 Code, table and currency-stat projection values use only guest-safe protocol
 scalars and Raw mechanics. The generated-transaction projection is intentionally
 host-only because `packed_transaction` is not part of the guest value surface.
+Producer info and finalizer vote records remain host-only projections; they are
+not registered as Contract SDK guest modules.
 
 The `finalizer_authority` leaf remains as an import-compatible forwarding
 module only. It does not own a second type or serialization implementation.
@@ -199,9 +207,9 @@ fields are absent; exact API readers are responsible for validating requests.
 ## Tests
 
 `test_forge_chain_protocol` covers raw and variant fixtures, fixed keys, names
-and assets, native state projections, transactions, compression, signatures,
-ABI compatibility, block IDs, transaction receipt roots and Spring-compatible
-Savanna action receipts.
+and assets, native state projections, producer binary-extension compatibility,
+typed finalizer votes, transactions, compression, signatures, ABI compatibility,
+block IDs, transaction receipt roots and Spring-compatible Savanna action receipts.
 `test_forge_package_chain_protocol_component` verifies the installed
 `chain_protocol` component, protocol imports and the transitive core digest
 dependency.

@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -961,6 +962,83 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_numeric_scalar_adapte
    BOOST_REQUIRE(!overflow.ok());
    BOOST_TEST(overflow.diagnostics.front().code == "json.type");
    BOOST_TEST(overflow.diagnostics.front().path == "unsigned_value");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_described_numeric_scalars_use_canonical_variant_representation) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("1.5", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_TEST(canonical.value.value == 1.5);
+
+   const auto written = forge::codec::json::write(canonical.value);
+   BOOST_REQUIRE(written.ok());
+   BOOST_TEST(written.text == "1.5");
+
+   const auto integer = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("1", options);
+   BOOST_REQUIRE(integer.ok());
+   BOOST_TEST(integer.value.value == 1.0);
+
+   const auto negative_integer = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("-1", options);
+   BOOST_REQUIRE(negative_integer.ok());
+   BOOST_TEST(negative_integer.value.value == -1.0);
+
+   const auto written_integer = forge::codec::json::write(integer.value);
+   BOOST_REQUIRE(written_integer.ok());
+   BOOST_TEST(written_integer.text == "1");
+
+   const auto exact_large_integer =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("9007199254740992", options);
+   BOOST_REQUIRE(exact_large_integer.ok());
+   BOOST_TEST(exact_large_integer.value.value == 9007199254740992.0);
+
+   const auto rounded_large_integer =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("9007199254740993", options);
+   BOOST_REQUIRE(!rounded_large_integer.ok());
+   BOOST_TEST(rounded_large_integer.diagnostics.front().code == "json.type");
+   BOOST_TEST(rounded_large_integer.diagnostics.front().path == "$");
+
+   const auto rounded_negative_integer =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("-9007199254740993", options);
+   BOOST_REQUIRE(!rounded_negative_integer.ok());
+   BOOST_TEST(rounded_negative_integer.diagnostics.front().code == "json.type");
+   BOOST_TEST(rounded_negative_integer.diagnostics.front().path == "$");
+
+   const auto int64_min =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("-9223372036854775808", options);
+   BOOST_REQUIRE(int64_min.ok());
+   BOOST_TEST(int64_min.value.value == -9223372036854775808.0);
+
+   const auto int64_max =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("9223372036854775807", options);
+   BOOST_REQUIRE(!int64_max.ok());
+   BOOST_TEST(int64_max.diagnostics.front().code == "json.type");
+
+   const auto uint64_max =
+       forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("18446744073709551615", options);
+   BOOST_REQUIRE(!uint64_max.ok());
+   BOOST_TEST(uint64_max.diagnostics.front().code == "json.type");
+
+   const auto negative_zero = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>("-0.0", options);
+   BOOST_REQUIRE(negative_zero.ok());
+   BOOST_TEST(std::signbit(negative_zero.value.value));
+
+   const auto string = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>(R"("1.5")", options);
+   BOOST_REQUIRE(!string.ok());
+   BOOST_TEST(string.diagnostics.front().code == "json.object");
+   BOOST_TEST(string.diagnostics.front().path == "$");
+
+   const auto object = forge::codec::json::read<forge_json_tests::exact_numeric_scalar>(R"({"value":1.5})", options);
+   BOOST_REQUIRE(!object.ok());
+   BOOST_TEST(object.diagnostics.front().code == "json.type");
+   BOOST_TEST(object.diagnostics.front().path == "$");
+
+   const auto record = forge::codec::json::read<forge_json_tests::exact_leaf>("1.5", options);
+   BOOST_REQUIRE(!record.ok());
+   BOOST_TEST(record.diagnostics.front().code == "json.object");
+   BOOST_TEST(record.diagnostics.front().path == "$");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_schema_enums_require_canonical_config_names) {
