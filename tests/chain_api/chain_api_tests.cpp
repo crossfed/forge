@@ -1541,7 +1541,7 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_admin_pages_and_respons
                      forge::chain::api::exceptions::resource_exhausted);
 }
 
-BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_authorizer_inputs_before_complete_decode) {
+BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_rejects_authorizer_second_container_at_generic_decode_boundary) {
    const auto default_limits = forge::chain::protocol::service_limits{};
    BOOST_TEST(default_limits.max_state_batch_size == 128U);
    const auto default_descriptor = forge::chain::api::limited_descriptor<forge::chain::api::state>(default_limits);
@@ -1572,6 +1572,13 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_authorizer_inputs_befor
        .limit = 1U,
    };
    BOOST_CHECK_THROW(method->request_validator(forge::raw::pack(request)),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   // The payload ends at the second vector count: its elements must never be allocated or decoded.
+   const auto truncated_after_second_count = forge::raw::pack(
+       std::vector<forge::chain::protocol::permission_level>{forge::chain::protocol::permission_level{}},
+       forge::unsigned_int{2U});
+   BOOST_CHECK_THROW(method->request_validator(truncated_after_second_count),
                      forge::chain::api::exceptions::resource_exhausted);
 
    limits.max_state_batch_size = 0U;
@@ -2085,6 +2092,22 @@ BOOST_AUTO_TEST_CASE(chain_state_paginated_responses_require_nonempty_next) {
          forge::chain::protocol::scheduled_response{});
    check("get_accounts_by_authorizers", forge::chain::protocol::authorizers_request{.limit = 1U},
          forge::chain::protocol::authorizers_response{});
+   check("get_table_changes",
+         forge::chain::protocol::table_changes_request{
+             .from_block = 1U,
+             .to_block = 2U,
+             .tables = {{.code = forge::chain::protocol::account_name{"alice"}}},
+             .limit = 1U,
+         },
+         forge::chain::protocol::table_changes_response{});
+   check("get_account_changes",
+         forge::chain::protocol::account_changes_request{
+             .from_block = 1U,
+             .to_block = 2U,
+             .accounts = {forge::chain::protocol::account_name{"alice"}},
+             .limit = 1U,
+         },
+         forge::chain::protocol::account_changes_response{});
 }
 
 BOOST_AUTO_TEST_CASE(chain_openapi_omits_body_for_query_only_admin_action) {
@@ -3007,6 +3030,11 @@ BOOST_AUTO_TEST_CASE(verified_table_changes_bind_opaque_cursor_and_enforce_lww_p
    BOOST_CHECK_THROW(static_cast<void>(verify(std::move(wrong_position), tables)),
                      forge::chain::api::exceptions::invalid_state_proof);
 
+   auto empty_next = response;
+   empty_next.next = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(empty_next), tables)),
+                     forge::chain::api::exceptions::unavailable);
+
    auto wrong_tables = tables;
    wrong_tables.back().code = forge::chain::protocol::account_name{"gamma"};
    BOOST_CHECK_THROW(static_cast<void>(verify(response, std::move(wrong_tables))),
@@ -3079,6 +3107,10 @@ BOOST_AUTO_TEST_CASE(verified_account_changes_reuse_account_authority_and_reject
 
    BOOST_CHECK_THROW(static_cast<void>(verify(response, forge::chain::protocol::bytes{0x01U, 0x02U})),
                      forge::chain::api::exceptions::invalid_state_proof);
+
+   auto empty_next = response;
+   empty_next.next = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(empty_next))), forge::chain::api::exceptions::unavailable);
 
    auto duplicate = response;
    duplicate.blocks.front().mutations.push_back(duplicate.blocks.front().mutations.front());

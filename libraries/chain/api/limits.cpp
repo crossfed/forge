@@ -98,7 +98,8 @@ forge::raw::unpack_limits request_allocation_limits(std::string_view api, std::s
       return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size);
    }
    if (api == "forge.chain.api.state" && method == "get_accounts_by_authorizers") {
-      return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size);
+      return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size,
+                               limits.max_state_batch_size);
    }
    return allocation_limits(payload, limits, limits.max_request_bytes);
 }
@@ -268,8 +269,8 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
          return request.limit;
       }
       if (method == "get_accounts_by_authorizers") {
-         const auto request =
-             unpack_request<protocol::authorizers_request>(payload, limits, limits.max_state_batch_size);
+         const auto request = unpack_request<protocol::authorizers_request>(
+             payload, limits, limits.max_state_batch_size, limits.max_state_batch_size);
          require_request_within_limits(request, limits);
          return request.limit;
       }
@@ -329,11 +330,13 @@ void require_method_response(std::string_view api, std::string_view method, bool
       }
    } else if (api == "forge.chain.api.state") {
       if (method == "get_table_changes") {
-         require_mutations(unpack_response<protocol::table_changes_response>(payload, limits).blocks, *requested_items,
-                           limits);
+         const auto response = unpack_response<protocol::table_changes_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_mutations(response.blocks, *requested_items, limits);
       } else if (method == "get_account_changes") {
-         require_mutations(unpack_response<protocol::account_changes_response>(payload, limits).blocks,
-                           *requested_items, limits);
+         const auto response = unpack_response<protocol::account_changes_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_mutations(response.blocks, *requested_items, limits);
       } else if (method == "get_table_rows") {
          require_items(unpack_response<protocol::table_rows_response>(payload, limits).rows.size(), *requested_items,
                        limits, "rows");
@@ -585,6 +588,7 @@ void require_response_within_limits(const protocol::account_changes_response& re
                                     const protocol::account_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_mutations(response.blocks, request.limit, limits);
 }
 
@@ -600,6 +604,7 @@ void require_response_within_limits(const protocol::table_changes_response& resp
                                     const protocol::table_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_mutations(response.blocks, request.limit, limits);
 }
 
