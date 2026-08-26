@@ -39,6 +39,7 @@ Documents below explain cross-library architecture decisions.
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
 | [runtime/asio-app.md](runtime/asio-app.md) | Runtime ownership, bounded scheduler, plugin lifecycle and rollback. |
 | [iterations/forge-native-admin-foundation-v1.md](iterations/forge-native-admin-foundation-v1.md) | Planned native HTTP server TLS, pairing, browser sessions, HTTP security and static-asset mounting for administration backends. |
+| [iterations/forge-chain-protocol-state-projections-v1-local-acceptance.md](iterations/forge-chain-protocol-state-projections-v1-local-acceptance.md) | Local ARM64 acceptance evidence and three reproducible failures outside the Chain Protocol state-projections feature diff. |
 | [iterations/forge-application-connect-services-v1.md](iterations/forge-application-connect-services-v1.md) | Accepted application connect phase and bounded publication of process-local runtime clients before plugin startup. |
 | [donors/forge-application-connect-services-v1.md](donors/forge-application-connect-services-v1.md) | Forge lifecycle, .NET Generic Host and gRPC Channel donor boundaries for connected application services. |
 | [runtime/compute-and-snapshots.md](runtime/compute-and-snapshots.md) | Separate CPU execution domain, snapshot readers with an ordered writer, and the boundary for future speculative execution. |
