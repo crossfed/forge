@@ -20,6 +20,7 @@ target_link_libraries(
       forge_api_http
       forge_chain_protocol
       forge_crypto_asymmetric
+      forge_crypto_bls
       forge_crypto_digest
       forge_db_authenticated
       forge_exceptions
