@@ -29,7 +29,11 @@ def main() -> int:
     openapi_path = root / "libraries/api/http/openapi.cpp"
     protocol_cmake_path = root / "libraries/chain/protocol/CMakeLists.txt"
     package_dir = root / "tests/package_chain_api_component"
-    package_p2p_path = package_dir / "read_e2e.cpp"
+    package_p2p_paths = (
+        package_dir / "read_e2e_p2p_state.cpp",
+        package_dir / "read_e2e_p2p_state_client.cpp",
+        package_dir / "read_e2e_p2p_state_server.cpp",
+    )
     package_cmake_path = package_dir / "CMakeLists.txt"
     package_protocol_path = root / "tests/package_chain_protocol_component/main.cpp"
 
@@ -40,7 +44,7 @@ def main() -> int:
     openapi = openapi_path.read_text(encoding="utf-8")
     protocol_cmake = protocol_cmake_path.read_text(encoding="utf-8")
     package_cmake = package_cmake_path.read_text(encoding="utf-8")
-    package_p2p = package_p2p_path.read_text(encoding="utf-8")
+    package_p2p = "\n".join(path.read_text(encoding="utf-8") for path in package_p2p_paths)
     package_files = sorted((*package_dir.glob("*.cpp"), *package_dir.glob("*.cppm"), *package_dir.glob("*.hpp")))
     package = "\n".join(path.read_text(encoding="utf-8") for path in package_files)
     package_protocol = package_protocol_path.read_text(encoding="utf-8")
@@ -161,22 +165,30 @@ def main() -> int:
         ".major = 3, .min_revision = 0",
     ):
         require(package, needle, package_dir)
-    require(package, "run_p2p_read_e2e", package_dir)
+    require(package, "run_p2p_state_e2e", package_dir)
     require(package, "std::optional<protocol::bytes>", package_dir)
     for needle in (
         "import forge.chain.api.state;",
         "import forge.chain.api.limits;",
         'export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})',
-        "resolver->remote<chain_api::state>(server_peer)",
+        'resolver->resolve(server_peer, {.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})',
+        "connection.get_remote_api<chain_api::state>()",
         "protocol::audit_mode::required",
         "oversized_request_rejected",
     ):
-        require(package_p2p, needle, package_p2p_path)
+        require(package_p2p, needle, package_dir)
     for api in ("admin", "submission", "transaction"):
-        forbid(package_p2p, f"import forge.chain.api.{api};", package_p2p_path)
-        forbid(package_p2p, f"export_api<chain_api::{api}>", package_p2p_path)
+        forbid(package_p2p, f"import forge.chain.api.{api};", package_dir)
+        forbid(package_p2p, f"export_api<chain_api::{api}>", package_dir)
     require(protocol_cmake, "state_query.cpp", protocol_cmake_path)
-    for source in ("p2p_runtime.cpp", "read_e2e.cpp", "read_fixture.cpp"):
+    for source in (
+        "p2p_runtime.cpp",
+        "read_e2e.cpp",
+        "read_e2e_p2p_state.cpp",
+        "read_e2e_p2p_state_client.cpp",
+        "read_e2e_p2p_state_server.cpp",
+        "read_fixture.cpp",
+    ):
         require(package_cmake, source, package_cmake_path)
 
     require(package_protocol, "account_response{}.account", package_protocol_path)
