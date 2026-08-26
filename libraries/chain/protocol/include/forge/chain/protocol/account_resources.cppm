@@ -12,7 +12,6 @@ export import forge.chain.protocol.account_ram_correction;
 export import forge.chain.protocol.resource_limits;
 export import forge.chain.protocol.resource_meter;
 export import forge.chain.protocol.resource_usage;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -27,26 +26,6 @@ struct account_resources {
 
    bool operator==(const account_resources&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const account_resources& value) {
-   forge::raw::pack(stream, value.current_limits);
-   forge::raw::pack(stream, value.pending_limits);
-   forge::raw::pack(stream, value.native_usage);
-   forge::raw::pack(stream, value.ram_correction);
-   forge::raw::pack(stream, value.cpu);
-   forge::raw::pack(stream, value.net);
-   forge::raw::pack(stream, value.ram);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, account_resources& value) {
-   forge::raw::unpack(stream, value.current_limits);
-   forge::raw::unpack(stream, value.pending_limits);
-   forge::raw::unpack(stream, value.native_usage);
-   forge::raw::unpack(stream, value.ram_correction);
-   forge::raw::unpack(stream, value.cpu);
-   forge::raw::unpack(stream, value.net);
-   forge::raw::unpack(stream, value.ram);
-}
 
 } // namespace forge::chain::protocol
 

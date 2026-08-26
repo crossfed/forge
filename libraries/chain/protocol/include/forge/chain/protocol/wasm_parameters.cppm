@@ -8,8 +8,6 @@ module;
 
 export module forge.chain.protocol.wasm_parameters;
 
-import forge.raw.codec;
-
 export namespace forge::chain::protocol {
 
 struct wasm_parameters {
@@ -27,34 +25,6 @@ struct wasm_parameters {
 
    bool operator==(const wasm_parameters&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const wasm_parameters& value) {
-   forge::raw::pack(stream, value.max_mutable_global_bytes);
-   forge::raw::pack(stream, value.max_table_elements);
-   forge::raw::pack(stream, value.max_section_elements);
-   forge::raw::pack(stream, value.max_linear_memory_init);
-   forge::raw::pack(stream, value.max_func_local_bytes);
-   forge::raw::pack(stream, value.max_nested_structures);
-   forge::raw::pack(stream, value.max_symbol_bytes);
-   forge::raw::pack(stream, value.max_module_bytes);
-   forge::raw::pack(stream, value.max_code_bytes);
-   forge::raw::pack(stream, value.max_pages);
-   forge::raw::pack(stream, value.max_call_depth);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, wasm_parameters& value) {
-   forge::raw::unpack(stream, value.max_mutable_global_bytes);
-   forge::raw::unpack(stream, value.max_table_elements);
-   forge::raw::unpack(stream, value.max_section_elements);
-   forge::raw::unpack(stream, value.max_linear_memory_init);
-   forge::raw::unpack(stream, value.max_func_local_bytes);
-   forge::raw::unpack(stream, value.max_nested_structures);
-   forge::raw::unpack(stream, value.max_symbol_bytes);
-   forge::raw::unpack(stream, value.max_module_bytes);
-   forge::raw::unpack(stream, value.max_code_bytes);
-   forge::raw::unpack(stream, value.max_pages);
-   forge::raw::unpack(stream, value.max_call_depth);
-}
 
 } // namespace forge::chain::protocol
 

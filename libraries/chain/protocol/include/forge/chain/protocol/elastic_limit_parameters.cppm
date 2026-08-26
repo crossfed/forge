@@ -9,7 +9,6 @@ module;
 export module forge.chain.protocol.elastic_limit_parameters;
 
 import forge.chain.protocol.ratio;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -23,24 +22,6 @@ struct elastic_limit_parameters {
 
    bool operator==(const elastic_limit_parameters&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const elastic_limit_parameters& value) {
-   forge::raw::pack(stream, value.target);
-   forge::raw::pack(stream, value.max);
-   forge::raw::pack(stream, value.periods);
-   forge::raw::pack(stream, value.max_multiplier);
-   forge::raw::pack(stream, value.contract_rate);
-   forge::raw::pack(stream, value.expand_rate);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, elastic_limit_parameters& value) {
-   forge::raw::unpack(stream, value.target);
-   forge::raw::unpack(stream, value.max);
-   forge::raw::unpack(stream, value.periods);
-   forge::raw::unpack(stream, value.max_multiplier);
-   forge::raw::unpack(stream, value.contract_rate);
-   forge::raw::unpack(stream, value.expand_rate);
-}
 
 } // namespace forge::chain::protocol
 

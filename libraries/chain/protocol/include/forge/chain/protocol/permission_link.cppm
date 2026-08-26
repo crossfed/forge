@@ -8,7 +8,6 @@ export module forge.chain.protocol.permission_link;
 
 export import forge.chain.protocol.native_ids;
 export import forge.chain.protocol.types;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -21,22 +20,6 @@ struct permission_link {
 
    bool operator==(const permission_link&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const permission_link& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.account);
-   forge::raw::pack(stream, value.code);
-   forge::raw::pack(stream, value.message_type);
-   forge::raw::pack(stream, value.required_permission);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, permission_link& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.account);
-   forge::raw::unpack(stream, value.code);
-   forge::raw::unpack(stream, value.message_type);
-   forge::raw::unpack(stream, value.required_permission);
-}
 
 } // namespace forge::chain::protocol
 

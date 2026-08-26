@@ -10,7 +10,6 @@ export module forge.chain.protocol.table;
 
 export import forge.chain.protocol.native_ids;
 export import forge.chain.protocol.types;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -24,24 +23,6 @@ struct table {
 
    bool operator==(const struct table&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const table& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.code);
-   forge::raw::pack(stream, value.scope);
-   forge::raw::pack(stream, value.table);
-   forge::raw::pack(stream, value.payer);
-   forge::raw::pack(stream, value.count);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, table& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.code);
-   forge::raw::unpack(stream, value.scope);
-   forge::raw::unpack(stream, value.table);
-   forge::raw::unpack(stream, value.payer);
-   forge::raw::unpack(stream, value.count);
-}
 
 } // namespace forge::chain::protocol
 

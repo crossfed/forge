@@ -11,7 +11,6 @@ export module forge.chain.protocol.resource_usage;
 export import forge.chain.protocol.native_ids;
 export import forge.chain.protocol.types;
 export import forge.chain.protocol.usage_accumulator;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -24,22 +23,6 @@ struct resource_usage {
 
    bool operator==(const resource_usage&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const resource_usage& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.owner);
-   forge::raw::pack(stream, value.net_usage);
-   forge::raw::pack(stream, value.cpu_usage);
-   forge::raw::pack(stream, value.ram_usage);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, resource_usage& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.owner);
-   forge::raw::unpack(stream, value.net_usage);
-   forge::raw::unpack(stream, value.cpu_usage);
-   forge::raw::unpack(stream, value.ram_usage);
-}
 
 } // namespace forge::chain::protocol
 

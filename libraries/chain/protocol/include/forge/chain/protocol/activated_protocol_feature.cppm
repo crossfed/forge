@@ -9,7 +9,6 @@ module;
 export module forge.chain.protocol.activated_protocol_feature;
 
 import forge.chain.protocol.types;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -19,16 +18,6 @@ struct activated_protocol_feature {
 
    bool operator==(const activated_protocol_feature&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const activated_protocol_feature& value) {
-   forge::raw::pack(stream, value.feature_digest);
-   forge::raw::pack(stream, value.activation_block_num);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, activated_protocol_feature& value) {
-   forge::raw::unpack(stream, value.feature_digest);
-   forge::raw::unpack(stream, value.activation_block_num);
-}
 
 } // namespace forge::chain::protocol
 

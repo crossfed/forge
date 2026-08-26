@@ -10,7 +10,6 @@ export module forge.chain.protocol.resource_limits_state;
 
 export import forge.chain.protocol.native_ids;
 export import forge.chain.protocol.usage_accumulator;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -28,32 +27,6 @@ struct resource_limits_state {
 
    bool operator==(const resource_limits_state&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const resource_limits_state& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.average_block_net_usage);
-   forge::raw::pack(stream, value.average_block_cpu_usage);
-   forge::raw::pack(stream, value.pending_net_usage);
-   forge::raw::pack(stream, value.pending_cpu_usage);
-   forge::raw::pack(stream, value.total_net_weight);
-   forge::raw::pack(stream, value.total_cpu_weight);
-   forge::raw::pack(stream, value.total_ram_bytes);
-   forge::raw::pack(stream, value.virtual_net_limit);
-   forge::raw::pack(stream, value.virtual_cpu_limit);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, resource_limits_state& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.average_block_net_usage);
-   forge::raw::unpack(stream, value.average_block_cpu_usage);
-   forge::raw::unpack(stream, value.pending_net_usage);
-   forge::raw::unpack(stream, value.pending_cpu_usage);
-   forge::raw::unpack(stream, value.total_net_weight);
-   forge::raw::unpack(stream, value.total_cpu_weight);
-   forge::raw::unpack(stream, value.total_ram_bytes);
-   forge::raw::unpack(stream, value.virtual_net_limit);
-   forge::raw::unpack(stream, value.virtual_cpu_limit);
-}
 
 } // namespace forge::chain::protocol
 

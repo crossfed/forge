@@ -10,7 +10,6 @@ module;
 export module forge.chain.protocol.resource_meter;
 
 export import forge.chain.protocol.time;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -27,24 +26,6 @@ struct resource_meter {
 
 [[nodiscard]] constexpr bool valid(const resource_meter& value) noexcept {
    return value.max.has_value() == value.available.has_value();
-}
-
-template <typename Stream> void raw_pack(Stream& stream, const resource_meter& value) {
-   forge::raw::pack(stream, value.used);
-   forge::raw::pack(stream, value.max);
-   forge::raw::pack(stream, value.available);
-   forge::raw::pack(stream, value.window);
-   forge::raw::pack(stream, value.last_ordinal);
-   forge::raw::pack(stream, value.fully_recovered_at);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, resource_meter& value) {
-   forge::raw::unpack(stream, value.used);
-   forge::raw::unpack(stream, value.max);
-   forge::raw::unpack(stream, value.available);
-   forge::raw::unpack(stream, value.window);
-   forge::raw::unpack(stream, value.last_ordinal);
-   forge::raw::unpack(stream, value.fully_recovered_at);
 }
 
 } // namespace forge::chain::protocol

@@ -8,8 +8,6 @@ module;
 
 export module forge.chain.protocol.blockchain_parameters;
 
-import forge.raw.codec;
-
 export namespace forge::chain::protocol {
 
 struct blockchain_parameters {
@@ -33,46 +31,6 @@ struct blockchain_parameters {
 
    bool operator==(const blockchain_parameters&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const blockchain_parameters& value) {
-   forge::raw::pack(stream, value.max_block_net_usage);
-   forge::raw::pack(stream, value.target_block_net_usage_pct);
-   forge::raw::pack(stream, value.max_transaction_net_usage);
-   forge::raw::pack(stream, value.base_per_transaction_net_usage);
-   forge::raw::pack(stream, value.net_usage_leeway);
-   forge::raw::pack(stream, value.context_free_discount_net_usage_num);
-   forge::raw::pack(stream, value.context_free_discount_net_usage_den);
-   forge::raw::pack(stream, value.max_block_cpu_usage);
-   forge::raw::pack(stream, value.target_block_cpu_usage_pct);
-   forge::raw::pack(stream, value.max_transaction_cpu_usage);
-   forge::raw::pack(stream, value.min_transaction_cpu_usage);
-   forge::raw::pack(stream, value.max_transaction_lifetime);
-   forge::raw::pack(stream, value.deferred_trx_expiration_window);
-   forge::raw::pack(stream, value.max_transaction_delay);
-   forge::raw::pack(stream, value.max_inline_action_size);
-   forge::raw::pack(stream, value.max_inline_action_depth);
-   forge::raw::pack(stream, value.max_authority_depth);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, blockchain_parameters& value) {
-   forge::raw::unpack(stream, value.max_block_net_usage);
-   forge::raw::unpack(stream, value.target_block_net_usage_pct);
-   forge::raw::unpack(stream, value.max_transaction_net_usage);
-   forge::raw::unpack(stream, value.base_per_transaction_net_usage);
-   forge::raw::unpack(stream, value.net_usage_leeway);
-   forge::raw::unpack(stream, value.context_free_discount_net_usage_num);
-   forge::raw::unpack(stream, value.context_free_discount_net_usage_den);
-   forge::raw::unpack(stream, value.max_block_cpu_usage);
-   forge::raw::unpack(stream, value.target_block_cpu_usage_pct);
-   forge::raw::unpack(stream, value.max_transaction_cpu_usage);
-   forge::raw::unpack(stream, value.min_transaction_cpu_usage);
-   forge::raw::unpack(stream, value.max_transaction_lifetime);
-   forge::raw::unpack(stream, value.deferred_trx_expiration_window);
-   forge::raw::unpack(stream, value.max_transaction_delay);
-   forge::raw::unpack(stream, value.max_inline_action_size);
-   forge::raw::unpack(stream, value.max_inline_action_depth);
-   forge::raw::unpack(stream, value.max_authority_depth);
-}
 
 } // namespace forge::chain::protocol
 

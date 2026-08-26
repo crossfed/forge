@@ -10,7 +10,6 @@ export module forge.chain.protocol.resource_limits_config;
 
 export import forge.chain.protocol.elastic_limit_parameters;
 export import forge.chain.protocol.native_ids;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -37,22 +36,6 @@ struct resource_limits_config {
 
    bool operator==(const resource_limits_config&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const resource_limits_config& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.cpu_limit_parameters);
-   forge::raw::pack(stream, value.net_limit_parameters);
-   forge::raw::pack(stream, value.account_cpu_usage_average_window);
-   forge::raw::pack(stream, value.account_net_usage_average_window);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, resource_limits_config& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.cpu_limit_parameters);
-   forge::raw::unpack(stream, value.net_limit_parameters);
-   forge::raw::unpack(stream, value.account_cpu_usage_average_window);
-   forge::raw::unpack(stream, value.account_net_usage_average_window);
-}
 
 } // namespace forge::chain::protocol
 

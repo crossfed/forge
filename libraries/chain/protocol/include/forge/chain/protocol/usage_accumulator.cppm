@@ -8,8 +8,6 @@ module;
 
 export module forge.chain.protocol.usage_accumulator;
 
-import forge.raw.codec;
-
 export namespace forge::chain::protocol {
 
 struct usage_accumulator {
@@ -19,18 +17,6 @@ struct usage_accumulator {
 
    bool operator==(const usage_accumulator&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const usage_accumulator& value) {
-   forge::raw::pack(stream, value.last_ordinal);
-   forge::raw::pack(stream, value.value_ex);
-   forge::raw::pack(stream, value.consumed);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, usage_accumulator& value) {
-   forge::raw::unpack(stream, value.last_ordinal);
-   forge::raw::unpack(stream, value.value_ex);
-   forge::raw::unpack(stream, value.consumed);
-}
 
 } // namespace forge::chain::protocol
 

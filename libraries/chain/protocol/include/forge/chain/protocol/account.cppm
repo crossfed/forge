@@ -10,7 +10,6 @@ export module forge.chain.protocol.account;
 
 export import forge.chain.protocol.native_ids;
 export import forge.chain.protocol.types;
-import forge.raw.codec;
 
 export namespace forge::chain::protocol {
 
@@ -23,22 +22,6 @@ struct account {
 
    bool operator==(const account&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const account& value) {
-   forge::raw::pack(stream, value.id);
-   forge::raw::pack(stream, value.name);
-   forge::raw::pack(stream, value.creation_date);
-   forge::raw::pack(stream, value.abi_hash);
-   forge::raw::pack(stream, value.abi_size);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, account& value) {
-   forge::raw::unpack(stream, value.id);
-   forge::raw::unpack(stream, value.name);
-   forge::raw::unpack(stream, value.creation_date);
-   forge::raw::unpack(stream, value.abi_hash);
-   forge::raw::unpack(stream, value.abi_size);
-}
 
 } // namespace forge::chain::protocol
 

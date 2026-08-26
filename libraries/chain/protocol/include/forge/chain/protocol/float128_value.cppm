@@ -5,7 +5,6 @@ module;
 export module forge.chain.protocol.float128:value;
 
 import forge.chain.protocol.values;
-import forge.raw.codec;
 
 namespace forge::chain::protocol::detail {
 
@@ -51,14 +50,6 @@ struct float128 {
       return std::partial_ordering::greater;
    }
    return std::partial_ordering::equivalent;
-}
-
-template <typename Stream> void raw_pack(Stream& stream, const float128& value) {
-   forge::raw::pack(stream, value.bits);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, float128& value) {
-   forge::raw::unpack(stream, value.bits);
 }
 
 } // namespace forge::chain::protocol

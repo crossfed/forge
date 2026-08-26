@@ -8,8 +8,6 @@ module;
 
 export module forge.chain.protocol.ratio;
 
-import forge.raw.codec;
-
 export namespace forge::chain::protocol {
 
 struct ratio {
@@ -18,16 +16,6 @@ struct ratio {
 
    bool operator==(const ratio&) const = default;
 };
-
-template <typename Stream> void raw_pack(Stream& stream, const ratio& value) {
-   forge::raw::pack(stream, value.numerator);
-   forge::raw::pack(stream, value.denominator);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, ratio& value) {
-   forge::raw::unpack(stream, value.numerator);
-   forge::raw::unpack(stream, value.denominator);
-}
 
 } // namespace forge::chain::protocol
 

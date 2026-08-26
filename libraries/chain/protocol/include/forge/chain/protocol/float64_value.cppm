@@ -5,8 +5,6 @@ module;
 
 export module forge.chain.protocol.float64:value;
 
-import forge.raw.codec;
-
 namespace forge::chain::protocol::detail {
 
 inline constexpr auto float64_sign_mask = std::uint64_t{0x8000000000000000ULL};
@@ -51,14 +49,6 @@ struct float64 {
       return std::partial_ordering::greater;
    }
    return std::partial_ordering::equivalent;
-}
-
-template <typename Stream> void raw_pack(Stream& stream, const float64& value) {
-   forge::raw::pack(stream, value.bits);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, float64& value) {
-   forge::raw::unpack(stream, value.bits);
 }
 
 } // namespace forge::chain::protocol
