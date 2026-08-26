@@ -505,7 +505,12 @@ def main():
     if "float64" in typed_id_structs or "float128" in typed_id_structs:
         raise RuntimeError("canonical protocol floats leaked their bits wrappers into the guest ABI")
     selector_type = state_fields["selector"]["type"]
-    if typed_id_structs[selector_type]["fields"] != [
+    selector_record = typed_id_types.get(selector_type)
+    if selector_type != "account_selector" or selector_record != "entity_selector_B_typed_id_1_10_E_name":
+        raise RuntimeError("guest ABI did not preserve the account_selector type alias")
+    if selector_type in typed_id_structs:
+        raise RuntimeError("account_selector alias leaked a duplicate guest ABI record")
+    if typed_id_structs[selector_record]["fields"] != [
         {"name": "id", "type": "uint64?"},
         {"name": "key", "type": "name?"},
     ]:

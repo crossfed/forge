@@ -109,6 +109,9 @@ def main() -> int:
         "parent_limits.bytes, input.size()",
         "nested.remaining_container_elements()",
         "parent.consume_cumulative_container_elements(consumed)",
+        "std::is_class_v<T> && std::is_aggregate_v<T>",
+        "boost::pfr::for_each_field(value, [&](const auto& field) { pack(stream, field); });",
+        "boost::pfr::for_each_field(value, [&](auto& field) { unpack(stream, field); });",
     ):
         require(raw_codec, needle, raw_codec_path)
 
@@ -120,18 +123,21 @@ def main() -> int:
         "std::vector<digest> dependencies;",
         "std::string protocol_feature_type;",
         "std::vector<protocol_feature_specification> specification;",
-        "raw_pack(Stream& stream, const protocol_feature_specification& value)",
-        "raw_unpack(Stream& stream, protocol_feature_specification& value)",
+        "BOOST_DESCRIBE_STRUCT(protocol_feature_specification, (), (name, value))",
+        "BOOST_DESCRIBE_STRUCT(protocol_feature, (),",
+        "(feature_digest, description_digest, dependencies, protocol_feature_type, specification))",
     ):
         require(feature_protocol, needle, feature_protocol_path)
+    for removed in (
+        "import forge.raw.codec;",
+        "raw_pack(",
+        "raw_unpack(",
+    ):
+        forbid(feature_protocol, removed, feature_protocol_path)
     for needle in (
         "struct activated_protocol_feature {",
         "digest feature_digest;",
         "std::uint32_t activation_block_num = 0;",
-        "forge::raw::pack(stream, value.feature_digest);",
-        "forge::raw::pack(stream, value.activation_block_num);",
-        "forge::raw::unpack(stream, value.feature_digest);",
-        "forge::raw::unpack(stream, value.activation_block_num);",
         "BOOST_DESCRIBE_STRUCT(activated_protocol_feature, (), (feature_digest, activation_block_num))",
     ):
         require(activated_feature_protocol, needle, activated_feature_protocol_path)
@@ -144,6 +150,12 @@ def main() -> int:
         "protocol_feature_type",
         "specification",
         "subjective_restrictions",
+    ):
+        forbid(activated_feature_protocol, removed, activated_feature_protocol_path)
+    for removed in (
+        "import forge.raw.codec;",
+        "raw_pack(",
+        "raw_unpack(",
     ):
         forbid(activated_feature_protocol, removed, activated_feature_protocol_path)
 

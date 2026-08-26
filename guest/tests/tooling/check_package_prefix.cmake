@@ -105,6 +105,8 @@ foreach(_module IN LISTS _guest_component_modules)
    )
 endforeach()
 foreach(_module IN ITEMS
+   forge/db/ids/typed_id.cppm
+   forge/chain/protocol/native_ids.cppm
    forge/chain/protocol/code.cppm
    forge/chain/protocol/table.cppm
    forge/chain/protocol/currency_stats.cppm
