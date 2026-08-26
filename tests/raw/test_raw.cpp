@@ -79,6 +79,32 @@ BOOST_DESCRIBE_STRUCT(macro_serialized_record, (), (id, name))
 FORGE_DECLARE_SERIALIZATION(macro_serialized_record)
 FORGE_IMPLEMENT_SERIALIZATION(macro_serialized_record)
 
+struct framed_vectors {
+   std::vector<std::vector<std::uint32_t>> values;
+
+   bool operator==(const framed_vectors&) const = default;
+};
+
+template <typename Stream> void raw_pack(Stream& stream, const framed_vectors& value) {
+   auto frames = std::vector<forge::raw::bytes>{};
+   frames.reserve(value.values.size());
+   for (const auto& item : value.values) {
+      frames.push_back(forge::raw::pack(item));
+   }
+   forge::raw::pack(stream, frames);
+}
+
+template <typename Stream> void raw_unpack(Stream& stream, framed_vectors& value) {
+   auto frames = std::vector<forge::raw::bytes>{};
+   forge::raw::unpack(stream, frames);
+   value.values.clear();
+   value.values.reserve(frames.size());
+   for (const auto& frame : frames) {
+      value.values.push_back(
+          forge::raw::unpack_nested_exact<std::vector<std::uint32_t>>(stream, std::span<const std::uint8_t>{frame}));
+   }
+}
+
 struct stream_serialized_aggregate {
    std::uint32_t value = 0;
 
@@ -331,6 +357,30 @@ BOOST_AUTO_TEST_CASE(raw_unpack_limits_apply_a_cumulative_container_budget) {
                                               forge::raw::unpack_limits{.max_container_elements = 8U,
                                                                         .max_total_container_elements = 3U,
                                                                         .first_container_elements = 2U}),
+                     forge::raw::exceptions::allocation_limit);
+}
+
+BOOST_AUTO_TEST_CASE(raw_nested_unpack_inherits_and_charges_parent_allocation_budgets) {
+   const auto oversized_child = forge::raw::pack(framed_vectors{.values = {{1U, 2U}}});
+   BOOST_CHECK_THROW(
+       (void)forge::raw::unpack_exact<framed_vectors>(std::span<const std::uint8_t>{oversized_child},
+                                                      forge::raw::unpack_limits{.max_container_elements = 1U,
+                                                                                .max_total_container_elements = 4U,
+                                                                                .max_bytes = 64U,
+                                                                                .first_container_elements = 1U}),
+       forge::raw::exceptions::allocation_limit);
+
+   const auto value = framed_vectors{.values = {{1U}, {2U}}};
+   const auto payload = forge::raw::pack(value);
+   const auto accepted = forge::raw::unpack_limits{.max_container_elements = 2U,
+                                                   .max_total_container_elements = 4U,
+                                                   .max_bytes = 64U,
+                                                   .first_container_elements = 2U};
+   BOOST_CHECK(forge::raw::unpack_exact<framed_vectors>(std::span<const std::uint8_t>{payload}, accepted) == value);
+
+   auto exhausted = accepted;
+   exhausted.max_total_container_elements = 3U;
+   BOOST_CHECK_THROW((void)forge::raw::unpack_exact<framed_vectors>(std::span<const std::uint8_t>{payload}, exhausted),
                      forge::raw::exceptions::allocation_limit);
 }
 
