@@ -1,6 +1,7 @@
 module;
 
 #include <concepts>
+#include <cstdint>
 #include <type_traits>
 
 module package.chain_api_component.surface_checks;
@@ -13,6 +14,14 @@ import forge.chain.api.info;
 import forge.chain.api.state;
 
 namespace package_chain_api_component {
+
+using state_full_account = decltype(forge::chain::protocol::account_response{}.account);
+using state_full_permissions = decltype(state_full_account{}.permissions);
+using state_full_permission = state_full_permissions::value_type;
+using state_authority = decltype(state_full_permission{}.auth);
+
+static_assert(std::is_aggregate_v<state_full_account>);
+static_assert(std::is_same_v<decltype(state_authority{}.threshold), std::uint32_t>);
 
 void check_read_api_surface() {
    namespace chain_api = forge::chain::api;

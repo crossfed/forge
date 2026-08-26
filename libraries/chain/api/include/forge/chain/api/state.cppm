@@ -22,6 +22,7 @@ import forge.api.http.mapping;
 import forge.api.http.openapi;
 import forge.api.http.proxy;
 import forge.chain.api.json_schema;
+import forge.chain.protocol.authority;
 import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.ids.object_id;
