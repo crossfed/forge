@@ -32,10 +32,30 @@ add_executable(
    p2p_runtime.cpp
    read_fixture.cpp
    read_e2e.cpp
+   read_e2e_http.cpp
+   read_e2e_p2p_info_block.cpp
+   read_e2e_p2p_info_block_client.cpp
+   read_e2e_p2p_info_block_server.cpp
+   read_e2e_p2p_state.cpp
+   read_e2e_p2p_state_client.cpp
+   read_e2e_p2p_state_server.cpp
+   surface_checks_api_read.cpp
+   surface_checks_api_write.cpp
+   surface_checks_block.cpp
+   surface_checks_codec.cpp
+   surface_checks_info_admin.cpp
+   surface_checks_state.cpp
    test_support.cpp
    verifier_fixture.cpp
    write_fixture.cpp
    write_e2e.cpp
+   write_e2e_http.cpp
+   write_e2e_p2p_admin.cpp
+   write_e2e_p2p_admin_client.cpp
+   write_e2e_p2p_admin_server.cpp
+   write_e2e_p2p_transaction.cpp
+   write_e2e_p2p_transaction_client.cpp
+   write_e2e_p2p_transaction_server.cpp
 )
 target_sources(
    forge_package_chain_api_component
@@ -44,11 +64,28 @@ target_sources(
       FILES
          p2p_runtime.cppm
          read_e2e.cppm
+         read_e2e_http.cppm
+         read_e2e_p2p_info_block.cppm
+         read_e2e_p2p_info_block_client.cppm
+         read_e2e_p2p_info_block_server.cppm
+         read_e2e_p2p_state.cppm
+         read_e2e_p2p_state_client.cppm
+         read_e2e_p2p_state_server.cppm
          read_fixture.cppm
+         read_result.cppm
+         surface_checks.cppm
          test_support.cppm
          verifier_fixture.cppm
          write_e2e.cppm
+         write_e2e_http.cppm
+         write_e2e_p2p_admin.cppm
+         write_e2e_p2p_admin_client.cppm
+         write_e2e_p2p_admin_server.cppm
+         write_e2e_p2p_transaction.cppm
+         write_e2e_p2p_transaction_client.cppm
+         write_e2e_p2p_transaction_server.cppm
          write_fixture.cppm
+         write_result.cppm
 )
 target_link_libraries(
    forge_package_chain_api_component

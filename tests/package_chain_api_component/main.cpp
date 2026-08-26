@@ -1,121 +1,16 @@
-#include <concepts>
-#include <cstdint>
-#include <optional>
-#include <type_traits>
-#include <vector>
-
 import package.chain_api_component.read_e2e;
-import package.chain_api_component.test_support;
+import package.chain_api_component.surface_checks;
 import package.chain_api_component.verifier_fixture;
 import package.chain_api_component.write_e2e;
-import forge.chain.api.admin;
-import forge.chain.api.authenticated_audit_verifier;
-import forge.chain.api.block;
-import forge.chain.api.finality;
-import forge.chain.api.info;
-import forge.chain.api.state;
-import forge.chain.api.submission;
-import forge.chain.api.submission_client;
-import forge.chain.api.table_key;
-import forge.chain.api.transaction;
-import forge.chain.protocol.account_authority;
-import forge.chain.protocol.account_ram_correction;
-import forge.chain.protocol.activated_protocol_feature_info;
-import forge.chain.protocol.audit;
-import forge.chain.protocol.block_query;
-import forge.chain.protocol.chain_config;
-import forge.chain.protocol.currency_stats;
-import forge.chain.protocol.finalizer_vote_record;
-import forge.chain.protocol.float64;
-import forge.chain.protocol.full_account;
-import forge.chain.protocol.generated_transaction;
-import forge.chain.protocol.producer_info;
-import forge.chain.protocol.protocol_feature;
-import forge.chain.protocol.resource_limits_config;
-import forge.chain.protocol.resource_limits_state;
-import forge.chain.protocol.state_query;
-import forge.chain.protocol.table;
-import forge.chain.protocol.transaction_query;
-import forge.chain.protocol.wasm_parameters;
-
-namespace chain_api = forge::chain::api;
-namespace protocol = forge::chain::protocol;
 
 int main() {
-   static_assert(std::is_abstract_v<chain_api::info>);
-   static_assert(std::is_abstract_v<chain_api::block>);
-   static_assert(std::is_abstract_v<chain_api::state>);
-   static_assert(std::is_abstract_v<chain_api::transaction>);
-   static_assert(std::is_abstract_v<chain_api::submission>);
-   static_assert(std::is_abstract_v<chain_api::admin>);
-   static_assert(!std::is_abstract_v<chain_api::submission_client>);
-   static_assert(std::derived_from<chain_api::authenticated_audit_verifier, chain_api::audit_verifier>);
-   static_assert(std::is_abstract_v<chain_api::finality_verifier>);
-   static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.rows), std::vector<protocol::table_row>>);
-   static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.next), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::table_scope_request{}.cursor), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::table_changes_request{}.cursor), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::account_changes_request{}.cursor), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::authorizers_request{}.cursor), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::authorizers_response{}.next), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::table_mutation{}.table), protocol::table_change_selector>);
-   static_assert(
-       std::is_same_v<decltype(protocol::table_changes_response{}.blocks), std::vector<protocol::table_change_batch>>);
-   static_assert(std::is_same_v<decltype(protocol::account_changes_response{}.blocks),
-                                std::vector<protocol::account_change_batch>>);
-   static_assert(std::is_same_v<decltype(protocol::account_response{}.account), protocol::full_account>);
-   static_assert(
-       std::is_same_v<decltype(protocol::account_mutation{}.authority), std::optional<protocol::account_authority>>);
-   static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.tables), std::vector<protocol::table>>);
-   static_assert(std::is_same_v<decltype(protocol::currency_stats_response{}.stats), protocol::currency_stats>);
-   static_assert(std::is_same_v<decltype(protocol::scheduled_response{}.transactions),
-                                std::vector<protocol::generated_transaction>>);
-   static_assert(std::is_same_v<decltype(protocol::protocol_features_response{}.features),
-                                std::vector<protocol::activated_protocol_feature_info>>);
-   static_assert(std::derived_from<protocol::activated_protocol_feature_info, protocol::protocol_feature>);
-   static_assert(std::derived_from<protocol::supported_protocol_feature, protocol::protocol_feature>);
-   static_assert(
-       std::is_same_v<decltype(protocol::consensus_parameters_response{}.parameters), protocol::chain_config>);
-   static_assert(std::is_same_v<decltype(protocol::consensus_parameters_response{}.wasm),
-                                std::optional<protocol::wasm_parameters>>);
-   static_assert(
-       std::is_same_v<decltype(protocol::producers_request{}.lower_bound), std::optional<protocol::account_name>>);
-   static_assert(std::is_same_v<decltype(protocol::producers_request{}.cursor), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::producers_response{}.rows), std::vector<protocol::producer_info>>);
-   static_assert(std::is_same_v<decltype(protocol::producers_response{}.total_vote_weight), protocol::float64>);
-   static_assert(std::is_same_v<decltype(protocol::producers_response{}.next), std::optional<protocol::bytes>>);
-   static_assert(std::is_same_v<decltype(protocol::finalizer_info_response{}.last_votes),
-                                std::vector<protocol::finalizer_vote_record>>);
-   static_assert(std::is_same_v<decltype(protocol::info_response{}.resource_config), protocol::resource_limits_config>);
-   static_assert(std::is_same_v<decltype(protocol::info_response{}.resource_state), protocol::resource_limits_state>);
-   static_assert(std::is_same_v<decltype(protocol::ram_corrections_response{}.rows),
-                                std::vector<protocol::account_ram_correction>>);
-   package_chain_api_component::require(chain_api::state::ref().major == 3U,
-                                        "installed state API does not expose version 3");
-   package_chain_api_component::require(chain_api::block::ref().major == 2U,
-                                        "installed block API does not expose version 2");
-   package_chain_api_component::require(chain_api::info::ref().major == 2U,
-                                        "installed info API does not expose version 2");
-   package_chain_api_component::require(chain_api::admin::ref().major == 2U,
-                                        "installed admin API does not expose version 2");
-
+   package_chain_api_component::check_read_api_surface();
+   package_chain_api_component::check_write_api_surface();
+   package_chain_api_component::check_state_surface();
+   package_chain_api_component::check_block_surface();
+   package_chain_api_component::check_info_admin_surface();
+   package_chain_api_component::check_codec_surface();
    package_chain_api_component::run_verifier_component_checks();
-
-   auto request = protocol::table_changes_request{
-       .from_block = 39,
-       .to_block = 40,
-       .tables = {{.code = protocol::account_name{"tester"}}},
-   };
-   auto block = protocol::block_request{};
-   auto transaction = protocol::transaction_status_request{};
-   const auto table_key = chain_api::encode_table_key(std::uint64_t{42U});
-   (void)request;
-   (void)block;
-   (void)transaction;
-   package_chain_api_component::require(table_key.size() == sizeof(std::uint64_t),
-                                        "installed table key codec returned the wrong width");
-
    package_chain_api_component::run_read_e2e();
    package_chain_api_component::run_write_e2e();
    return 0;
