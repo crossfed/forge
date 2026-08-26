@@ -110,6 +110,10 @@ struct exact_varint_record {
    forge::unsigned_int unsigned_value;
 };
 
+struct exact_numeric_scalar {
+   double value = 0.0;
+};
+
 struct exact_chrono_record {
    std::chrono::microseconds delay{};
    std::chrono::sys_time<std::chrono::microseconds> timestamp{};
@@ -191,6 +195,7 @@ BOOST_DESCRIBE_STRUCT(exact_dotted_map_key_parent, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_dotted_variant_parent, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_varint_record, (), (signed_value, unsigned_value))
+BOOST_DESCRIBE_STRUCT(exact_numeric_scalar, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))
 BOOST_DESCRIBE_STRUCT(exact_blob_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_byte_vector_record, (), (payload))
@@ -211,6 +216,14 @@ export namespace forge {
 
 inline void to_variant(const forge_json_tests::exact_long_double_record&, variant& output) {
    output = mutable_variant_object{};
+}
+
+inline void to_variant(const forge_json_tests::exact_numeric_scalar& input, variant& output) {
+   output = input.value;
+}
+
+inline void from_variant(const variant& input, forge_json_tests::exact_numeric_scalar& output) {
+   output.value = input.as_double();
 }
 
 } // namespace forge

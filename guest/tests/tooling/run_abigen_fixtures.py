@@ -482,11 +482,84 @@ def main():
         "application_id": "uint64",
         "workspace_id": "uint64",
         "repair_id": "uint64",
+        "native_account_id": "uint64",
         "coding": "coding_scheme",
     }:
         raise RuntimeError("namespaced typed IDs or enum changed their canonical ABI")
     if any(item["name"].startswith("typed_id") for item in typed_ids["structs"]):
         raise RuntimeError("typed ID implementation records leaked into the contract ABI")
+
+    typed_id_structs = by_name(typed_ids["structs"])
+    state_fields = by_name(typed_id_structs["statevalues"]["fields"])
+    if {name: field["type"] for name, field in state_fields.items() if name != "selector"} != {
+        "parameters": "blockchain_parameters",
+        "config": "chain_config",
+        "wasm": "wasm_parameters",
+        "elastic": "elastic_limit_parameters",
+        "usage": "usage_accumulator",
+        "feature": "activated_protocol_feature",
+        "float64_value": "float64",
+        "float128_value": "float128",
+    }:
+        raise RuntimeError("guest ABI did not traverse the canonical protocol state values")
+    if "float64" in typed_id_structs or "float128" in typed_id_structs:
+        raise RuntimeError("canonical protocol floats leaked their bits wrappers into the guest ABI")
+    selector_type = state_fields["selector"]["type"]
+    selector_record = typed_id_types.get(selector_type)
+    if selector_type != "account_selector" or selector_record != "entity_selector_B_typed_id_1_10_E_name":
+        raise RuntimeError("guest ABI did not preserve the account_selector type alias")
+    if selector_type in typed_id_structs:
+        raise RuntimeError("account_selector alias leaked a duplicate guest ABI record")
+    if typed_id_structs[selector_record]["fields"] != [
+        {"name": "id", "type": "uint64?"},
+        {"name": "key", "type": "name?"},
+    ]:
+        raise RuntimeError("guest ABI did not traverse account_selector fields")
+    if typed_id_structs["chain_config"]["base"] != "blockchain_parameters" or typed_id_structs["chain_config"][
+        "fields"
+    ] != [{"name": "max_action_return_value_size", "type": "uint32"}]:
+        raise RuntimeError("chain_config guest ABI inheritance changed")
+    if typed_id_structs["blockchain_parameters"]["fields"] != [
+        {"name": "max_block_net_usage", "type": "uint64"},
+        {"name": "target_block_net_usage_pct", "type": "uint32"},
+        {"name": "max_transaction_net_usage", "type": "uint32"},
+        {"name": "base_per_transaction_net_usage", "type": "uint32"},
+        {"name": "net_usage_leeway", "type": "uint32"},
+        {"name": "context_free_discount_net_usage_num", "type": "uint32"},
+        {"name": "context_free_discount_net_usage_den", "type": "uint32"},
+        {"name": "max_block_cpu_usage", "type": "uint32"},
+        {"name": "target_block_cpu_usage_pct", "type": "uint32"},
+        {"name": "max_transaction_cpu_usage", "type": "uint32"},
+        {"name": "min_transaction_cpu_usage", "type": "uint32"},
+        {"name": "max_transaction_lifetime", "type": "uint32"},
+        {"name": "deferred_trx_expiration_window", "type": "uint32"},
+        {"name": "max_transaction_delay", "type": "uint32"},
+        {"name": "max_inline_action_size", "type": "uint32"},
+        {"name": "max_inline_action_depth", "type": "uint16"},
+        {"name": "max_authority_depth", "type": "uint16"},
+    ]:
+        raise RuntimeError("blockchain_parameters guest ABI changed")
+    if typed_id_structs["elastic_limit_parameters"]["fields"][-2:] != [
+        {"name": "contract_rate", "type": "ratio"},
+        {"name": "expand_rate", "type": "ratio"},
+    ] or typed_id_structs["ratio"]["fields"] != [
+        {"name": "numerator", "type": "uint64"},
+        {"name": "denominator", "type": "uint64"},
+    ]:
+        raise RuntimeError("elastic limit guest ABI did not traverse ratio")
+    if typed_id_structs["usage_accumulator"]["fields"] != [
+        {"name": "last_ordinal", "type": "uint32"},
+        {"name": "value_ex", "type": "uint64"},
+        {"name": "consumed", "type": "uint64"},
+    ]:
+        raise RuntimeError("usage_accumulator guest ABI changed")
+    if typed_id_structs["activated_protocol_feature"]["fields"] != [
+        {"name": "feature_digest", "type": "checksum256"},
+        {"name": "activation_block_num", "type": "uint32"},
+    ]:
+        raise RuntimeError("activated_protocol_feature guest ABI changed")
+    if "protocol_feature" in typed_id_structs or "protocol_feature_specification" in typed_id_structs:
+        raise RuntimeError("host protocol feature API values leaked into the guest ABI")
 
     equivalent_struct = invoke(
         args,

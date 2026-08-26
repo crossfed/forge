@@ -2,6 +2,9 @@ add_library(
    forge_plugins_p2p_node STATIC
       plugin.cpp
       api_impl.cpp
+      api_publication_generation.cpp
+      api_publication_slot.cpp
+      api_publication_registry.cpp
       plugin_diagnostics_source_adapter.cpp
       plugin_pubsub_source_adapter.cpp
       config.cpp
@@ -15,6 +18,9 @@ add_library(
       details/p2p_state_schema.hxx
       details/plugin_diagnostics_source_adapter.hxx
       details/plugin_pubsub_source_adapter.hxx
+      details/api_publication_generation.hxx
+      details/api_publication_slot.hxx
+      details/api_publication_registry.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_node plugins/p2p/node)
 
@@ -40,4 +46,6 @@ target_link_libraries(
       Boost::asio
       forge_plugins_db_store
       forge_plugins_crypto_secrets
+   PRIVATE
+      forge_api_stream
 )

@@ -115,6 +115,49 @@ BOOST_AUTO_TEST_CASE(task_handle_failure_is_published_before_late_wait_registrat
    BOOST_CHECK_THROW(waiter.get(), std::runtime_error);
 }
 
+BOOST_AUTO_TEST_CASE(task_handle_accepted_latches_queue_admission) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+
+   auto failed = scheduler.submit(task{.priority = priority{1},
+                                       .name = "accepted-before-failure",
+                                       .work = [] { throw std::runtime_error{"task failure"}; }});
+   BOOST_TEST(failed.accepted());
+   BOOST_CHECK_THROW(wait_task(runtime, failed), std::runtime_error);
+   BOOST_TEST(failed.accepted());
+
+   auto canceled = scheduler.submit_after(task{.priority = priority{1}, .name = "accepted-before-cancel", .work = [] {}},
+                                          std::chrono::seconds{1});
+   BOOST_TEST(canceled.accepted());
+   BOOST_REQUIRE(canceled.cancel());
+   BOOST_CHECK_THROW(wait_task(runtime, canceled), forge::asio::exceptions::canceled);
+   BOOST_TEST(canceled.accepted());
+}
+
+BOOST_AUTO_TEST_CASE(task_handle_accepted_is_false_for_immediate_rejection) {
+   auto stopped_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto stopped_scheduler = scheduler_type{stopped_runtime};
+   stopped_scheduler.stop();
+
+   auto stopped = stopped_scheduler.submit(task{.priority = priority{1}, .name = "stopped", .work = [] {}});
+   BOOST_TEST(!stopped.accepted());
+   BOOST_CHECK_THROW(wait_task(stopped_runtime, stopped), forge::asio::exceptions::rejected);
+
+   auto bounded_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto bounded =
+       scheduler_type{bounded_runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 1}};
+   auto queued = bounded.submit_after(task{.priority = priority{1}, .name = "queued", .work = [] {}},
+                                      std::chrono::seconds{1});
+   auto full = bounded.submit_after(task{.priority = priority{1}, .name = "full", .work = [] {}},
+                                    std::chrono::seconds{1});
+
+   BOOST_TEST(queued.accepted());
+   BOOST_TEST(!full.accepted());
+   BOOST_CHECK_THROW(wait_task(bounded_runtime, full), forge::asio::exceptions::rejected);
+   static_cast<void>(queued.cancel());
+   bounded.stop();
+}
+
 BOOST_AUTO_TEST_CASE(task_handle_wakes_concurrent_waiters) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};

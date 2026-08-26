@@ -26,11 +26,62 @@ Package component: `chain_protocol`. Public namespace:
   keys, signatures, timestamps and scalar wire vocabulary.
 - `forge.chain.protocol.fixed_key`: `fixed_key<Size>` and `key256`, with
   ordered word construction, canonical raw bytes and fixed-width hex variants.
+- `forge.chain.protocol.native_ids`: canonical native object-ID aliases backed
+  directly by `forge.db.ids.typed_id`. These named IDs are the stable public
+  identity of native protocol records; they do not expose generic ObjectDB
+  access and this library intentionally provides no `get_object` operation.
+- `forge.chain.protocol.entity_selector`: exact entity selection by one native
+  ID or one natural key; it carries no lookup behavior.
+- `forge.chain.protocol.account`, `account_metadata`, `permission_usage`,
+  `permission`, `full_permission`, `permission_link`, `account_authority` and
+  `full_account`: flat canonical account and authority projections. Persisted
+  primitives retain explicit native IDs and Spine field order; composed views
+  use inheritance without depending on ObjectDB records.
+- `forge.chain.protocol.code` and `table`: canonical native code and contract
+  table projections with stable named IDs. `code_hash` is also the digest of
+  the persisted code blob, so the public code projection carries only its size
+  and never duplicates that digest in a second blob-reference field.
+- `forge.chain.protocol.currency_stats`: the donor-compatible token statistics
+  row in exact `supply`, `max_supply`, `issuer` order.
+- `forge.chain.protocol.generated_transaction`: host projection of persisted
+  deferred-transaction metadata plus `packed_transaction`. The canonical
+  mapping from the persisted blob uses no signatures, `compression::none`,
+  empty context-free data and the donor transaction bytes in `packed_trx`;
+  construction remains the responsibility of a future builder.
+- `forge.chain.protocol.resource_limits`, `resource_usage`,
+  `resource_limits_config`, `resource_limits_state`,
+  `account_ram_correction`, `resource_meter` and `account_resources`: objective
+  persisted resource primitives plus transport-neutral account resource views.
+  A meter is unlimited when both `max` and `available` are absent and bounded
+  when both are present. Mixed presence is invalid; `valid(resource_meter
+  const&)` reports this invariant for later API validators. Meter fields are
+  supplied data and this library performs no recovery or limit policy.
+- `forge.chain.protocol.chain_config`, `wasm_parameters`, `ratio`,
+  `elastic_limit_parameters`, `usage_accumulator`,
+  `activated_protocol_feature`: canonical persisted and guest state values with
+  Raw and host Variant contracts, but no controller policy. The activated value
+  remains exactly `feature_digest` plus `activation_block_num` on the Raw and
+  guest ABI surfaces.
+- `forge.chain.protocol.protocol_feature`,
+  `activated_protocol_feature_info`: host API values for complete protocol
+  feature metadata. The shared base carries digest, description, dependencies,
+  type and specification; activated API information adds ordinal and block
+  number. Subjective restrictions remain exclusive to
+  `supported_protocol_feature`.
+- `forge.chain.protocol.float64`, `float128`: bit-preserving floating values;
+  their host ordered-key helpers reject NaN and use the canonical Spine byte
+  order.
 - `forge.chain.protocol.authority`: permission weights and authority thresholds.
 - `forge.chain.protocol.producer_schedule`: legacy producer keys and schedules
   used by block headers and contract APIs.
 - `forge.chain.protocol.producer_authority`: weighted block-signing authorities
   and producer authority schedules.
+- `forge.chain.protocol.producer_info`: canonical `eosio.system` producer row.
+  Its optional block-signing authority is a trailing binary extension: omission
+  contributes no Raw bytes, while a present authority uses its ordinary
+  `[index, payload]` wire representation without an optional presence marker.
+- `forge.chain.protocol.finalizer_vote_record`: typed finalizer vote diagnostics
+  with the canonical BLS public key, block ID and block timestamp values.
 - `forge.chain.protocol.finalizer_authority`: import-compatible alias that
   preserves the public type name while forwarding ownership to the canonical
   typed `forge.chain.savanna.values` finalizer record. Its `public_key` field
@@ -58,14 +109,21 @@ Package component: `chain_protocol`. Public namespace:
   `state_anchor` on every batch; product protocol does not expose raw proof
   keys, point/range records or authenticated change-range DTOs.
 
-The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,
-`forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric`
-and `forge_crypto_digest`.
+The target publicly links `forge_db_ids`, `forge_exceptions`, `forge_chain_core`,
+`forge_compression`, `forge_raw`, `forge_variant`,
+`forge_crypto_asymmetric_values`, `forge_crypto_asymmetric` and
+`forge_crypto_digest`.
 
 Authority, producer schedule, producer authority and finalizer policy modules
 share guest-safe value partitions with host wrappers. Host wrappers provide the
 same full Raw and Variant serialization contract; `block_signing_authority`
 uses the Spring/FC `[index, payload]` JSON representation.
+
+Code, table and currency-stat projection values use only guest-safe protocol
+scalars and Raw mechanics. The generated-transaction projection is intentionally
+host-only because `packed_transaction` is not part of the guest value surface.
+Producer info and finalizer vote records remain host-only projections; they are
+not registered as Contract SDK guest modules.
 
 The `finalizer_authority` leaf remains as an import-compatible forwarding
 module only. It does not own a second type or serialization implementation.
@@ -148,13 +206,18 @@ key custody and signing authorization belong to the product runtime.
 This library does not provide state storage, controller behavior, transaction
 execution, action trace collection, sequence allocation, consensus, finality,
 P2P synchronization, block production, Merkle proofs or finality-tree
-construction.
+construction. Account/resource projections are public protocol snapshots, not
+ObjectDB models, persisted indexes or calculation services.
+Their defaults intentionally mirror the current Spine donor state. Generic
+described Variant decoding is permissive and preserves declared defaults when
+fields are absent; exact API readers are responsible for validating requests.
 
 ## Tests
 
 `test_forge_chain_protocol` covers raw and variant fixtures, fixed keys, names
-and assets, transactions, compression, signatures, ABI compatibility, block
-IDs, transaction receipt roots and Spring-compatible Savanna action receipts.
+and assets, native state projections, producer binary-extension compatibility,
+typed finalizer votes, transactions, compression, signatures, ABI compatibility,
+block IDs, transaction receipt roots and Spring-compatible Savanna action receipts.
 `test_forge_package_chain_protocol_component` verifies the installed
 `chain_protocol` component, protocol imports and the transitive core digest
 dependency.

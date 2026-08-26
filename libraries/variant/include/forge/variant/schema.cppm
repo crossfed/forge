@@ -261,7 +261,7 @@ template <typename T> void apply_encoding(const T& input, variant& output, std::
          output = from_schema_input(schema::input_value{rules.encode_object(input, path)});
          return;
       }
-      if (output.is_string()) {
+      if (!output.is_object()) {
          return;
       }
 

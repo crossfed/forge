@@ -26,6 +26,12 @@ def require_tokens(path: Path, tokens: list[str], label: str) -> None:
         fail(f"missing {label} in {path}: {', '.join(missing)}")
 
 
+def require_before(path: Path, first: str, second: str, label: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    if text.find(first) == -1 or text.find(second) == -1 or text.find(first) > text.find(second):
+        fail(f"missing {label} order in {path}: {first} before {second}")
+
+
 def require_boost_header_closure(include: Path) -> None:
     missing = set()
     for header in sorted((include / "boost").rglob("*")):
@@ -104,6 +110,14 @@ def main() -> None:
     require_files(include, surface["donor_c_headers"], "CDT C headers")
     require_files(include, surface["canonical_c_headers"], "canonical C headers")
     require_files(include / "eosio", surface["donor_cpp_headers"], "CDT C++ headers")
+    eosio_serialize = include / "eosio/serialize.hpp"
+    require_tokens(eosio_serialize, ["import forge.raw.codec;"], "raw codec import")
+    require_before(
+        eosio_serialize,
+        "#include <new>",
+        "#include <eosio/dispatcher.hpp>",
+        "aligned allocation declaration",
+    )
     require_files(
         args.data_dir / "modules/forge/contract",
         [f"{name}.cppm" for name in surface["modern_modules"]],

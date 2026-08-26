@@ -112,6 +112,7 @@ node::impl::open_session_stream(const std::shared_ptr<session_state>& session, c
       selected.request_cancel();
       throw;
    }
+   detail::stream_access::set_authentication(selected, session->authentication);
    co_return selected;
 }
 

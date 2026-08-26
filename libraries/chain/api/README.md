@@ -86,9 +86,39 @@ Forge exceptions and translate implementation `std`/Boost failures into their
 own typed Forge error contracts. Asio operation cancellation remains a typed
 `forge::asio::exceptions::canceled` result rather than an availability error.
 
+## Typed block, info and admin reads
+
+`forge.chain.api.block`, `forge.chain.api.info` and
+`forge.chain.api.admin` are contract version `2.0`. This is a clean break:
+there are no compatibility aliases, legacy readers or alternate JSON modes.
+
+Block responses use the complete host `activated_protocol_feature_info` and
+reuse the canonical
+`chain_config`, `wasm_parameters`, `producer_info` and
+`finalizer_vote_record` protocol records. Activated features preserve the
+Spring ordinal, activation block, feature and description digests,
+dependencies, feature type and specification; subjective restrictions remain
+supported-feature administration data only. Producer pagination uses an optional
+typed `account_name` lower bound and opaque `bytes` cursor/next values. Present
+cursors and continuations must be non-empty and remain bounded by the common
+request and response byte limits. Producer response Raw frames each row's
+canonical `producer_info` bytes so its trailing authority extension remains
+optional without changing the canonical record encoding. Each nested row is
+decoded with the parent's configured byte and per-container limits capped by
+that row's exact frame size. Nested container allocations consume the same
+cumulative budget as audited fields and all other rows. The donor aggregate
+vote weight remains canonical `float64 total_vote_weight` between `rows` and
+`next` in both Raw and JSON shapes.
+
+`info_response` carries canonical `resource_limits_config` and
+`resource_limits_state` projections as `resource_config` and `resource_state`.
+The old duplicated virtual/block CPU/NET and total-weight fields are removed.
+Admin RAM-correction pages return canonical `account_ram_correction` records.
+All of these reads use `GET` and `Cache-Control: no-store`.
+
 ## Verified state synchronization
 
-`forge.chain.api.state` is contract version `2.0`. It exposes typed
+`forge.chain.api.state` is contract version `3.0`. It exposes typed
 `get_table_changes` and `get_account_changes` methods; the old remote
 `get_point`, `get_range` and `get_changes` surface does not exist. Both change
 methods use `POST` because selectors and proof pagination are structured
@@ -109,10 +139,9 @@ mutations to one `state_anchor`, and `table_changes_response.blocks` preserves
 the ordered multi-block `(from_block, to_block]` history. Page limits apply to
 the aggregate mutation count across all returned blocks.
 
-`account_state` contains only `creation_date` and `permissions`.
-`account_response` carries the requested account beside that state, while
-`account_mutation` carries an account and optional `account_state`; an absent
-state is a deletion. `account_change_batch` and
+`account_response` carries the canonical `full_account`, while
+`account_mutation` carries an account name and optional canonical
+`account_authority`; an absent authority is a deletion. `account_change_batch` and
 `account_changes_response.blocks` use the same per-block history shape. Within
 each block, mutations are last-write-wins by logical identity: a batch cannot
 contain two mutations for the same table primary key or account.

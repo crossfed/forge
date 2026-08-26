@@ -1,12 +1,14 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <cstdint>
 #include <limits>
-#include <stdexcept>
 #include <string>
 
 module forge.db.ids.object_id;
 
+import forge.exceptions;
 import forge.variant.value;
 
 namespace forge::db::ids {
@@ -25,10 +27,10 @@ void from_variant(const forge::variant& input, object_id& out) {
    forge::from_variant(object["type"], decoded_type);
    forge::from_variant(object["instance"], out.instance);
    if (decoded_space > std::numeric_limits<std::uint8_t>::max()) {
-      throw std::invalid_argument("object_id space exceeds uint8 range");
+      FORGE_THROW("object_id space exceeds uint8 range", forge::exceptions::ctx("space", decoded_space));
    }
    if (decoded_type > std::numeric_limits<std::uint16_t>::max()) {
-      throw std::invalid_argument("object_id type exceeds uint16 range");
+      FORGE_THROW("object_id type exceeds uint16 range", forge::exceptions::ctx("type", decoded_type));
    }
    out.space = static_cast<std::uint8_t>(decoded_space);
    out.type = static_cast<std::uint16_t>(decoded_type);

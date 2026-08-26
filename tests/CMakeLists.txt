@@ -294,6 +294,14 @@ add_test(
       ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_chain_api_typed_control_surfaces
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_typed_control_surfaces.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 add_executable(
    test_forge_plugins_http_server
@@ -1053,7 +1061,9 @@ add_executable(
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
    plugins/plugins_tests.cpp
+   plugins/resolver_publication_race.cpp
    plugins/log_otlp_tests.cpp
+   plugins/details/resolver_publication_race.hxx
 )
 target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

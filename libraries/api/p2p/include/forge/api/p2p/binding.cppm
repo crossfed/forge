@@ -20,6 +20,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.p2p.authenticated_peer;
 import forge.api.stream.options;
 import forge.api.stream.server;
 import forge.net.p2p.exceptions;
@@ -56,6 +57,12 @@ class api_binding {
    }
 
    boost::asio::awaitable<void> accept(forge::net::p2p::node::incoming_protocol_stream stream) const {
+      auto live = make_session(std::move(stream));
+      co_await live.async_serve();
+   }
+
+   [[nodiscard]] forge::api::stream::session
+   make_session(forge::net::p2p::node::incoming_protocol_stream stream) const {
       validate_stream(stream);
       auto trusted = forge::api::core::metadata{
          forge::api::core::metadata_entry{
@@ -63,8 +70,21 @@ class api_binding {
             .value = stream.session.remote_peer.to_string(),
          },
       };
-      co_await forge::api::stream::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
-                                               std::move(trusted));
+      auto invocation = forge::api::core::trusted_invocation{};
+      switch (stream.stream.authentication()) {
+      case forge::net::p2p::peer_authentication::quic_tls:
+      case forge::net::p2p::peer_authentication::libp2p_tls:
+      case forge::net::p2p::peer_authentication::noise:
+         invocation = forge::api::core::trusted_invocation_builder{}
+                          .set(authenticated_peer{.id = stream.session.remote_peer})
+                          .build();
+         break;
+      case forge::net::p2p::peer_authentication::unverified:
+         break;
+      }
+      return forge::api::stream::session{
+         std::move(stream.stream).into_transport_stream(), plan_, options_,
+         std::move(trusted), std::move(invocation)};
    }
 
    boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {

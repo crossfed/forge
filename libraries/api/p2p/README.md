@@ -15,3 +15,25 @@ Forge API wire-v2 hello before accepting calls. This does not change libp2p
 security, multiplexing, peer identity or protocol negotiation.
 
 Use this library when an API contract should be published through a P2P node.
+
+Each accepted P2P API stream creates `forge::api::p2p::authenticated_peer` only
+from the already authenticated incoming session's `remote_peer`. The binding
+places that value in core trusted invocation context for typed request
+enrichment, and also preserves the legacy `forge.p2p.remote_peer` trusted
+metadata injection for interceptors. The metadata value is not an authority
+source, so a client-supplied `forge.p2p.remote_peer` cannot impersonate a peer.
+`authenticated_peer` is a trusted source type, not a wire field: product DTOs
+specialize `server_supplied<Field>` and read it with
+`trusted_invocation::find<authenticated_peer>()`.
+The P2P session has already authenticated `remote_peer` through its negotiated
+security channel before `api_binding::make_session(...)` constructs the typed
+context; that factory exposes the configured stream session when the caller owns
+its serve lifecycle.
+
+`forge.api.p2p.publication` is the move-only ownership token used by P2P API
+publishers. Destroying it, or calling `close()`, closes admission for that API
+generation and requests cancellation of only its owned API sessions.
+`async_close()` additionally waits for those sessions to drain. Replacing a
+publication installs a new generation atomically; an older token cannot remove
+the replacement. This is application-level lifecycle ownership and does not
+change libp2p negotiation, Identify, or raw stream semantics.

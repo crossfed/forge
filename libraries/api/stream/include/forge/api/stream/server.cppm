@@ -2,6 +2,8 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <optional>
+
 export module forge.api.stream.server;
 
 export import forge.api.core.dispatcher;
@@ -15,5 +17,8 @@ boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, 
                                           options value = {});
 boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
                                           forge::api::core::metadata trusted_metadata);
+boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::core::binding_plan plan, options value,
+                                          forge::api::core::metadata trusted_metadata,
+                                          std::optional<forge::api::core::trusted_invocation> trusted);
 
 } // namespace forge::api::stream

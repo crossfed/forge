@@ -259,6 +259,41 @@ void validate_canonical_string_adapter(const variant& source, std::string_view p
 }
 
 template <typename T>
+bool validate_canonical_variant_adapter(const variant& source, std::string_view path,
+                                        std::vector<schema::diagnostic>& diagnostics, std::string_view description,
+                                        bool require_non_object_canonical = false) {
+   try {
+      const auto value = source.template as<T>();
+      auto canonical = variant{};
+      to_variant(value, canonical);
+      if (require_non_object_canonical && canonical.is_object()) {
+         return false;
+      }
+      if (!matches_canonical_json_value(source, canonical)) {
+         add_exact_error(diagnostics, std::string{path}, "json.type",
+                         std::string{description} + " must use its canonical JSON representation");
+      }
+      return true;
+   } catch (const std::exception&) {
+      return false;
+   }
+}
+
+template <typename T> [[nodiscard]] bool uses_non_object_variant_representation() {
+   if constexpr (std::default_initializable<T> &&
+                 requires(const T& input, variant& output) { to_variant(input, output); }) {
+      try {
+         const auto value = T{};
+         auto canonical = variant{};
+         to_variant(value, canonical);
+         return !canonical.is_object();
+      } catch (const std::exception&) {
+      }
+   }
+   return false;
+}
+
+template <typename T>
 void validate_exact(const variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
 
 template <typename T>
@@ -332,7 +367,16 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          return;
       }
       if (!source.is_object()) {
+         if (validate_canonical_variant_adapter<value_type>(source, path, diagnostics, "described scalar adapter",
+                                                            true)) {
+            return;
+         }
          add_exact_error(diagnostics, std::string{path}, "json.object", "described record must be a JSON object");
+         return;
+      }
+      if (uses_non_object_variant_representation<value_type>()) {
+         add_exact_error(diagnostics, std::string{path}, "json.type",
+                         "described scalar adapter must use its canonical JSON representation");
          return;
       }
 
@@ -532,18 +576,14 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          }
       }
    } else if constexpr (requires(const variant& input, value_type& output) { from_variant(input, output); }) {
-      try {
-         const auto value = source.template as<value_type>();
-         if constexpr (requires(const value_type& input, variant& output) { to_variant(input, output); }) {
-            auto canonical = variant{};
-            to_variant(value, canonical);
-            if (!matches_canonical_json_value(source, canonical)) {
-               add_exact_error(diagnostics, std::string{path}, "json.type",
-                               "scalar adapter must use its canonical JSON representation");
+      if constexpr (requires(const value_type& input, variant& output) { to_variant(input, output); }) {
+         if (!validate_canonical_variant_adapter<value_type>(source, path, diagnostics, "scalar adapter")) {
+            try {
+               static_cast<void>(source.template as<value_type>());
+            } catch (const std::exception& error) {
+               add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
             }
          }
-      } catch (const std::exception& error) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }
    }
 }

@@ -4,10 +4,14 @@ add_library(
       config.cpp
       plugin_impl.cpp
       api_impl.cpp
+      publication_catalog.cpp
+      resolver_protocol.cpp
       managed_api_impl.cpp
       managed_remote_invoker.cpp
       managed_remote_state.cpp
       details/cache_record.hxx
+      details/publication_catalog.hxx
+      details/resolver_protocol.hxx
       details/managed_remote_state.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
@@ -27,6 +31,7 @@ target_link_libraries(
       forge_app
       forge_api_core
       forge_api_transport
+      forge_api_p2p
       forge_net_p2p
       forge_config_core
       forge_schema

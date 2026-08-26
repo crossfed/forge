@@ -267,6 +267,7 @@ class tcp_profile final {
              .session = std::move(*upgraded.session).as_transport(),
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
+             .authentication = upgraded.authentication,
          };
       } catch (const forge::exceptions::base& error) {
          if (deadline.timed_out()) {
@@ -347,6 +348,7 @@ class tcp_profile final {
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
              .admission = std::move(admission),
+             .authentication = upgraded.authentication,
          };
       } catch (const forge::exceptions::base& error) {
          rethrow_tcp_as_p2p(error);

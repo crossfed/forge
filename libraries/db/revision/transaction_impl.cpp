@@ -21,6 +21,7 @@ module;
 module forge.db.revision.store;
 
 import forge.db.core.record;
+import forge.db.ids.object_id;
 import forge.db.object.system;
 import forge.db.revision.exceptions;
 import forge.raw.raw;

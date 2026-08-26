@@ -1271,7 +1271,7 @@ std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_n
                        reinterpret_cast<const std::uint8_t*>(value.data() + value.size()));
    }));
    run(increment_table(*transaction_, owner.id));
-   return cache(row_kind::primary, created.id.as_object_id(), owner.id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(created.id), owner.id);
 }
 
 void host::impl::db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::interpret::span<const char> value) {
@@ -1319,7 +1319,7 @@ std::int32_t host::impl::db_next_i64(std::int32_t iterator, output<std::uint64_t
       return end(row_kind::primary, entry.table_id);
    }
    *primary = next->primary;
-   return cache(row_kind::primary, next->id.as_object_id(), next->table_id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(next->id), next->table_id);
 }
 
 std::int32_t host::impl::db_previous_i64(std::int32_t iterator, output<std::uint64_t> primary) {
@@ -1343,7 +1343,7 @@ std::int32_t host::impl::db_previous_i64(std::int32_t iterator, output<std::uint
       return -1;
    }
    *primary = previous->primary;
-   return cache(row_kind::primary, previous->id.as_object_id(), previous->table_id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(previous->id), previous->table_id);
 }
 
 std::int32_t host::impl::db_find_i64(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
@@ -1356,7 +1356,7 @@ std::int32_t host::impl::db_find_i64(std::uint64_t code, std::uint64_t scope, st
    if (!row) {
       return -1;
    }
-   return cache(row_kind::primary, row->id.as_object_id(), row->table_id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 std::int32_t host::impl::db_lowerbound_i64(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
@@ -1370,7 +1370,7 @@ std::int32_t host::impl::db_lowerbound_i64(std::uint64_t code, std::uint64_t sco
    if (!same_table(row, owner->id)) {
       return end(row_kind::primary, owner->id);
    }
-   return cache(row_kind::primary, row->id.as_object_id(), row->table_id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 std::int32_t host::impl::db_upperbound_i64(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
@@ -1384,7 +1384,7 @@ std::int32_t host::impl::db_upperbound_i64(std::uint64_t code, std::uint64_t sco
    if (!same_table(row, owner->id)) {
       return end(row_kind::primary, owner->id);
    }
-   return cache(row_kind::primary, row->id.as_object_id(), row->table_id);
+   return cache(row_kind::primary, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 std::int32_t host::impl::db_end_i64(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name) {
@@ -1409,7 +1409,7 @@ std::int32_t host::impl::secondary_store(std::uint64_t scope, std::uint64_t tabl
       row.secondary = secondary;
    }));
    run(increment_table(*transaction_, owner.id));
-   return cache(Kind, created.id.as_object_id(), owner.id);
+   return cache(Kind, forge::db::ids::to_object_id(created.id), owner.id);
 }
 
 template <typename Row, typename Index, host::impl::row_kind Kind, typename Secondary>
@@ -1448,7 +1448,7 @@ std::int32_t host::impl::secondary_next(std::int32_t iterator, std::uint64_t& pr
       return end(Kind, entry.table_id);
    }
    primary = next->primary;
-   return cache(Kind, next->id.as_object_id(), next->table_id);
+   return cache(Kind, forge::db::ids::to_object_id(next->id), next->table_id);
 }
 
 template <typename Row, typename Index, host::impl::row_kind Kind>
@@ -1473,7 +1473,7 @@ std::int32_t host::impl::secondary_previous(std::int32_t iterator, std::uint64_t
       return -1;
    }
    primary = previous->primary;
-   return cache(Kind, previous->id.as_object_id(), previous->table_id);
+   return cache(Kind, forge::db::ids::to_object_id(previous->id), previous->table_id);
 }
 
 template <typename Row, typename Index, host::impl::row_kind Kind, typename Secondary>
@@ -1488,7 +1488,7 @@ std::int32_t host::impl::secondary_find_primary(std::uint64_t code, std::uint64_
       return end(Kind, owner->id);
    }
    secondary = row->secondary;
-   return cache(Kind, row->id.as_object_id(), row->table_id);
+   return cache(Kind, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 namespace {
@@ -1574,7 +1574,7 @@ std::int32_t host::impl::secondary_find_secondary(std::uint64_t code, std::uint6
       return end(Kind, owner->id);
    }
    primary = row->primary;
-   return cache(Kind, row->id.as_object_id(), row->table_id);
+   return cache(Kind, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 template <typename Row, typename Index, host::impl::row_kind Kind, typename Secondary>
@@ -1594,7 +1594,7 @@ std::int32_t host::impl::secondary_bound(bool upper, std::uint64_t code, std::ui
    }
    primary = row->primary;
    secondary = row->secondary;
-   return cache(Kind, row->id.as_object_id(), row->table_id);
+   return cache(Kind, forge::db::ids::to_object_id(row->id), row->table_id);
 }
 
 template <typename Row, typename Index, host::impl::row_kind Kind>

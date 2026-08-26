@@ -67,13 +67,13 @@ void validate_live_stream_headers(const forge::net::http::request& request,
                                   forge::api::core::method_kind kind);
 
 boost::asio::awaitable<forge::net::http::stream_response>
-make_live_server_stream_response(forge::api::core::binding_plan plan,
+make_live_server_stream_response(forge::api::core::pinned_binding_plan plan,
                                  forge::api::core::frame request,
                                  forge::net::http::stream_request& http_request,
                                  forge::net::http::status success_status);
 
 boost::asio::awaitable<forge::api::core::frame>
-dispatch_live_client_stream(forge::api::core::binding_plan plan,
+dispatch_live_client_stream(forge::api::core::pinned_binding_plan plan,
                             forge::api::core::frame request,
                             forge::net::http::body_reader body,
                             std::function<void(const forge::api::core::bytes&,
@@ -323,6 +323,131 @@ class binding_builder {
                                "HTTP API route method is not declared by descriptor");
       }
       return *result;
+   }
+
+   [[nodiscard]] static const forge::api::core::method_descriptor&
+   require_route_method_descriptor(const forge::api::core::descriptor* descriptor, std::string_view name) {
+      if (descriptor != nullptr) {
+         if (const auto* method = forge::api::core::find_method(*descriptor, name); method != nullptr) {
+            return *method;
+         }
+      }
+      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                            "HTTP API route method is not declared by descriptor",
+                            forge::exceptions::ctx("method", std::string{name}));
+   }
+
+   [[nodiscard]] static const forge::api::core::detail::server_field_operations*
+   server_field_operations_for(const forge::api::core::method_descriptor& descriptor) {
+      const auto* fields = forge::api::core::detail::server_fields_for(descriptor);
+      return fields != nullptr && fields->active() ? fields : nullptr;
+   }
+
+   [[nodiscard]] static bool has_contextual_unary_hook(const forge::api::core::method_descriptor& descriptor) {
+      const auto* contextual = forge::api::core::detail::contextual_unary_for(descriptor);
+      return contextual != nullptr && static_cast<bool>(*contextual);
+   }
+
+   [[nodiscard]] static bool has_contextual_stream_hook(const forge::api::core::method_descriptor& descriptor) {
+      const auto* contextual = forge::api::core::detail::contextual_stream_for(descriptor);
+      return contextual != nullptr && static_cast<bool>(*contextual);
+   }
+
+   [[nodiscard]] static bool has_contextual_method_hook(const forge::api::core::method_descriptor& descriptor) {
+      return has_contextual_unary_hook(descriptor) || has_contextual_stream_hook(descriptor);
+   }
+
+   [[nodiscard]] static bool has_wire_request_object_hook(const forge::api::core::method_descriptor& descriptor) {
+      const auto* fields = server_field_operations_for(descriptor);
+      return static_cast<bool>(descriptor.request_encoder) || has_contextual_method_hook(descriptor) ||
+             (fields != nullptr && (fields->reset_wire || fields->apply_wire));
+   }
+
+   [[nodiscard]] static bool has_fixed_arguments_object_hook(const forge::api::core::method_descriptor& descriptor) {
+      const auto* fields = server_field_operations_for(descriptor);
+      return has_contextual_method_hook(descriptor) ||
+             (fields != nullptr && (fields->reset_fixed || fields->apply_fixed));
+   }
+
+   [[nodiscard]] static bool has_response_object_hook(const forge::api::core::method_descriptor& descriptor) {
+      return static_cast<bool>(descriptor.response_encoder) || has_contextual_method_hook(descriptor);
+   }
+
+   [[nodiscard]] static bool matches_typed_or_byte_only_legacy(std::type_index actual, std::type_index expected,
+                                                                 bool byte_only_legacy) {
+      return actual == expected || (actual == typeid(void) && byte_only_legacy);
+   }
+
+   [[nodiscard]] static bool matches_absent_stream_endpoint(std::type_index actual) {
+      return actual == typeid(void);
+   }
+
+   [[nodiscard]] static bool matches_stream_endpoint(std::type_index actual, std::type_index expected,
+                                                      bool byte_only_legacy) {
+      return matches_typed_or_byte_only_legacy(actual, expected, byte_only_legacy);
+   }
+
+   template <auto Method, typename Request, typename Response>
+   static void validate_route_method_descriptor(const forge::api::core::method_descriptor& descriptor,
+                                                std::string_view name) {
+      using request_type = std::remove_cvref_t<Request>;
+      using wire_request_type = std::remove_cvref_t<detail::http_method_request_t<Method>>;
+      using argument_tuple = detail::http_method_argument_tuple_t<Method>;
+      using response_type = std::remove_cvref_t<Response>;
+
+      constexpr auto positional = detail::is_positional_http_method_v<Method, request_type>;
+      const auto request_matches =
+          matches_typed_or_byte_only_legacy(descriptor.request_type, typeid(request_type),
+                                            !has_wire_request_object_hook(descriptor)) &&
+          matches_typed_or_byte_only_legacy(descriptor.request_type, typeid(wire_request_type),
+                                            !has_wire_request_object_hook(descriptor));
+      const auto response_matches =
+          matches_typed_or_byte_only_legacy(descriptor.response_type, typeid(response_type),
+                                            !has_response_object_hook(descriptor)) &&
+          matches_typed_or_byte_only_legacy(descriptor.result_type, typeid(response_type),
+                                            !has_response_object_hook(descriptor));
+      const auto fixed_arguments_match =
+          !positional || matches_typed_or_byte_only_legacy(descriptor.fixed_arguments_type, typeid(argument_tuple),
+                                                            !has_fixed_arguments_object_hook(descriptor));
+      const auto stream_items_match = [&] {
+         constexpr auto kind = forge::api::core::method_kind_v<Method>;
+         if constexpr (kind == forge::api::core::method_kind::unary) {
+            return matches_absent_stream_endpoint(descriptor.input_type) &&
+                   matches_absent_stream_endpoint(descriptor.output_type);
+         } else {
+            const auto byte_only_legacy = !has_contextual_stream_hook(descriptor);
+            using endpoint_type = std::remove_cvref_t<forge::api::core::method_argument_t<
+                Method, forge::api::core::method_argument_count_v<Method> - 1U>>;
+            if constexpr (kind == forge::api::core::method_kind::server_stream) {
+               return matches_absent_stream_endpoint(descriptor.input_type) &&
+                      matches_stream_endpoint(
+                         descriptor.output_type,
+                         typeid(typename forge::api::core::stream_writer_traits<endpoint_type>::item_type),
+                         byte_only_legacy);
+            } else if constexpr (kind == forge::api::core::method_kind::client_stream) {
+               return matches_stream_endpoint(
+                         descriptor.input_type,
+                         typeid(typename forge::api::core::stream_reader_traits<endpoint_type>::item_type),
+                         byte_only_legacy) &&
+                      matches_absent_stream_endpoint(descriptor.output_type);
+            } else {
+               return matches_stream_endpoint(
+                         descriptor.input_type,
+                         typeid(typename forge::api::core::duplex_stream_traits<endpoint_type>::input_type),
+                         byte_only_legacy) &&
+                      matches_stream_endpoint(
+                         descriptor.output_type,
+                         typeid(typename forge::api::core::duplex_stream_traits<endpoint_type>::output_type),
+                         byte_only_legacy);
+            }
+         }
+      }();
+      if (descriptor.kind != forge::api::core::method_kind_v<Method> || !request_matches || !response_matches ||
+          !fixed_arguments_match || !stream_items_match) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP route method descriptor is incompatible with its method binding",
+                               forge::exceptions::ctx("method", std::string{name}));
+      }
    }
 
    [[nodiscard]] static std::string encode_error_payload(const forge::api::core::error_payload& error,
@@ -1590,9 +1715,9 @@ class binding_builder {
    }
 
    template <typename Interface, typename Request>
-   [[nodiscard]] static forge::api::core::bytes validate_local_request(const forge::api::core::binding_plan& plan,
+   [[nodiscard]] static forge::api::core::bytes validate_local_request(const forge::api::core::pinned_binding_plan& plan,
                                                                        std::string_view name, const Request& request) {
-      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
       if (method == nullptr) {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
@@ -1613,9 +1738,9 @@ class binding_builder {
    }
 
    template <typename Interface, typename Response>
-   static void validate_local_response(const forge::api::core::binding_plan& plan, std::string_view name,
+   static void validate_local_response(const forge::api::core::pinned_binding_plan& plan, std::string_view name,
                                        const forge::api::core::bytes& request, const Response& response) {
-      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
       if (method == nullptr || !method->response_validator) {
          return;
@@ -1628,20 +1753,42 @@ class binding_builder {
    }
 
    template <auto Method, typename Interface, typename Request, typename Response>
-   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::binding_plan& plan,
-                                                        std::string_view name, Request request) {
+   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::pinned_binding_plan& plan,
+                                                        std::string_view name,
+                                                        const forge::api::core::method_descriptor& canonical_method,
+                                                        Request request) {
+      const auto* descriptor = plan.describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                               "HTTP API method is not installed in the local registry");
+      }
+      validate_route_method_descriptor<Method, Request, Response>(*method, name);
+      forge::api::core::detail::apply_wire_request(
+         canonical_method, &request, forge::api::core::trusted_invocation{});
       auto request_payload = validate_local_request<Interface>(plan, name, request);
-      auto implementation = plan.local->get<Interface>(Interface::ref());
+      auto implementation = plan.get<Interface>(Interface::ref());
       auto response = co_await std::invoke(Method, *implementation.shared(), std::move(request));
       validate_local_response<Interface>(plan, name, request_payload, response);
       co_return response;
    }
 
-   template <auto Method, typename Interface, typename Tuple, typename Response>
-   static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::binding_plan& plan,
-                                                                  std::string_view name, Tuple arguments) {
+   template <auto Method, typename Interface, typename Request, typename Tuple, typename Response>
+   static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::pinned_binding_plan& plan,
+                                                                  std::string_view name,
+                                                                  const forge::api::core::method_descriptor& canonical_method,
+                                                                  Tuple arguments) {
+      const auto* descriptor = plan.describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                               "HTTP API method is not installed in the local registry");
+      }
+      validate_route_method_descriptor<Method, Request, Response>(*method, name);
+      forge::api::core::detail::apply_fixed_request(
+         canonical_method, &arguments, forge::api::core::trusted_invocation{});
       auto request_payload = validate_local_request<Interface>(plan, name, arguments);
-      auto implementation = plan.local->get<Interface>(Interface::ref());
+      auto implementation = plan.get<Interface>(Interface::ref());
       auto response = co_await std::apply(
           [&](auto&&... args) {
              return std::invoke(Method, *implementation.shared(), std::forward<decltype(args)>(args)...);
@@ -1709,50 +1856,56 @@ class binding_builder {
       return [plan = std::move(plan), verb, path = std::move(path), options = std::move(options),
               name = std::move(name)](router& target, std::string_view base_path) {
          validate_response_file_option<Response>(options);
+         const auto api_descriptor = interface_type::describe();
+         const auto& mount_method_descriptor = require_route_method_descriptor(&api_descriptor, name);
+         validate_route_method_descriptor<Method, Request, Response>(mount_method_descriptor, name);
+         if (plan.local != nullptr) {
+            const auto& installed_method_descriptor =
+                require_route_method_descriptor(plan.local->describe(interface_type::ref()), name);
+            validate_route_method_descriptor<Method, Request, Response>(installed_method_descriptor, name);
+         }
          if constexpr (forge::api::core::method_kind_v<Method> ==
                        forge::api::core::method_kind::bidirectional_stream) {
             FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version,
                                   "HTTP/1.1 does not support bidirectional API streams",
                                   forge::exceptions::ctx("method", name));
          }
-         const auto api_descriptor = interface_type::describe();
-         const auto* mount_method_descriptor = forge::api::core::find_method(api_descriptor, name);
          if constexpr (is_positional_http_method_v<Method, Request>) {
-            if (mount_method_descriptor == nullptr ||
-                (std::tuple_size_v<argument_tuple> != 0U && mount_method_descriptor->argument_names.empty())) {
+            if (std::tuple_size_v<argument_tuple> != 0U && mount_method_descriptor.argument_names.empty()) {
                FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                      "HTTP API positional method is missing argument metadata");
             }
             validate_positional_http_arguments<argument_tuple>(
-               verb, path, options, *mount_method_descriptor,
+               verb, path, options, mount_method_descriptor,
                forge::api::core::method_kind_v<Method> != forge::api::core::method_kind::client_stream,
                forge::api::core::method_kind_v<Method> != forge::api::core::method_kind::unary);
          } else if constexpr (forge::api::core::method_kind_v<Method> ==
                               forge::api::core::method_kind::client_stream) {
             validate_client_stream_request<Request>(path, options);
          }
+         auto canonical_method_descriptor = mount_method_descriptor;
          auto mounted_path = join_path(base_path, path);
          if constexpr (forge::api::core::method_kind_v<Method> != forge::api::core::method_kind::unary) {
-            auto stream_handler = [plan, options,
-                                   name](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+            auto stream_handler = [plan, options, name,
+                                   canonical_method_descriptor](stream_request& request_value)
+                -> boost::asio::awaitable<stream_response> {
                if (plan.local == nullptr) {
                   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version,
                                         "HTTP API binding has no local registry");
                }
-               const auto api_descriptor = interface_type::describe();
-               const auto* method_descriptor = forge::api::core::find_method(api_descriptor, name);
+               auto pinned = plan.pin(interface_type::ref());
+               const auto& method_descriptor = canonical_method_descriptor;
                try {
-                  if (method_descriptor == nullptr) {
-                     FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
-                                           "HTTP API stream method is not declared");
-                  }
+                  const auto& installed_method_descriptor = require_route_method_descriptor(
+                     pinned.describe(interface_type::ref()), name);
+                  validate_route_method_descriptor<Method, Request, Response>(installed_method_descriptor, name);
                   detail::validate_live_stream_headers(
                      request_value.context.request, forge::api::core::method_kind_v<Method>);
 
                   auto payload = forge::api::core::bytes{};
                   if constexpr (is_positional_http_method_v<Method, Request>) {
                      if constexpr (std::tuple_size_v<argument_tuple> != 0U) {
-                        if (method_descriptor->argument_names.empty()) {
+                        if (method_descriptor.argument_names.empty()) {
                            FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                                  "HTTP API positional method is missing argument metadata");
                         }
@@ -1760,23 +1913,33 @@ class binding_builder {
                      if constexpr (forge::api::core::method_kind_v<Method> ==
                                    forge::api::core::method_kind::server_stream) {
                         auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
-                           request_value, options, *method_descriptor);
-                        payload = forge::api::core::detail::pack_fixed_proxy_arguments<Method>(
-                           arguments, std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
+                           request_value, options, method_descriptor);
+                        forge::api::core::detail::apply_fixed_request(
+                           method_descriptor, &arguments, forge::api::core::trusted_invocation{});
+                        payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
+                           method_descriptor, arguments,
+                           std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
                      } else {
                         auto arguments = make_positional_arguments_from_http<argument_tuple>(
-                           request_value.context, options, *method_descriptor);
-                        payload = forge::api::core::detail::pack_fixed_proxy_arguments<Method>(
-                           arguments, std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
+                           request_value.context, options, method_descriptor);
+                        forge::api::core::detail::apply_fixed_request(
+                           method_descriptor, &arguments, forge::api::core::trusted_invocation{});
+                        payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
+                           method_descriptor, arguments,
+                           std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
                      }
                   } else {
                      if constexpr (forge::api::core::method_kind_v<Method> ==
                                    forge::api::core::method_kind::server_stream) {
                         auto request = co_await make_request_from_stream<Request>(request_value, options);
-                        payload = forge::api::core::pack_body(request);
+                        forge::api::core::detail::apply_wire_request(
+                           method_descriptor, &request, forge::api::core::trusted_invocation{});
+                        payload = forge::api::core::detail::encode_owned_request(method_descriptor, request);
                      } else {
                         auto request = make_request_from_http<Request>(request_value.context, options);
-                        payload = forge::api::core::pack_body(request);
+                        forge::api::core::detail::apply_wire_request(
+                           method_descriptor, &request, forge::api::core::trusted_invocation{});
+                        payload = forge::api::core::detail::encode_owned_request(method_descriptor, request);
                      }
                   }
 
@@ -1784,12 +1947,13 @@ class binding_builder {
                   if constexpr (forge::api::core::method_kind_v<Method> ==
                                 forge::api::core::method_kind::server_stream) {
                      auto output = co_await detail::make_live_server_stream_response(
-                        plan, std::move(request), request_value, options.success_status);
+                        std::move(pinned), std::move(request), request_value, options.success_status);
                      apply_cache_policy(output.head, options);
                      co_return output;
                   } else {
                      auto terminal = co_await detail::dispatch_live_client_stream(
-                        plan, std::move(request), std::move(request_value.body), method_descriptor->input_decoder);
+                        std::move(pinned), std::move(request), std::move(request_value.body),
+                        method_descriptor.input_decoder);
                      if (terminal.kind == forge::api::core::frame_kind::error) {
                         auto payload = forge::raw::unpack_exact<forge::api::core::error_payload>(terminal.payload);
                         co_return buffered(make_error_response(request_value.context.request, payload, options));
@@ -1809,12 +1973,8 @@ class binding_builder {
                } catch (const forge::net::http::exceptions::bad_request& error) {
                   co_return buffered(make_validation_response(request_value.context.request, error.message(), options));
                } catch (const forge::exceptions::base& error) {
-                  if (method_descriptor != nullptr) {
-                     const auto payload = forge::api::core::project_error(*method_descriptor, error);
-                     co_return buffered(make_error_response(request_value.context.request, payload, options));
-                  }
-                  co_return buffered(make_error_response(request_value.context.request,
-                                                          forge::api::core::make_internal_error_payload(), options));
+                  const auto payload = forge::api::core::project_error(method_descriptor, error);
+                  co_return buffered(make_error_response(request_value.context.request, payload, options));
                }
             };
             switch (verb) {
@@ -1842,25 +2002,30 @@ class binding_builder {
             }
          } else if constexpr (detail::request_needs_stream_v<Request> || tuple_needs_stream_v<argument_tuple> ||
                        detail::response_needs_stream_v<Response>) {
-            auto stream_handler = [plan, options,
-                                   name](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+            auto stream_handler = [plan, options, name,
+                                   canonical_method_descriptor](stream_request& request_value)
+                -> boost::asio::awaitable<stream_response> {
                if (plan.local == nullptr) {
                   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version,
                                         "HTTP API binding has no local registry");
                }
-               const auto api_descriptor = interface_type::describe();
-               const auto* method_descriptor = forge::api::core::find_method(api_descriptor, name);
+               auto pinned = plan.pin(interface_type::ref());
+               const auto& method_descriptor = canonical_method_descriptor;
                try {
+                  const auto& installed_method_descriptor = require_route_method_descriptor(
+                     pinned.describe(interface_type::ref()), name);
+                  validate_route_method_descriptor<Method, Request, Response>(installed_method_descriptor, name);
                   require_response_accept_before_handler<Response>(request_value.context.request, options);
                   if constexpr (is_positional_http_method_v<Method, Request>) {
-                     if (method_descriptor == nullptr || method_descriptor->argument_names.empty()) {
+                     if (method_descriptor.argument_names.empty()) {
                         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                               "HTTP API positional method is missing argument metadata");
                      }
                      auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
-                         request_value, options, *method_descriptor);
-                     auto value = co_await invoke_local_arguments<Method, interface_type, argument_tuple, Response>(
-                         plan, name, std::move(arguments));
+                         request_value, options, method_descriptor);
+                     auto value = co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple,
+                                                                  Response>(pinned, name, canonical_method_descriptor,
+                                                                            std::move(arguments));
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      {}, &request_value);
@@ -1869,8 +2034,8 @@ class binding_builder {
                      auto endpoint =
                          make_endpoint_state<Request>(request_value.context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
-                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(plan, name,
-                                                                                                   std::move(request));
+                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(
+                        pinned, name, canonical_method_descriptor, std::move(request));
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      endpoint, &request_value);
@@ -1885,11 +2050,7 @@ class binding_builder {
                } catch (const forge::net::http::exceptions::bad_request& error) {
                   co_return buffered(make_validation_response(request_value.context.request, error.message(), options));
                } catch (const forge::exceptions::base& error) {
-                  if (method_descriptor != nullptr) {
-                     const auto payload = forge::api::core::project_error(*method_descriptor, error);
-                     co_return buffered(make_error_response(request_value.context.request, payload, options));
-                  }
-                  const auto payload = forge::api::core::make_internal_error_payload();
+                  const auto payload = forge::api::core::project_error(method_descriptor, error);
                   co_return buffered(make_error_response(request_value.context.request, payload, options));
                }
             };
@@ -1917,31 +2078,36 @@ class binding_builder {
                                      "unsupported HTTP API stream route verb");
             }
          } else {
-            auto handler = [plan, options, name](route_context& context) -> boost::asio::awaitable<response> {
+            auto handler = [plan, options, name,
+                            canonical_method_descriptor](route_context& context) -> boost::asio::awaitable<response> {
                if (plan.local == nullptr) {
                   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version,
                                         "HTTP API binding has no local registry");
                }
-               const auto api_descriptor = interface_type::describe();
-               const auto* method_descriptor = forge::api::core::find_method(api_descriptor, name);
+               auto pinned = plan.pin(interface_type::ref());
+               const auto& method_descriptor = canonical_method_descriptor;
                try {
+                  const auto& installed_method_descriptor = require_route_method_descriptor(
+                     pinned.describe(interface_type::ref()), name);
+                  validate_route_method_descriptor<Method, Request, Response>(installed_method_descriptor, name);
                   require_response_accept_before_handler<Response>(context.request, options);
                   if constexpr (is_positional_http_method_v<Method, Request>) {
-                     if (method_descriptor == nullptr || method_descriptor->argument_names.empty()) {
+                     if (method_descriptor.argument_names.empty()) {
                         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                               "HTTP API positional method is missing argument metadata");
                      }
                      auto arguments =
-                         make_positional_arguments_from_http<argument_tuple>(context, options, *method_descriptor);
-                     auto value = co_await invoke_local_arguments<Method, interface_type, argument_tuple, Response>(
-                         plan, name, std::move(arguments));
+                         make_positional_arguments_from_http<argument_tuple>(context, options, method_descriptor);
+                     auto value = co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple,
+                                                                  Response>(pinned, name, canonical_method_descriptor,
+                                                                            std::move(arguments));
                      co_return make_success_response(context.request, options.success_status, value, options);
                   } else {
                      auto request = make_request_from_http<Request>(context, options);
                      auto endpoint = make_endpoint_state<Request>(context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
-                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(plan, name,
-                                                                                                   std::move(request));
+                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(
+                        pinned, name, canonical_method_descriptor, std::move(request));
                      co_return make_success_response(context.request, options.success_status, value, options, endpoint);
                   }
                } catch (const forge::net::http::exceptions::unsupported_media_type& error) {
@@ -1953,11 +2119,7 @@ class binding_builder {
                } catch (const forge::net::http::exceptions::bad_request& error) {
                   co_return make_validation_response(context.request, error.message(), options);
                } catch (const forge::exceptions::base& error) {
-                  if (method_descriptor != nullptr) {
-                     const auto payload = forge::api::core::project_error(*method_descriptor, error);
-                     co_return make_error_response(context.request, payload, options);
-                  }
-                  const auto payload = forge::api::core::make_internal_error_payload();
+                  const auto payload = forge::api::core::project_error(method_descriptor, error);
                   co_return make_error_response(context.request, payload, options);
                }
             };

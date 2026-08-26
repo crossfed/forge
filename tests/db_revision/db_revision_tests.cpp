@@ -662,7 +662,8 @@ BOOST_AUTO_TEST_CASE(db_revision_revert_rejects_corrupt_journal_before_applicati
       auto corrupt = co_await env.driver->begin_transaction();
       co_await corrupt.put(
           env.objects.family(),
-          forge::db::object::system::access::record_key(forge::db::revision::entry::id_t{1U}.as_object_id()),
+          forge::db::object::system::access::record_key(
+              forge::db::ids::to_object_id(forge::db::revision::entry::id_t{1U})),
           bytes("not-a-valid-entry"));
       co_await corrupt.commit();
 

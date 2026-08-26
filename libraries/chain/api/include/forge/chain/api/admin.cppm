@@ -91,7 +91,7 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
 } // namespace forge::api::core
 
 FORGE_EXPORT_API(
-    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 1, 0),
+    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 2, 0),
     FORGE_API_METHOD_TYPED(push_block, ::forge::chain::protocol::signed_block,
                            ::forge::chain::protocol::push_block_response),
     FORGE_API_METHOD(create_snapshot, name),

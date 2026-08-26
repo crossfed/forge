@@ -10,6 +10,7 @@ module;
 #include <cstring>
 #include <deque>
 #include <list>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -77,8 +78,7 @@ struct unpack_limits {
 
 namespace forge::raw::detail {
 
-datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input,
-                                                        unpack_limits limits = {});
+datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input, unpack_limits limits = {});
 
 } // namespace forge::raw::detail
 
@@ -819,6 +819,44 @@ template <typename T> T unpack_exact(std::span<const std::uint8_t> input, unpack
    auto value = T{};
    unpack_exact(input, value, limits);
    return value;
+}
+
+template <typename T, typename ParentStream>
+T unpack_nested_exact(ParentStream& parent, std::span<const std::uint8_t> input) {
+   const auto frame_limit =
+       static_cast<std::uint32_t>(std::min<std::size_t>(input.size(), std::numeric_limits<std::uint32_t>::max()));
+   auto limits = unpack_limits{.max_container_elements = frame_limit,
+                               .max_total_container_elements = frame_limit,
+                               .max_bytes = frame_limit,
+                               .first_container_elements = frame_limit};
+
+   if constexpr (requires {
+                    parent.allocation_limits();
+                    parent.remaining_container_elements();
+                    parent.consume_cumulative_container_elements(std::size_t{});
+                 }) {
+      const auto& parent_limits = parent.allocation_limits();
+      limits.max_container_elements = static_cast<std::uint32_t>(
+          std::min<std::size_t>({parent_limits.elements, input.size(), std::numeric_limits<std::uint32_t>::max()}));
+      limits.max_total_container_elements = static_cast<std::uint32_t>(
+          std::min<std::size_t>(parent.remaining_container_elements(), std::numeric_limits<std::uint32_t>::max()));
+      limits.max_bytes = static_cast<std::uint32_t>(
+          std::min<std::size_t>({parent_limits.bytes, input.size(), std::numeric_limits<std::uint32_t>::max()}));
+      limits.first_container_elements = limits.max_container_elements;
+
+      auto value = T{};
+      auto nested = detail::make_input_stream(input, limits);
+      unpack(nested, value);
+      detail::require(nested.remaining() == 0U, "raw input contains trailing bytes");
+      const auto consumed =
+          static_cast<std::size_t>(limits.max_total_container_elements) - nested.remaining_container_elements();
+      if (!parent.consume_cumulative_container_elements(consumed)) {
+         detail::fail_allocation("raw nested input exceeds the cumulative element limit");
+      }
+      return value;
+   } else {
+      return unpack_exact<T>(input, limits);
+   }
 }
 
 template <typename T> T unpack(const std::vector<std::uint8_t>& input) {

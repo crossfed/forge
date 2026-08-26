@@ -16,6 +16,14 @@ forge_contract_register_guest_component(
 )
 
 forge_contract_register_guest_component(
+   ID forge.db.ids
+   TARGET forge_db_ids
+   PUBLIC_LIBRARIES forge.raw
+   MODULES forge/db/ids/typed_id.cppm
+   MODULE_NAMES forge.db.ids.typed_id
+)
+
+forge_contract_register_guest_component(
    ID forge.codec.base64
    TARGET forge_codec_base64
    ARCHIVE libforge_guest_codec_base64.a
@@ -111,6 +119,7 @@ forge_contract_register_guest_component(
    ARCHIVE libforge_guest_chain_protocol.a
    PUBLIC_LIBRARIES
       forge.raw
+      forge.db.ids
       forge.crypto.digest
       forge.crypto.asymmetric
       forge.crypto.bls_values
@@ -120,7 +129,6 @@ forge_contract_register_guest_component(
       forge/chain/protocol/time.cppm
       forge/chain/protocol/types_value.cppm
       forge/chain/protocol/types.cppm
-      forge/chain/protocol/typed_id.cppm
       forge/chain/protocol/fixed_key_value.cppm
       forge/chain/protocol/fixed_key.cppm
       forge/chain/protocol/action_value.cppm
@@ -137,6 +145,21 @@ forge_contract_register_guest_component(
       forge/chain/protocol/system.cppm
       forge/chain/protocol/code_hash_result.cppm
       forge/chain/protocol/blockchain_parameters.cppm
+      forge/chain/protocol/chain_config.cppm
+      forge/chain/protocol/wasm_parameters.cppm
+      forge/chain/protocol/ratio.cppm
+      forge/chain/protocol/elastic_limit_parameters.cppm
+      forge/chain/protocol/usage_accumulator.cppm
+      forge/chain/protocol/activated_protocol_feature.cppm
+      forge/chain/protocol/float64_value.cppm
+      forge/chain/protocol/float64.cppm
+      forge/chain/protocol/float128_value.cppm
+      forge/chain/protocol/float128.cppm
+      forge/chain/protocol/native_ids.cppm
+      forge/chain/protocol/entity_selector.cppm
+      forge/chain/protocol/code.cppm
+      forge/chain/protocol/table.cppm
+      forge/chain/protocol/currency_stats.cppm
       forge/chain/protocol/kv_parameters.cppm
       forge/chain/protocol/finalizer_authority.cppm
       forge/chain/protocol/finalizer_policy_value.cppm
@@ -149,7 +172,6 @@ forge_contract_register_guest_component(
       forge.chain.protocol.time
       forge.chain.protocol.types:value
       forge.chain.protocol.types
-      forge.chain.protocol.typed_id
       forge.chain.protocol.fixed_key:value
       forge.chain.protocol.fixed_key
       forge.chain.protocol.action:value
@@ -166,6 +188,21 @@ forge_contract_register_guest_component(
       forge.chain.protocol.system
       forge.chain.protocol.code_hash_result
       forge.chain.protocol.blockchain_parameters
+      forge.chain.protocol.chain_config
+      forge.chain.protocol.wasm_parameters
+      forge.chain.protocol.ratio
+      forge.chain.protocol.elastic_limit_parameters
+      forge.chain.protocol.usage_accumulator
+      forge.chain.protocol.activated_protocol_feature
+      forge.chain.protocol.float64:value
+      forge.chain.protocol.float64
+      forge.chain.protocol.float128:value
+      forge.chain.protocol.float128
+      forge.chain.protocol.native_ids
+      forge.chain.protocol.entity_selector
+      forge.chain.protocol.code
+      forge.chain.protocol.table
+      forge.chain.protocol.currency_stats
       forge.chain.protocol.kv_parameters
       forge.chain.protocol.finalizer_authority
       forge.chain.protocol.finalizer_policy:value
@@ -185,6 +222,7 @@ forge_contract_register_guest_component(
       forge.codec.base64
       forge.codec.base58
       forge.codec.hex
+      forge.db.ids
       forge.chain.protocol
    MODULES
       forge/contract/intrinsics.cppm

@@ -19,7 +19,9 @@ class session {
    session(forge::net::transport::stream stream, options value = {});
    session(forge::net::transport::stream stream,
            forge::api::core::binding_plan plan, options value = {},
-           forge::api::core::metadata trusted_metadata = {});
+           forge::api::core::metadata trusted_metadata = {},
+           std::optional<forge::api::core::trusted_invocation> trusted =
+              std::nullopt);
    ~session();
 
    session(session&&) noexcept;

@@ -30,15 +30,15 @@ template <typename T>
 }
 
 [[nodiscard]] inline forge::db::core::record_key state_key() {
-   return forge::db::object::system::access::record_key(state_id.as_object_id());
+   return forge::db::object::system::access::record_key(forge::db::ids::to_object_id(state_id));
 }
 
 [[nodiscard]] inline forge::db::core::record_key entry_key(revision_id_t id) {
-   return forge::db::object::system::access::record_key(entry::id_t{id}.as_object_id());
+   return forge::db::object::system::access::record_key(forge::db::ids::to_object_id(entry::id_t{id}));
 }
 
 [[nodiscard]] inline forge::db::core::record_key delta_key(std::uint64_t id) {
-   return forge::db::object::system::access::record_key(delta::id_t{id}.as_object_id());
+   return forge::db::object::system::access::record_key(forge::db::ids::to_object_id(delta::id_t{id}));
 }
 
 } // namespace forge::db::revision::detail

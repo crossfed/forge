@@ -149,6 +149,14 @@ This matters for re-entrant workflows: an awaitable pass may submit a short
 blocking companion task to the same scheduler and wait for it. That must not
 deadlock just because the awaitable itself is already in flight.
 
+### Inspect Admission
+
+`task::handle::accepted()` reports whether a task was admitted to the bounded
+scheduler queue. It becomes true on admission and remains true if that task is
+later canceled or fails. It is false for an immediate rejection because the
+scheduler is stopped or its pending queue is full; `wait()` reports that
+rejection as an exception.
+
 ### Delegate CPU Work To Compute
 
 `task::scheduler` owns orchestration, numeric priority and delayed admission.

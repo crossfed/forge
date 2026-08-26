@@ -134,7 +134,7 @@ template <> struct sort_key<forge::db::ids::object_id> {
 
 template <forge::db::ids::typed_id_like T> struct sort_key<T> {
    [[nodiscard]] sort_key_bytes operator()(const T& value) const {
-      return sort_key<forge::db::ids::object_id>{}(value.as_object_id());
+      return sort_key<forge::db::ids::object_id>{}(forge::db::ids::to_object_id(value));
    }
 };
 

@@ -18,6 +18,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.p2p.publication;
 import forge.api.transport.exceptions;
 import forge.api.transport.options;
 import forge.api.transport.client;
@@ -42,9 +43,11 @@ class api : public forge::api::core::contract<api> {
    [[nodiscard]] virtual std::vector<forge::net::p2p::endpoint> local_endpoints() const = 0;
    [[nodiscard]] virtual info network_info() const = 0;
 
-   virtual void publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol) = 0;
-   virtual void publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                            forge::api::transport::options options) = 0;
+   [[nodiscard]] virtual forge::api::p2p::publication
+   publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol) = 0;
+   [[nodiscard]] virtual forge::api::p2p::publication
+   publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+               forge::api::transport::options options) = 0;
    virtual void publish_protocol(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler) = 0;
 
    virtual boost::asio::awaitable<forge::api::transport::connection>
@@ -83,7 +86,7 @@ class pubsub_source : public forge::api::core::contract<pubsub_source> {
 
 } // namespace forge::plugins::p2p::node
 
-FORGE_EXPORT_API(::forge::plugins::p2p::node::api, FORGE_API_CONTRACT("forge.plugins.p2p.node", 1, 0))
+FORGE_EXPORT_API(::forge::plugins::p2p::node::api, FORGE_API_CONTRACT("forge.plugins.p2p.node", 2, 0))
 FORGE_EXPORT_API(::forge::plugins::p2p::node::diagnostics_source,
                  FORGE_API_CONTRACT("forge.plugins.p2p.node.diagnostics_source", 1, 0))
 FORGE_EXPORT_API(::forge::plugins::p2p::node::pubsub_source,

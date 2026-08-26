@@ -131,7 +131,7 @@ void validate_live_stream_headers(const forge::net::http::request& request,
 
 boost::asio::awaitable<forge::net::http::stream_response>
 make_live_server_stream_response(
-   forge::api::core::binding_plan plan,
+   forge::api::core::pinned_binding_plan plan,
    forge::api::core::frame request,
    forge::net::http::stream_request& http_request,
    forge::net::http::status success_status) {
@@ -161,7 +161,7 @@ make_live_server_stream_response(
 
 boost::asio::awaitable<forge::api::core::frame>
 dispatch_live_client_stream(
-   forge::api::core::binding_plan plan,
+   forge::api::core::pinned_binding_plan plan,
    forge::api::core::frame request,
    forge::net::http::body_reader body,
    std::function<void(const forge::api::core::bytes&, forge::raw::unpack_limits)> decoder) {

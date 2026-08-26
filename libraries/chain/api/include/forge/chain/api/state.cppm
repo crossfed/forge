@@ -4,6 +4,8 @@ module;
 #include <forge/api/core/macros.hpp>
 #include <forge/api/http/macros.hpp>
 
+#include <type_traits>
+
 export module forge.chain.api.state;
 
 import forge.api.core.binding;
@@ -22,6 +24,7 @@ import forge.api.http.proxy;
 import forge.chain.api.json_schema;
 import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
+import forge.db.ids.object_id;
 import forge.net.http.types;
 import forge.raw.varint;
 import forge.variant.variant_dynamic_bitset;
@@ -40,6 +43,8 @@ class state
    virtual boost::asio::awaitable<protocol::account_changes_response>
    get_account_changes(protocol::account_changes_request value) = 0;
    virtual boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request value) = 0;
+   virtual boost::asio::awaitable<protocol::permission_links_response>
+   get_permission_links(protocol::permission_links_request value) = 0;
    virtual boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request value) = 0;
    virtual boost::asio::awaitable<protocol::table_changes_response>
    get_table_changes(protocol::table_changes_request value) = 0;
@@ -63,18 +68,26 @@ template <> struct method_descriptor_customization<::forge::chain::api::state> {
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::state, EnableRaw>& method) {
       ::forge::chain::api::exceptions::descriptor::declare_historical_query<Method>(method);
+      using request = ::forge::api::core::method_request_t<Method>;
+      if constexpr (std::is_same_v<request, ::forge::chain::protocol::account_request> ||
+                    std::is_same_v<request, ::forge::chain::protocol::code_request> ||
+                    std::is_same_v<request, ::forge::chain::protocol::permission_links_request>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      }
    }
 };
 
 } // namespace forge::api::core
 
-FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api.state", 2, 0),
+FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api.state", 3, 0),
                  FORGE_API_METHOD_TYPED(get_account, ::forge::chain::protocol::account_request,
                                         ::forge::chain::protocol::account_response),
                  FORGE_API_METHOD_TYPED(get_account_changes, ::forge::chain::protocol::account_changes_request,
                                         ::forge::chain::protocol::account_changes_response),
                  FORGE_API_METHOD_TYPED(get_code, ::forge::chain::protocol::code_request,
                                         ::forge::chain::protocol::code_response),
+                 FORGE_API_METHOD_TYPED(get_permission_links, ::forge::chain::protocol::permission_links_request,
+                                        ::forge::chain::protocol::permission_links_response),
                  FORGE_API_METHOD_TYPED(get_table_rows, ::forge::chain::protocol::table_rows_request,
                                         ::forge::chain::protocol::table_rows_response),
                  FORGE_API_METHOD_TYPED(get_table_changes, ::forge::chain::protocol::table_changes_request,
@@ -92,13 +105,18 @@ FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api
 
 FORGE_HTTP_API(
     ::forge::chain::api::state,
-    FORGE_HTTP_GET(get_account,
-                   "/v1/chain/state/accounts/{account}?anchor={anchor}&finality_from={finality_from}&audit={audit}",
-                   FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(
+        get_account,
+        "/v1/chain/state/accounts?id={id}&key={key}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
+        FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_account_changes, "/v1/chain/state/account-changes", ok, FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_code,
-                   "/v1/chain/state/accounts/{account}/code?include_code={include_code}&include_abi={include_abi}"
+                   "/v1/chain/state/codes?id={id}&key={key}&include_wasm={include_wasm}&include_abi={include_abi}"
                    "&known_abi_hash={known_abi_hash}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
+                   FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(get_permission_links,
+                   "/v1/chain/state/permission-links?id={id}&key={key}&code={code}&message_type={message_type}"
+                   "&limit={limit}&cursor={cursor}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_rows,
                    "/v1/chain/state/tables/{code}/{scope}/{table}/rows?index={index}&lower_bound={lower_bound}"
@@ -120,9 +138,8 @@ FORGE_HTTP_API(
                    "&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_scheduled_transactions,
-                   "/v1/chain/state/scheduled-transactions?json={json}&lower_bound={lower_bound}&limit={limit}"
-                   "&time_limit_ms={time_limit_ms}"
-                   "&anchor={anchor}&finality_from={finality_from}&audit={audit}",
+                   "/v1/chain/state/scheduled-transactions?lower_bound={lower_bound}&upper_bound={upper_bound}"
+                   "&limit={limit}&cursor={cursor}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_accounts_by_authorizers, "/v1/chain/state/accounts-by-authorizers", ok,
                     FORGE_HTTP_CACHE(no_store)))

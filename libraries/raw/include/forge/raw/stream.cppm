@@ -223,6 +223,18 @@ class datastream<std::vector<Byte, Allocator>,
       return allocation_limits_;
    }
 
+   [[nodiscard]] std::size_t remaining_container_elements() const noexcept {
+      return remaining_elements_;
+   }
+
+   bool consume_cumulative_container_elements(std::size_t count) noexcept {
+      if (count > remaining_elements_) {
+         return false;
+      }
+      remaining_elements_ -= count;
+      return true;
+   }
+
    bool consume_container_elements(std::size_t count) noexcept {
       const auto limit =
           std::min({allocation_limits_.elements, allocation_limits_.first_container_elements, remaining_elements_});
@@ -230,8 +242,7 @@ class datastream<std::vector<Byte, Allocator>,
       if (count > limit) {
          return false;
       }
-      remaining_elements_ -= count;
-      return true;
+      return consume_cumulative_container_elements(count);
    }
 
    storage_type& storage() {

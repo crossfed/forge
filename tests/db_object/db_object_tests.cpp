@@ -37,6 +37,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <typeindex>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -2951,6 +2952,60 @@ BOOST_AUTO_TEST_CASE(db_object_create_does_not_open_nested_write_transaction) {
       BOOST_CHECK_EQUAL(created.id.instance, 0U);
       BOOST_CHECK(!driver->overlapping_writes());
       BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_transaction_typed_id_create_find_and_erase) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+
+      auto tx = co_await store.begin_transaction();
+      const auto created = co_await tx.create<account>([](account& value) {
+         value.name = "alice";
+         value.balance = 100;
+         value.region = 3;
+      });
+      const auto found = co_await tx.find(created.id);
+      BOOST_REQUIRE(found.has_value());
+      BOOST_CHECK_EQUAL(found->name, "alice");
+
+      co_await tx.erase(created.id);
+      BOOST_CHECK(!(co_await tx.find(created.id)).has_value());
+      co_await tx.commit();
+
+      BOOST_CHECK(!(co_await store.find(created.id)).has_value());
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_transaction_create_rejects_allocator_id_for_another_type) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto active = co_await driver->begin_transaction();
+      auto tx = forge::db::object::transaction{
+          std::move(active),
+          forge::db::core::family{"objectdb"},
+          [](forge::db::ids::object_id, std::type_index) {},
+          [](forge::db::ids::object_id, forge::db::core::transaction&)
+              -> boost::asio::awaitable<forge::db::ids::object_id> {
+             co_return forge::db::ids::object_id{
+                 .space = account::space,
+                 .type = static_cast<std::uint16_t>(account::type + 1U),
+                 .instance = 42,
+             };
+          },
+          {},
+          {},
+          [] {},
+      };
+
+      BOOST_CHECK_THROW(co_await tx.create<account>([](account&) {}),
+                        forge::db::object::exceptions::invalid_descriptor);
+      co_await tx.rollback();
       co_return;
    }());
 }

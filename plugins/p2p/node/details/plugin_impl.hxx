@@ -17,6 +17,9 @@ namespace forge::plugins::p2p::node {
 struct plugin::impl {
    using route = std::pair<forge::net::p2p::protocol_id, forge::net::p2p::node::protocol_handler>;
 
+   impl();
+   ~impl();
+
    forge::net::p2p::node::options options{
        .allow_insecure_test_mode = false,
    };
@@ -35,6 +38,7 @@ struct plugin::impl {
    std::shared_ptr<forge::net::p2p::peer_store::persistence> peer_state;
    std::vector<std::pair<forge::net::p2p::protocol_id, std::shared_ptr<object_dht_record_store_adapter>>> dht_state;
    forge::net::p2p::pubsub::options pubsub_options{};
+   std::shared_ptr<detail::api_publication_registry> api_publications;
    std::shared_ptr<forge::net::p2p::node> node;
    forge::asio::runtime* runtime = nullptr;
    std::atomic_bool stop_requested = false;

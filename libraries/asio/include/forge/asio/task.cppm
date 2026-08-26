@@ -81,6 +81,7 @@ class handle {
    handle& operator=(const handle&) = delete;
 
    [[nodiscard]] bool valid() const noexcept;
+   [[nodiscard]] bool accepted() const noexcept;
    [[nodiscard]] std::uint64_t id() const noexcept;
    [[nodiscard]] bool cancel_requested() const noexcept;
    bool cancel() noexcept;

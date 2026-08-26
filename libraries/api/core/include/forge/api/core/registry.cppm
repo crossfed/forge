@@ -5,6 +5,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <typeindex>
@@ -18,11 +19,14 @@ export import forge.api.core.descriptor;
 export import forge.api.core.error_projection;
 export import forge.api.core.handle;
 export import forge.api.core.connection;
+export import forge.api.core.trusted_invocation;
 
 export namespace forge::api::core {
 
 class registry : public service_mount {
  public:
+   class snapshot;
+
    registry();
    ~registry();
 
@@ -38,42 +42,36 @@ class registry : public service_mount {
       }
       descriptor.interface_type = typeid(Interface);
       descriptor.supported_surfaces = Interface::api_surface;
-      const auto key = key_for(descriptor.id.value, descriptor.version.major);
-      if (entries_.contains(key)) {
-         throw exceptions::protocol_error{"duplicate API implementation"};
-      }
-      entries_.emplace(key, entry{std::move(descriptor), std::move(implementation), typeid(Interface)});
+      register_api(std::move(descriptor), std::move(implementation), typeid(Interface));
    }
 
    template <typename Interface> void install(std::shared_ptr<Interface> implementation) {
       install<Interface>(Interface::describe(), std::move(implementation));
    }
 
-   template <typename Interface> [[nodiscard]] handle<Interface> try_get(api_ref requested) const {
-      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
-      const auto* entry = find(requested);
-      if (entry == nullptr || entry->interface_type != typeid(Interface)) {
-         return {};
-      }
-      return handle<Interface>{std::static_pointer_cast<Interface>(entry->implementation)};
-   }
+   template <typename Interface> [[nodiscard]] handle<Interface> try_get(api_ref requested) const;
 
-   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const {
-      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
-      auto result = try_get<Interface>(std::move(requested));
-      if (!result) {
-         throw exceptions::protocol_error{"required API is not available"};
-      }
-      return result;
-   }
+   template <typename Interface> [[nodiscard]] handle<Interface> get(api_ref requested) const;
 
-   [[nodiscard]] const descriptor* describe(api_ref requested) const noexcept;
+   [[nodiscard]] snapshot pin(api_ref requested) const;
+   [[nodiscard]] const descriptor* describe(api_ref requested) const;
    boost::asio::awaitable<frame> dispatch(frame request) const;
+   boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_contextual(frame request, trusted_invocation trusted, contextual_dispatch_hook before) const;
    boost::asio::awaitable<frame>
    dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                    std::shared_ptr<detail::stream_endpoint> output) const;
-   [[nodiscard]] std::size_t size() const noexcept;
-   void clear() noexcept;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted, contextual_dispatch_hook before) const;
+   [[nodiscard]] std::size_t size() const;
+   void clear();
 
  private:
    struct entry {
@@ -83,12 +81,81 @@ class registry : public service_mount {
    };
 
    static std::string key_for(std::string_view id, std::uint16_t major);
-   [[nodiscard]] const entry* find(api_ref requested) const noexcept;
+   [[nodiscard]] std::shared_ptr<const entry> find(api_ref requested) const;
 
    void register_api(descriptor value, std::shared_ptr<void> implementation, std::type_index type) override;
 
-   std::unordered_map<std::string, entry> entries_;
+   mutable std::mutex entries_mutex_;
+   std::unordered_map<std::string, std::shared_ptr<const entry>> entries_;
 };
+
+class registry::snapshot {
+ public:
+   snapshot() = default;
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return static_cast<bool>(entry_);
+   }
+
+   [[nodiscard]] const descriptor* describe() const noexcept {
+      return entry_ == nullptr ? nullptr : &entry_->descriptor;
+   }
+
+   template <typename Interface> [[nodiscard]] handle<Interface> try_get() const {
+      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+      if (entry_ == nullptr || entry_->interface_type != typeid(Interface)) {
+         return {};
+      }
+      return handle<Interface>{std::static_pointer_cast<Interface>(entry_->implementation)};
+   }
+
+   template <typename Interface> [[nodiscard]] handle<Interface> get() const {
+      static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+      auto result = try_get<Interface>();
+      if (!result) {
+         throw exceptions::protocol_error{"required API is not available"};
+      }
+      return result;
+   }
+
+   boost::asio::awaitable<frame> dispatch_contextual(frame request, trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_contextual(frame request, trusted_invocation trusted, contextual_dispatch_hook before) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted) const;
+   boost::asio::awaitable<frame>
+   dispatch_stream_contextual(frame request, std::shared_ptr<detail::stream_endpoint> input,
+                              std::shared_ptr<detail::stream_endpoint> output,
+                              trusted_invocation trusted, contextual_dispatch_hook before) const;
+
+ private:
+   friend class registry;
+
+   explicit snapshot(std::shared_ptr<const registry::entry> entry) : entry_(std::move(entry)) {}
+
+   static boost::asio::awaitable<frame>
+   dispatch_contextual_entry(std::shared_ptr<const registry::entry> entry, frame request,
+                             trusted_invocation trusted, contextual_dispatch_hook before);
+   static boost::asio::awaitable<frame>
+   dispatch_stream_contextual_entry(std::shared_ptr<const registry::entry> entry, frame request,
+                                    std::shared_ptr<detail::stream_endpoint> input,
+                                    std::shared_ptr<detail::stream_endpoint> output,
+                                    trusted_invocation trusted, contextual_dispatch_hook before);
+
+   std::shared_ptr<const registry::entry> entry_;
+};
+
+template <typename Interface> handle<Interface> registry::try_get(api_ref requested) const {
+   static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+   return pin(std::move(requested)).try_get<Interface>();
+}
+
+template <typename Interface> handle<Interface> registry::get(api_ref requested) const {
+   static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
+   return pin(std::move(requested)).get<Interface>();
+}
 
 class installer {
  public:

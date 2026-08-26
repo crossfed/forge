@@ -33,6 +33,14 @@ Target: `forge_raw`.
 Dependencies: `forge_core`, `forge_exceptions`, `forge_reflect`, `forge_variant`,
 Boost headers and Boost.Multiprecision.
 
+`unpack_limits` bounds per-container, cumulative-container and byte
+allocations. A framed codec that decodes nested Raw payloads through
+`unpack_nested_exact(parent, frame)` inherits the parent's configured
+per-container and byte limits, capped by the frame size, and charges successful
+nested container allocations to the parent's remaining cumulative budget.
+Calling ordinary top-level `unpack_exact` independently for each nested frame
+would reset that budget and is not suitable for untrusted framed input.
+
 ## Examples
 
 ### Pack A Described Struct

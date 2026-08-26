@@ -2,6 +2,7 @@
 #include <forge/api/core/macros.hpp>
 
 #include <concepts>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -15,6 +16,7 @@ import forge.api.core.descriptor;
 import forge.api.core.handle;
 import forge.api.core.binding;
 import forge.api.core.registry;
+import forge.api.core.trusted_invocation;
 import forge.api.core.server_stream_call;
 import forge.api.core.stream_reader;
 import forge.api.core.stream_writer;
@@ -91,9 +93,12 @@ int main() {
    };
    const auto local = local_api::describe();
    const auto* transform = forge::api::core::find_method(local, "transform");
+   const auto trusted = forge::api::core::trusted_invocation_builder{}
+                            .set(std::uint32_t{7})
+                            .build();
    return forge::api::core::compatible(available, requested) && plan.local == &registry &&
                   transform != nullptr && !transform->raw_invoker &&
-                  stream_limits.max_buffered_items == 2
+                  stream_limits.max_buffered_items == 2 && trusted.contains<std::uint32_t>()
               ? 0
               : 1;
 }

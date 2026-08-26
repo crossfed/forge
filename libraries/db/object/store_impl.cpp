@@ -22,6 +22,7 @@ module forge.db.object.store;
 
 import forge.asio.gate;
 import forge.db.core.exceptions;
+import forge.db.ids.object_id;
 import forge.db.object.exceptions;
 import forge.db.object.header;
 import forge.raw.raw;
@@ -167,7 +168,7 @@ boost::asio::awaitable<forge::db::core::snapshot> store::impl::open_read_snapsho
 
 boost::asio::awaitable<forge::db::object::header>
 store::impl::initialize_header(forge::db::core::transaction& active) const {
-   const auto key = detail::record_key::object(forge::db::object::header_id.as_object_id());
+   const auto key = detail::record_key::object(forge::db::ids::to_object_id(forge::db::object::header_id));
    const auto existing = co_await active.get(config.family, key);
 
    if (!existing.has_value()) {

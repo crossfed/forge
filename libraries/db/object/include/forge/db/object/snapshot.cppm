@@ -100,7 +100,7 @@ namespace forge::db::object::detail {
 
 template <object_model Object>
 [[nodiscard]] forge::db::core::record_key object_record_key(id_t_of<Object> id) {
-   return forge::db::object::detail::record_key::object(id.as_object_id());
+   return forge::db::object::detail::record_key::object(forge::db::ids::to_object_id(id));
 }
 
 inline std::vector<std::uint8_t> to_uint8_vector(const std::vector<std::byte>& input) {
@@ -164,7 +164,7 @@ id_t_of<Object> typed_id_from(forge::db::ids::object_id id) {
    if (!forge::db::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
-   return id_t_of<Object>{id};
+   return id_t_of<Object>{id.instance};
 }
 
 template <object_model Object, typename Access>
@@ -197,7 +197,7 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_snapshot_o
          out.items.push_back(unpack_value<typename Object::value_type>(entry.value));
       } else {
          const auto id = unpack_value<id_t_of<Object>>(entry.value);
-         auto value = co_await read_snapshot_object<Object>(view, id.as_object_id());
+         auto value = co_await read_snapshot_object<Object>(view, forge::db::ids::to_object_id(id));
          if (!value.has_value()) {
             FORGE_THROW_EXCEPTION(exceptions::not_found, "db object index points to a missing object");
          }
@@ -260,7 +260,7 @@ nth_snapshot_object(Access view, std::uint64_t position) {
          co_return unpack_value<typename Object::value_type>(*encoded);
       } else {
          const auto id = unpack_value<id_t_of<Object>>(*encoded);
-         auto value = co_await read_snapshot_object<Object>(view, id.as_object_id());
+         auto value = co_await read_snapshot_object<Object>(view, forge::db::ids::to_object_id(id));
          if (!value.has_value()) {
             FORGE_THROW_EXCEPTION(exceptions::aggregate_corruption,
                                   "ranked index points to a missing object");
@@ -296,12 +296,12 @@ export namespace forge::db::object {
 
 template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<typename index_for_id_t<Id>::value_type> snapshot::get(Id id) {
-   co_return co_await get<index_for_id_t<Id>>(id.as_object_id());
+   co_return co_await get<index_for_id_t<Id>>(forge::db::ids::to_object_id(id));
 }
 
 template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> snapshot::find(Id id) {
-   co_return co_await find<index_for_id_t<Id>>(id.as_object_id());
+   co_return co_await find<index_for_id_t<Id>>(forge::db::ids::to_object_id(id));
 }
 
 template <object_model Object>

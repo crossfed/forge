@@ -7,7 +7,9 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <stop_token>
 #include <string>
 #include <utility>
@@ -25,6 +27,8 @@ module;
 module forge.plugins.p2p.node.plugin;
 
 import forge.api.transport.options;
+import forge.api.p2p.binding;
+import forge.api.p2p.publication;
 import forge.asio.runtime;
 import forge.asio.task;
 import forge.exceptions;
@@ -56,6 +60,9 @@ namespace {
 
 } // namespace
 
+plugin::impl::impl() : api_publications{detail::make_api_publication_registry()} {}
+plugin::impl::~impl() = default;
+
 std::optional<std::vector<plugin::impl::route>> plugin::impl::begin_startup() {
    auto lock = std::scoped_lock{configuration_mutex};
    if (stop_requested.load(std::memory_order_acquire)) {
@@ -65,8 +72,9 @@ std::optional<std::vector<plugin::impl::route>> plugin::impl::begin_startup() {
    if (phase.load(std::memory_order_relaxed) != lifecycle_phase::idle) {
       FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P node startup has already begun");
    }
+   auto startup_routes = routes;
    phase.store(lifecycle_phase::starting, std::memory_order_release);
-   return routes;
+   return startup_routes;
 }
 
 void plugin::impl::mark_started() noexcept {
@@ -87,20 +95,26 @@ std::shared_ptr<forge::net::p2p::node> plugin::impl::ensure_node(const std::vect
    if (!runtime) {
       FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin is not initialized");
    }
-   auto current = std::atomic_load_explicit(&node, std::memory_order_acquire);
-   if (!current) {
-      if (pubsub_requested) {
-         options.capabilities.add(forge::net::p2p::capabilities::pubsub);
-         options.limits.pubsub = pubsub_options;
-      }
-      auto candidate = std::make_shared<forge::net::p2p::node>(*runtime, options);
-      for (const auto& route : startup_routes) {
-         candidate->register_protocol_handler(route.first, route.second);
-      }
-      if (!std::atomic_compare_exchange_strong_explicit(&node, &current, candidate, std::memory_order_acq_rel,
-                                                        std::memory_order_acquire)) {
-         candidate->stop();
-      } else {
+   auto current = std::shared_ptr<forge::net::p2p::node>{};
+   {
+      const auto lock = std::scoped_lock{configuration_mutex};
+      current = std::atomic_load_explicit(&node, std::memory_order_acquire);
+      if (!current) {
+         if (pubsub_requested) {
+            options.capabilities.add(forge::net::p2p::capabilities::pubsub);
+            options.limits.pubsub = pubsub_options;
+         }
+         auto candidate = std::make_shared<forge::net::p2p::node>(*runtime, options);
+         for (const auto& route : startup_routes) {
+            candidate->register_protocol_handler(route.first, route.second);
+         }
+         try {
+            detail::attach_api_publication_registry(api_publications, candidate);
+         } catch (...) {
+            candidate->stop();
+            throw;
+         }
+         std::atomic_store_explicit(&node, candidate, std::memory_order_release);
          current = std::move(candidate);
       }
    }
@@ -133,6 +147,10 @@ void plugin::impl::add_route(forge::net::p2p::protocol_id protocol, forge::net::
    }
    if (contains_protocol(routes, protocol)) {
       FORGE_THROW_EXCEPTION(exceptions::route_conflict, "duplicate P2P route",
+                            forge::exceptions::ctx("protocol", protocol.value));
+   }
+   if (detail::api_publication_registry_contains(api_publications, protocol)) {
+      FORGE_THROW_EXCEPTION(exceptions::route_conflict, "P2P raw route conflicts with an API publication",
                             forge::exceptions::ctx("protocol", protocol.value));
    }
    routes.emplace_back(std::move(protocol), std::move(handler));

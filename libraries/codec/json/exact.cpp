@@ -4,6 +4,7 @@ module;
 
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -56,8 +57,29 @@ bool matches_canonical_json_value(const variant& source, const variant& canonica
       }
       return source.is_int64() && source.as_int64() >= 0 && static_cast<std::uint64_t>(source.as_int64()) == expected;
    }
-   case variant::double_type:
-      return source.is_double() && source.as_double() == canonical.as_double();
+   case variant::double_type: {
+      const auto expected = canonical.as_double();
+      if (source.is_double()) {
+         const auto actual = source.as_double();
+         return actual == expected && (actual != 0.0 || std::signbit(actual) == std::signbit(expected));
+      }
+      if (expected == 0.0 && std::signbit(expected)) {
+         return false;
+      }
+      if (source.is_int64()) {
+         const auto value = source.as_int64();
+         const auto converted = static_cast<double>(value);
+         return converted == expected && converted >= -std::ldexp(1.0, 63) && converted < std::ldexp(1.0, 63) &&
+                static_cast<std::int64_t>(converted) == value;
+      }
+      if (source.is_uint64()) {
+         const auto value = source.as_uint64();
+         const auto converted = static_cast<double>(value);
+         return converted == expected && converted < std::ldexp(1.0, 64) &&
+                static_cast<std::uint64_t>(converted) == value;
+      }
+      return false;
+   }
    case variant::bool_type:
       return source.is_bool() && source.as_bool() == canonical.as_bool();
    case variant::string_type:
@@ -122,11 +144,9 @@ schema::input_value to_schema_input(const variant& source) {
       return schema::input_value{std::move(output)};
    }
    case variant::blob_type:
-      FORGE_THROW_EXCEPTION(schema::exceptions::invalid_value,
-                            "JSON schema records cannot contain blob values");
+      FORGE_THROW_EXCEPTION(schema::exceptions::invalid_value, "JSON schema records cannot contain blob values");
    }
-   FORGE_THROW_EXCEPTION(schema::exceptions::invalid_value,
-                         "unsupported JSON schema value");
+   FORGE_THROW_EXCEPTION(schema::exceptions::invalid_value, "unsupported JSON schema value");
 }
 
 void append_schema_diagnostics(std::vector<schema::diagnostic>& output, std::vector<schema::diagnostic> diagnostics) {

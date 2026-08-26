@@ -25,6 +25,7 @@ struct connection {
    std::optional<forge::net::p2p::endpoint> local_endpoint;
    std::optional<forge::net::p2p::endpoint> remote_endpoint;
    std::optional<resource_manager::session_reservation> admission;
+   peer_authentication authentication = peer_authentication::unverified;
 };
 
 struct profile {

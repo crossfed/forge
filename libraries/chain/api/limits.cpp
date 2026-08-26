@@ -14,6 +14,7 @@ module;
 module forge.chain.api.limits;
 
 import forge.chain.api.table_key;
+import forge.chain.protocol.entity_selector;
 import forge.raw.exceptions;
 import forge.raw.raw;
 
@@ -43,6 +44,19 @@ void require_items(std::size_t count, std::uint32_t requested, const protocol::s
       FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API response item count exceeds the request limit",
                             forge::exceptions::ctx("field", field), forge::exceptions::ctx("count", count),
                             forge::exceptions::ctx("limit", allowed));
+   }
+}
+
+void require_nonempty_next(const std::optional<protocol::bytes>& next) {
+   if (next && next->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API owner returned an empty continuation cursor");
+   }
+}
+
+template <typename Request> void require_account_selector(const Request& value) {
+   if (!protocol::selects_exactly_one(static_cast<const protocol::account_selector&>(value))) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request,
+                            "chain API account selector must contain exactly one of id or key");
    }
 }
 
@@ -84,8 +98,8 @@ forge::raw::unpack_limits request_allocation_limits(std::string_view api, std::s
       return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size);
    }
    if (api == "forge.chain.api.state" && method == "get_accounts_by_authorizers") {
-      return allocation_limits(payload, limits, limits.max_request_bytes, forge::raw::max_array_elements,
-                               std::optional<std::uint32_t>{limits.max_state_batch_size});
+      return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size,
+                               limits.max_state_batch_size);
    }
    return allocation_limits(payload, limits, limits.max_request_bytes);
 }
@@ -216,6 +230,17 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
          return request.limit;
       }
    } else if (api == "forge.chain.api.state") {
+      if (method == "get_account") {
+         require_request_within_limits(unpack_request<protocol::account_request>(payload, limits), limits);
+      }
+      if (method == "get_code") {
+         require_request_within_limits(unpack_request<protocol::code_request>(payload, limits), limits);
+      }
+      if (method == "get_permission_links") {
+         const auto request = unpack_request<protocol::permission_links_request>(payload, limits);
+         require_request_within_limits(request, limits);
+         return request.limit;
+      }
       if (method == "get_table_changes") {
          const auto request =
              unpack_request<protocol::table_changes_request>(payload, limits, limits.max_state_batch_size);
@@ -244,9 +269,8 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
          return request.limit;
       }
       if (method == "get_accounts_by_authorizers") {
-         const auto request =
-             unpack_request<protocol::authorizers_request>(payload, limits, forge::raw::max_array_elements,
-                                                           std::optional<std::uint32_t>{limits.max_state_batch_size});
+         const auto request = unpack_request<protocol::authorizers_request>(
+             payload, limits, limits.max_state_batch_size, limits.max_state_batch_size);
          require_request_within_limits(request, limits);
          return request.limit;
       }
@@ -300,28 +324,37 @@ void require_method_response(std::string_view api, std::string_view method, bool
          require_items(unpack_response<protocol::protocol_features_response>(payload, limits).features.size(),
                        *requested_items, limits, "features");
       } else if (method == "get_producers") {
-         require_items(unpack_response<protocol::producers_response>(payload, limits).rows.size(), *requested_items,
-                       limits, "rows");
+         const auto response = unpack_response<protocol::producers_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_items(response.rows.size(), *requested_items, limits, "rows");
       }
    } else if (api == "forge.chain.api.state") {
       if (method == "get_table_changes") {
-         require_mutations(unpack_response<protocol::table_changes_response>(payload, limits).blocks, *requested_items,
-                           limits);
+         const auto response = unpack_response<protocol::table_changes_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_mutations(response.blocks, *requested_items, limits);
       } else if (method == "get_account_changes") {
-         require_mutations(unpack_response<protocol::account_changes_response>(payload, limits).blocks,
-                           *requested_items, limits);
+         const auto response = unpack_response<protocol::account_changes_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_mutations(response.blocks, *requested_items, limits);
       } else if (method == "get_table_rows") {
          require_items(unpack_response<protocol::table_rows_response>(payload, limits).rows.size(), *requested_items,
                        limits, "rows");
       } else if (method == "get_table_scope") {
-         require_items(unpack_response<protocol::table_scope_response>(payload, limits).rows.size(), *requested_items,
-                       limits, "rows");
+         require_items(unpack_response<protocol::table_scope_response>(payload, limits).tables.size(), *requested_items,
+                       limits, "tables");
+      } else if (method == "get_permission_links") {
+         const auto response = unpack_response<protocol::permission_links_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_items(response.links.size(), *requested_items, limits, "links");
       } else if (method == "get_scheduled_transactions") {
-         require_items(unpack_response<protocol::scheduled_response>(payload, limits).transactions.size(),
-                       *requested_items, limits, "transactions");
+         const auto response = unpack_response<protocol::scheduled_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_items(response.transactions.size(), *requested_items, limits, "transactions");
       } else if (method == "get_accounts_by_authorizers") {
-         require_items(unpack_response<protocol::authorizers_response>(payload, limits).accounts.size(),
-                       *requested_items, limits, "accounts");
+         const auto response = unpack_response<protocol::authorizers_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_items(response.accounts.size(), *requested_items, limits, "accounts");
       }
    } else if (api == "forge.chain.api.submission" && method == "submit_batch") {
       require_transaction_batch_response_within_limits(
@@ -358,6 +391,29 @@ void require_request_within_limits(const protocol::protocol_features_request& va
 void require_request_within_limits(const protocol::producers_request& value, const protocol::service_limits& limits) {
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit", true);
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "producer cursor must not be empty");
+   }
+}
+
+void require_request_within_limits(const protocol::account_request& value, const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_account_selector(value);
+}
+
+void require_request_within_limits(const protocol::code_request& value, const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_account_selector(value);
+}
+
+void require_request_within_limits(const protocol::permission_links_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_account_selector(value);
+   require_page(value.limit, limits.max_page_size, "limit", true);
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "permission links cursor must not be empty");
+   }
 }
 
 void require_request_within_limits(const protocol::account_changes_request& value,
@@ -422,6 +478,12 @@ void require_request_within_limits(const protocol::table_scope_request& value, c
 void require_request_within_limits(const protocol::scheduled_request& value, const protocol::service_limits& limits) {
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit", true);
+   if (value.lower_bound && value.upper_bound && *value.upper_bound < *value.lower_bound) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "scheduled transaction lower bound exceeds its upper bound");
+   }
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "scheduled transaction cursor must not be empty");
+   }
 }
 
 void require_request_within_limits(const protocol::authorizers_request& value, const protocol::service_limits& limits) {
@@ -432,6 +494,9 @@ void require_request_within_limits(const protocol::authorizers_request& value, c
       FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "authorizer input count exceeds the configured maximum",
                             forge::exceptions::ctx("count", inputs),
                             forge::exceptions::ctx("limit", limits.max_state_batch_size));
+   }
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "authorizer cursor must not be empty");
    }
 }
 
@@ -515,6 +580,7 @@ void require_response_within_limits(const protocol::producers_response& response
                                     const protocol::producers_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_items(response.rows.size(), request.limit, limits, "rows");
 }
 
@@ -522,13 +588,23 @@ void require_response_within_limits(const protocol::account_changes_response& re
                                     const protocol::account_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_mutations(response.blocks, request.limit, limits);
+}
+
+void require_response_within_limits(const protocol::permission_links_response& response,
+                                    const protocol::permission_links_request& request,
+                                    const protocol::service_limits& limits) {
+   require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
+   require_items(response.links.size(), request.limit, limits, "links");
 }
 
 void require_response_within_limits(const protocol::table_changes_response& response,
                                     const protocol::table_changes_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_mutations(response.blocks, request.limit, limits);
 }
 
@@ -543,13 +619,14 @@ void require_response_within_limits(const protocol::table_scope_response& respon
                                     const protocol::table_scope_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
-   require_items(response.rows.size(), request.limit, limits, "rows");
+   require_items(response.tables.size(), request.limit, limits, "tables");
 }
 
 void require_response_within_limits(const protocol::scheduled_response& response,
                                     const protocol::scheduled_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_items(response.transactions.size(), request.limit, limits, "transactions");
 }
 
@@ -557,6 +634,7 @@ void require_response_within_limits(const protocol::authorizers_response& respon
                                     const protocol::authorizers_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_items(response.accounts.size(), request.limit, limits, "accounts");
 }
 

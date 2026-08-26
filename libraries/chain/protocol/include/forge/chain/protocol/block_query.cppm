@@ -4,20 +4,25 @@ module;
 
 #include <cstdint>
 #include <optional>
-#include <string>
+#include <span>
 #include <vector>
 
 export module forge.chain.protocol.block_query;
 
-import forge.variant.containers;
-import forge.variant.described;
-export import forge.variant.value;
+export import forge.chain.protocol.activated_protocol_feature_info;
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.block;
-export import forge.chain.protocol.blockchain_parameters;
+export import forge.chain.protocol.chain_config;
 export import forge.chain.protocol.finalizer_policy;
+export import forge.chain.protocol.finalizer_vote_record;
+export import forge.chain.protocol.producer_info;
 export import forge.chain.protocol.producer_authority;
 export import forge.chain.protocol.producer_schedule;
+export import forge.chain.protocol.wasm_parameters;
+
+import forge.variant.containers;
+import forge.variant.described;
+import forge.raw.raw;
 
 export namespace forge::chain::protocol {
 
@@ -82,21 +87,21 @@ struct protocol_features_request {
 };
 
 struct protocol_features_response : audited_response {
-   std::vector<forge::variant> features;
+   std::vector<forge::chain::protocol::activated_protocol_feature_info> features;
    std::optional<std::uint32_t> next;
 
    bool operator==(const protocol_features_response&) const = default;
 };
 
 struct consensus_parameters_response : audited_response {
-   forge::chain::protocol::blockchain_parameters parameters;
-   std::optional<forge::variant> wasm;
+   forge::chain::protocol::chain_config parameters;
+   std::optional<forge::chain::protocol::wasm_parameters> wasm;
 };
 
 struct producers_request {
-   bool json = false;
-   std::string lower_bound;
+   std::optional<account_name> lower_bound;
    std::uint32_t limit = 50;
+   std::optional<bytes> cursor;
    std::optional<block_id> anchor;
    std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
@@ -105,12 +110,37 @@ struct producers_request {
 };
 
 struct producers_response : audited_response {
-   std::vector<forge::variant> rows;
-   double total_vote_weight = 0;
-   std::string next;
+   std::vector<forge::chain::protocol::producer_info> rows;
+   forge::chain::protocol::float64 total_vote_weight;
+   std::optional<bytes> next;
 
    bool operator==(const producers_response&) const = default;
 };
+
+template <typename Stream> void raw_pack(Stream& stream, const producers_response& value) {
+   forge::raw::pack(stream, static_cast<const audited_response&>(value));
+   auto packed_rows = std::vector<bytes>{};
+   packed_rows.reserve(value.rows.size());
+   for (const auto& row : value.rows) {
+      packed_rows.push_back(forge::raw::pack(row));
+   }
+   forge::raw::pack(stream, packed_rows);
+   forge::raw::pack(stream, value.total_vote_weight);
+   forge::raw::pack(stream, value.next);
+}
+
+template <typename Stream> void raw_unpack(Stream& stream, producers_response& value) {
+   forge::raw::unpack(stream, static_cast<audited_response&>(value));
+   auto packed_rows = std::vector<bytes>{};
+   forge::raw::unpack(stream, packed_rows);
+   value.rows.clear();
+   value.rows.reserve(packed_rows.size());
+   for (const auto& row : packed_rows) {
+      value.rows.push_back(forge::raw::unpack_nested_exact<producer_info>(stream, std::span<const std::uint8_t>{row}));
+   }
+   forge::raw::unpack(stream, value.total_vote_weight);
+   forge::raw::unpack(stream, value.next);
+}
 
 struct producer_schedule_response : audited_response {
    forge::chain::protocol::producer_authority_schedule active;
@@ -123,7 +153,7 @@ struct producer_schedule_response : audited_response {
 struct finalizer_info_response : audited_response {
    forge::chain::protocol::finalizer_policy active;
    std::optional<forge::chain::protocol::finalizer_policy> pending;
-   std::vector<forge::variant> last_votes;
+   std::vector<forge::chain::protocol::finalizer_vote_record> last_votes;
 
    bool operator==(const finalizer_info_response&) const = default;
 };
@@ -139,7 +169,7 @@ BOOST_DESCRIBE_STRUCT(protocol_features_request, (),
                       (lower_bound, upper_bound, limit, search_by_block_num, reverse, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(protocol_features_response, (audited_response), (features, next))
 BOOST_DESCRIBE_STRUCT(consensus_parameters_response, (audited_response), (parameters, wasm))
-BOOST_DESCRIBE_STRUCT(producers_request, (), (json, lower_bound, limit, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(producers_request, (), (lower_bound, limit, cursor, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(producers_response, (audited_response), (rows, total_vote_weight, next))
 BOOST_DESCRIBE_STRUCT(producer_schedule_response, (audited_response), (active, pending, proposed))
 BOOST_DESCRIBE_STRUCT(finalizer_info_response, (audited_response), (active, pending, last_votes))

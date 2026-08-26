@@ -42,6 +42,8 @@ struct packed_transaction {
    bytes packed_context_free_data;
    bytes packed_trx;
 
+   bool operator==(const packed_transaction&) const = default;
+
    [[nodiscard]] digest packed_digest() const;
    [[nodiscard]] transaction_id id() const;
    [[nodiscard]] signed_transaction get_signed_transaction() const;

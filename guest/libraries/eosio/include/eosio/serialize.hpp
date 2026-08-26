@@ -1,5 +1,7 @@
 #pragma once
 
+#include <new>
+
 #include <eosio/dispatcher.hpp>
 
 #include <cstddef>

@@ -80,6 +80,18 @@ forge_guest_add_implementation_archive(
       "${_raw}/codec.cpp"
 )
 
+set(_db_ids "${FORGE_SOURCE_DIR}/libraries/db/ids")
+add_library(forge_guest_db_ids_modules OBJECT)
+target_sources(
+   forge_guest_db_ids_modules
+   PUBLIC
+      FILE_SET CXX_MODULES
+      BASE_DIRS "${_db_ids}/include"
+      FILES "${_db_ids}/include/forge/db/ids/typed_id.cppm"
+)
+forge_guest_configure_target(forge_guest_db_ids_modules)
+target_link_libraries(forge_guest_db_ids_modules PRIVATE forge_guest_raw_modules)
+
 foreach(_codec IN ITEMS base64 base58 hex)
    set(_codec_source "${FORGE_SOURCE_DIR}/libraries/codec/${_codec}")
    forge_guest_add_implementation_archive(
@@ -140,7 +152,6 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/time.cppm"
       "${_protocol}/include/forge/chain/protocol/types_value.cppm"
       "${_protocol}/include/forge/chain/protocol/types.cppm"
-      "${_protocol}/include/forge/chain/protocol/typed_id.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key_value.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key.cppm"
       "${_protocol}/include/forge/chain/protocol/action_value.cppm"
@@ -157,6 +168,21 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/system.cppm"
       "${_protocol}/include/forge/chain/protocol/code_hash_result.cppm"
       "${_protocol}/include/forge/chain/protocol/blockchain_parameters.cppm"
+      "${_protocol}/include/forge/chain/protocol/chain_config.cppm"
+      "${_protocol}/include/forge/chain/protocol/wasm_parameters.cppm"
+      "${_protocol}/include/forge/chain/protocol/ratio.cppm"
+      "${_protocol}/include/forge/chain/protocol/elastic_limit_parameters.cppm"
+      "${_protocol}/include/forge/chain/protocol/usage_accumulator.cppm"
+      "${_protocol}/include/forge/chain/protocol/activated_protocol_feature.cppm"
+      "${_protocol}/include/forge/chain/protocol/float64_value.cppm"
+      "${_protocol}/include/forge/chain/protocol/float64.cppm"
+      "${_protocol}/include/forge/chain/protocol/float128_value.cppm"
+      "${_protocol}/include/forge/chain/protocol/float128.cppm"
+      "${_protocol}/include/forge/chain/protocol/native_ids.cppm"
+      "${_protocol}/include/forge/chain/protocol/entity_selector.cppm"
+      "${_protocol}/include/forge/chain/protocol/code.cppm"
+      "${_protocol}/include/forge/chain/protocol/table.cppm"
+      "${_protocol}/include/forge/chain/protocol/currency_stats.cppm"
       "${_protocol}/include/forge/chain/protocol/kv_parameters.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_authority.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_policy_value.cppm"
@@ -169,6 +195,7 @@ forge_guest_add_implementation_archive(
       "${_protocol}/time.cpp"
    DEPENDENCIES
       forge_guest_raw_modules
+      forge_guest_db_ids_modules
       forge_guest_crypto_modules
       forge_guest_chain_savanna_values_modules
 )

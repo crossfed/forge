@@ -196,7 +196,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_codec_base32`, `forge_codec_base58`, `forge_crypto_digest`, `forge_exceptions`. |
 | [net/p2p](libraries/net/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
-| [db/ids](libraries/db/ids/README.md) | `forge_db_ids` | Compact database object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
+| [db/ids](libraries/db/ids/README.md) | `forge_db_ids` | Compact database object IDs and guest-safe typed ID bindings. | `forge_raw`, `forge_variant`, `forge_exceptions`. |
 | [db/core](libraries/db/core/README.md) | `forge_db_core` | Shared record driver, transaction and snapshot contract. | Boost.Asio, `forge_exceptions`. |
 | [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_db_ids`, `forge_raw`, `forge_exceptions`. |
 | [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto_digest`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
@@ -265,7 +265,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.27.1 release notes](docs/releases/8.27.1.md).
+[Forge 8.28.0 release notes](docs/releases/8.28.0.md).
 
 ## Совместимость
 

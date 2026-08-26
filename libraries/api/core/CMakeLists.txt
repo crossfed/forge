@@ -3,6 +3,7 @@ add_library(
    binding.cpp
    call_options.cpp
    call_state.cpp
+   contextual_handler_gate_state.cpp
    context.cpp
    dispatcher.cpp
    descriptor.cpp
@@ -10,6 +11,7 @@ add_library(
    registry.cpp
    stream_reader.cpp
    stream_state.cpp
+   trusted_invocation.cpp
 )
 forge_target_modules_at(forge_api_core api/core)
 
@@ -19,5 +21,6 @@ target_link_libraries(
    forge_api_core PUBLIC
       forge_exceptions
       forge_raw
+      forge_reflect
       Boost::headers
 )

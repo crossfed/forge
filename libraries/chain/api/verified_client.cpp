@@ -215,6 +215,11 @@ void projection_verifier::verify(const protocol::code_request&, const protocol::
    unsupported_projection("state.get_code");
 }
 
+void projection_verifier::verify(const protocol::permission_links_request&, const protocol::permission_links_response&,
+                                 const protocol::audit_bundle&, audit_verifier&) {
+   unsupported_projection("state.get_permission_links");
+}
+
 void projection_verifier::verify(const protocol::table_rows_request&, const protocol::table_rows_response&,
                                  const protocol::audit_bundle&, audit_verifier&) {
    unsupported_projection("state.get_table_rows");
@@ -559,6 +564,19 @@ boost::asio::awaitable<protocol::code_response> verified_client::get_code(protoc
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
    verify_projection("state.get_code", [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::permission_links_response>
+verified_client::get_permission_links(protocol::permission_links_request request) {
+   auto& projections = require_projection(projections_, "state.get_permission_links");
+   require_audit(request, *verifier_);
+   const auto requested_anchor = request.anchor;
+   auto response = co_await invoke_service<protocol::permission_links_response>(
+       "state.get_permission_links", request, limits_, [&] { return client_.state().get_permission_links(request); });
+   const auto& audit = verify_envelope(response);
+   verify_requested_anchor(requested_anchor, response);
+   verify_projection("state.get_permission_links", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 

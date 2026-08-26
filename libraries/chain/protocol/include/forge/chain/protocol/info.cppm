@@ -9,6 +9,8 @@ module;
 export module forge.chain.protocol.info;
 
 export import forge.chain.protocol.audit;
+export import forge.chain.protocol.resource_limits_config;
+export import forge.chain.protocol.resource_limits_state;
 export import forge.chain.protocol.time;
 
 export namespace forge::chain::protocol {
@@ -28,12 +30,8 @@ struct info_response : audited_response {
    std::optional<block_id> best_candidate;
    std::optional<std::uint32_t> best_candidate_num;
    std::uint32_t earliest_available_block_num = 0;
-   std::uint64_t virtual_block_cpu_limit = 0;
-   std::uint64_t virtual_block_net_limit = 0;
-   std::uint64_t block_cpu_limit = 0;
-   std::uint64_t block_net_limit = 0;
-   std::uint64_t total_cpu_weight = 0;
-   std::uint64_t total_net_weight = 0;
+   forge::chain::protocol::resource_limits_config resource_config;
+   forge::chain::protocol::resource_limits_state resource_state;
    capabilities available;
    service_limits limits;
 
@@ -43,8 +41,7 @@ struct info_response : audited_response {
 BOOST_DESCRIBE_STRUCT(info_response, (audited_response),
                       (chain, server_version, server_version_string, server_full_version_string, head, head_num,
                        head_time, head_producer, finalized, finalized_num, finalized_time, best_candidate,
-                       best_candidate_num, earliest_available_block_num, virtual_block_cpu_limit,
-                       virtual_block_net_limit, block_cpu_limit, block_net_limit, total_cpu_weight, total_net_weight,
-                       available, limits))
+                       best_candidate_num, earliest_available_block_num, resource_config, resource_state, available,
+                       limits))
 
 } // namespace forge::chain::protocol
