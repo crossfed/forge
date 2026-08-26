@@ -12,7 +12,6 @@ module;
 export module forge.chain.protocol.state_query;
 
 import forge.chain.protocol.account_authority;
-import forge.chain.protocol.action;
 import forge.chain.protocol.code;
 import forge.chain.protocol.currency_stats;
 import forge.chain.protocol.entity_selector;
@@ -20,12 +19,8 @@ import forge.chain.protocol.full_account;
 import forge.chain.protocol.generated_transaction;
 import forge.chain.protocol.permission_link;
 import forge.chain.protocol.table;
-import forge.variant.containers;
-import forge.variant.described;
 
 export import forge.chain.protocol.audit;
-export import forge.chain.protocol.authority;
-export import forge.variant.value;
 
 export namespace forge::chain::protocol {
 
