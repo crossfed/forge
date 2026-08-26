@@ -64,7 +64,7 @@ template <> struct method_descriptor_customization<::forge::chain::api::block> {
 
 } // namespace forge::api::core
 
-FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api.block", 1, 0),
+FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api.block", 2, 0),
                  FORGE_API_METHOD_TYPED(get_block, ::forge::chain::protocol::block_request,
                                         ::forge::chain::protocol::block_response),
                  FORGE_API_METHOD_TYPED(get_header, ::forge::chain::protocol::block_request,
@@ -107,7 +107,7 @@ FORGE_HTTP_API(
                    "/v1/chain/blocks/consensus-parameters?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_producers,
-                   "/v1/chain/blocks/producers?json={json}&lower_bound={lower_bound}&limit={limit}&anchor={anchor}"
+                   "/v1/chain/blocks/producers?lower_bound={lower_bound}&limit={limit}&cursor={cursor}&anchor={anchor}"
                    "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_producer_schedule,

@@ -9,10 +9,12 @@ module;
 
 export module forge.chain.protocol.admin;
 
+export import forge.chain.protocol.account_ram_correction;
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.block;
-export import forge.variant.value;
+export import forge.chain.protocol.protocol_feature;
 
+import forge.raw.codec;
 import forge.variant.containers;
 import forge.variant.described;
 
@@ -81,23 +83,29 @@ struct protocol_feature_subjective_restrictions {
    bool operator==(const protocol_feature_subjective_restrictions&) const = default;
 };
 
-struct protocol_feature_specification {
-   std::string name;
-   std::string value;
-
-   bool operator==(const protocol_feature_specification&) const = default;
-};
-
-struct supported_protocol_feature {
-   digest feature_digest;
+struct supported_protocol_feature : protocol_feature {
    protocol_feature_subjective_restrictions subjective_restrictions = protocol_feature_subjective_restrictions{};
-   digest description_digest;
-   std::vector<digest> dependencies;
-   std::string protocol_feature_type;
-   std::vector<protocol_feature_specification> specification;
 
    bool operator==(const supported_protocol_feature&) const = default;
 };
+
+template <typename Stream> void raw_pack(Stream& stream, const supported_protocol_feature& value) {
+   forge::raw::pack(stream, value.feature_digest);
+   forge::raw::pack(stream, value.subjective_restrictions);
+   forge::raw::pack(stream, value.description_digest);
+   forge::raw::pack(stream, value.dependencies);
+   forge::raw::pack(stream, value.protocol_feature_type);
+   forge::raw::pack(stream, value.specification);
+}
+
+template <typename Stream> void raw_unpack(Stream& stream, supported_protocol_feature& value) {
+   forge::raw::unpack(stream, value.feature_digest);
+   forge::raw::unpack(stream, value.subjective_restrictions);
+   forge::raw::unpack(stream, value.description_digest);
+   forge::raw::unpack(stream, value.dependencies);
+   forge::raw::unpack(stream, value.protocol_feature_type);
+   forge::raw::unpack(stream, value.specification);
+}
 
 struct supported_protocol_features_response {
    std::vector<supported_protocol_feature> features;
@@ -115,7 +123,7 @@ struct ram_corrections_request {
 };
 
 struct ram_corrections_response {
-   std::vector<forge::variant> rows;
+   std::vector<forge::chain::protocol::account_ram_correction> rows;
    std::optional<account_name> next;
 
    bool operator==(const ram_corrections_response&) const = default;
@@ -246,7 +254,6 @@ BOOST_DESCRIBE_STRUCT(producer_status_response, (), (paused, options, greylist, 
 BOOST_DESCRIBE_STRUCT(supported_protocol_features_request, (), (exclude_disabled, exclude_unactivatable))
 BOOST_DESCRIBE_STRUCT(protocol_feature_subjective_restrictions, (),
                       (enabled, preactivation_required, earliest_allowed_activation_time))
-BOOST_DESCRIBE_STRUCT(protocol_feature_specification, (), (name, value))
 BOOST_DESCRIBE_STRUCT(supported_protocol_feature, (),
                       (feature_digest, subjective_restrictions, description_digest, dependencies, protocol_feature_type,
                        specification))

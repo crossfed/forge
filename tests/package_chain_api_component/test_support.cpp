@@ -105,12 +105,12 @@ protocol::info_response make_audited_info_response() {
    response.best_candidate = hash("chain-api-e2e-candidate");
    response.best_candidate_num = 43;
    response.earliest_available_block_num = 7;
-   response.virtual_block_cpu_limit = 1'000;
-   response.virtual_block_net_limit = 2'000;
-   response.block_cpu_limit = 900;
-   response.block_net_limit = 1'800;
-   response.total_cpu_weight = 77;
-   response.total_net_weight = 88;
+   response.resource_config.cpu_limit_parameters.max = 900;
+   response.resource_config.net_limit_parameters.max = 1'800;
+   response.resource_state.virtual_cpu_limit = 1'000;
+   response.resource_state.virtual_net_limit = 2'000;
+   response.resource_state.total_cpu_weight = 77;
+   response.resource_state.total_net_weight = 88;
    response.available.archive = true;
    response.limits = package_limits();
    return response;

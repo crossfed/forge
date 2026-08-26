@@ -154,8 +154,8 @@ read_responses run_p2p_read_e2e(read_services& services) {
        .binding = [](forge::app::plugin_context& context) {
           return forge::api::core::binding()
               .serve(context.apis())
-              .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
-              .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 2, .min_revision = 0})
+              .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 2, .min_revision = 0})
               .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})
               .build();
        },
@@ -188,7 +188,7 @@ read_responses run_p2p_read_e2e(read_services& services) {
       require_advertised_api(remote_apis, "forge.chain.api.block");
       require_advertised_api(remote_apis, "forge.chain.api.state");
       const auto resolution = forge::asio::blocking::run(
-          client.runtime(), resolver->resolve(server_peer, {.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0}));
+          client.runtime(), resolver->resolve(server_peer, {.id = {"forge.chain.api.info"}, .major = 2, .min_revision = 0}));
       require(resolution.api.protocol == chain_api_protocol, "P2P resolver selected the wrong chain API protocol");
 
       auto info_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::info>(server_peer));

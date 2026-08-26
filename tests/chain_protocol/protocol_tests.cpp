@@ -77,6 +77,7 @@ import forge.chain.protocol.types;
 import forge.chain.protocol.usage_accumulator;
 import forge.chain.protocol.wasm_parameters;
 import forge.chain.protocol.activated_protocol_feature;
+import forge.chain.protocol.activated_protocol_feature_info;
 
 namespace core = forge::chain::core;
 namespace protocol = forge::chain::protocol;
@@ -403,8 +404,40 @@ BOOST_AUTO_TEST_CASE(protocol_state_values_preserve_raw_variant_and_malformed_co
    BOOST_TEST(protocol::chain_config{}.max_action_return_value_size == 256U);
 
    const auto feature = protocol::activated_protocol_feature{
-       .feature_digest = protocol::digest::hash(std::string{"activated-feature"}), .activation_block_num = 42U};
-   BOOST_CHECK((forge::raw::unpack<protocol::activated_protocol_feature>(forge::raw::pack(feature)) == feature));
+       .feature_digest = protocol::digest::hash(std::string{"activated-feature"}),
+       .activation_block_num = 42U,
+   };
+   const auto feature_bytes = forge::raw::pack(feature);
+   const auto concatenate_raw = []<typename... Values>(const Values&... values) {
+      auto result = protocol::bytes{};
+      const auto append = [&result](const auto& value) {
+         const auto bytes = forge::raw::pack(value);
+         result.insert(result.end(), bytes.begin(), bytes.end());
+      };
+      (append(values), ...);
+      return result;
+   };
+   BOOST_TEST(feature_bytes == concatenate_raw(feature.feature_digest, feature.activation_block_num));
+   BOOST_CHECK((forge::raw::unpack_exact<protocol::activated_protocol_feature>(feature_bytes) == feature));
+
+   auto feature_info = protocol::activated_protocol_feature_info{};
+   feature_info.feature_digest = feature.feature_digest;
+   feature_info.activation_ordinal = 41U;
+   feature_info.activation_block_num = feature.activation_block_num;
+   feature_info.description_digest = protocol::digest::hash(std::string{"activated-description"});
+   feature_info.dependencies = {protocol::digest::hash(std::string{"activated-dependency"})};
+   feature_info.protocol_feature_type = "builtin";
+   feature_info.specification = {{.name = "builtin_feature_codename", .value = "ACTIVATED_FEATURE"}};
+   const auto feature_info_bytes = forge::raw::pack(feature_info);
+   BOOST_TEST(feature_info_bytes == concatenate_raw(feature_info.feature_digest, feature_info.activation_ordinal,
+                                                    feature_info.activation_block_num, feature_info.description_digest,
+                                                    feature_info.dependencies, feature_info.protocol_feature_type,
+                                                    feature_info.specification));
+   BOOST_CHECK(
+       (forge::raw::unpack_exact<protocol::activated_protocol_feature_info>(feature_info_bytes) == feature_info));
+   BOOST_CHECK((forge::raw::unpack_exact<protocol::protocol_feature>(
+                    forge::raw::pack(static_cast<const protocol::protocol_feature&>(feature_info))) ==
+                static_cast<const protocol::protocol_feature&>(feature_info)));
 
    const auto check_variant_roundtrip = []<typename T>(const T& value) {
       auto encoded = forge::variant{};
@@ -419,6 +452,32 @@ BOOST_AUTO_TEST_CASE(protocol_state_values_preserve_raw_variant_and_malformed_co
    check_variant_roundtrip(wasm);
    check_variant_roundtrip(config);
    check_variant_roundtrip(feature);
+   check_variant_roundtrip(feature_info);
+
+   const auto variant_field_names = [](const forge::variant& value) {
+      auto fields = std::vector<std::string>{};
+      fields.reserve(value.get_object().size());
+      for (const auto& entry : value.get_object()) {
+         fields.emplace_back(entry.key());
+      }
+      return fields;
+   };
+
+   auto encoded_feature = forge::variant{};
+   forge::to_variant(feature, encoded_feature);
+   const auto persisted_feature_fields = variant_field_names(encoded_feature);
+   const auto expected_persisted_feature_fields = std::vector<std::string>{"feature_digest", "activation_block_num"};
+   BOOST_TEST(persisted_feature_fields == expected_persisted_feature_fields, boost::test_tools::per_element());
+
+   auto encoded_feature_info = forge::variant{};
+   forge::to_variant(feature_info, encoded_feature_info);
+   const auto activated_feature_info_fields = variant_field_names(encoded_feature_info);
+   const auto expected_activated_feature_info_fields =
+       std::vector<std::string>{"feature_digest", "activation_ordinal",    "activation_block_num", "description_digest",
+                                "dependencies",   "protocol_feature_type", "specification"};
+   BOOST_TEST(activated_feature_info_fields == expected_activated_feature_info_fields,
+              boost::test_tools::per_element());
+   BOOST_CHECK(!encoded_feature_info.get_object().contains("subjective_restrictions"));
 }
 
 BOOST_AUTO_TEST_CASE(account_and_resource_projections_preserve_raw_variant_and_inheritance) {
@@ -1661,32 +1720,50 @@ BOOST_AUTO_TEST_CASE(named_action_payload_owns_name_and_raw_bytes) {
 }
 
 BOOST_AUTO_TEST_CASE(supported_protocol_features_have_a_typed_variant_contract) {
+   auto feature = protocol::supported_protocol_feature{};
+   feature.feature_digest = protocol::digest{"0ec7e080177b2c02b278d5088611686b49d739925a92d9bfcacd7fc6b74053bd"};
+   feature.subjective_restrictions = {
+       .enabled = true,
+       .preactivation_required = false,
+       .earliest_allowed_activation_time = protocol::time_point{},
+   };
+   feature.description_digest = protocol::digest{"64fe7df32e9b86be2b296b3f81dfd527f84e82b98e363bc97e40bc7a83733310"};
+   feature.protocol_feature_type = "builtin";
+   feature.specification = {{.name = "builtin_feature_codename", .value = "PREACTIVATE_FEATURE"}};
    const auto value = protocol::supported_protocol_features_response{
-       .features =
-           {
-               {
-                   .feature_digest =
-                       protocol::digest{"0ec7e080177b2c02b278d5088611686b49d739925a92d9bfcacd7fc6b74053bd"},
-                   .subjective_restrictions =
-                       {
-                           .enabled = true,
-                           .preactivation_required = false,
-                           .earliest_allowed_activation_time = protocol::time_point{},
-                       },
-                   .description_digest =
-                       protocol::digest{"64fe7df32e9b86be2b296b3f81dfd527f84e82b98e363bc97e40bc7a83733310"},
-                   .protocol_feature_type = "builtin",
-                   .specification = {{.name = "builtin_feature_codename", .value = "PREACTIVATE_FEATURE"}},
-               },
-           },
+       .features = {feature},
    };
 
+   const auto concatenate_raw = []<typename... Values>(const Values&... values) {
+      auto result = protocol::bytes{};
+      const auto append = [&result](const auto& value) {
+         const auto bytes = forge::raw::pack(value);
+         result.insert(result.end(), bytes.begin(), bytes.end());
+      };
+      (append(values), ...);
+      return result;
+   };
+   BOOST_TEST(forge::raw::pack(feature) == concatenate_raw(feature.feature_digest, feature.subjective_restrictions,
+                                                           feature.description_digest, feature.dependencies,
+                                                           feature.protocol_feature_type, feature.specification));
+   BOOST_CHECK(forge::raw::unpack_exact<protocol::supported_protocol_features_response>(forge::raw::pack(value)) ==
+               value);
    auto encoded = forge::variant{};
    forge::to_variant(value, encoded);
    auto decoded = protocol::supported_protocol_features_response{};
    forge::from_variant(encoded, decoded);
 
    BOOST_CHECK(decoded == value);
+   const auto& encoded_feature = encoded["features"][std::size_t{0}];
+   auto fields = std::vector<std::string>{};
+   fields.reserve(encoded_feature.get_object().size());
+   for (const auto& entry : encoded_feature.get_object()) {
+      fields.emplace_back(entry.key());
+   }
+   const auto expected_fields =
+       std::vector<std::string>{"feature_digest", "subjective_restrictions", "description_digest",
+                                "dependencies",   "protocol_feature_type",   "specification"};
+   BOOST_TEST(fields == expected_fields, boost::test_tools::per_element());
 }
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {

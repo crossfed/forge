@@ -553,6 +553,8 @@ def main():
         {"name": "activation_block_num", "type": "uint32"},
     ]:
         raise RuntimeError("activated_protocol_feature guest ABI changed")
+    if "protocol_feature" in typed_id_structs or "protocol_feature_specification" in typed_id_structs:
+        raise RuntimeError("host protocol feature API values leaked into the guest ABI")
 
     equivalent_struct = invoke(
         args,

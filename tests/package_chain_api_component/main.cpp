@@ -19,14 +19,24 @@ import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
 import forge.chain.protocol.account_authority;
+import forge.chain.protocol.account_ram_correction;
+import forge.chain.protocol.activated_protocol_feature_info;
 import forge.chain.protocol.audit;
 import forge.chain.protocol.block_query;
+import forge.chain.protocol.chain_config;
 import forge.chain.protocol.currency_stats;
+import forge.chain.protocol.finalizer_vote_record;
+import forge.chain.protocol.float64;
 import forge.chain.protocol.full_account;
 import forge.chain.protocol.generated_transaction;
+import forge.chain.protocol.producer_info;
+import forge.chain.protocol.protocol_feature;
+import forge.chain.protocol.resource_limits_config;
+import forge.chain.protocol.resource_limits_state;
 import forge.chain.protocol.state_query;
 import forge.chain.protocol.table;
 import forge.chain.protocol.transaction_query;
+import forge.chain.protocol.wasm_parameters;
 
 namespace chain_api = forge::chain::api;
 namespace protocol = forge::chain::protocol;
@@ -61,8 +71,34 @@ int main() {
    static_assert(std::is_same_v<decltype(protocol::currency_stats_response{}.stats), protocol::currency_stats>);
    static_assert(std::is_same_v<decltype(protocol::scheduled_response{}.transactions),
                                 std::vector<protocol::generated_transaction>>);
+   static_assert(std::is_same_v<decltype(protocol::protocol_features_response{}.features),
+                                std::vector<protocol::activated_protocol_feature_info>>);
+   static_assert(std::derived_from<protocol::activated_protocol_feature_info, protocol::protocol_feature>);
+   static_assert(std::derived_from<protocol::supported_protocol_feature, protocol::protocol_feature>);
+   static_assert(
+       std::is_same_v<decltype(protocol::consensus_parameters_response{}.parameters), protocol::chain_config>);
+   static_assert(std::is_same_v<decltype(protocol::consensus_parameters_response{}.wasm),
+                                std::optional<protocol::wasm_parameters>>);
+   static_assert(
+       std::is_same_v<decltype(protocol::producers_request{}.lower_bound), std::optional<protocol::account_name>>);
+   static_assert(std::is_same_v<decltype(protocol::producers_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::producers_response{}.rows), std::vector<protocol::producer_info>>);
+   static_assert(std::is_same_v<decltype(protocol::producers_response{}.total_vote_weight), protocol::float64>);
+   static_assert(std::is_same_v<decltype(protocol::producers_response{}.next), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::finalizer_info_response{}.last_votes),
+                                std::vector<protocol::finalizer_vote_record>>);
+   static_assert(std::is_same_v<decltype(protocol::info_response{}.resource_config), protocol::resource_limits_config>);
+   static_assert(std::is_same_v<decltype(protocol::info_response{}.resource_state), protocol::resource_limits_state>);
+   static_assert(std::is_same_v<decltype(protocol::ram_corrections_response{}.rows),
+                                std::vector<protocol::account_ram_correction>>);
    package_chain_api_component::require(chain_api::state::ref().major == 3U,
                                         "installed state API does not expose version 3");
+   package_chain_api_component::require(chain_api::block::ref().major == 2U,
+                                        "installed block API does not expose version 2");
+   package_chain_api_component::require(chain_api::info::ref().major == 2U,
+                                        "installed info API does not expose version 2");
+   package_chain_api_component::require(chain_api::admin::ref().major == 2U,
+                                        "installed admin API does not expose version 2");
 
    package_chain_api_component::run_verifier_component_checks();
 

@@ -49,7 +49,7 @@ template <> struct method_descriptor_customization<::forge::chain::api::info> {
 
 } // namespace forge::api::core
 
-FORGE_EXPORT_API(::forge::chain::api::info, FORGE_API_CONTRACT("forge.chain.api.info", 1, 0),
+FORGE_EXPORT_API(::forge::chain::api::info, FORGE_API_CONTRACT("forge.chain.api.info", 2, 0),
                  FORGE_API_METHOD_TYPED(get, ::forge::chain::protocol::anchored_request,
                                         ::forge::chain::protocol::info_response))
 

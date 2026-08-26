@@ -1180,6 +1180,18 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_audited_get_finality_anchor(transactions);
 }
 
+BOOST_AUTO_TEST_CASE(chain_block_info_admin_contracts_are_version_2) {
+   const auto descriptors = std::array{forge::chain::api::block::describe(), forge::chain::api::info::describe(),
+                                       forge::chain::api::admin::describe()};
+   for (const auto& descriptor : descriptors) {
+      BOOST_TEST(descriptor.version.major == 2U);
+      BOOST_TEST(descriptor.version.revision == 0U);
+   }
+   BOOST_TEST(forge::chain::api::block::ref().major == 2U);
+   BOOST_TEST(forge::chain::api::info::ref().major == 2U);
+   BOOST_TEST(forge::chain::api::admin::ref().major == 2U);
+}
+
 BOOST_AUTO_TEST_CASE(chain_state_v3_declares_only_typed_state_reads_and_public_history_error) {
    const auto descriptor = forge::chain::api::state::describe();
    BOOST_TEST(descriptor.version.major == 3U);
@@ -1403,13 +1415,29 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_rejects_malformed_and_unbounde
    BOOST_CHECK_NO_THROW(submit_batch->request_validator(bounded_batch));
 }
 
-BOOST_AUTO_TEST_CASE(chain_api_producer_zero_limit_preserves_donor_continuation_semantics) {
-   const auto limits = forge::chain::protocol::service_limits{};
-   const auto request = forge::chain::protocol::producers_request{.limit = 0U};
-   const auto response = forge::chain::protocol::producers_response{.next = "producer"};
+BOOST_AUTO_TEST_CASE(chain_api_producer_pagination_uses_bounded_nonempty_opaque_cursors) {
+   auto limits = forge::chain::protocol::service_limits{};
+   auto request = forge::chain::protocol::producers_request{
+       .lower_bound = forge::chain::protocol::account_name{"alice"},
+       .limit = 0U,
+       .cursor = forge::chain::protocol::bytes{0x00U, 0xffU},
+   };
+   auto response = forge::chain::protocol::producers_response{
+       .next = forge::chain::protocol::bytes{0x01U, 0x02U},
+   };
 
    BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(request, limits));
    BOOST_CHECK_NO_THROW(forge::chain::api::require_response_within_limits(response, request, limits));
+
+   auto empty_cursor = request;
+   empty_cursor.cursor = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(empty_cursor, limits),
+                     forge::chain::api::exceptions::invalid_request);
+
+   auto empty_next = response;
+   empty_next.next = forge::chain::protocol::bytes{};
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(empty_next, request, limits),
+                     forge::chain::api::exceptions::unavailable);
 
    auto invalid = response;
    invalid.rows.emplace_back();
@@ -1421,6 +1449,23 @@ BOOST_AUTO_TEST_CASE(chain_api_producer_zero_limit_preserves_donor_continuation_
    BOOST_REQUIRE(method != nullptr);
    BOOST_CHECK_NO_THROW(method->request_validator(forge::raw::pack(request)));
    BOOST_CHECK_NO_THROW(method->response_validator(forge::raw::pack(request), forge::raw::pack(response)));
+   BOOST_CHECK_THROW(method->request_validator(forge::raw::pack(empty_cursor)),
+                     forge::chain::api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(method->response_validator(forge::raw::pack(request), forge::raw::pack(empty_next)),
+                     forge::chain::api::exceptions::unavailable);
+
+   limits.max_request_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(request));
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(request, limits));
+   --limits.max_request_bytes;
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   limits = forge::chain::protocol::service_limits{};
+   limits.max_response_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(response));
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_response_within_limits(response, request, limits));
+   --limits.max_response_bytes;
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, request, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_types) {
@@ -1485,7 +1530,7 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_admin_pages_and_respons
    BOOST_CHECK_THROW(ram->request_validator(oversized_ram), forge::chain::api::exceptions::resource_exhausted);
    const auto ram_request = forge::raw::pack(forge::chain::protocol::ram_corrections_request{.limit = 1U});
    const auto ram_response = forge::raw::pack(forge::chain::protocol::ram_corrections_response{
-       .rows = {forge::variant{}, forge::variant{}},
+       .rows = {forge::chain::protocol::account_ram_correction{}, forge::chain::protocol::account_ram_correction{}},
    });
    BOOST_CHECK_THROW(ram->response_validator(ram_request, ram_response),
                      forge::chain::api::exceptions::resource_exhausted);
@@ -1810,6 +1855,22 @@ BOOST_AUTO_TEST_CASE(chain_table_scope_http_carries_the_opaque_cursor) {
    BOOST_TEST(target.find("cursor=%5B0%2C47%2C255%5D") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(chain_producers_http_carries_typed_lower_bound_and_opaque_cursor) {
+   const auto routes = forge::api::http::traits<forge::chain::api::block>::routes();
+   const auto& route = find_route(routes, "get_producers");
+   const auto target = forge::api::http::detail::render_route_target(
+       route, forge::chain::protocol::producers_request{
+                  .lower_bound = forge::chain::protocol::account_name{"alice"},
+                  .cursor = forge::chain::protocol::bytes{0x00U, 0x2fU, 0xffU},
+              });
+
+   BOOST_CHECK(route.verb == method::get);
+   BOOST_TEST(route.target.find("json={json}") == std::string::npos);
+   BOOST_TEST(route.target.find("&cursor={cursor}&") != std::string::npos);
+   BOOST_TEST(target.find("lower_bound=alice") != std::string::npos);
+   BOOST_TEST(target.find("cursor=%5B0%2C47%2C255%5D") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(chain_table_rows_http_carries_the_secondary_index) {
    const auto routes = forge::api::http::traits<forge::chain::api::state>::routes();
    const auto& route = find_route(routes, "get_table_rows");
@@ -1894,6 +1955,85 @@ BOOST_AUTO_TEST_CASE(chain_state_selector_openapi_requires_exactly_one_id_or_key
          {"include_wasm", "include_abi", "known_abi_hash", "anchor", "finality_from", "audit"});
    check("/v1/chain/state/permission-links",
          {"code", "message_type", "limit", "cursor", "anchor", "finality_from", "audit"});
+}
+
+BOOST_AUTO_TEST_CASE(chain_block_info_admin_openapi_exposes_canonical_typed_records) {
+   const auto block = forge::api::http::openapi<forge::chain::api::block>();
+   const auto& producers = block["paths"]["/v1/chain/blocks/producers"]["get"];
+   const auto& parameters = producers["parameters"].get_array();
+   BOOST_TEST(std::ranges::none_of(parameters,
+                                   [](const forge::variant& value) { return value["name"].as_string() == "json"; }));
+   for (const auto name : {"lower_bound", "limit", "cursor", "anchor", "finality_from", "audit"}) {
+      BOOST_TEST(std::ranges::count_if(
+                     parameters, [&](const forge::variant& value) { return value["name"].as_string() == name; }) == 1U);
+   }
+   const auto cursor = std::ranges::find_if(
+       parameters, [](const forge::variant& value) { return value["name"].as_string() == "cursor"; });
+   BOOST_REQUIRE(cursor != parameters.end());
+   BOOST_TEST(!cursor->get_object().contains("schema"));
+   BOOST_TEST((*cursor)["content"]["application/json"]["schema"]["anyOf"][std::size_t{0}]["type"].as_string() ==
+              "array");
+
+   const auto& producer_properties =
+       producers["responses"]["200"]["content"]["application/json"]["schema"]["properties"];
+   BOOST_TEST(producer_properties["rows"]["items"]["properties"]["total_votes"]["type"].as_string() == "number");
+   BOOST_TEST(producer_properties["total_vote_weight"]["type"].as_string() == "number");
+   BOOST_TEST(producer_properties["total_vote_weight"]["format"].as_string() == "double");
+   BOOST_TEST(producer_properties["next"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
+
+   const auto& feature_properties =
+       block["paths"]["/v1/chain/blocks/activated-protocol-features"]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"]["properties"]["features"]["items"]["properties"];
+   auto feature_fields = std::vector<std::string>{};
+   feature_fields.reserve(feature_properties.get_object().size());
+   for (const auto& entry : feature_properties.get_object()) {
+      feature_fields.emplace_back(entry.key());
+   }
+   const auto expected_feature_fields =
+       std::vector<std::string>{"feature_digest", "activation_ordinal",    "activation_block_num", "description_digest",
+                                "dependencies",   "protocol_feature_type", "specification"};
+   BOOST_TEST(feature_fields == expected_feature_fields, boost::test_tools::per_element());
+   BOOST_TEST(!feature_properties.get_object().contains("subjective_restrictions"));
+
+   const auto& consensus_properties = block["paths"]["/v1/chain/blocks/consensus-parameters"]["get"]["responses"]["200"]
+                                           ["content"]["application/json"]["schema"]["properties"];
+   BOOST_TEST(consensus_properties["parameters"]["properties"].get_object().contains("max_action_return_value_size"));
+   BOOST_TEST(consensus_properties["wasm"]["anyOf"][std::size_t{0}]["properties"].get_object().contains("max_pages"));
+
+   const auto& vote_properties = block["paths"]["/v1/chain/blocks/finalizers"]["get"]["responses"]["200"]["content"]
+                                      ["application/json"]["schema"]["properties"]["last_votes"]["items"]["properties"];
+   BOOST_TEST(vote_properties["public_key"]["type"].as_string() == "string");
+   BOOST_TEST(vote_properties["public_key"]["format"].as_string() == "forge-bls-public-key");
+
+   const auto information = forge::api::http::openapi<forge::chain::api::info>();
+   const auto& info_properties = information["paths"]["/v1/chain/info"]["get"]["responses"]["200"]["content"]
+                                            ["application/json"]["schema"]["properties"];
+   BOOST_TEST(info_properties.get_object().contains("resource_config"));
+   BOOST_TEST(info_properties.get_object().contains("resource_state"));
+   BOOST_TEST(!info_properties.get_object().contains("virtual_block_cpu_limit"));
+   BOOST_TEST(!info_properties.get_object().contains("total_cpu_weight"));
+
+   const auto admin = forge::api::http::openapi<forge::chain::api::admin>();
+   const auto& supported_feature_properties =
+       admin["paths"]["/v1/chain/admin/protocol-features/supported"]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"]["properties"]["features"]["items"]["properties"];
+   auto supported_feature_fields = std::vector<std::string>{};
+   supported_feature_fields.reserve(supported_feature_properties.get_object().size());
+   for (const auto& entry : supported_feature_properties.get_object()) {
+      supported_feature_fields.emplace_back(entry.key());
+   }
+   const auto expected_supported_feature_fields =
+       std::vector<std::string>{"feature_digest", "subjective_restrictions", "description_digest",
+                                "dependencies",   "protocol_feature_type",   "specification"};
+   BOOST_TEST(supported_feature_fields == expected_supported_feature_fields, boost::test_tools::per_element());
+   BOOST_TEST(!supported_feature_properties.get_object().contains("activation_ordinal"));
+   BOOST_TEST(!supported_feature_properties.get_object().contains("activation_block_num"));
+   const auto& correction_properties =
+       admin["paths"]["/v1/chain/admin/accounts/ram-corrections"]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"]["properties"]["rows"]["items"]["properties"];
+   BOOST_TEST(correction_properties.get_object().contains("id"));
+   BOOST_TEST(correction_properties.get_object().contains("name"));
+   BOOST_TEST(correction_properties.get_object().contains("ram_correction"));
 }
 
 BOOST_AUTO_TEST_CASE(chain_authorizer_pagination_uses_opaque_bytes) {

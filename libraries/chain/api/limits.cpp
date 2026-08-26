@@ -323,8 +323,9 @@ void require_method_response(std::string_view api, std::string_view method, bool
          require_items(unpack_response<protocol::protocol_features_response>(payload, limits).features.size(),
                        *requested_items, limits, "features");
       } else if (method == "get_producers") {
-         require_items(unpack_response<protocol::producers_response>(payload, limits).rows.size(), *requested_items,
-                       limits, "rows");
+         const auto response = unpack_response<protocol::producers_response>(payload, limits);
+         require_nonempty_next(response.next);
+         require_items(response.rows.size(), *requested_items, limits, "rows");
       }
    } else if (api == "forge.chain.api.state") {
       if (method == "get_table_changes") {
@@ -387,6 +388,9 @@ void require_request_within_limits(const protocol::protocol_features_request& va
 void require_request_within_limits(const protocol::producers_request& value, const protocol::service_limits& limits) {
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit", true);
+   if (value.cursor && value.cursor->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "producer cursor must not be empty");
+   }
 }
 
 void require_request_within_limits(const protocol::account_request& value, const protocol::service_limits& limits) {
@@ -573,6 +577,7 @@ void require_response_within_limits(const protocol::producers_response& response
                                     const protocol::producers_request& request,
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
+   require_nonempty_next(response.next);
    require_items(response.rows.size(), request.limit, limits, "rows");
 }
 

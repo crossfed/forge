@@ -272,7 +272,7 @@ write_responses run_p2p_write_e2e(write_services& services) {
               .serve(context.apis())
               .export_api<chain_api::transaction>({.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
               .export_api<chain_api::submission>({.id = {"forge.chain.api.submission"}, .major = 1, .min_revision = 0})
-              .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 2, .min_revision = 0})
               .build();
        },
    }};

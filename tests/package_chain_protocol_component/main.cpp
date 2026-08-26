@@ -8,6 +8,8 @@
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.account_authority;
+import forge.chain.protocol.activated_protocol_feature;
+import forge.chain.protocol.activated_protocol_feature_info;
 import forge.chain.protocol.block;
 import forge.chain.protocol.chain_config;
 import forge.chain.protocol.entity_selector;
@@ -17,6 +19,7 @@ import forge.chain.protocol.float64;
 import forge.chain.protocol.full_account;
 import forge.chain.protocol.native_ids;
 import forge.chain.protocol.permission_link;
+import forge.chain.protocol.protocol_feature;
 import forge.chain.protocol.ratio;
 import forge.chain.protocol.resource_limits_config;
 import forge.chain.protocol.resource_limits_state;
@@ -57,6 +60,14 @@ int main() {
    static_assert(std::same_as<forge::chain::protocol::resource_state_id, forge::db::ids::typed_id<1, 63>>);
    static_assert(std::derived_from<forge::chain::protocol::account_authority, forge::chain::protocol::account>);
    static_assert(std::derived_from<forge::chain::protocol::full_account, forge::chain::protocol::account>);
+   static_assert(!std::derived_from<forge::chain::protocol::activated_protocol_feature,
+                                    forge::chain::protocol::protocol_feature>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::activated_protocol_feature{}.feature_digest),
+                              forge::chain::protocol::digest>);
+   static_assert(std::same_as<decltype(forge::chain::protocol::activated_protocol_feature{}.activation_block_num),
+                              std::uint32_t>);
+   static_assert(std::derived_from<forge::chain::protocol::activated_protocol_feature_info,
+                                   forge::chain::protocol::protocol_feature>);
    const auto digest = forge::chain::protocol::digest::hash(std::string{"package-chain-protocol"});
    const auto selector = forge::chain::protocol::account_selector{
        .id = forge::chain::protocol::account_id{42},

@@ -294,6 +294,14 @@ add_test(
       ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_chain_api_typed_control_surfaces
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_typed_control_surfaces.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 add_executable(
    test_forge_plugins_http_server

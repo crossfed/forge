@@ -58,8 +58,16 @@ Package component: `chain_protocol`. Public namespace:
   supplied data and this library performs no recovery or limit policy.
 - `forge.chain.protocol.chain_config`, `wasm_parameters`, `ratio`,
   `elastic_limit_parameters`, `usage_accumulator`,
-  `activated_protocol_feature`: canonical state values with Raw and host
-  Variant contracts, but no controller policy.
+  `activated_protocol_feature`: canonical persisted and guest state values with
+  Raw and host Variant contracts, but no controller policy. The activated value
+  remains exactly `feature_digest` plus `activation_block_num` on the Raw and
+  guest ABI surfaces.
+- `forge.chain.protocol.protocol_feature`,
+  `activated_protocol_feature_info`: host API values for complete protocol
+  feature metadata. The shared base carries digest, description, dependencies,
+  type and specification; activated API information adds ordinal and block
+  number. Subjective restrictions remain exclusive to
+  `supported_protocol_feature`.
 - `forge.chain.protocol.float64`, `float128`: bit-preserving floating values;
   their host ordered-key helpers reject NaN and use the canonical Spine byte
   order.
