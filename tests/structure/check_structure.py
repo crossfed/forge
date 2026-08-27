@@ -697,6 +697,7 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
    for token in (
       "export module forge.auth.pairing.pairing",
       "begin_bootstrap",
+      "identify_bootstrap_token",
       "consume_bootstrap",
       "supersede_pending",
       "identify_pre_session",
@@ -726,6 +727,7 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "pre_session_digest",
       "pre_session_consumed",
       "issue_distinct_token",
+      "identify_bootstrap_token",
       "identify_pre_session",
       "consume_approved_pre_session",
       "approved_credential",

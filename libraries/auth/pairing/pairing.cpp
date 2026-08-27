@@ -282,6 +282,10 @@ bootstrap_issuance begin_bootstrap(bootstrap_options options) {
    };
 }
 
+token_digest identify_bootstrap_token(const forge::crypto::core::secret_string& bootstrap_token) {
+   return identify_token(bootstrap_token);
+}
+
 pending_issuance consume_bootstrap(bootstrap_record& bootstrap, const forge::crypto::core::secret_string& token,
                                    pairing_request request, consume_options options) {
    require_bootstrap_record(bootstrap);

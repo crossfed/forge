@@ -157,6 +157,21 @@ BOOST_AUTO_TEST_CASE(bootstrap_consumption_is_one_time_bounded_and_does_not_repo
    });
 }
 
+BOOST_AUTO_TEST_CASE(bootstrap_token_is_strictly_identifiable_for_indexed_lookup) {
+   const auto issuance = issue();
+   const auto identified = pairing::identify_bootstrap_token(issuance.token);
+
+   BOOST_CHECK(identified == issuance.record.digest);
+
+   const auto padded = forge::crypto::core::secret_string{std::string{issuance.token.view()} + "="};
+   require_exception<pairing::exceptions::token_invalid>(
+       [&] { return pairing::identify_bootstrap_token(padded); });
+
+   const auto short_token = forge::crypto::core::secret_string{std::string(42U, 'A')};
+   require_exception<pairing::exceptions::token_invalid>(
+       [&] { return pairing::identify_bootstrap_token(short_token); });
+}
+
 BOOST_AUTO_TEST_CASE(pre_session_is_canonical_digest_only_and_strictly_identifiable) {
    auto bootstrap = issue();
    const auto pending_issuance = pairing::consume_bootstrap(

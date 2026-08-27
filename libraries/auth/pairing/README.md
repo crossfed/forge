@@ -25,6 +25,9 @@ pre-session value. The pre-session digest differs from the bootstrap digest,
 and supersession returns a fresh distinct pre-session issuance before marking
 the prior request superseded.
 
+`identify_bootstrap_token` performs the same strict canonical base64url
+validation and returns the SHA-256 digest for indexed bootstrap-record lookup.
+It does not consume or otherwise mutate the located record.
 `identify_pre_session` performs strict canonical base64url validation and
 returns the SHA-256 digest for a caller's pending-record lookup.
 `validate_pre_session` verifies the located record without duplicating codec

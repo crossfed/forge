@@ -30,6 +30,7 @@ int main() {
        .expires_at = now + std::chrono::minutes{1},
        .scope_baseline = {"pair.read"},
    });
+   const auto bootstrap_digest = pairing::identify_bootstrap_token(issuance.token);
    auto pending_issuance = pairing::consume_bootstrap(issuance.record, issuance.token,
                                                       {.identity = "consumer", .requested_scopes = {"pair.read"}},
                                                       {.now = now + std::chrono::seconds{1},
@@ -75,6 +76,7 @@ int main() {
       return condition;
    };
    if (!require(pending.state == pairing::pending_state::approved, "pending state was not approved") ||
+       !require(bootstrap_digest == issuance.record.digest, "bootstrap digest changed") ||
        !require(credential.id.value == "credential-consumer", "credential ID changed") ||
        !require(pending.pre_session_consumed, "pre-session was not consumed") ||
        !require(pre_session_digest == pending.pre_session_digest, "pre-session digest changed") ||

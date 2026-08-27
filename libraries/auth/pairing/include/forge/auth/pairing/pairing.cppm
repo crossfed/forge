@@ -13,6 +13,9 @@ export namespace forge::auth::pairing {
 
 [[nodiscard]] bootstrap_issuance begin_bootstrap(bootstrap_options options);
 
+[[nodiscard]] token_digest
+identify_bootstrap_token(const forge::crypto::core::secret_string& bootstrap_token);
+
 [[nodiscard]] pending_issuance consume_bootstrap(bootstrap_record& bootstrap,
                                                  const forge::crypto::core::secret_string& token,
                                                  pairing_request request, consume_options options);
