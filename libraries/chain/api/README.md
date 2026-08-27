@@ -88,9 +88,12 @@ own typed Forge error contracts. Asio operation cancellation remains a typed
 
 ## Typed block, info and admin reads
 
-`forge.chain.api.block`, `forge.chain.api.info` and
-`forge.chain.api.admin` are contract version `2.0`. This is a clean break:
+`forge.chain.api.block` and `forge.chain.api.info` are contract version `2.0`;
+`forge.chain.api.admin` is version `2.1`. Major version 2 is a clean break:
 there are no compatibility aliases, legacy readers or alternate JSON modes.
+Admin revision 1 appends the read-only `get_operator_identity` and
+`get_node_status` capability-descriptor methods, mapped to
+`/v1/chain/admin/operator-identity` and `/v1/chain/admin/node-status`.
 
 Block responses use the complete host `activated_protocol_feature_info` and
 reuse the canonical

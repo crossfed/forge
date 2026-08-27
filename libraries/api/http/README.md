@@ -42,6 +42,12 @@ clients.
 
 Macro header: `<forge/api/http/macros.hpp>`.
 
+`forge::api::http::openapi_document_builder` aggregates those existing
+`FORGE_HTTP_API(...)` descriptors without introducing a second routing DSL.
+`add<Interface>(base_path)` prefixes its paths, while `build(info)` emits a
+deterministic document. Duplicate verb/path pairs and reused operation IDs with
+incompatible request or response schemas are rejected as typed protocol errors.
+
 ## Live Streaming
 
 HTTP/1.1 supports server-stream and client-stream methods. Server streams use a

@@ -42,7 +42,10 @@
 
 import forge.asio.runtime;
 import forge.asio.blocking;
+import forge.crypto.pki.x509;
 import forge.net.http.body;
+import forge.net.http.client;
+import forge.net.http.exceptions;
 import forge.net.http.route_context;
 import forge.net.http.router;
 import forge.net.http.server;
@@ -50,6 +53,7 @@ import forge.net.http.stream;
 import forge.net.http.types;
 import forge.net.http.base_url;
 import forge.net.tls.context;
+import forge.net.tls.exceptions;
 import forge.net.websocket.client;
 import forge.net.websocket.connection;
 
@@ -393,6 +397,110 @@ BOOST_AUTO_TEST_CASE(http_server_accepts_tls_1_3_before_parsing_http) {
    BOOST_TEST(result.protocol == "TLSv1.3");
    BOOST_TEST(result.response.result() == beast_http::status::ok);
    BOOST_TEST(result.response.body() == "ready");
+
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(http_client_options_verify_hostname_and_certificate_pin) {
+   const auto material = make_mutual_tls_material();
+   auto server_provider = std::make_shared<forge::net::tls::context_provider>(server_options(material.server));
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = forge::net::http::server{
+       runtime,
+       {.tls_context_provider = server_provider,
+        .handshake_timeout = std::chrono::seconds{1},
+        .max_pending_tls_handshakes = 4},
+       ready_router(),
+   };
+   server.start();
+
+   const auto endpoint = forge::net::http::parse_base_url("https://127.0.0.1:" + std::to_string(wait_for_port(server)));
+   const auto client_context = forge::net::tls::context_options{
+       .role = forge::net::tls::endpoint_role::client,
+       .protocols = forge::net::tls::protocol_policy::tls13_only,
+       .verification = forge::net::tls::peer_verification::verify_peer,
+       .trust_anchors_pem = {material.ca.certificate},
+       .alpn_protocols = {"http/1.1"},
+       .use_default_verify_paths = false,
+   };
+   const auto fingerprint =
+       forge::crypto::pki::x509::certificate::from_pem(material.server.certificate).fingerprint_sha256_text();
+
+   auto verified_client = forge::net::http::client{
+       runtime,
+       endpoint,
+       {.tls_context_provider = std::make_shared<forge::net::tls::context_provider>(client_context),
+        .hostname = "forge http tls server",
+        .expected_sha256_fingerprint = fingerprint},
+   };
+   const auto response = forge::asio::blocking::run(runtime, verified_client.async_get("/ready"));
+   BOOST_TEST(response.result() == forge::net::http::status::ok);
+   BOOST_TEST(response.body() == "ready");
+
+   auto wrong_hostname_client = forge::net::http::client{
+       runtime,
+       endpoint,
+       {.tls_context_provider = std::make_shared<forge::net::tls::context_provider>(client_context),
+        .hostname = "wrong.example"},
+   };
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, wrong_hostname_client.async_get("/ready")),
+                     forge::net::tls::exceptions::hostname_mismatch);
+
+   auto wrong_pin_client = forge::net::http::client{
+       runtime,
+       endpoint,
+       {.tls_context_provider = std::make_shared<forge::net::tls::context_provider>(client_context),
+        .hostname = "forge http tls server",
+        .expected_sha256_fingerprint = std::string(64U, '0')},
+   };
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, wrong_pin_client.async_get("/ready")),
+                     forge::net::tls::exceptions::fingerprint_mismatch);
+
+   auto unverified_context = client_context;
+   unverified_context.verification = forge::net::tls::peer_verification::none;
+   BOOST_CHECK_THROW(
+       (forge::net::http::client{runtime,
+                                 endpoint,
+                                 {.tls_context_provider = std::make_shared<forge::net::tls::context_provider>(
+                                      std::move(unverified_context))}}),
+       forge::net::http::exceptions::bad_request);
+
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(http_client_options_use_mtls_identity_from_tls_context_provider) {
+   const auto material = make_mutual_tls_material();
+   auto server_provider = std::make_shared<forge::net::tls::context_provider>(
+       server_options(material.server, true, material.ca.certificate));
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = forge::net::http::server{
+       runtime,
+       {.tls_context_provider = server_provider,
+        .handshake_timeout = std::chrono::seconds{1},
+        .max_pending_tls_handshakes = 4},
+       ready_router(),
+   };
+   server.start();
+
+   auto client_context = forge::net::tls::context_options{};
+   client_context.role = forge::net::tls::endpoint_role::client;
+   client_context.protocols = forge::net::tls::protocol_policy::tls13_only;
+   client_context.verification = forge::net::tls::peer_verification::verify_peer;
+   client_context.certificate_chain_pem = material.client.certificate;
+   client_context.private_key_pem = material.client.private_key;
+   client_context.trust_anchors_pem = {material.ca.certificate};
+   client_context.alpn_protocols = {"http/1.1"};
+   client_context.use_default_verify_paths = false;
+
+   auto client = forge::net::http::client{
+       runtime,
+       forge::net::http::parse_base_url("https://127.0.0.1:" + std::to_string(wait_for_port(server))),
+       {.tls_context_provider = std::make_shared<forge::net::tls::context_provider>(std::move(client_context)),
+        .hostname = "forge http tls server"},
+   };
+   const auto response = forge::asio::blocking::run(runtime, client.async_get("/ready"));
+   BOOST_TEST(response.result() == forge::net::http::status::ok);
+   BOOST_TEST(response.body() == "ready");
 
    server.stop();
 }

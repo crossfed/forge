@@ -23,6 +23,9 @@ void check_info_admin_surface() {
    static_assert(std::is_same_v<decltype(protocol::info_response{}.resource_state), protocol::resource_limits_state>);
    static_assert(std::is_same_v<decltype(protocol::ram_corrections_response{}.rows),
                                 std::vector<protocol::account_ram_correction>>);
+   static_assert(std::is_same_v<decltype(protocol::operator_identity{}.block_public_key), protocol::public_key>);
+   static_assert(
+       std::is_same_v<decltype(protocol::operator_identity{}.finalizer_public_key), forge::crypto::bls::public_key>);
 }
 
 } // namespace package_chain_api_component

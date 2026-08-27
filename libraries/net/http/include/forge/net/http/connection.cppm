@@ -13,6 +13,7 @@ import forge.asio.runtime;
 import forge.net.http.base_url;
 import forge.net.http.body;
 import forge.net.http.types;
+import forge.net.tls.context;
 
 export namespace forge::net::http {
 
@@ -45,9 +46,16 @@ struct response_stream {
    body_reader body;
 };
 
+struct connection_options {
+   std::shared_ptr<tls::context_provider> tls_context_provider;
+   tls::client_stream_options tls_stream_options;
+   tls::peer_validation tls_peer_validation;
+};
+
 class connection {
  public:
    connection(forge::asio::runtime& runtime, base_url endpoint);
+   connection(forge::asio::runtime& runtime, base_url endpoint, connection_options options);
    ~connection();
 
    connection(const connection&) = delete;

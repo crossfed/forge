@@ -6,12 +6,11 @@ module;
 
 module package.chain_api_component.surface_checks;
 
-import forge.chain.protocol.account_authority;
-import forge.chain.protocol.currency_stats;
-import forge.chain.protocol.full_account;
-import forge.chain.protocol.generated_transaction;
-import forge.chain.protocol.state_query;
-import forge.chain.protocol.table;
+import package.chain_api_component.test_support;
+import forge.chain.api.state;
+import forge.codec.json;
+import forge.variant.described;
+import forge.variant.value;
 
 namespace package_chain_api_component {
 
@@ -38,6 +37,26 @@ void check_state_surface() {
    static_assert(std::is_same_v<decltype(protocol::currency_stats_response{}.stats), protocol::currency_stats>);
    static_assert(std::is_same_v<decltype(protocol::scheduled_response{}.transactions),
                                 std::vector<protocol::generated_transaction>>);
+
+   auto account = protocol::full_account{};
+   auto permission = protocol::full_permission{};
+   permission.auth.threshold = 1;
+   account.permissions.push_back(permission);
+
+   auto variant = forge::variant{};
+   forge::to_variant(account, variant);
+   auto variant_round_trip = protocol::full_account{};
+   forge::from_variant(variant, variant_round_trip);
+   require(variant_round_trip == account, "state API did not preserve full-account authority through Variant");
+
+   const auto http_json = forge::codec::json::write(account);
+   require(http_json.ok(), "state API could not encode full-account authority as HTTP JSON");
+   const auto http_round_trip = forge::codec::json::read<protocol::full_account>(
+       http_json.text, {.source_name = "package.state.full-account",
+                        .unknown_fields = forge::codec::json::unknown_field_policy::error,
+                        .described_records = forge::codec::json::described_record_policy::exact});
+   require(http_round_trip.ok(), "state API could not decode full-account authority from HTTP JSON");
+   require(http_round_trip.value == account, "state API changed full-account authority through HTTP JSON");
 }
 
 } // namespace package_chain_api_component

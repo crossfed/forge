@@ -5,7 +5,9 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -47,15 +49,48 @@ namespace {
 
 struct target_description {
    std::string path;
+   std::string collision_path;
    std::vector<std::string> path_fields;
    std::vector<field_binding> query;
 };
+
+[[nodiscard]] std::string normalize_base_path(std::string_view base_path) {
+   if (base_path.empty() || base_path == "/") {
+      return {};
+   }
+   if (base_path.front() != '/' || base_path.find('?') != std::string_view::npos ||
+       base_path.find('#') != std::string_view::npos) {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI base path is malformed"};
+   }
+   while (base_path.size() > 1U && base_path.ends_with('/')) {
+      base_path.remove_suffix(1U);
+   }
+   return std::string{base_path};
+}
+
+[[nodiscard]] std::string with_base_path(std::string_view base_path, std::string_view target) {
+   const auto base = normalize_base_path(base_path);
+   if (base.empty()) {
+      return std::string{target};
+   }
+   const auto query = target.find('?');
+   const auto path = target.substr(0U, query);
+   if (path.empty() || path.front() != '/') {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI route path is malformed"};
+   }
+   auto result = path == "/" ? base : base + std::string{path};
+   if (query != std::string_view::npos) {
+      result.append(target.substr(query));
+   }
+   return result;
+}
 
 [[nodiscard]] target_description describe_target(std::string_view target) {
    auto output = target_description{};
    const auto question = target.find('?');
    const auto path = target.substr(0, question);
    output.path.reserve(path.size());
+   output.collision_path.reserve(path.size());
    for (auto position = std::size_t{}; position < path.size();) {
       if (path[position] == ':' && (position == 0U || path[position - 1U] == '/')) {
          const auto end = path.find('/', position + 1U);
@@ -65,16 +100,19 @@ struct target_description {
          output.path.push_back('{');
          output.path += name;
          output.path.push_back('}');
+         output.collision_path += "{}";
          position += size + 1U;
          continue;
       }
       if (path[position] != '{') {
-         output.path.push_back(path[position++]);
+         output.path.push_back(path[position]);
+         output.collision_path.push_back(path[position++]);
          continue;
       }
       const auto close = path.find('}', position + 1U);
       if (close == std::string_view::npos) {
          output.path.append(path.substr(position));
+         output.collision_path.append(path.substr(position));
          break;
       }
       auto name = std::string{path.substr(position + 1U, close - position - 1U)};
@@ -82,6 +120,7 @@ struct target_description {
       output.path.push_back('{');
       output.path += name;
       output.path.push_back('}');
+      output.collision_path += "{}";
       position = close + 1U;
    }
 
@@ -514,22 +553,42 @@ struct request_body_description {
 
 } // namespace
 
-forge::variant build_openapi_document(const forge::api::core::descriptor& api,
-                                      std::vector<openapi_operation> operations, openapi_info info) {
+struct registered_operation {
+   forge::api::core::descriptor api;
+   openapi_operation operation;
+};
+
+[[nodiscard]] forge::variant build_openapi_document(std::vector<registered_operation> operations, openapi_info info) {
    if (info.title.empty()) {
-      info.title = api.id.value;
+      info.title = "Forge API";
    }
    if (info.version.empty()) {
-      info.version = std::to_string(api.version.major) + "." + std::to_string(api.version.revision);
+      info.version = "1.0.0";
    }
 
+   std::ranges::sort(operations, [](const auto& left, const auto& right) {
+      const auto left_target = describe_target(left.operation.mapping.target);
+      const auto right_target = describe_target(right.operation.mapping.target);
+      if (left_target.path != right_target.path) {
+         return left_target.path < right_target.path;
+      }
+      const auto left_verb = verb_name(left.operation.mapping.verb);
+      const auto right_verb = verb_name(right.operation.mapping.verb);
+      if (left_verb != right_verb) {
+         return left_verb < right_verb;
+      }
+      return left.api.id.value + "." + left.operation.mapping.method_name <
+             right.api.id.value + "." + right.operation.mapping.method_name;
+   });
+
    auto paths = forge::mutable_variant_object{};
-   for (const auto& operation : operations) {
-      const auto target = describe_target(operation.mapping.target);
+   for (const auto& registered : operations) {
+      const auto target = describe_target(registered.operation.mapping.target);
       auto path = paths.find(target.path);
       auto methods =
           path == paths.end() ? forge::mutable_variant_object{} : forge::mutable_variant_object{path->value()};
-      methods.set(verb_name(operation.mapping.verb), operation_document(api, operation));
+      methods.set(verb_name(registered.operation.mapping.verb),
+                  operation_document(registered.api, registered.operation));
       paths.set(target.path, forge::variant{std::move(methods)});
    }
 
@@ -550,4 +609,83 @@ forge::variant build_openapi_document(const forge::api::core::descriptor& api,
    return forge::variant{std::move(document)};
 }
 
+forge::variant build_openapi_document(const forge::api::core::descriptor& api,
+                                      std::vector<openapi_operation> operations, openapi_info info) {
+   if (info.title.empty()) {
+      info.title = api.id.value;
+   }
+   if (info.version.empty()) {
+      info.version = std::to_string(api.version.major) + "." + std::to_string(api.version.revision);
+   }
+   auto registered = std::vector<registered_operation>{};
+   registered.reserve(operations.size());
+   for (auto& operation : operations) {
+      registered.push_back({.api = api, .operation = std::move(operation)});
+   }
+   return build_openapi_document(std::move(registered), std::move(info));
+}
+
 } // namespace forge::api::http::detail
+
+namespace forge::api::http {
+
+struct openapi_document_builder::impl {
+   std::vector<detail::registered_operation> operations;
+};
+
+openapi_document_builder::openapi_document_builder() : impl_(std::make_unique<impl>()) {}
+
+openapi_document_builder::~openapi_document_builder() = default;
+
+openapi_document_builder::openapi_document_builder(openapi_document_builder&&) noexcept = default;
+
+openapi_document_builder& openapi_document_builder::operator=(openapi_document_builder&&) noexcept = default;
+
+void openapi_document_builder::add(forge::api::core::descriptor api, std::vector<openapi_operation> operations,
+                                   std::string_view base_path) {
+   for (auto& operation : operations) {
+      operation.mapping.target = detail::with_base_path(base_path, operation.mapping.target);
+   }
+
+   auto candidates = std::vector<detail::registered_operation>{};
+   candidates.reserve(operations.size());
+   for (auto& operation : operations) {
+      candidates.push_back({.api = api, .operation = std::move(operation)});
+   }
+
+   const auto reject_collision = [](const detail::registered_operation& candidate,
+                                    const detail::registered_operation& existing) {
+      const auto target = detail::describe_target(candidate.operation.mapping.target);
+      const auto verb = detail::verb_name(candidate.operation.mapping.verb);
+      const auto operation_id = candidate.api.id.value + "." + candidate.operation.mapping.method_name;
+      const auto existing_target = detail::describe_target(existing.operation.mapping.target);
+      if (existing_target.collision_path == target.collision_path &&
+          detail::verb_name(existing.operation.mapping.verb) == verb) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI document has a duplicate HTTP verb and path"};
+      }
+      const auto existing_id = existing.api.id.value + "." + existing.operation.mapping.method_name;
+      if (existing_id == operation_id) {
+         if (existing.operation.request_schema != candidate.operation.request_schema ||
+             existing.operation.response_schema != candidate.operation.response_schema) {
+            throw forge::api::core::exceptions::protocol_error{"OpenAPI operation id has incompatible schemas"};
+         }
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI document has a duplicate operation id"};
+      }
+   };
+   for (auto candidate = candidates.begin(); candidate != candidates.end(); ++candidate) {
+      for (const auto& existing : impl_->operations) {
+         reject_collision(*candidate, existing);
+      }
+      for (auto prior = candidates.begin(); prior != candidate; ++prior) {
+         reject_collision(*candidate, *prior);
+      }
+   }
+   impl_->operations.insert(impl_->operations.end(), std::make_move_iterator(candidates.begin()),
+                            std::make_move_iterator(candidates.end()));
+}
+
+forge::variant openapi_document_builder::build(openapi_info info) const {
+   return detail::build_openapi_document(impl_->operations, std::move(info));
+}
+
+} // namespace forge::api::http

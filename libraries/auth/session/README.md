@@ -14,6 +14,8 @@ Public modules:
   renewal, rotation, logout and revocation transitions, issuance-integrity
   validation, and strict canonical session-token digest identification for
   caller-owned record lookup.
+- `forge.auth.session.serialization`: canonical Raw serialization for persisted
+  session records, including strict enum and timestamp validation on decode.
 
 Issuance and rotation create independent 32-byte session and CSRF secrets as
 canonical unpadded base64url `forge::crypto::core::secret_string` values. The
@@ -29,4 +31,4 @@ creation or activity times. Absolute and idle expiry are explicit; idle renewal
 never extends beyond absolute expiry.
 
 Dependencies: `forge_auth_pairing`, `forge_codec_base64`, `forge_crypto_core`,
-`forge_crypto_digest`, `forge_exceptions`.
+`forge_crypto_digest`, `forge_exceptions`, `forge_raw`.

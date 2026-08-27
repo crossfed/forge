@@ -56,6 +56,9 @@ import forge.chain.api.verified_client;
 import forge.chain.core.merkle;
 import forge.chain.protocol.audit;
 import forge.chain.protocol.account_authority;
+import forge.codec.hex;
+import forge.codec.json;
+import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
@@ -63,6 +66,8 @@ import forge.net.http.types;
 import forge.raw.raw;
 import forge.schema.exceptions;
 import forge.schema.scalar;
+import forge.variant.described;
+import forge.variant.value;
 
 namespace {
 
@@ -1167,8 +1172,8 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
                   {"get_required_keys", "compute_transaction", "send_read_only_transaction"});
    require_routes(submissions, method::post, {"submit", "submit_batch"});
    require_routes(admin, method::get,
-                  {"producer_status", "supported_protocol_features", "account_ram_corrections",
-                   "unapplied_transactions", "snapshot_requests", "integrity_hash"});
+                  {"producer_status", "get_operator_identity", "get_node_status", "supported_protocol_features",
+                   "account_ram_corrections", "unapplied_transactions", "snapshot_requests", "integrity_hash"});
    require_routes(admin, method::post, {"push_block", "create_snapshot", "prune", "schedule_snapshot"});
    require_routes(admin, method::put, {"configure_pause", "set_access_policy", "schedule_protocol_features"});
    require_routes(admin, method::patch, {"update_runtime_options", "update_greylist"});
@@ -1181,12 +1186,15 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
 }
 
 BOOST_AUTO_TEST_CASE(chain_block_info_admin_contracts_are_version_2) {
-   const auto descriptors = std::array{forge::chain::api::block::describe(), forge::chain::api::info::describe(),
-                                       forge::chain::api::admin::describe()};
-   for (const auto& descriptor : descriptors) {
+   const auto stable_descriptors =
+       std::array{forge::chain::api::block::describe(), forge::chain::api::info::describe()};
+   for (const auto& descriptor : stable_descriptors) {
       BOOST_TEST(descriptor.version.major == 2U);
       BOOST_TEST(descriptor.version.revision == 0U);
    }
+   const auto admin = forge::chain::api::admin::describe();
+   BOOST_TEST(admin.version.major == 2U);
+   BOOST_TEST(admin.version.revision == 1U);
    BOOST_TEST(forge::chain::api::block::ref().major == 2U);
    BOOST_TEST(forge::chain::api::info::ref().major == 2U);
    BOOST_TEST(forge::chain::api::admin::ref().major == 2U);
@@ -1815,12 +1823,22 @@ BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_meth
    const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::conflict>();
    const auto* push = forge::api::core::find_method(descriptor, "push_block");
    const auto* status = forge::api::core::find_method(descriptor, "producer_status");
+   const auto* operator_identity = forge::api::core::find_method(descriptor, "get_operator_identity");
+   const auto* node_status = forge::api::core::find_method(descriptor, "get_node_status");
    BOOST_REQUIRE(push != nullptr);
    BOOST_REQUIRE(status != nullptr);
+   BOOST_REQUIRE(operator_identity != nullptr);
+   BOOST_REQUIRE(node_status != nullptr);
    BOOST_CHECK(std::ranges::find(push->errors, identity, &forge::api::core::error_descriptor::identity) !=
                push->errors.end());
    BOOST_CHECK(std::ranges::find(status->errors, identity, &forge::api::core::error_descriptor::identity) ==
                status->errors.end());
+   BOOST_CHECK(std::ranges::find(operator_identity->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               operator_identity->errors.end());
+   BOOST_CHECK(std::ranges::find(node_status->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               node_status->errors.end());
+   BOOST_TEST(operator_identity->since_revision == 1U);
+   BOOST_TEST(node_status->since_revision == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
@@ -1923,6 +1941,44 @@ BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
    BOOST_TEST(schema["format"].as_string() == "forge-public-key");
 }
 
+BOOST_AUTO_TEST_CASE(chain_admin_operator_identity_preserves_non_k1_key_across_raw_variant_and_http_json) {
+   auto r1 = forge::crypto::asymmetric::r1_public_key{};
+   r1.data[0] = static_cast<char>(0x02);
+   auto finalizer_bytes = forge::crypto::bls::public_key::data_type{};
+   const auto finalizer_wire = forge::codec::hex::decode(
+       "f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c580"
+       "50bd5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e");
+   BOOST_REQUIRE(finalizer_wire.size() == finalizer_bytes.size());
+   std::ranges::copy(finalizer_wire, finalizer_bytes.begin());
+   const auto identity = forge::chain::protocol::operator_identity{
+       .producer = forge::chain::protocol::account_name{"operator"},
+       .block_public_key = forge::chain::protocol::public_key{r1},
+       .finalizer_public_key = forge::crypto::bls::public_key{finalizer_bytes},
+       .enabled_roles = {forge::chain::protocol::operator_role::producer},
+   };
+
+   const auto raw = forge::raw::unpack<forge::chain::protocol::operator_identity>(forge::raw::pack(identity));
+   BOOST_CHECK(raw == identity);
+   BOOST_CHECK(std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(raw.block_public_key));
+
+   auto variant = forge::variant{};
+   forge::to_variant(identity, variant);
+   auto variant_round_trip = forge::chain::protocol::operator_identity{};
+   forge::from_variant(variant, variant_round_trip);
+   BOOST_CHECK(variant_round_trip == identity);
+   BOOST_CHECK(std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(variant_round_trip.block_public_key));
+
+   const auto http_json = forge::codec::json::write(identity);
+   BOOST_REQUIRE(http_json.ok());
+   const auto http_round_trip = forge::codec::json::read<forge::chain::protocol::operator_identity>(
+       http_json.text,
+       {.source_name = "http.operator_identity", .unknown_fields = forge::codec::json::unknown_field_policy::error});
+   BOOST_REQUIRE(http_round_trip.ok());
+   BOOST_CHECK(http_round_trip.value == identity);
+   BOOST_CHECK(
+       std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(http_round_trip.value.block_public_key));
+}
+
 BOOST_AUTO_TEST_CASE(chain_state_selector_openapi_requires_exactly_one_id_or_key) {
    const auto document = forge::api::http::openapi<forge::chain::api::state>();
    const auto check = [&](const char* path, std::initializer_list<std::string_view> other_fields) {
@@ -2021,6 +2077,17 @@ BOOST_AUTO_TEST_CASE(chain_block_info_admin_openapi_exposes_canonical_typed_reco
    BOOST_TEST(!info_properties.get_object().contains("total_cpu_weight"));
 
    const auto admin = forge::api::http::openapi<forge::chain::api::admin>();
+   const auto& operator_identity = admin["paths"]["/v1/chain/admin/operator-identity"]["get"]["responses"]["200"]
+                                        ["content"]["application/json"]["schema"]["properties"];
+   BOOST_TEST(operator_identity.get_object().contains("producer"));
+   BOOST_TEST(operator_identity.get_object().contains("block_public_key"));
+   BOOST_TEST(operator_identity.get_object().contains("finalizer_public_key"));
+   BOOST_TEST(operator_identity.get_object().contains("enabled_roles"));
+   const auto& node_status = admin["paths"]["/v1/chain/admin/node-status"]["get"]["responses"]["200"]["content"]
+                                  ["application/json"]["schema"]["properties"];
+   BOOST_TEST(node_status.get_object().contains("process_start"));
+   BOOST_TEST(node_status.get_object().contains("uptime_ms"));
+   BOOST_TEST(node_status.get_object().contains("lifecycle"));
    const auto& supported_feature_properties =
        admin["paths"]["/v1/chain/admin/protocol-features/supported"]["get"]["responses"]["200"]["content"]
             ["application/json"]["schema"]["properties"]["features"]["items"]["properties"];
