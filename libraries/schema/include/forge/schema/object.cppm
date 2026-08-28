@@ -1157,6 +1157,15 @@ template <typename T>
             continue;
          }
       }
+      if constexpr (!boost::describe::has_describe_members<T>::value) {
+         try {
+            output.push_back(cast_input_to<T>((*values)[i], item_path, diagnostics));
+         } catch (const std::exception& error) {
+            diagnostics.push_back(make_path_error(item_path, "config.type", error.what()));
+         }
+         continue;
+      }
+
       const auto* object = (*values)[i].as_object();
       if (!object) {
          diagnostics.push_back(make_path_error(item_path, "config.type", "list entry is not an object"));

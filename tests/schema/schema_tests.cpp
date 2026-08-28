@@ -48,6 +48,10 @@ struct policy_list_config {
    std::vector<path_policy> policies;
 };
 
+struct byte_list_config {
+   std::vector<std::uint8_t> payload;
+};
+
 struct wide_range_config {
    __int128 signed_value = 0;
    unsigned __int128 unsigned_value = 0;
@@ -72,6 +76,7 @@ BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_default_config, (), (wrapped_
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_item, (), (id))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_config, (), (tags, items))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::policy_list_config, (), (policies))
+BOOST_DESCRIBE_STRUCT(forge_schema_tests::byte_list_config, (), (payload))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::wide_range_config, (), (signed_value, unsigned_value))
 
 import forge.schema.diagnostic;
@@ -153,6 +158,14 @@ template <> struct forge::schema::rules<forge_schema_tests::policy_list_config> 
    [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::policy_list_config> define() {
       auto schema = forge::schema::object<forge_schema_tests::policy_list_config>();
       static_cast<void>(schema.field<&forge_schema_tests::policy_list_config::policies>("policies"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_schema_tests::byte_list_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::byte_list_config> define() {
+      auto schema = forge::schema::object<forge_schema_tests::byte_list_config>();
+      static_cast<void>(schema.field<&forge_schema_tests::byte_list_config::payload>("payload"));
       return schema;
    }
 };
@@ -499,6 +512,34 @@ BOOST_AUTO_TEST_CASE(schema_enum_lists_decode_canonical_config_names) {
    BOOST_TEST(static_cast<int>(decoded.policies[0]) == static_cast<int>(forge_schema_tests::path_policy::direct_only));
    BOOST_TEST(static_cast<int>(decoded.policies[1]) ==
               static_cast<int>(forge_schema_tests::path_policy::direct_preferred));
+}
+
+BOOST_AUTO_TEST_CASE(schema_scalar_lists_decode_integral_values_with_bounds) {
+   const auto schema = forge::schema::rules<forge_schema_tests::byte_list_config>::define();
+   const auto input = forge::schema::input_value::object_type{
+       {"payload",
+        forge::schema::input_value::array_type{
+            forge::schema::input_value{std::uint64_t{0}},
+            forge::schema::input_value{std::uint64_t{127}},
+            forge::schema::input_value{std::uint64_t{255}},
+        }},
+   };
+
+   BOOST_TEST(schema.validate_exact_input(input, "config").empty());
+
+   auto decoded = forge_schema_tests::byte_list_config{};
+   const auto diagnostics = schema.decode_object(input, "config", decoded);
+   BOOST_TEST(diagnostics.empty());
+   BOOST_TEST(decoded.payload == (std::vector<std::uint8_t>{0U, 127U, 255U}), boost::test_tools::per_element());
+
+   const auto overflow = schema.validate_exact_input(
+       forge::schema::input_value::object_type{
+           {"payload", forge::schema::input_value::array_type{forge::schema::input_value{std::uint64_t{256}}}},
+       },
+       "config");
+   BOOST_REQUIRE_EQUAL(overflow.size(), 1U);
+   BOOST_TEST(overflow.front().path == "config.payload[0]");
+   BOOST_TEST(overflow.front().code == "config.range");
 }
 
 BOOST_AUTO_TEST_CASE(schema_exact_lists_require_canonical_string_scalar_spelling) {
