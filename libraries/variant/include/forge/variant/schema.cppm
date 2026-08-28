@@ -101,6 +101,11 @@ struct sequence_traits<std::unordered_set<T, Hash, Equal, Allocator>> {
 
 template <typename T> inline constexpr bool is_sequence_v = sequence_traits<clean_type<T>>::value;
 
+template <typename T> inline constexpr bool is_unsigned_byte_vector_v = false;
+
+template <typename Allocator>
+inline constexpr bool is_unsigned_byte_vector_v<std::vector<std::uint8_t, Allocator>> = true;
+
 template <typename T> struct multi_index_traits {
    static constexpr bool value = false;
 };
@@ -278,6 +283,8 @@ template <typename T> void apply_encoding(const T& input, variant& output, std::
          std::visit([&](const auto& value) { apply_encoding(value, output.get_array()[1], element_path(path, 1U)); },
                     input);
       }
+   } else if constexpr (is_unsigned_byte_vector_v<value_type>) {
+      return;
    } else if constexpr (is_multi_index_v<value_type> || is_sequence_v<value_type>) {
       if (!output.is_array()) {
          return;
@@ -402,6 +409,8 @@ void materialize(variant& source, std::string_view path, std::vector<schema::dia
          materialize<typename multi_index_traits<value_type>::value_type>(elements[index], element_path(path, index),
                                                                           diagnostics);
       }
+   } else if constexpr (is_unsigned_byte_vector_v<value_type>) {
+      return;
    } else if constexpr (is_sequence_v<value_type>) {
       if (!source.is_array()) {
          return;

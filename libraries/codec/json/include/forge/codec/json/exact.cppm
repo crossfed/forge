@@ -96,6 +96,11 @@ template <typename T> inline constexpr bool is_byte_vector_v = false;
 
 template <typename Allocator> inline constexpr bool is_byte_vector_v<std::vector<char, Allocator>> = true;
 
+template <typename T> inline constexpr bool is_unsigned_byte_vector_v = false;
+
+template <typename Allocator>
+inline constexpr bool is_unsigned_byte_vector_v<std::vector<std::uint8_t, Allocator>> = true;
+
 template <typename T> struct sequence_traits {
    static constexpr bool value = false;
 };
@@ -356,6 +361,22 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       validate_canonical_string_adapter<value_type>(source, path, diagnostics, "chrono time point");
    } else if constexpr (is_byte_vector_v<value_type>) {
       validate_canonical_string_adapter<value_type>(source, path, diagnostics, "hexadecimal byte vector");
+   } else if constexpr (is_unsigned_byte_vector_v<value_type>) {
+      if (!source.is_array()) {
+         add_exact_error(diagnostics, std::string{path}, "json.array", "byte vector must be a JSON array");
+         return;
+      }
+      const auto& elements = source.get_array();
+      for (auto index = std::size_t{}; index < elements.size(); ++index) {
+         const auto& element = elements[index];
+         const auto valid =
+             (element.is_uint64() && element.as_uint64() <= std::numeric_limits<std::uint8_t>::max()) ||
+             (element.is_int64() && element.as_int64() >= 0 &&
+              static_cast<std::uint64_t>(element.as_int64()) <= std::numeric_limits<std::uint8_t>::max());
+         if (!valid) {
+            validate_exact<std::uint8_t>(element, element_path(path, index), diagnostics);
+         }
+      }
    } else if constexpr (std::same_as<value_type, forge::blob>) {
       validate_canonical_string_adapter<value_type>(source, path, diagnostics, "Base64 blob");
    } else if constexpr (reflect::is_described_object_v<value_type>) {
