@@ -45,6 +45,7 @@ import forge.net.http.stream;
 import forge.net.http.types;
 import forge.net.http.upload;
 import forge.codec.json;
+import forge.exceptions;
 import forge.reflect.reflect;
 import forge.codec.xml;
 
@@ -287,6 +288,16 @@ template <typename Response>
           forge::codec::json::read_options{.source_name = "http.response",
                                            .unknown_fields = forge::codec::json::unknown_field_policy::error});
       if (!decoded.ok()) {
+         if (!decoded.diagnostics.empty()) {
+            const auto& diagnostic = decoded.diagnostics.front();
+            FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response JSON is invalid",
+                                  forge::exceptions::ctx("diagnostic_code", diagnostic.code),
+                                  forge::exceptions::ctx("diagnostic_path_size", diagnostic.path.size()),
+                                  forge::exceptions::ctx("http_status", response_value.result_int()),
+                                  forge::exceptions::ctx("response_body_size", response_value.body().size()),
+                                  forge::exceptions::ctx("line", diagnostic.line),
+                                  forge::exceptions::ctx("column", diagnostic.column));
+         }
          FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response JSON is invalid");
       }
       return std::move(decoded.value);

@@ -62,6 +62,7 @@ import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
+import forge.exceptions;
 import forge.net.http.types;
 import forge.raw.raw;
 import forge.schema.exceptions;
@@ -1977,6 +1978,23 @@ BOOST_AUTO_TEST_CASE(chain_admin_operator_identity_preserves_non_k1_key_across_r
    BOOST_CHECK(http_round_trip.value == identity);
    BOOST_CHECK(
        std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(http_round_trip.value.block_public_key));
+}
+
+BOOST_AUTO_TEST_CASE(http_response_decode_reports_safe_codec_location) {
+   auto response = forge::net::http::response{forge::net::http::status::ok, 11};
+   response.body() = R"({"enabled_roles":["not-an-operator-role"],"secret-bearing-field\n":true})";
+
+   try {
+      static_cast<void>(forge::api::http::detail::decode_response_body<forge::chain::protocol::operator_identity>(
+          response, forge::api::http::body_codec::json));
+      BOOST_FAIL("invalid typed HTTP response was accepted");
+   } catch (const std::exception& error) {
+      const auto chain = forge::exceptions::format_exception_chain(error);
+      BOOST_TEST(chain.find("diagnostic_code=json.type") != std::string::npos);
+      BOOST_TEST(chain.find("diagnostic_path_size=") != std::string::npos);
+      BOOST_TEST(chain.find("secret-bearing-field") == std::string::npos);
+      BOOST_TEST(chain.find(response.body()) == std::string::npos);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(chain_state_selector_openapi_requires_exactly_one_id_or_key) {
