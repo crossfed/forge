@@ -30,6 +30,7 @@ boundary.
 - Config section: `plugins.crypto.signer`
 - Public modules:
   - `forge.plugins.crypto.signer.plugin`
+  - `forge.plugins.crypto.signer.descriptor`
   - `forge.plugins.crypto.signer.api`
   - `forge.plugins.crypto.signer.bls_api`
   - `forge.plugins.crypto.signer.types`

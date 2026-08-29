@@ -9,6 +9,7 @@ module;
 export module forge.plugins.db.store.plugin;
 
 export import forge.plugins.db.store.api;
+export import forge.plugins.db.store.descriptor;
 
 import forge.api.core.binding;
 import forge.app.plugin;

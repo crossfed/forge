@@ -62,7 +62,9 @@ API binding сначала применяй актуальное правило 
 
 ## 4. Публичные module-слайсы
 Под `include/<ns>/plugins/<family>/<name>/` (по R1 из create-library):
-- `plugin.cppm` — класс плагина + `descriptor()`
+- `plugin.cppm` — класс плагина + канонический `descriptor(...)`
+- опц. `descriptor.cppm` — лёгкий application-composition слайс только с
+  `default_descriptor()`; `plugin.cppm` re-export-ит этот слайс
 - `api.cppm` — типизированные локальные контракты
 - `types.cppm` — config + DTO-типы
 - `exceptions.cppm` — типизированные исключения
@@ -74,7 +76,14 @@ API binding сначала применяй актуальное правило 
 
 ### Каноническая реализация plugin/API
 
-- `plugin.cppm` + `plugin.cpp` объявляют и реализуют public plugin lifecycle.
+- `plugin.cppm` + `plugin.cpp` объявляют и реализуют public plugin lifecycle и
+  канонический, в том числе конфигурируемый, `descriptor(...)`.
+- Опциональная пара `descriptor.cppm` + `descriptor.cpp` существует только для
+  лёгкой application composition: интерфейс импортирует только
+  `forge.app.plugin_registry` и объявляет `default_descriptor()`, реализация
+  импортирует owning `plugin` module и возвращает `descriptor()`. Этот wrapper
+  не дублирует plugin id, dependencies, `enabled_by_default`, factory behavior,
+  config types или default arguments канонического descriptor.
 - `details/plugin_impl.hxx` + `plugin_impl.cpp` содержат только `plugin::impl` и его
   методы. Concrete API implementation и lifecycle facade в этих файлах запрещены.
 - Concrete implementation локального `api` называется `plugin::api_impl` и живёт в

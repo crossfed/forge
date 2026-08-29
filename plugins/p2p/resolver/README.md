@@ -32,6 +32,7 @@ contracts it exposes before opening a typed API connection.
 - Depends on plugin id: `forge.plugins.p2p.node`
 - Public modules:
   - `forge.plugins.p2p.resolver.plugin`
+  - `forge.plugins.p2p.resolver.descriptor`
   - `forge.plugins.p2p.resolver.api`
   - `forge.plugins.p2p.resolver.managed_api`
   - `forge.plugins.p2p.resolver.types`

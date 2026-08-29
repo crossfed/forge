@@ -26,6 +26,7 @@ publish/subscribe over the shared P2P node.
 - Depends on plugin id: `forge.plugins.p2p.node`
 - Public modules:
   - `forge.plugins.p2p.pubsub.plugin`
+  - `forge.plugins.p2p.pubsub.descriptor`
   - `forge.plugins.p2p.pubsub.api`
   - `forge.plugins.p2p.pubsub.types`
   - `forge.plugins.p2p.pubsub.exceptions`

@@ -33,6 +33,7 @@ Secrets API without exposing PEM material to application plugins.
 - Config section: `plugins.http.server`
 - Public modules:
   - `forge.plugins.http.server.plugin`
+  - `forge.plugins.http.server.descriptor`
   - `forge.plugins.http.server.api`
   - `forge.plugins.http.server.bearer_auth`
   - `forge.plugins.http.server.middleware`
