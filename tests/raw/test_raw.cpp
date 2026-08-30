@@ -131,6 +131,21 @@ struct stream_serialized_aggregate {
 
 static_assert(std::is_aggregate_v<stream_serialized_aggregate>);
 
+struct stream_serialized_bool {
+   bool value = false;
+   std::uint8_t marker = 0;
+
+   bool operator==(const stream_serialized_bool&) const = default;
+
+   template <typename Stream> friend Stream& operator<<(Stream& stream, const stream_serialized_bool& item) {
+      return stream << item.value << item.marker;
+   }
+
+   template <typename Stream> friend Stream& operator>>(Stream& stream, stream_serialized_bool& item) {
+      return stream >> item.value >> item.marker;
+   }
+};
+
 struct datastream_serialized_aggregate {
    std::uint32_t value = 0;
 
@@ -399,6 +414,14 @@ BOOST_AUTO_TEST_CASE(custom_stream_codec_precedes_aggregate_fallback) {
    auto decoded = stream_serialized_aggregate{};
    stream >> decoded;
    BOOST_CHECK(decoded == value);
+}
+
+BOOST_AUTO_TEST_CASE(stream_operator_bool_uses_canonical_one_byte_codec) {
+   const auto value = stream_serialized_bool{.value = true, .marker = 0xa5U};
+   const auto packed = forge::raw::pack(value);
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "01a5");
+   BOOST_CHECK(forge::raw::unpack_exact<stream_serialized_bool>(packed) == value);
 }
 
 BOOST_AUTO_TEST_CASE(datastream_specific_codec_precedes_aggregate_fallback) {
