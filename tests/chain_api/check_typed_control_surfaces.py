@@ -234,11 +234,13 @@ def main() -> int:
         "compatibility alias",
     )
 
-    require(block_api, 'FORGE_API_CONTRACT("forge.chain.api.block", 2, 0)', block_api_path)
+    require(block_api, 'FORGE_API_CONTRACT("forge.chain.api.block", 2, 1)', block_api_path)
     require(info_api, 'FORGE_API_CONTRACT("forge.chain.api.info", 2, 0)', info_api_path)
-    require(admin_api, 'FORGE_API_CONTRACT("forge.chain.api.admin", 2, 1)', admin_api_path)
+    require(admin_api, 'FORGE_API_CONTRACT("forge.chain.api.admin", 2, 2)', admin_api_path)
     require(admin_api, "FORGE_API_METHOD_TYPED_SINCE(get_operator_identity", admin_api_path)
     require(admin_api, "FORGE_API_METHOD_TYPED_SINCE(get_node_status", admin_api_path)
+    require(admin_api, "FORGE_API_METHOD_TYPED_SINCE(snapshot_status", admin_api_path)
+    require(admin_api, "FORGE_API_METHOD_TYPED_SINCE(request_snapshot", admin_api_path)
     require(admin_api, '"/v1/chain/admin/operator-identity"', admin_api_path)
     require(admin_api, '"/v1/chain/admin/node-status"', admin_api_path)
     require(block_api, "FORGE_HTTP_GET(get_producers", block_api_path)

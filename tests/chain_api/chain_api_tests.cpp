@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <typeindex>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -33,12 +34,17 @@
 #include <forge/exceptions/macros.hpp>
 
 import forge.api.core.connection;
+import forge.api.core.binding;
 import forge.api.core.exceptions;
 import forge.api.core.registry;
+import forge.api.http.binding;
 import forge.api.http.client_response;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
+import forge.api.http.proxy;
+import forge.asio.blocking;
 import forge.asio.exceptions;
+import forge.asio.runtime;
 import forge.chain.api.admin;
 import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
@@ -63,6 +69,10 @@ import forge.crypto.digest.sha256;
 import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
 import forge.exceptions;
+import forge.net.http.base_url;
+import forge.net.http.client;
+import forge.net.http.router;
+import forge.net.http.server;
 import forge.net.http.types;
 import forge.raw.raw;
 import forge.schema.exceptions;
@@ -167,6 +177,9 @@ class block_service final : public forge::chain::api::block {
 
    boost::asio::awaitable<forge::chain::protocol::producers_response>
    get_producers(forge::chain::protocol::producers_request) override {
+      if (throw_producers_not_found) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::not_found, "producer table is not available");
+      }
       co_return forge::chain::protocol::producers_response{};
    }
 
@@ -180,9 +193,129 @@ class block_service final : public forge::chain::api::block {
       co_return forge::chain::protocol::finalizer_info_response{};
    }
 
+   bool throw_producers_not_found = false;
+
  private:
    forge::chain::protocol::block_response response_;
    forge::chain::protocol::block_header_response header_response_;
+};
+
+class snapshot_admin_service final : public forge::chain::api::admin {
+ public:
+   explicit snapshot_admin_service(forge::chain::protocol::snapshot_response response)
+       : response_{std::move(response)} {}
+
+   boost::asio::awaitable<forge::chain::protocol::push_block_response>
+   push_block(forge::chain::protocol::signed_block) override {
+      co_return forge::chain::protocol::push_block_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_response> create_snapshot(std::string name) override {
+      auto response = response_;
+      response.name = std::move(name);
+      co_return response;
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_lifecycle_response>
+   request_snapshot(forge::chain::protocol::snapshot_request request) override {
+      if (accepted_request && accepted_request->request_id == request.request_id &&
+          accepted_request->name != request.name) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::conflict,
+                               "snapshot request id was already used with another name");
+      }
+      accepted_request = request;
+      co_return lifecycle(request);
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_lifecycle_response>
+   snapshot_status(forge::chain::protocol::snapshot_status_request request) override {
+      if (!accepted_request || request.request_id != accepted_request->request_id) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::not_found, "snapshot identity is not known");
+      }
+      co_return lifecycle(*accepted_request);
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::prune_response>
+   prune(forge::chain::protocol::prune_request) override {
+      co_return forge::chain::protocol::prune_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::producer_status_response>
+   producer_status(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::producer_status_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::supported_protocol_features_response>
+   supported_protocol_features(forge::chain::protocol::supported_protocol_features_request) override {
+      co_return forge::chain::protocol::supported_protocol_features_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::ram_corrections_response>
+   account_ram_corrections(forge::chain::protocol::ram_corrections_request) override {
+      co_return forge::chain::protocol::ram_corrections_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::unapplied_transactions_response>
+   unapplied_transactions(forge::chain::protocol::unapplied_transactions_request) override {
+      co_return forge::chain::protocol::unapplied_transactions_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_requests_response>
+   snapshot_requests(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::snapshot_requests_response{};
+   }
+
+   boost::asio::awaitable<bool> configure_pause(forge::chain::protocol::producer_pause_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_runtime_options(forge::chain::protocol::producer_runtime_options) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_greylist(forge::chain::protocol::greylist_update_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> set_access_policy(forge::chain::protocol::producer_access_policy) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_schedule>
+   schedule_snapshot(forge::chain::protocol::snapshot_schedule_request) override {
+      co_return forge::chain::protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_schedule>
+   unschedule_snapshot(forge::chain::protocol::snapshot_schedule_id) override {
+      co_return forge::chain::protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::integrity_hash_response>
+   integrity_hash(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::integrity_hash_response{};
+   }
+
+   boost::asio::awaitable<bool> schedule_protocol_features(std::vector<forge::chain::protocol::digest>) override {
+      co_return false;
+   }
+
+   forge::chain::protocol::snapshot_state state = forge::chain::protocol::snapshot_state::pending;
+   std::optional<forge::chain::protocol::snapshot_request> accepted_request;
+
+ private:
+   forge::chain::protocol::snapshot_lifecycle_response
+   lifecycle(const forge::chain::protocol::snapshot_request& request) const {
+      return {
+          .request_id = request.request_id,
+          .name = request.name,
+          .state = state,
+          .head = response_.head,
+          .head_num = response_.head_num,
+      };
+   }
+
+   forge::chain::protocol::snapshot_response response_;
 };
 
 class info_service final : public forge::chain::api::info {
@@ -1174,8 +1307,10 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(submissions, method::post, {"submit", "submit_batch"});
    require_routes(admin, method::get,
                   {"producer_status", "get_operator_identity", "get_node_status", "supported_protocol_features",
-                   "account_ram_corrections", "unapplied_transactions", "snapshot_requests", "integrity_hash"});
-   require_routes(admin, method::post, {"push_block", "create_snapshot", "prune", "schedule_snapshot"});
+                   "account_ram_corrections", "unapplied_transactions", "snapshot_status", "snapshot_requests",
+                   "integrity_hash"});
+   require_routes(admin, method::post,
+                  {"push_block", "create_snapshot", "request_snapshot", "prune", "schedule_snapshot"});
    require_routes(admin, method::put, {"configure_pause", "set_access_policy", "schedule_protocol_features"});
    require_routes(admin, method::patch, {"update_runtime_options", "update_greylist"});
    require_routes(admin, method::delete_, {"unschedule_snapshot"});
@@ -1187,18 +1322,216 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
 }
 
 BOOST_AUTO_TEST_CASE(chain_block_info_admin_contracts_are_version_2) {
-   const auto stable_descriptors =
-       std::array{forge::chain::api::block::describe(), forge::chain::api::info::describe()};
-   for (const auto& descriptor : stable_descriptors) {
-      BOOST_TEST(descriptor.version.major == 2U);
-      BOOST_TEST(descriptor.version.revision == 0U);
-   }
+   const auto block = forge::chain::api::block::describe();
+   const auto info = forge::chain::api::info::describe();
    const auto admin = forge::chain::api::admin::describe();
+   BOOST_TEST(block.version.major == 2U);
+   BOOST_TEST(block.version.revision == 1U);
+   BOOST_TEST(info.version.major == 2U);
+   BOOST_TEST(info.version.revision == 0U);
    BOOST_TEST(admin.version.major == 2U);
-   BOOST_TEST(admin.version.revision == 1U);
+   BOOST_TEST(admin.version.revision == 2U);
    BOOST_TEST(forge::chain::api::block::ref().major == 2U);
+   BOOST_TEST(forge::chain::api::block::ref().min_revision == 1U);
    BOOST_TEST(forge::chain::api::info::ref().major == 2U);
    BOOST_TEST(forge::chain::api::admin::ref().major == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_snapshot_lifecycle_descriptor_and_codecs_are_revision_2_compatible) {
+   auto head = forge::chain::protocol::block_id{};
+   head._hash[0] = 0x42U;
+   const auto created = forge::chain::protocol::snapshot_response{
+       .name = "snapshot-a",
+       .head = head,
+       .head_num = 42U,
+   };
+   const auto request = forge::chain::protocol::snapshot_request{
+       .request_id = "request-42",
+       .name = "snapshot-a",
+   };
+   const auto status_request = forge::chain::protocol::snapshot_status_request{.request_id = request.request_id};
+   const auto lifecycle = forge::chain::protocol::snapshot_lifecycle_response{
+       .request_id = request.request_id,
+       .name = request.name,
+       .state = forge::chain::protocol::snapshot_state::completed,
+       .head = head,
+       .head_num = 42U,
+   };
+
+   const auto descriptor = forge::chain::api::admin::describe();
+   const auto* create = forge::api::core::find_method(descriptor, "create_snapshot");
+   const auto* request_method = forge::api::core::find_method(descriptor, "request_snapshot");
+   const auto* status = forge::api::core::find_method(descriptor, "snapshot_status");
+   BOOST_REQUIRE(create != nullptr);
+   BOOST_REQUIRE(request_method != nullptr);
+   BOOST_REQUIRE(status != nullptr);
+   BOOST_TEST(descriptor.version.revision == 2U);
+   BOOST_TEST(request_method->since_revision == 2U);
+   BOOST_TEST(status->since_revision == 2U);
+   BOOST_CHECK(create->response_type == std::type_index{typeid(forge::chain::protocol::snapshot_response)});
+   BOOST_CHECK(request_method->request_type == std::type_index{typeid(forge::chain::protocol::snapshot_request)});
+   BOOST_CHECK(request_method->response_type ==
+               std::type_index{typeid(forge::chain::protocol::snapshot_lifecycle_response)});
+   BOOST_CHECK(status->request_type == std::type_index{typeid(forge::chain::protocol::snapshot_status_request)});
+   BOOST_CHECK(status->response_type == std::type_index{typeid(forge::chain::protocol::snapshot_lifecycle_response)});
+
+   const auto old_snapshot_wire = forge::codec::hex::decode(
+       "0a736e617073686f742d6142000000000000000000000000000000000000000000000000000000000000002a000000");
+   BOOST_CHECK(forge::raw::pack(created) == old_snapshot_wire);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_response>(old_snapshot_wire) == created);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_request>(forge::raw::pack(request)) ==
+               request);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_status_request>(
+                   forge::raw::pack(status_request)) == status_request);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_lifecycle_response>(
+                   forge::raw::pack(lifecycle)) == lifecycle);
+
+   const auto created_json = forge::codec::json::write(created);
+   const auto lifecycle_request_json = forge::codec::json::write(request);
+   const auto status_request_json = forge::codec::json::write(status_request);
+   const auto response_json = forge::codec::json::write(lifecycle);
+   BOOST_REQUIRE(created_json.ok());
+   BOOST_REQUIRE(lifecycle_request_json.ok());
+   BOOST_REQUIRE(status_request_json.ok());
+   BOOST_REQUIRE(response_json.ok());
+   BOOST_CHECK(created_json.text.find("\"state\"") == std::string::npos);
+   const auto json_options = forge::codec::json::read_options{
+       .unknown_fields = forge::codec::json::unknown_field_policy::error,
+   };
+   const auto created_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_response>(created_json.text, json_options);
+   const auto lifecycle_request_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_request>(lifecycle_request_json.text, json_options);
+   const auto status_request_round_trip = forge::codec::json::read<forge::chain::protocol::snapshot_status_request>(
+       status_request_json.text, json_options);
+   const auto response_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_lifecycle_response>(response_json.text, json_options);
+   BOOST_REQUIRE(created_round_trip.ok());
+   BOOST_REQUIRE(lifecycle_request_round_trip.ok());
+   BOOST_REQUIRE(status_request_round_trip.ok());
+   BOOST_REQUIRE(response_round_trip.ok());
+   BOOST_CHECK(created_round_trip.value == created);
+   BOOST_CHECK(lifecycle_request_round_trip.value == request);
+   BOOST_CHECK(status_request_round_trip.value == status_request);
+   BOOST_CHECK(response_round_trip.value == lifecycle);
+}
+
+BOOST_AUTO_TEST_CASE(chain_block_descriptor_declares_not_found_only_for_entity_lookups) {
+   const auto descriptor = forge::chain::api::block::describe();
+   const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
+
+   for (const auto name : {"get_block", "get_header", "get_block_state", "get_producers"}) {
+      const auto* method = forge::api::core::find_method(descriptor, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, not_found, &forge::api::core::error_descriptor::identity) !=
+                  method->errors.end());
+   }
+   for (const auto name : {"get_canonical_range", "get_activated_protocol_features", "get_consensus_parameters",
+                           "get_producer_schedule", "get_finalizer_info"}) {
+      const auto* method = forge::api::core::find_method(descriptor, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, not_found, &forge::api::core::error_descriptor::identity) ==
+                  method->errors.end());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(chain_producers_http_roundtrip_preserves_typed_not_found) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto service = std::make_shared<block_service>(forge::chain::protocol::block_response{});
+   service->throw_producers_not_found = true;
+
+   auto apis = forge::api::core::registry{};
+   apis.install<forge::chain::api::block>(forge::chain::api::block::describe(), service);
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<forge::chain::api::block>()
+                    .build());
+
+   auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
+   server.start();
+   try {
+      auto client = forge::net::http::client{
+          runtime,
+          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+      };
+      auto remote = forge::asio::blocking::run(runtime, forge::api::http::remote<forge::chain::api::block>(client));
+      BOOST_CHECK_THROW(
+          forge::asio::blocking::run(runtime, remote->get_producers(forge::chain::protocol::producers_request{})),
+          forge::chain::api::exceptions::not_found);
+   } catch (...) {
+      server.stop();
+      throw;
+   }
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(chain_snapshot_http_roundtrip_preserves_lifecycle_and_typed_not_found) {
+   auto head = forge::chain::protocol::block_id{};
+   head._hash[0] = 0x42U;
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto service = std::make_shared<snapshot_admin_service>(forge::chain::protocol::snapshot_response{
+       .name = "snapshot-a",
+       .head = head,
+       .head_num = 42U,
+   });
+
+   auto apis = forge::api::core::registry{};
+   apis.install<forge::chain::api::admin>(forge::chain::api::admin::describe(), service);
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<forge::chain::api::admin>()
+                    .build());
+
+   auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
+   server.start();
+   try {
+      auto client = forge::net::http::client{
+          runtime,
+          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+      };
+      auto remote = forge::asio::blocking::run(runtime, forge::api::http::remote<forge::chain::api::admin>(client));
+
+      const auto created = forge::asio::blocking::run(runtime, remote->create_snapshot("snapshot-a"));
+      BOOST_TEST(created.head == head);
+      BOOST_TEST(created.head_num == 42U);
+
+      const auto request = forge::chain::protocol::snapshot_request{
+          .request_id = "request-42",
+          .name = "snapshot-a",
+      };
+      const auto pending = forge::asio::blocking::run(runtime, remote->request_snapshot(request));
+      BOOST_CHECK(pending.state == forge::chain::protocol::snapshot_state::pending);
+      BOOST_TEST(pending.request_id == request.request_id);
+      BOOST_REQUIRE(pending.head.has_value());
+      BOOST_TEST(*pending.head == head);
+
+      const auto replay = forge::asio::blocking::run(runtime, remote->request_snapshot(request));
+      BOOST_CHECK(replay == pending);
+
+      auto mismatched = request;
+      mismatched.name = "snapshot-b";
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->request_snapshot(mismatched)),
+                        forge::chain::api::exceptions::conflict);
+
+      const auto status_request = forge::chain::protocol::snapshot_status_request{.request_id = request.request_id};
+      service->state = forge::chain::protocol::snapshot_state::completed;
+      const auto completed = forge::asio::blocking::run(runtime, remote->snapshot_status(status_request));
+      BOOST_CHECK(completed.state == forge::chain::protocol::snapshot_state::completed);
+      BOOST_TEST(completed.request_id == request.request_id);
+
+      auto unknown = status_request;
+      unknown.request_id = "unknown-request";
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->snapshot_status(unknown)),
+                        forge::chain::api::exceptions::not_found);
+   } catch (...) {
+      server.stop();
+      throw;
+   }
+   server.stop();
 }
 
 BOOST_AUTO_TEST_CASE(chain_state_v3_declares_only_typed_state_reads_and_public_history_error) {
@@ -1826,10 +2159,13 @@ BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_meth
    const auto* status = forge::api::core::find_method(descriptor, "producer_status");
    const auto* operator_identity = forge::api::core::find_method(descriptor, "get_operator_identity");
    const auto* node_status = forge::api::core::find_method(descriptor, "get_node_status");
+   const auto* snapshot_status = forge::api::core::find_method(descriptor, "snapshot_status");
+   const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
    BOOST_REQUIRE(push != nullptr);
    BOOST_REQUIRE(status != nullptr);
    BOOST_REQUIRE(operator_identity != nullptr);
    BOOST_REQUIRE(node_status != nullptr);
+   BOOST_REQUIRE(snapshot_status != nullptr);
    BOOST_CHECK(std::ranges::find(push->errors, identity, &forge::api::core::error_descriptor::identity) !=
                push->errors.end());
    BOOST_CHECK(std::ranges::find(status->errors, identity, &forge::api::core::error_descriptor::identity) ==
@@ -1838,6 +2174,10 @@ BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_meth
                operator_identity->errors.end());
    BOOST_CHECK(std::ranges::find(node_status->errors, identity, &forge::api::core::error_descriptor::identity) ==
                node_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_status->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               snapshot_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_status->errors, not_found, &forge::api::core::error_descriptor::identity) !=
+               snapshot_status->errors.end());
    BOOST_TEST(operator_identity->since_revision == 1U);
    BOOST_TEST(node_status->since_revision == 1U);
 }
