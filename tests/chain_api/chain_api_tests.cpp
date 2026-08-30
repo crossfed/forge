@@ -218,6 +218,10 @@ class snapshot_admin_service final : public forge::chain::api::admin {
 
    boost::asio::awaitable<forge::chain::protocol::snapshot_lifecycle_response>
    request_snapshot(forge::chain::protocol::snapshot_request request) override {
+      if (request.request_id == lost_request_id) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::snapshot_lost,
+                               "snapshot request anchor is no longer canonical");
+      }
       if (accepted_request && accepted_request->request_id == request.request_id &&
           accepted_request->name != request.name) {
          FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::conflict,
@@ -302,6 +306,7 @@ class snapshot_admin_service final : public forge::chain::api::admin {
 
    forge::chain::protocol::snapshot_state state = forge::chain::protocol::snapshot_state::pending;
    std::optional<forge::chain::protocol::snapshot_request> accepted_request;
+   std::string lost_request_id;
 
  private:
    forge::chain::protocol::snapshot_lifecycle_response
@@ -1330,7 +1335,7 @@ BOOST_AUTO_TEST_CASE(chain_block_info_admin_contracts_are_version_2) {
    BOOST_TEST(info.version.major == 2U);
    BOOST_TEST(info.version.revision == 0U);
    BOOST_TEST(admin.version.major == 2U);
-   BOOST_TEST(admin.version.revision == 2U);
+   BOOST_TEST(admin.version.revision == 3U);
    BOOST_TEST(forge::chain::api::block::ref().major == 2U);
    BOOST_TEST(forge::chain::api::block::ref().min_revision == 1U);
    BOOST_TEST(forge::chain::api::info::ref().major == 2U);
@@ -1365,7 +1370,7 @@ BOOST_AUTO_TEST_CASE(chain_snapshot_lifecycle_descriptor_and_codecs_are_revision
    BOOST_REQUIRE(create != nullptr);
    BOOST_REQUIRE(request_method != nullptr);
    BOOST_REQUIRE(status != nullptr);
-   BOOST_TEST(descriptor.version.revision == 2U);
+   BOOST_TEST(descriptor.version.revision == 3U);
    BOOST_TEST(request_method->since_revision == 2U);
    BOOST_TEST(status->since_revision == 2U);
    BOOST_CHECK(create->response_type == std::type_index{typeid(forge::chain::protocol::snapshot_response)});
@@ -1516,6 +1521,12 @@ BOOST_AUTO_TEST_CASE(chain_snapshot_http_roundtrip_preserves_lifecycle_and_typed
       mismatched.name = "snapshot-b";
       BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->request_snapshot(mismatched)),
                         forge::chain::api::exceptions::conflict);
+
+      service->lost_request_id = "lost-request";
+      auto lost = request;
+      lost.request_id = service->lost_request_id;
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->request_snapshot(lost)),
+                        forge::chain::api::exceptions::snapshot_lost);
 
       const auto status_request = forge::chain::protocol::snapshot_status_request{.request_id = request.request_id};
       service->state = forge::chain::protocol::snapshot_state::completed;
@@ -2160,12 +2171,15 @@ BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_meth
    const auto* operator_identity = forge::api::core::find_method(descriptor, "get_operator_identity");
    const auto* node_status = forge::api::core::find_method(descriptor, "get_node_status");
    const auto* snapshot_status = forge::api::core::find_method(descriptor, "snapshot_status");
+   const auto* snapshot_request = forge::api::core::find_method(descriptor, "request_snapshot");
    const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
+   const auto snapshot_lost = forge::api::core::exception_identity<forge::chain::api::exceptions::snapshot_lost>();
    BOOST_REQUIRE(push != nullptr);
    BOOST_REQUIRE(status != nullptr);
    BOOST_REQUIRE(operator_identity != nullptr);
    BOOST_REQUIRE(node_status != nullptr);
    BOOST_REQUIRE(snapshot_status != nullptr);
+   BOOST_REQUIRE(snapshot_request != nullptr);
    BOOST_CHECK(std::ranges::find(push->errors, identity, &forge::api::core::error_descriptor::identity) !=
                push->errors.end());
    BOOST_CHECK(std::ranges::find(status->errors, identity, &forge::api::core::error_descriptor::identity) ==
@@ -2178,6 +2192,14 @@ BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_meth
                snapshot_status->errors.end());
    BOOST_CHECK(std::ranges::find(snapshot_status->errors, not_found, &forge::api::core::error_descriptor::identity) !=
                snapshot_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_request->errors, snapshot_lost,
+                                 &forge::api::core::error_descriptor::identity) != snapshot_request->errors.end());
+   for (const auto& method : descriptor.methods) {
+      if (method.name != "request_snapshot") {
+         BOOST_CHECK(std::ranges::find(method.errors, snapshot_lost, &forge::api::core::error_descriptor::identity) ==
+                     method.errors.end());
+      }
+   }
    BOOST_TEST(operator_identity->since_revision == 1U);
    BOOST_TEST(node_status->since_revision == 1U);
 }

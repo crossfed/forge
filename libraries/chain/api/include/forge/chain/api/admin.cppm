@@ -90,6 +90,9 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
       if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::snapshot_status_request>) {
          ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
       }
+      if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::snapshot_request>) {
+         ::forge::chain::api::exceptions::descriptor::declare_snapshot_lost(method);
+      }
       if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::signed_block> ||
                     std::is_same_v<request_type, ::std::string> ||
                     std::is_same_v<request_type, ::forge::chain::protocol::snapshot_request> ||
@@ -109,7 +112,7 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
 } // namespace forge::api::core
 
 FORGE_EXPORT_API(
-    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 2, 2),
+    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 2, 3),
     FORGE_API_METHOD_TYPED(push_block, ::forge::chain::protocol::signed_block,
                            ::forge::chain::protocol::push_block_response),
     FORGE_API_METHOD(create_snapshot, name),
