@@ -272,37 +272,22 @@ class datastream<std::vector<Byte, Allocator>,
    std::size_t remaining_elements_;
 };
 
-template <typename Storage> datastream<Storage>& operator<<(datastream<Storage>& stream, const __int128& value) {
-   stream.write(reinterpret_cast<const char*>(&value), sizeof(value));
-   return stream;
-}
-
-template <typename Storage> datastream<Storage>& operator>>(datastream<Storage>& stream, __int128& value) {
-   stream.read(reinterpret_cast<char*>(&value), sizeof(value));
-   return stream;
-}
-
-template <typename Storage>
-datastream<Storage>& operator<<(datastream<Storage>& stream, const unsigned __int128& value) {
-   stream.write(reinterpret_cast<const char*>(&value), sizeof(value));
-   return stream;
-}
-
-template <typename Storage> datastream<Storage>& operator>>(datastream<Storage>& stream, unsigned __int128& value) {
-   stream.read(reinterpret_cast<char*>(&value), sizeof(value));
-   return stream;
-}
-
 #define FORGE_RAW_STREAM_SCALAR(Type)                                                                                  \
-   template <typename Storage> datastream<Storage>& operator<<(datastream<Storage>& stream, const Type& value) {       \
+   template <typename Storage, typename Value>                                                                         \
+      requires std::is_same_v<Value, Type>                                                                             \
+   datastream<Storage>& operator<<(datastream<Storage>& stream, const Value& value) {                                  \
       stream.write(reinterpret_cast<const char*>(&value), sizeof(value));                                              \
       return stream;                                                                                                   \
    }                                                                                                                   \
-   template <typename Storage> datastream<Storage>& operator>>(datastream<Storage>& stream, Type& value) {             \
+   template <typename Storage, typename Value>                                                                         \
+      requires std::is_same_v<Value, Type>                                                                             \
+   datastream<Storage>& operator>>(datastream<Storage>& stream, Value& value) {                                        \
       stream.read(reinterpret_cast<char*>(&value), sizeof(value));                                                     \
       return stream;                                                                                                   \
    }
 
+FORGE_RAW_STREAM_SCALAR(__int128)
+FORGE_RAW_STREAM_SCALAR(unsigned __int128)
 FORGE_RAW_STREAM_SCALAR(std::int64_t)
 FORGE_RAW_STREAM_SCALAR(std::uint64_t)
 FORGE_RAW_STREAM_SCALAR(std::int32_t)

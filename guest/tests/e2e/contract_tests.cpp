@@ -354,6 +354,17 @@ BOOST_AUTO_TEST_CASE(generated_dispatcher_serializes_user_defined_action_records
    BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(contract_sdk_stream_operator_preserves_canonical_bool_bytes) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_RECORD_WASM);
+   auto host = invocation{.action_data = forge::raw::pack(true)};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "recordtest", "boolwire"));
+   const auto packed = forge::raw::unpack_exact<std::vector<std::uint8_t>>(host.return_value);
+   const auto expected = std::vector<std::uint8_t>{0x01U, 0xa5U};
+   BOOST_TEST(packed == expected, boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(legacy_dispatcher_serializes_user_defined_action_records) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
