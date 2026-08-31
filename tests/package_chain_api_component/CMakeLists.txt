@@ -26,6 +26,10 @@ find_package(
       plugins_p2p_resolver
 )
 
+if(NOT Forge_BUILT_WITH_PORTABLE_VERIFIED_CLIENT)
+   message(FATAL_ERROR "Forge package must provide Forge_BUILT_WITH_PORTABLE_VERIFIED_CLIENT")
+endif()
+
 add_executable(
    forge_package_chain_api_component
    main.cpp

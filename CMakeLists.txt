@@ -863,6 +863,12 @@ if(FORGE_ENABLE_TOOLING)
    )
 endif()
 
+# forge_chain_api owns the contract-table projection verifier used by the portable client.
+set(FORGE_HAS_PORTABLE_VERIFIED_CLIENT OFF)
+if(TARGET forge_chain_savanna AND TARGET forge_chain_api)
+   set(FORGE_HAS_PORTABLE_VERIFIED_CLIENT ON)
+endif()
+
 add_library(forge STATIC forge.cpp)
 add_library(Forge::forge ALIAS forge)
 
