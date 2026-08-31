@@ -1222,6 +1222,7 @@ struct rich_client_harness {
 };
 
 rich_client_harness make_rich_client(const rich_portable_fixture& fixture, savanna::finality_trust trust,
+                                     std::vector<savanna::finality_trust> additional_trusts,
                                      protocol::proof_blob finality, fixture_state_service::rows_handler rows,
                                      fixture_state_service::changes_handler changes) {
    auto services = forge::api::core::registry{};
@@ -1238,6 +1239,7 @@ rich_client_harness make_rich_client(const rich_portable_fixture& fixture, savan
                                                .state_domain = fixture.state_domain,
                                                .trust = std::move(trust),
                                                .projections = api::make_contract_table_projection_verifier(),
+                                               .additional_trusts = std::move(additional_trusts),
                                            }),
        .service = std::move(service),
    };
@@ -1277,10 +1279,153 @@ BOOST_AUTO_TEST_CASE(portable_verified_client_executes_rows_and_changes_with_rea
    BOOST_CHECK(changes == fixture.changes_response);
 }
 
+BOOST_AUTO_TEST_CASE(portable_savanna_multi_trust_prefers_max_and_selects_each_witness_bootstrap) {
+   const auto fixture = make_rich_portable_fixture();
+   const auto genesis_anchor = savanna::trust_anchor(fixture.genesis_trust);
+   const auto checkpoint_anchor = savanna::trust_anchor(fixture.checkpoint_trust);
+   const auto& checkpoint = std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust);
+   BOOST_REQUIRE(checkpoint.value.finalized.num > 1U);
+
+   const auto verify_order = [&](std::vector<savanna::finality_trust> trusted) {
+      const auto verifier = api::make_savanna_finality_verifier_with_trusts(trusted.front(), {trusted.back()});
+      BOOST_REQUIRE(verifier->preferred_trust_anchor().has_value());
+      BOOST_CHECK(*verifier->preferred_trust_anchor() == checkpoint_anchor.block);
+
+      const auto intermediate = std::array{fixture.first_change_anchor};
+      for (const auto& proof : {fixture.genesis_finality, fixture.checkpoint_finality}) {
+         const auto state = api::replay_savanna_finality_state(trusted, fixture.target_anchor, proof);
+         BOOST_CHECK(state.id == fixture.target_anchor.block);
+         BOOST_CHECK_NO_THROW(verifier->verify(fixture.target_anchor, proof));
+         BOOST_CHECK_NO_THROW(verifier->verify_ancestry(fixture.target_anchor, intermediate, proof));
+      }
+   };
+
+   verify_order({fixture.genesis_trust, fixture.checkpoint_trust});
+   verify_order({fixture.checkpoint_trust, fixture.genesis_trust});
+
+   const auto legacy = api::make_savanna_finality_verifier(fixture.genesis_trust);
+   BOOST_REQUIRE(legacy->preferred_trust_anchor().has_value());
+   BOOST_CHECK(*legacy->preferred_trust_anchor() == genesis_anchor.block);
+}
+
+BOOST_AUTO_TEST_CASE(portable_factory_accepts_multi_trust_and_requests_preferred_checkpoint) {
+   const auto fixture = make_rich_portable_fixture();
+   const auto checkpoint_anchor = savanna::trust_anchor(fixture.checkpoint_trust);
+   for (const auto& finality : {fixture.genesis_finality, fixture.checkpoint_finality}) {
+      auto harness = make_rich_client(
+          fixture, fixture.genesis_trust, {fixture.checkpoint_trust}, finality,
+          [&](const auto& request) { return make_rich_rows_response(fixture, request, finality); },
+          [&](const auto&) { return make_empty_changes_response(fixture); });
+      const auto rows = run(harness.client.get_table_rows(protocol::table_rows_request{
+          .code = protocol::account_name{fixture.rows_location.code},
+          .scope = protocol::name{fixture.rows_location.scope},
+          .table = protocol::table_name{fixture.rows_location.table},
+          .index = {.kind = protocol::table_index_kind::primary},
+          .limit = 2U,
+          .audit = protocol::audit_mode::required,
+      }));
+      BOOST_REQUIRE_EQUAL(rows.rows.size(), 2U);
+      BOOST_REQUIRE_EQUAL(harness.service->rows_requests().size(), 1U);
+      BOOST_REQUIRE(harness.service->rows_requests().front().finality_from.has_value());
+      BOOST_CHECK(*harness.service->rows_requests().front().finality_from == checkpoint_anchor.block);
+   }
+}
+
+BOOST_AUTO_TEST_CASE(portable_factory_rejects_cross_chain_trust_before_selecting_preferred_anchor) {
+   const auto fixture = make_rich_portable_fixture();
+   auto foreign_checkpoint = std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust);
+   foreign_checkpoint.chain._hash[0] ^= 1U;
+
+   BOOST_CHECK_THROW(
+       static_cast<void>(make_rich_client(
+           fixture, fixture.genesis_trust, {savanna::finality_trust{std::move(foreign_checkpoint)}},
+           fixture.genesis_finality,
+           [&](const auto& request) { return make_rich_rows_response(fixture, request, fixture.genesis_finality); },
+           [&](const auto&) { return make_empty_changes_response(fixture); })),
+       api::exceptions::wrong_chain);
+}
+
+BOOST_AUTO_TEST_CASE(portable_savanna_multi_trust_rejects_invalid_public_trust_sets) {
+   const auto fixture = make_rich_portable_fixture();
+   const auto trusted = std::vector<savanna::finality_trust>{fixture.genesis_trust, fixture.checkpoint_trust};
+   const auto empty = std::vector<savanna::finality_trust>{};
+   const auto duplicate =
+       std::vector<savanna::finality_trust>{fixture.genesis_trust, fixture.checkpoint_trust, fixture.checkpoint_trust};
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(empty, fixture.target_anchor,
+                                                                            fixture.genesis_finality)),
+                     api::exceptions::trust_required);
+   BOOST_CHECK_THROW(static_cast<void>(
+                         api::replay_savanna_finality_state(duplicate, fixture.target_anchor, fixture.genesis_finality)),
+                     api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(static_cast<void>(api::make_savanna_finality_verifier_with_trusts(
+                         fixture.genesis_trust, {fixture.checkpoint_trust, fixture.checkpoint_trust})),
+                     api::exceptions::invalid_request);
+   auto foreign_checkpoint = std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust);
+   foreign_checkpoint.chain._hash[0] ^= 1U;
+   const auto mixed = std::vector<savanna::finality_trust>{
+       fixture.genesis_trust,
+       savanna::finality_trust{std::move(foreign_checkpoint)},
+   };
+   BOOST_CHECK_THROW(static_cast<void>(api::make_savanna_finality_verifier_with_trusts(
+                         fixture.genesis_trust, {mixed.back()})),
+                     api::exceptions::wrong_chain);
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(mixed, fixture.target_anchor,
+                                                                            fixture.genesis_finality)),
+                     api::exceptions::wrong_chain);
+
+   auto same_height_checkpoint = std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust);
+   same_height_checkpoint.value.state.header.transaction_mroot._hash[0] ^= 1U;
+   same_height_checkpoint.value.state.id = protocol::calculate_block_id(same_height_checkpoint.value.state.header);
+   same_height_checkpoint.value.state.block = same_height_checkpoint.value.state.make_block_ref();
+   same_height_checkpoint.value.finalized = same_height_checkpoint.value.state.block;
+   const auto same_height = savanna::finality_trust{std::move(same_height_checkpoint)};
+   BOOST_REQUIRE(savanna::trust_anchor(same_height).chain == savanna::trust_anchor(fixture.checkpoint_trust).chain);
+   BOOST_REQUIRE(savanna::trust_anchor(same_height).block != savanna::trust_anchor(fixture.checkpoint_trust).block);
+   BOOST_REQUIRE(std::get<savanna::finality_checkpoint_bootstrap>(same_height).value.finalized.num ==
+                 std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust).value.finalized.num);
+   const auto conflicting = std::vector<savanna::finality_trust>{fixture.checkpoint_trust, same_height};
+   const auto reversed_conflicting = std::vector<savanna::finality_trust>{same_height, fixture.checkpoint_trust};
+   BOOST_CHECK_THROW(static_cast<void>(api::make_savanna_finality_verifier_with_trusts(
+                         fixture.checkpoint_trust, {same_height})),
+                     api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(static_cast<void>(api::make_savanna_finality_verifier_with_trusts(
+                         same_height, {fixture.checkpoint_trust})),
+                     api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(conflicting, fixture.target_anchor,
+                                                                            fixture.checkpoint_finality)),
+                     api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(reversed_conflicting, fixture.target_anchor,
+                                                                            fixture.checkpoint_finality)),
+                     api::exceptions::invalid_request);
+
+   const auto verifier =
+       api::make_savanna_finality_verifier_with_trusts(fixture.genesis_trust, {fixture.checkpoint_trust});
+   auto unknown_bootstrap = savanna::trust_anchor(fixture.genesis_trust).block;
+   unknown_bootstrap._hash[0] ^= 1U;
+   const auto unknown =
+       savanna::encode_finality_witness(savanna::make_finality_witness(fixture.chain, unknown_bootstrap, {}));
+   BOOST_CHECK_THROW(verifier->verify(fixture.target_anchor, unknown), api::exceptions::trust_required);
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(trusted, fixture.target_anchor, unknown)),
+                     api::exceptions::trust_required);
+
+   auto wrong_chain = fixture.chain;
+   wrong_chain._hash[0] ^= 1U;
+   const auto foreign = savanna::encode_finality_witness(
+       savanna::make_finality_witness(wrong_chain, savanna::trust_anchor(fixture.genesis_trust).block, {}));
+   BOOST_CHECK_THROW(verifier->verify(fixture.target_anchor, foreign), api::exceptions::wrong_chain);
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(trusted, fixture.target_anchor, foreign)),
+                     api::exceptions::wrong_chain);
+
+   auto malformed = fixture.genesis_finality;
+   malformed.payload.clear();
+   BOOST_CHECK_THROW(static_cast<void>(api::replay_savanna_finality_state(trusted, fixture.target_anchor, malformed)),
+                     api::exceptions::invalid_finality);
+}
+
 BOOST_AUTO_TEST_CASE(portable_factory_accepts_checkpoint_and_bidirectional_primary_secondary_pagination) {
    const auto fixture = make_rich_portable_fixture();
    auto harness = make_rich_client(
-       fixture, fixture.genesis_trust, fixture.genesis_finality,
+       fixture, fixture.genesis_trust, {}, fixture.genesis_finality,
        [&](const auto& request) { return make_rich_rows_response(fixture, request, fixture.genesis_finality); },
        [&](const auto&) { return make_empty_changes_response(fixture); });
 
@@ -1330,7 +1475,7 @@ BOOST_AUTO_TEST_CASE(portable_factory_accepts_checkpoint_and_bidirectional_prima
    }
 
    auto checkpoint = make_rich_client(
-       fixture, fixture.checkpoint_trust, fixture.checkpoint_finality,
+       fixture, fixture.checkpoint_trust, {}, fixture.checkpoint_finality,
        [&](const auto& request) { return make_rich_rows_response(fixture, request, fixture.checkpoint_finality); },
        [&](const auto&) { return make_empty_changes_response(fixture); });
    const auto checkpoint_rows = run(checkpoint.client.get_table_rows(protocol::table_rows_request{
@@ -1350,7 +1495,7 @@ BOOST_AUTO_TEST_CASE(portable_factory_accepts_checkpoint_and_bidirectional_prima
 BOOST_AUTO_TEST_CASE(portable_factory_accepts_multi_block_changes_cursors_empty_interval_and_fails_closed) {
    const auto fixture = make_rich_portable_fixture();
    auto harness = make_rich_client(
-       fixture, fixture.genesis_trust, fixture.genesis_finality,
+       fixture, fixture.genesis_trust, {}, fixture.genesis_finality,
        [&](const auto& request) { return make_rich_rows_response(fixture, request, fixture.genesis_finality); },
        [&](const auto& request) {
           if (request.from_block == request.to_block) {
@@ -1563,7 +1708,7 @@ BOOST_AUTO_TEST_CASE(portable_savanna_trust_rejects_invalid_bls_subgroup_through
                                                    {
                                                        .chain = fixture.chain,
                                                        .state_domain = fixture.state_domain,
-                                                       .trust = std::move(trust),
+                                                       .trust = savanna::finality_trust{std::move(trust)},
                                                        .projections = api::make_contract_table_projection_verifier(),
                                                    })),
        api::exceptions::trust_required);

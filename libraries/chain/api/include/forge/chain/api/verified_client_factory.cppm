@@ -2,6 +2,7 @@ module;
 
 #include <memory>
 #include <string>
+#include <vector>
 
 export module forge.chain.api.verified_client_factory;
 
@@ -18,6 +19,7 @@ struct verified_client_options {
    forge::db::authenticated::limits proof_limits = {};
    protocol::service_limits service_limits = {};
    std::shared_ptr<projection_verifier> projections;
+   std::vector<savanna::finality_trust> additional_trusts = {};
 };
 
 [[nodiscard]] verified_client make_verified_client(raw_client client, verified_client_options options);

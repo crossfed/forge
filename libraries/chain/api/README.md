@@ -90,7 +90,8 @@ own typed Forge error contracts. Asio operation cancellation remains a typed
 
 forge.chain.api.verified_client_factory composes the Forge authenticated-state
 verifier with Savanna finality. A product supplies its raw client, chain ID,
-state domain, trusted genesis or checkpoint, and the projection verifier:
+state domain, one or more trusted genesis or checkpoint bootstraps, and the
+projection verifier:
 
 ~~~
 import forge.chain.api.contract_table_projection_verifier;
@@ -103,11 +104,25 @@ auto client = forge::chain::api::make_verified_client(
         .state_domain = settings.state_domain,
         .trust = settings.finality_trust,
         .projections = forge::chain::api::make_contract_table_projection_verifier(),
+        .additional_trusts = settings.additional_finality_trusts,
     });
 ~~~
 
-Forge verifies the supplied Savanna witness locally; it does not load trust
-material from files or select product policy. The contract-table projection
+`verified_client_options::trust` remains the required primary bootstrap;
+`additional_trusts` is an additive list of further bootstraps. Forge composes
+both fields, rejects duplicate or cross-chain entries, and uses the bootstrap
+with the highest operational block as the preferred remote request anchor.
+Distinct anchors at the same operational block are invalid, so this choice is
+independent of input order.
+Each returned witness is verified against the configured bootstrap identified
+by its chain ID and `trusted_bootstrap`. Forge verifies the witness locally;
+it does not load trust material from files or select product policy. The
+`replay_savanna_finality_state` API gives projection verifiers that same
+canonical multi-trust replay and returns the verified Savanna header state;
+it does not introduce a separate product trust-selection path. The
+`verified_client` factory rejects a trust list containing an anchor from a
+different configured chain before it can become `finality_from`. The
+contract-table projection
 verifier covers get_table_rows and get_table_changes, including canonical key
 layout, row/payer bytes, ordering, deletion, cursors and authenticated
 continuations. It intentionally does not verify table scope or native product
