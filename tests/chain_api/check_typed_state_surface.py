@@ -170,7 +170,7 @@ def main() -> int:
     for needle in (
         "import forge.chain.api.state;",
         "import forge.chain.api.limits;",
-        'export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})',
+        "export_api<chain_api::state>(chain_api::state::ref())",
         'resolver->resolve(server_peer, {.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})',
         "connection.get_remote_api<chain_api::state>()",
         "protocol::audit_mode::required",
