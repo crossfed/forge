@@ -66,8 +66,11 @@ Forge's explicit block number is not packed into this preimage.
 Rejected:
 
 - deriving block number from a protocol-specific block ID;
-- controller, fork database and header-state ownership;
-- producer schedules, genesis policy and extension IDs;
+- controller and fork database ownership, and protocol-bound header-state
+  ownership inside the neutral kernel modules;
+- producer schedules, genesis policy and extension IDs in the exact neutral
+  kernel modules; protocol-bound integration remains separately classified
+  inside the same `forge_chain_savanna` target;
 - vote networking, connection/runtime queues and key custody;
 - Spring's controller-owned safety file, CRC and filesystem lifecycle;
 - serialization of ephemeral vote accumulators;
@@ -135,6 +138,8 @@ Corrected during transfer:
   - bounded validation commitment tree;
   - finalizer vote safety planning;
   - deterministic rank.
+  - protocol-bound policy state, extensions, genesis/header admission and
+    finality witnesses above the exact protocol-free kernel module set.
 
 ## Verification
 
@@ -156,4 +161,5 @@ The focused tests cover:
   and verified strong-QC safety advancement;
 - rank ordering;
 - static absence of protocol, product and direct BLS-vendor dependencies in
-  the Chain leaf.
+  the exact neutral kernel module set; protocol-bound integration modules in
+  `forge_chain_savanna` may depend on `forge_chain_protocol`.

@@ -13,6 +13,7 @@ add_library(
    producer_schedule.cpp
    producer_authority.cpp
    finalizer_policy.cpp
+   contract_commitment.cpp
    state_query.cpp
    float64_ordered.cpp
    float64_variant.cpp

@@ -30,6 +30,7 @@ add_executable(
    forge_package_chain_api_component
    main.cpp
    p2p_runtime.cpp
+   portable_verified_client.cpp
    read_fixture.cpp
    read_e2e.cpp
    read_e2e_http.cpp
@@ -98,6 +99,7 @@ target_link_libraries(
       Forge::forge_asio
       Forge::forge_chain_api
       Forge::forge_chain_protocol
+      Forge::forge_chain_savanna
       Forge::forge_config_core
       Forge::forge_crypto_digest
       Forge::forge_net_http

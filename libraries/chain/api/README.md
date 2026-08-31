@@ -86,6 +86,34 @@ Forge exceptions and translate implementation `std`/Boost failures into their
 own typed Forge error contracts. Asio operation cancellation remains a typed
 `forge::asio::exceptions::canceled` result rather than an availability error.
 
+## Portable verified client
+
+forge.chain.api.verified_client_factory composes the Forge authenticated-state
+verifier with Savanna finality. A product supplies its raw client, chain ID,
+state domain, trusted genesis or checkpoint, and the projection verifier:
+
+~~~
+import forge.chain.api.contract_table_projection_verifier;
+import forge.chain.api.verified_client_factory;
+
+auto client = forge::chain::api::make_verified_client(
+    raw,
+    {
+        .chain = settings.chain,
+        .state_domain = settings.state_domain,
+        .trust = settings.finality_trust,
+        .projections = forge::chain::api::make_contract_table_projection_verifier(),
+    });
+~~~
+
+Forge verifies the supplied Savanna witness locally; it does not load trust
+material from files or select product policy. The contract-table projection
+verifier covers get_table_rows and get_table_changes, including canonical key
+layout, row/payer bytes, ordering, deletion, cursors and authenticated
+continuations. It intentionally does not verify table scope or native product
+projections. Those calls fail closed unless a product installs its own
+projection verifier.
+
 ## Typed block, info and admin reads
 
 `forge.chain.api.block` and `forge.chain.api.info` are contract version `2.0`;

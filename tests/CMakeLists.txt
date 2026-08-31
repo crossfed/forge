@@ -276,6 +276,26 @@ target_link_libraries(
    Boost::included_unit_test_framework
 )
 add_test(NAME test_forge_chain_api COMMAND test_forge_chain_api WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_chain_portable_verified_client
+   unit/main.cpp
+   chain_api/portable_verified_client_tests.cpp
+   chain_api/contract_commitment_compatibility_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_portable_verified_client
+   forge_chain_api
+   forge_codec_hex
+   forge_db_authenticated
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_chain_portable_verified_client
+   COMMAND test_forge_chain_portable_verified_client
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 add_test(
    NAME test_forge_chain_api_spring_manifest
    COMMAND
@@ -291,6 +311,14 @@ add_test(
    COMMAND
       ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_typed_state_surface.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+add_test(
+   NAME test_forge_chain_api_portable_verified_client
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_portable_verified_client.py
       ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

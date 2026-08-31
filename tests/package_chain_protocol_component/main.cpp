@@ -30,6 +30,7 @@ import forge.variant.value;
 
 bool producer_authority_json_roundtrip();
 bool state_projection_package_contract();
+bool contract_commitment_package_contract();
 
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
@@ -124,7 +125,7 @@ int main() {
    (void)resource_state;
    return forge::chain::protocol::selects_exactly_one(selector) && decoded_float64 == float64 &&
                   decoded_float128 == float128 && producer_authority_json_roundtrip() &&
-                  state_projection_package_contract()
+                  state_projection_package_contract() && contract_commitment_package_contract()
               ? 0
               : 1;
 }

@@ -19,8 +19,8 @@ find_package(Forge CONFIG REQUIRED COMPONENTS chain_savanna)
 target_link_libraries(my_target PRIVATE Forge::forge_chain_savanna)
 ```
 
-The component automatically provides Chain Core, Chain Quorum, Crypto BLS,
-Crypto Digest, Raw and Variant dependencies.
+The component automatically provides Chain Core, Chain Protocol, Chain Quorum,
+Crypto Asymmetric, Crypto BLS, Crypto Digest, Raw and Variant dependencies.
 
 ## Modules
 
@@ -34,6 +34,17 @@ Crypto Digest, Raw and Variant dependencies.
 - `forge.chain.savanna.finalizer_safety`
 - `forge.chain.savanna.rank`
 - `forge.chain.savanna.exceptions`
+
+The same `forge_chain_savanna` target also provides the protocol-bound modules
+`policy_state`, `extensions`, `genesis`, `header_state`, `candidate`,
+`checkpoint`, `admission` and `finality_witness`; this upper integration is not
+a second target or facade. Neutrality is module-level: `exceptions`, `types`,
+`policy`, `finality_core`, `qc`, `vote`, `vote_accumulator`, `validation`,
+`finalizer_safety` and `rank`, including their implementation files, have no
+Chain Protocol import. `policy_state` holds protocol-bearing finalizer proofs
+and producer schedule state without duplicating the neutral types and policy
+modules. `genesis` owns the value, validation and chain-ID calculation only;
+file and JSON loading remain product-owned.
 
 ## Operational Types
 

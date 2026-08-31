@@ -10,6 +10,12 @@ add_library(
    finalizer_safety.cpp
    validation.cpp
    rank.cpp
+   policy_state.cpp
+   extensions.cpp
+   genesis.cpp
+   header_state.cpp
+   admission.cpp
+   finality_witness.cpp
 )
 forge_target_modules_at(forge_chain_savanna chain/savanna)
 
@@ -22,6 +28,8 @@ target_link_libraries(
       forge_chain_core
       forge_chain_quorum
       forge_chain_savanna_values
+      forge_chain_protocol
+      forge_crypto_asymmetric
       forge_crypto_bls
       forge_crypto_digest
       forge_exceptions

@@ -1,5 +1,15 @@
 # forge_chain_protocol
 
+## Contract commitments
+
+forge.chain.protocol.contract_commitment owns the canonical contract-table
+authenticated-state layout used by verified table reads and change streams. It
+provides contract_table_location, the exact `table_value { payer, uint32_t
+count }` metadata record, primary and secondary value records, family
+identifiers and deterministic key derivation. These bytes are a persisted
+consensus commitment: consumers must use the supplied helpers rather than
+reconstructing metadata, prefixes or secondary keys manually.
+
 `forge_chain_protocol` provides canonical blockchain protocol values and wire
 records. Use it to build, serialize, hash and sign Forge-compatible actions,
 transactions and blocks. It builds on `forge_chain_core` without adding
