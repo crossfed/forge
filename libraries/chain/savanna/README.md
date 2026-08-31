@@ -124,6 +124,17 @@ roots and preimages. The prefix frontier keeps the complete Merkle history in
 advancing the state whenever finality moves. Looking up a pruned root throws
 `validation_root_unavailable`.
 
+## Finality Trust Advance
+
+`advance_finality_trust()` derives a checkpoint bootstrap solely from a
+caller-trusted genesis or checkpoint bootstrap, a decoded witness (or its Raw
+proof) and a finalized `state_anchor`. It replays headers, producer signatures,
+QC, policy transitions and validation state before it advances validation to
+the finalized target. The returned checkpoint is local replay output; witness
+bytes never supply a checkpoint as trust material. Use
+`advance_finality_trust_with_replay()` when the verified replay anchors are
+also needed for an ancestry-aware trust promotion.
+
 `append()` is `O(log N)` and does not replay the retained range. Full replay is
 performed by explicit `validate()` and by Raw decoding. The Raw v1 layout is:
 

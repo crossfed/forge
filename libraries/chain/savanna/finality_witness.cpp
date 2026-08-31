@@ -271,7 +271,7 @@ protocol::signed_block make_header_only_block(const finality_witness_record& rec
 
 struct replay_result {
    finality_replay replay;
-   std::optional<header_state> expected_state;
+   std::optional<candidate> expected;
 };
 
 replay_result replay(const finality_trust& trust, const finality_witness& witness,
@@ -299,7 +299,7 @@ replay_result replay(const finality_trust& trust, const finality_witness& witnes
            },
    };
    if (expected && result.replay.anchors.front() == *expected) {
-      result.expected_state = seed.root.state;
+      result.expected = seed.root;
    }
    result.replay.anchors.reserve(witness.records.size() + 1U);
    auto parent = std::move(seed.root);
@@ -328,7 +328,7 @@ replay_result replay(const finality_trust& trust, const finality_witness& witnes
           std::max(result.replay.validated_block_num, next.state.finality.latest_qc_claim().block);
       const auto anchor = make_anchor(seed.chain, next);
       if (expected && anchor == *expected) {
-         result.expected_state = next.state;
+         result.expected = next;
       }
       result.replay.anchors.push_back(std::move(anchor));
       parent = std::move(next);
@@ -378,11 +378,49 @@ header_state replay_finality_witness_state(const finality_trust& trust, const fi
                                            const protocol::state_anchor& expected, finality_witness_limits limits) {
    auto result = replay(trust, witness, expected, limits);
    static_cast<void>(require_anchor(result.replay, expected, true));
-   if (!result.expected_state) {
+   if (!result.expected) {
       FORGE_THROW_EXCEPTION(exceptions::finality_anchor_mismatch,
                             "Savanna finality witness state is unavailable for the expected anchor");
    }
-   return std::move(*result.expected_state);
+   return std::move(result.expected->state);
+}
+
+finality_trust_advance advance_finality_trust_with_replay(const finality_trust& trust, const finality_witness& witness,
+                                                          const protocol::state_anchor& finalized,
+                                                          finality_witness_limits limits) {
+   auto result = replay(trust, witness, finalized, limits);
+   static_cast<void>(require_anchor(result.replay, finalized, true));
+   if (!result.expected) {
+      FORGE_THROW_EXCEPTION(exceptions::finality_anchor_mismatch,
+                            "Savanna finality witness checkpoint state is unavailable for the finalized anchor");
+   }
+
+   auto candidate = std::move(*result.expected);
+   return {
+       .checkpoint =
+           {
+               .chain = finalized.chain,
+               .value =
+                   {
+                       .finalized = candidate.state.make_block_ref(),
+                       .state = std::move(candidate.state),
+                       .validation = advance_finalized(std::move(candidate.validation), finalized.block_num),
+                   },
+           },
+       .replay = std::move(result.replay),
+   };
+}
+
+finality_checkpoint_bootstrap advance_finality_trust(const finality_trust& trust, const finality_witness& witness,
+                                                     const protocol::state_anchor& finalized,
+                                                     finality_witness_limits limits) {
+   return advance_finality_trust_with_replay(trust, witness, finalized, limits).checkpoint;
+}
+
+finality_checkpoint_bootstrap advance_finality_trust(const finality_trust& trust, const protocol::proof_blob& proof,
+                                                     const protocol::state_anchor& finalized,
+                                                     finality_witness_limits limits) {
+   return advance_finality_trust(trust, decode_finality_witness(proof, limits), finalized, limits);
 }
 
 finality_trust_anchor trust_anchor(const finality_trust& trust) {

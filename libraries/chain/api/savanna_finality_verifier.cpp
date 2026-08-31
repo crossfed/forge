@@ -2,8 +2,8 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -13,6 +13,7 @@ module;
 #include <source_location>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -22,18 +23,19 @@ module forge.chain.api.savanna_finality_verifier;
 import forge.chain.api.exceptions;
 import forge.crypto.digest.sha256;
 
+#include "details/savanna_finality_trust_store.hxx"
+
 namespace forge::chain::api {
 namespace {
-
-protocol::block_num operational_block_num(const savanna::finality_trust& trust) {
-   const auto* checkpoint = std::get_if<savanna::finality_checkpoint_bootstrap>(&trust);
-   return checkpoint ? checkpoint->value.finalized.num : protocol::block_num{1U};
-}
 
 template <typename Exception>
 [[noreturn]] void throw_public(const forge::exceptions::base& error,
                                std::source_location location = std::source_location::current()) {
    throw Exception{error.message(), error.context(), location};
+}
+
+bool is_public_chain_api_failure(const forge::exceptions::base& error) {
+   return error.code().category() == exceptions::forge_exceptions_category(exceptions::code::invalid_request);
 }
 
 template <typename Operation> decltype(auto) translate_finality_failure(Operation&& operation) {
@@ -75,120 +77,31 @@ template <typename Operation> decltype(auto) translate_finality_failure(Operatio
    }
 }
 
-void require_witness_chain(const protocol::chain_id& expected, const savanna::finality_witness& witness) {
-   if (witness.chain != expected) {
-      FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "Savanna finality witness belongs to another chain");
-   }
-}
+} // namespace
 
-class trusted_finality_set {
- public:
-   trusted_finality_set(savanna::finality_trust trust, std::vector<savanna::finality_trust> additional_trusts) {
-      reserve(additional_trusts.size() + 1U);
-      add(std::move(trust));
-      for (auto& additional : additional_trusts) {
-         add(std::move(additional));
-      }
-   }
+struct savanna_finality_verifier::impl {
+   impl(savanna::finality_trust trust, std::vector<savanna::finality_trust> additional_trusts,
+        savanna::finality_witness_limits limits)
+       : trust_store{std::move(trust), std::move(additional_trusts), limits} {}
 
-   explicit trusted_finality_set(std::span<const savanna::finality_trust> trusted) {
-      reserve(trusted.size());
-      for (const auto& trust : trusted) {
-         add(trust);
-      }
-   }
-
-   [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const {
-      const auto preferred = std::ranges::max_element(trusted_, {}, &trusted_entry::operational_block_num);
-      return preferred->anchor.block;
-   }
-
-   [[nodiscard]] savanna::header_state replay_state(const protocol::state_anchor& expected,
-                                                    const protocol::proof_blob& proof,
-                                                    savanna::finality_witness_limits limits) const {
-      const auto witness = savanna::decode_finality_witness(proof, limits);
-      require_witness_chain(expected.chain, witness);
-      return savanna::replay_finality_witness_state(require_trust(witness), witness, expected, limits);
-   }
-
-   void verify_ancestry(const protocol::state_anchor& finalized,
-                        std::span<const protocol::state_anchor> intermediate, const protocol::proof_blob& proof,
-                        savanna::finality_witness_limits limits) const {
-      const auto witness = savanna::decode_finality_witness(proof, limits);
-      require_witness_chain(finalized.chain, witness);
-      savanna::verify_finality_ancestry_witness(require_trust(witness), proof, finalized, intermediate, limits);
-   }
-
- private:
-   struct trusted_entry {
-      protocol::block_num operational_block_num = 0;
-      savanna::finality_trust_anchor anchor;
-      savanna::finality_trust trust;
-   };
-
-   void reserve(std::size_t size) {
-      if (size == 0U) {
-         FORGE_THROW_EXCEPTION(exceptions::trust_required,
-                               "Savanna finality verifier requires at least one trusted bootstrap");
-      }
-      trusted_.reserve(size);
-   }
-
-   void add(savanna::finality_trust trust) {
-      auto anchor = savanna::trust_anchor(trust);
-      const auto height = operational_block_num(trust);
-      if (!trusted_.empty() && trusted_.front().anchor.chain != anchor.chain) {
-         FORGE_THROW_EXCEPTION(exceptions::wrong_chain,
-                               "Savanna finality verifier requires trusted bootstraps from one chain");
-      }
-      if (std::ranges::any_of(trusted_, [&](const auto& existing) { return existing.anchor == anchor; })) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_request,
-                               "Savanna finality verifier contains a duplicate trusted bootstrap");
-      }
-      if (std::ranges::any_of(trusted_, [&](const auto& existing) {
-             return existing.operational_block_num == height && existing.anchor != anchor;
-          })) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_request,
-                               "Savanna finality verifier contains distinct trusted bootstraps at one block height");
-      }
-      trusted_.push_back({
-          .operational_block_num = height,
-          .anchor = std::move(anchor),
-          .trust = std::move(trust),
-      });
-   }
-
-   [[nodiscard]] const savanna::finality_trust& require_trust(const savanna::finality_witness& witness) const {
-      const auto found = std::ranges::find_if(trusted_, [&](const auto& value) {
-         return value.anchor.chain == witness.chain && value.anchor.block == witness.trusted_bootstrap;
-      });
-      if (found == trusted_.end()) {
-         FORGE_THROW_EXCEPTION(exceptions::trust_required,
-                               "Savanna finality witness does not match a trusted bootstrap");
-      }
-      return found->trust;
-   }
-
-   std::vector<trusted_entry> trusted_;
+   detail::savanna_finality_trust_store trust_store;
 };
 
-template <typename... Arguments> trusted_finality_set make_trusted_finality_set(Arguments&&... arguments) {
+std::unique_ptr<savanna_finality_verifier::impl>
+savanna_finality_verifier::make_impl(savanna::finality_trust trust,
+                                     std::vector<savanna::finality_trust> additional_trusts,
+                                     savanna::finality_witness_limits limits) {
    try {
-      return trusted_finality_set{std::forward<Arguments>(arguments)...};
-   } catch (const exceptions::trust_required&) {
-      throw;
-   } catch (const exceptions::invalid_request&) {
-      throw;
-   } catch (const exceptions::wrong_chain&) {
-      throw;
-   } catch (const exceptions::resource_exhausted&) {
-      throw;
+      return std::make_unique<impl>(std::move(trust), std::move(additional_trusts), limits);
    } catch (const std::bad_alloc&) {
-      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality trust allocation failed");
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality verifier allocation failed");
    } catch (const std::length_error& error) {
-      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality trust allocation exceeds its limit",
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality verifier allocation exceeds its limit",
                             forge::exceptions::ctx("reason", error.what()));
    } catch (const forge::exceptions::base& error) {
+      if (is_public_chain_api_failure(error)) {
+         throw;
+      }
       throw_public<exceptions::trust_required>(error);
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality trust is invalid",
@@ -198,70 +111,117 @@ template <typename... Arguments> trusted_finality_set make_trusted_finality_set(
    }
 }
 
-class savanna_finality_verifier final : public finality_verifier {
- public:
-   savanna_finality_verifier(trusted_finality_set trusted, savanna::finality_witness_limits limits)
-       : trusted_{std::move(trusted)}, limits_{limits} {}
+savanna_finality_verifier::savanna_finality_verifier(savanna::finality_trust trust,
+                                                     savanna::finality_witness_limits limits)
+    : savanna_finality_verifier(std::move(trust), {}, limits) {}
 
-   [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const override {
-      return trusted_.preferred_trust_anchor();
+savanna_finality_verifier::savanna_finality_verifier(savanna::finality_trust trust,
+                                                     std::vector<savanna::finality_trust> additional_trusts,
+                                                     savanna::finality_witness_limits limits)
+    : impl_{make_impl(std::move(trust), std::move(additional_trusts), limits)} {}
+
+savanna_finality_verifier::~savanna_finality_verifier() = default;
+
+savanna_finality_verifier::savanna_finality_verifier(savanna_finality_verifier&&) noexcept = default;
+
+savanna_finality_verifier& savanna_finality_verifier::operator=(savanna_finality_verifier&&) noexcept = default;
+
+std::optional<protocol::chain_id> savanna_finality_verifier::trusted_chain() const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
    }
+   return impl_->trust_store.trusted_chain();
+}
 
-   void verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) override {
+savanna::finality_trust savanna_finality_verifier::preferred_trust() const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
+   }
+   return translate_finality_failure([&] { return impl_->trust_store.preferred_trust(); });
+}
+
+std::optional<protocol::block_id> savanna_finality_verifier::preferred_trust_anchor() const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
+   }
+   return translate_finality_failure([&] { return impl_->trust_store.preferred_trust_anchor(); });
+}
+
+savanna::header_state savanna_finality_verifier::replay_state(const protocol::state_anchor& expected,
+                                                              const protocol::proof_blob& proof) const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
+   }
+   return translate_finality_failure([&] {
       const auto proof_digest = forge::crypto::digest::sha256::hash(proof);
-      {
-         const auto lock = std::lock_guard{verified_mutex_};
-         if (verified_ && verified_->anchor == anchor && verified_->proof_digest == proof_digest) {
-            return;
-         }
+      const auto limits = impl_->trust_store.witness_limits();
+      if (const auto cached = impl_->trust_store.cached_replay_state(expected, proof_digest)) {
+         return *cached;
       }
+      const auto witness = savanna::decode_finality_witness(proof, limits);
+      const auto snapshot = impl_->trust_store.take_snapshot(expected, witness);
+      return savanna::replay_finality_witness_state(*snapshot.source_trust, witness, expected, limits);
+   });
+}
 
-      static_cast<void>(replay_state(anchor, proof));
-
-      const auto lock = std::lock_guard{verified_mutex_};
-      verified_ = verified_finality{.anchor = anchor, .proof_digest = proof_digest};
+void savanna_finality_verifier::verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
    }
+   auto verified = translate_finality_failure([&] {
+      auto proof_digest = forge::crypto::digest::sha256::hash(proof);
+      const auto limits = impl_->trust_store.witness_limits();
+      const auto witness = savanna::decode_finality_witness(proof, limits);
+      const auto snapshot = impl_->trust_store.take_snapshot(anchor, witness);
+      auto advance = savanna::advance_finality_trust_with_replay(*snapshot.source_trust, witness, anchor, limits);
+      const auto position = detail::savanna_finality_trust_store::checkpoint_position(advance.checkpoint);
+      if (position.finalized_block_num > snapshot.preferred.finalized_block_num &&
+          !detail::savanna_finality_trust_store::replay_contains(advance.replay, snapshot.preferred)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                               "Savanna finality checkpoint does not descend from the snapshot preferred checkpoint");
+      }
+      auto state = advance.checkpoint.value.state;
+      return std::tuple{std::move(proof_digest), std::move(advance.checkpoint), std::move(advance.replay),
+                        std::move(state)};
+   });
+   auto proof_digest = std::move(std::get<0>(verified));
+   auto checkpoint = std::move(std::get<1>(verified));
+   auto replay = std::move(std::get<2>(verified));
+   auto state = std::move(std::get<3>(verified));
+   translate_finality_failure([&] {
+      impl_->trust_store.install_verified(std::move(checkpoint), replay, anchor, proof_digest, std::move(state));
+   });
+}
 
-   void verify_ancestry(const protocol::state_anchor& finalized, std::span<const protocol::state_anchor> intermediate,
-                        const protocol::proof_blob& proof) override {
-      translate_finality_failure([&] { trusted_.verify_ancestry(finalized, intermediate, proof, limits_); });
+void savanna_finality_verifier::verify_ancestry(const protocol::state_anchor& finalized,
+                                                std::span<const protocol::state_anchor> intermediate,
+                                                const protocol::proof_blob& proof) {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
    }
+   const auto limits = impl_->trust_store.witness_limits();
+   translate_finality_failure([&] {
+      const auto witness = savanna::decode_finality_witness(proof, limits);
+      const auto snapshot = impl_->trust_store.take_snapshot(finalized, witness);
+      savanna::verify_finality_ancestry_witness(*snapshot.source_trust, proof, finalized, intermediate, limits);
+   });
+}
 
- private:
-   struct verified_finality {
-      protocol::state_anchor anchor;
-      protocol::digest proof_digest;
-   };
+namespace {
 
-   [[nodiscard]] savanna::header_state replay_state(const protocol::state_anchor& anchor,
-                                                    const protocol::proof_blob& proof) const {
-      return translate_finality_failure([&] { return trusted_.replay_state(anchor, proof, limits_); });
-   }
-
-   trusted_finality_set trusted_;
-   savanna::finality_witness_limits limits_;
-   std::mutex verified_mutex_;
-   std::optional<verified_finality> verified_;
-};
-
-std::shared_ptr<finality_verifier> make_public_finality_verifier(trusted_finality_set trusted,
-                                                                 savanna::finality_witness_limits limits) {
+template <typename... Arguments>
+std::shared_ptr<savanna_finality_verifier> make_public_finality_verifier(Arguments&&... arguments) {
    try {
-      return std::make_shared<savanna_finality_verifier>(std::move(trusted), limits);
-   } catch (const exceptions::trust_required&) {
-      throw;
-   } catch (const exceptions::invalid_request&) {
-      throw;
-   } catch (const exceptions::wrong_chain&) {
-      throw;
-   } catch (const exceptions::resource_exhausted&) {
-      throw;
+      return std::make_shared<savanna_finality_verifier>(std::forward<Arguments>(arguments)...);
    } catch (const std::bad_alloc&) {
       FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality verifier allocation failed");
    } catch (const std::length_error& error) {
       FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "Savanna finality verifier allocation exceeds its limit",
                             forge::exceptions::ctx("reason", error.what()));
    } catch (const forge::exceptions::base& error) {
+      if (is_public_chain_api_failure(error)) {
+         throw;
+      }
       throw_public<exceptions::trust_required>(error);
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality trust is invalid",
@@ -273,25 +233,16 @@ std::shared_ptr<finality_verifier> make_public_finality_verifier(trusted_finalit
 
 } // namespace
 
-std::shared_ptr<finality_verifier> make_savanna_finality_verifier(savanna::finality_trust trust,
-                                                                  savanna::finality_witness_limits limits) {
-   return make_savanna_finality_verifier_with_trusts(std::move(trust), {}, limits);
+std::shared_ptr<savanna_finality_verifier> make_savanna_finality_verifier(savanna::finality_trust trust,
+                                                                          savanna::finality_witness_limits limits) {
+   return make_public_finality_verifier(std::move(trust), limits);
 }
 
-std::shared_ptr<finality_verifier>
+std::shared_ptr<savanna_finality_verifier>
 make_savanna_finality_verifier_with_trusts(savanna::finality_trust trust,
                                            std::vector<savanna::finality_trust> additional_trusts,
                                            savanna::finality_witness_limits limits) {
-   return make_public_finality_verifier(make_trusted_finality_set(std::move(trust), std::move(additional_trusts)),
-                                        limits);
-}
-
-savanna::header_state replay_savanna_finality_state(std::span<const savanna::finality_trust> trusted,
-                                                     const protocol::state_anchor& expected,
-                                                     const protocol::proof_blob& proof,
-                                                     savanna::finality_witness_limits limits) {
-   auto trusted_set = make_trusted_finality_set(trusted);
-   return translate_finality_failure([&] { return trusted_set.replay_state(expected, proof, limits); });
+   return make_public_finality_verifier(std::move(trust), std::move(additional_trusts), limits);
 }
 
 } // namespace forge::chain::api

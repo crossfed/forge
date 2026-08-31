@@ -49,6 +49,8 @@ def main() -> int:
         *(api / name for name in (
             "include/forge/chain/api/savanna_finality_verifier.cppm",
             "savanna_finality_verifier.cpp",
+            "details/savanna_finality_trust_store.hxx",
+            "savanna_finality_trust_store.cpp",
             "include/forge/chain/api/contract_table_projection_verifier.cppm",
             "contract_table_projection_verifier.cpp",
             "include/forge/chain/api/verified_client_factory.cppm",
@@ -70,7 +72,57 @@ def main() -> int:
         reject_imports(text, path)
 
     wire_scheme = savanna / "include/forge/chain/savanna/finality_witness.cppm"
-    require(wire_scheme.read_text(encoding="utf-8"), '"spine.savanna.finality"', wire_scheme)
+    wire_text = wire_scheme.read_text(encoding="utf-8")
+    require(wire_text, '"spine.savanna.finality"', wire_scheme)
+    for needle in ("struct finality_trust_advance", "advance_finality_trust(",
+                   "advance_finality_trust_with_replay("):
+        require(wire_text, needle, wire_scheme)
+
+    savanna_verifier = api / "include/forge/chain/api/savanna_finality_verifier.cppm"
+    savanna_verifier_text = savanna_verifier.read_text(encoding="utf-8")
+    for needle in ("class savanna_finality_verifier final : public finality_verifier",
+                   "preferred_trust() const", "replay_state(",
+                   "std::shared_ptr<savanna_finality_verifier>"):
+        require(savanna_verifier_text, needle, savanna_verifier)
+    forbid(savanna_verifier_text, "replay_savanna_finality_state", savanna_verifier)
+
+    savanna_verifier_impl = api / "savanna_finality_verifier.cpp"
+    savanna_verifier_impl_text = savanna_verifier_impl.read_text(encoding="utf-8")
+    replay_start = savanna_verifier_impl_text.index("savanna_finality_verifier::replay_state(")
+    replay_translator = savanna_verifier_impl_text.index("return translate_finality_failure([&] {", replay_start)
+    replay_prefix = savanna_verifier_impl_text[replay_start:replay_translator]
+    for needle in ("sha256::hash", "cached_replay_state"):
+        forbid(replay_prefix, needle, savanna_verifier_impl)
+    require(savanna_verifier_impl_text,
+            "return translate_finality_failure([&] {\n      const auto proof_digest = forge::crypto::digest::sha256::hash(proof);\n"
+            "      const auto limits = impl_->trust_store.witness_limits();\n"
+            "      if (const auto cached = impl_->trust_store.cached_replay_state(expected, proof_digest))",
+            savanna_verifier_impl)
+
+    verify_start = savanna_verifier_impl_text.index("void savanna_finality_verifier::verify(")
+    verify_translator = savanna_verifier_impl_text.index("auto verified = translate_finality_failure([&] {", verify_start)
+    forbid(savanna_verifier_impl_text[verify_start:verify_translator], "sha256::hash", savanna_verifier_impl)
+    require(savanna_verifier_impl_text,
+            "auto verified = translate_finality_failure([&] {\n"
+            "      auto proof_digest = forge::crypto::digest::sha256::hash(proof);\n"
+            "      const auto limits = impl_->trust_store.witness_limits();",
+            savanna_verifier_impl)
+
+    trust_store = (
+        api / "details/savanna_finality_trust_store.hxx",
+        api / "savanna_finality_trust_store.cpp",
+    )
+    for path in trust_store:
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"(?:persistence|filesystem|json|spine|storlane|chain_plugin|state_api_impl|block_api_impl|chainbase)",
+                     text, re.IGNORECASE):
+            raise SystemExit(f"{path}: trust store contains a forbidden portability dependency")
+
+    verified_factory = api / "include/forge/chain/api/verified_client_factory.cppm"
+    verified_factory_text = verified_factory.read_text(encoding="utf-8")
+    require(verified_factory_text, "std::shared_ptr<finality_verifier> finality;", verified_factory)
+    for needle in ("savanna::finality_trust trust", "additional_trusts"):
+        forbid(verified_factory_text, needle, verified_factory)
 
     kernel = (
         *(savanna / "include/forge/chain/savanna" / name for name in kernel_interfaces),

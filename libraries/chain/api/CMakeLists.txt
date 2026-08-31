@@ -5,6 +5,8 @@ add_library(
    finality.cpp
    limits.cpp
    raw_client.cpp
+   savanna_finality_trust_store.cpp
+   details/savanna_finality_trust_store.hxx
    savanna_finality_verifier.cpp
    submission_client.cpp
    table_key.cpp

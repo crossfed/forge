@@ -65,6 +65,11 @@ struct finality_replay {
    block_num validated_block_num = 0;
 };
 
+struct finality_trust_advance {
+   finality_checkpoint_bootstrap checkpoint;
+   finality_replay replay;
+};
+
 [[nodiscard]] finality_witness make_finality_witness(forge::chain::protocol::chain_id chain, block_id trusted_bootstrap,
                                                      std::span<const finality_witness_record> records,
                                                      finality_witness_limits limits = {});
@@ -81,6 +86,19 @@ struct finality_replay {
 [[nodiscard]] header_state replay_finality_witness_state(const finality_trust& trust, const finality_witness& witness,
                                                          const forge::chain::protocol::state_anchor& expected,
                                                          finality_witness_limits limits = {});
+
+[[nodiscard]] finality_checkpoint_bootstrap
+advance_finality_trust(const finality_trust& trust, const finality_witness& witness,
+                       const forge::chain::protocol::state_anchor& finalized, finality_witness_limits limits = {});
+
+[[nodiscard]] finality_trust_advance
+advance_finality_trust_with_replay(const finality_trust& trust, const finality_witness& witness,
+                                   const forge::chain::protocol::state_anchor& finalized,
+                                   finality_witness_limits limits = {});
+
+[[nodiscard]] finality_checkpoint_bootstrap
+advance_finality_trust(const finality_trust& trust, const forge::chain::protocol::proof_blob& proof,
+                       const forge::chain::protocol::state_anchor& finalized, finality_witness_limits limits = {});
 
 [[nodiscard]] finality_trust_anchor trust_anchor(const finality_trust& trust);
 
@@ -99,6 +117,7 @@ BOOST_DESCRIBE_STRUCT(finality_genesis_bootstrap, (), (configuration, commitment
 BOOST_DESCRIBE_STRUCT(finality_checkpoint_bootstrap, (), (chain, value))
 BOOST_DESCRIBE_STRUCT(finality_trust_anchor, (), (chain, block))
 BOOST_DESCRIBE_STRUCT(finality_replay, (), (anchors, finalized_block_num, validated_block_num))
+BOOST_DESCRIBE_STRUCT(finality_trust_advance, (), (checkpoint, replay))
 
 } // namespace forge::chain::savanna
 

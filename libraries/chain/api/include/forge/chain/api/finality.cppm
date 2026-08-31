@@ -15,6 +15,7 @@ class finality_verifier {
  public:
    virtual ~finality_verifier() = default;
 
+   [[nodiscard]] virtual std::optional<protocol::chain_id> trusted_chain() const;
    [[nodiscard]] virtual std::optional<protocol::block_id> preferred_trust_anchor() const;
 
    virtual void verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) = 0;
@@ -34,6 +35,7 @@ class cached_finality_verifier final : public finality_verifier {
    cached_finality_verifier(cached_finality_verifier&&) noexcept;
    cached_finality_verifier& operator=(cached_finality_verifier&&) noexcept;
 
+   [[nodiscard]] std::optional<protocol::chain_id> trusted_chain() const override;
    [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const override;
 
    void verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) override;

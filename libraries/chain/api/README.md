@@ -89,40 +89,43 @@ own typed Forge error contracts. Asio operation cancellation remains a typed
 ## Portable verified client
 
 forge.chain.api.verified_client_factory composes the Forge authenticated-state
-verifier with Savanna finality. A product supplies its raw client, chain ID,
-state domain, one or more trusted genesis or checkpoint bootstraps, and the
-projection verifier:
+verifier with a caller-owned finality verifier. A Savanna product constructs
+that verifier from its trusted genesis or checkpoint bootstraps, then supplies
+the raw client, chain ID, state domain and projection verifier:
 
 ~~~
 import forge.chain.api.contract_table_projection_verifier;
+import forge.chain.api.savanna_finality_verifier;
 import forge.chain.api.verified_client_factory;
 
+auto finality = forge::chain::api::make_savanna_finality_verifier_with_trusts(
+    settings.finality_trust,
+    settings.additional_finality_trusts);
 auto client = forge::chain::api::make_verified_client(
     raw,
     {
         .chain = settings.chain,
         .state_domain = settings.state_domain,
-        .trust = settings.finality_trust,
+        .finality = finality,
         .projections = forge::chain::api::make_contract_table_projection_verifier(),
-        .additional_trusts = settings.additional_finality_trusts,
     });
 ~~~
 
-`verified_client_options::trust` remains the required primary bootstrap;
-`additional_trusts` is an additive list of further bootstraps. Forge composes
-both fields, rejects duplicate or cross-chain entries, and uses the bootstrap
-with the highest operational block as the preferred remote request anchor.
-Distinct anchors at the same operational block are invalid, so this choice is
-independent of input order.
-Each returned witness is verified against the configured bootstrap identified
-by its chain ID and `trusted_bootstrap`. Forge verifies the witness locally;
-it does not load trust material from files or select product policy. The
-`replay_savanna_finality_state` API gives projection verifiers that same
-canonical multi-trust replay and returns the verified Savanna header state;
-it does not introduce a separate product trust-selection path. The
-`verified_client` factory rejects a trust list containing an anchor from a
-different configured chain before it can become `finality_from`. The
-contract-table projection
+`verified_client` requires a non-null verifier whose declared trusted chain
+matches `options.chain` before it can issue a raw request. It never accepts a
+bootstrap or selects trust from another options field. The public
+`savanna_finality_verifier` verifies each returned witness against a configured
+root or one of its 16 newest rolling checkpoints, then atomically promotes a
+locally replayed checkpoint only when it descends from the current preferred
+anchor. An exact known checkpoint is a no-op; an unknown lower checkpoint, a
+competing branch or a canonical checkpoint conflict fails without changing
+trust. `preferred_trust()`
+and `replay_state()` expose the selected locally trusted state to consumers
+that need Savanna-specific projection verification. The exact verified replay
+state is retained in the same bounded parallel-response window, so immediate
+replay of an in-flight response does not depend on its source checkpoint still
+being retained. Forge verifies the witness locally; it does not load trust
+material from files or select product policy. The contract-table projection
 verifier covers get_table_rows and get_table_changes, including canonical key
 layout, row/payer bytes, ordering, deletion, cursors and authenticated
 continuations. It intentionally does not verify table scope or native product
