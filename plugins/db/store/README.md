@@ -7,8 +7,15 @@ applications. Each named store owns one `forge::db::core::driver` and may expose
 
 - Target: `forge_plugins_db_store`
 - Package component: `plugins_db_store`
-- Runtime id and API id: `forge.plugins.db.store`
+- Plugin id: `forge.plugins.db.store`
+- Main API id: `forge.plugins.db.store`
 - Config section: `plugins.db.store`
+- Public modules:
+  - `forge.plugins.db.store.plugin`
+  - `forge.plugins.db.store.descriptor`
+  - `forge.plugins.db.store.api`
+  - `forge.plugins.db.store.types`
+  - `forge.plugins.db.store.exceptions`
 
 ## Stability
 

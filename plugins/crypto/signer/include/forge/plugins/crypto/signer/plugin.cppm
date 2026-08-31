@@ -8,6 +8,8 @@ module;
 
 export module forge.plugins.crypto.signer.plugin;
 
+export import forge.plugins.crypto.signer.descriptor;
+
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;

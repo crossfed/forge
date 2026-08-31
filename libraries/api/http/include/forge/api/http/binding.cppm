@@ -1787,7 +1787,13 @@ class binding_builder {
       validate_route_method_descriptor<Method, Request, Response>(*method, name);
       forge::api::core::detail::apply_fixed_request(
          canonical_method, &arguments, forge::api::core::trusted_invocation{});
-      auto request_payload = validate_local_request<Interface>(plan, name, arguments);
+      auto request_payload = [&] {
+         if constexpr (std::tuple_size_v<Tuple> == 1U) {
+            return validate_local_request<Interface>(plan, name, std::get<0>(arguments));
+         } else {
+            return validate_local_request<Interface>(plan, name, arguments);
+         }
+      }();
       auto implementation = plan.get<Interface>(Interface::ref());
       auto response = co_await std::apply(
           [&](auto&&... args) {

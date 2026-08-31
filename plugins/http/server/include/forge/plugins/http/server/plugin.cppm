@@ -8,6 +8,8 @@ module;
 
 export module forge.plugins.http.server.plugin;
 
+export import forge.plugins.http.server.descriptor;
+
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;

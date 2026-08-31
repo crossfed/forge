@@ -1,5 +1,6 @@
 add_library(
    forge_plugins_p2p_resolver STATIC
+      descriptor.cpp
       plugin.cpp
       config.cpp
       plugin_impl.cpp

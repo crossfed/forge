@@ -8,6 +8,8 @@ module;
 
 export module forge.plugins.crypto.secrets.plugin;
 
+export import forge.plugins.crypto.secrets.descriptor;
+
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;

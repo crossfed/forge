@@ -22,6 +22,7 @@ source loading policy, then delegates cryptographic primitives to
 Public modules:
 
 - `forge.plugins.crypto.secrets.plugin`
+- `forge.plugins.crypto.secrets.descriptor`
 - `forge.plugins.crypto.secrets.api`
 - `forge.plugins.crypto.secrets.types`
 - `forge.plugins.crypto.secrets.exceptions`

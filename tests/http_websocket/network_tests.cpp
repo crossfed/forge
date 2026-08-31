@@ -713,6 +713,13 @@ class positional_plain_body_api : public http_contract<positional_plain_body_api
    virtual boost::asio::awaitable<positional_body_response> write(std::string ref, positional_body_payload payload) = 0;
 };
 
+class validated_single_body_api : public http_contract<validated_single_body_api> {
+ public:
+   virtual ~validated_single_body_api() = default;
+
+   virtual boost::asio::awaitable<positional_body_response> write(positional_body_payload payload) = 0;
+};
+
 class positional_ambiguous_body_api : public http_contract<positional_ambiguous_body_api> {
  public:
    virtual ~positional_ambiguous_body_api() = default;
@@ -976,6 +983,9 @@ FORGE_API(::forge::net::http::test_api::positional_query_append_api,
 FORGE_API(::forge::net::http::test_api::positional_plain_body_api,
           FORGE_API_CONTRACT("http.positional.plain-body", 1, 0), FORGE_API_METHOD(write, ref, payload))
 
+FORGE_API(::forge::net::http::test_api::validated_single_body_api,
+          FORGE_API_CONTRACT("http.positional.validated-single-body", 1, 0), FORGE_API_METHOD(write, payload))
+
 FORGE_API(::forge::net::http::test_api::positional_ambiguous_body_api,
           FORGE_API_CONTRACT("http.positional.ambiguous-body", 1, 0), FORGE_API_METHOD(write, ref, left, right))
 
@@ -1172,6 +1182,9 @@ FORGE_HTTP_API(::forge::net::http::test_api::positional_single_query_api, FORGE_
 FORGE_HTTP_API(::forge::net::http::test_api::positional_query_append_api, FORGE_HTTP_GET(read, "/query/:ref"))
 
 FORGE_HTTP_API(::forge::net::http::test_api::positional_plain_body_api, FORGE_HTTP_POST(write, "/plain/:ref", created))
+
+FORGE_HTTP_API(::forge::net::http::test_api::validated_single_body_api,
+               FORGE_HTTP_POST(write, "/validated-single-body", created))
 
 FORGE_HTTP_API(::forge::net::http::test_api::positional_ambiguous_body_api,
                FORGE_HTTP_POST(write, "/ambiguous/:ref", created))
@@ -1410,6 +1423,7 @@ using test_api::to_beast_response;
 using test_api::to_http_request;
 using test_api::to_http_response;
 using test_api::trusted_http_api;
+using test_api::validated_single_body_api;
 using test_api::websocket_positional_api;
 using test_api::xml_cache_api;
 
@@ -1654,6 +1668,19 @@ class positional_plain_body_api_impl final : public positional_plain_body_api {
    boost::asio::awaitable<positional_body_response> write(std::string ref, positional_body_payload payload) override {
       co_return positional_body_response{.summary = std::move(ref) + ":" + payload.value};
    }
+};
+
+class validated_single_body_api_impl final : public validated_single_body_api {
+ public:
+   explicit validated_single_body_api_impl(std::shared_ptr<std::size_t> calls) : calls_{std::move(calls)} {}
+
+   boost::asio::awaitable<positional_body_response> write(positional_body_payload payload) override {
+      ++*calls_;
+      co_return positional_body_response{.summary = std::move(payload.value)};
+   }
+
+ private:
+   std::shared_ptr<std::size_t> calls_;
 };
 
 class positional_ambiguous_body_api_impl final : public positional_ambiguous_body_api {
@@ -4136,6 +4163,60 @@ BOOST_AUTO_TEST_CASE(http_positional_ordinary_dto_body_roundtrips_without_body_w
    BOOST_TEST(response.summary == "chunk-plain:payload");
 
    server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(http_positional_single_body_uses_canonical_request_for_validation) {
+   auto runtime = forge::asio::runtime{};
+   auto descriptor = validated_single_body_api::describe();
+   auto write = std::ranges::find_if(descriptor.methods, [](const auto& method) { return method.name == "write"; });
+   BOOST_REQUIRE(write != descriptor.methods.end());
+   BOOST_REQUIRE(write->request_encoder);
+   BOOST_TEST((write->request_type == std::type_index{typeid(positional_body_payload)}));
+
+   auto validator_calls = std::make_shared<std::size_t>();
+   write->request_validator = [validator_calls](const forge::api::core::bytes& payload) {
+      ++*validator_calls;
+      BOOST_TEST(!payload.empty());
+   };
+
+   auto handler_calls = std::make_shared<std::size_t>();
+   auto apis = forge::api::core::registry{};
+   apis.install<validated_single_body_api>(std::move(descriptor),
+                                           std::make_shared<validated_single_body_api_impl>(handler_calls));
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<validated_single_body_api>()
+                    .build());
+
+   auto request = make_request(method::post, "/validated-single-body");
+   request.set(field::content_type, "application/json");
+   request.body() = R"({"value":"accepted"})";
+   request.prepare_payload();
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+
+   const auto response = handle(router, context);
+   const auto decoded = forge::codec::json::read<positional_body_response>(response.body());
+   BOOST_TEST(response.result_int() == static_cast<unsigned>(status::created));
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(decoded.value.summary == "accepted");
+   BOOST_TEST(*validator_calls == 1U);
+   BOOST_TEST(*handler_calls == 1U);
+
+   auto malformed = make_request(method::post, "/validated-single-body");
+   malformed.set(field::content_type, "application/json");
+   malformed.body() = R"({"value":)";
+   malformed.prepare_payload();
+   auto malformed_context = make_route_context(malformed);
+   malformed_context.runtime = &runtime;
+
+   const auto malformed_response = handle(router, malformed_context);
+   BOOST_TEST(malformed_response.result_int() == 422U);
+   BOOST_TEST(malformed_response.body().find("validation_error") != std::string::npos);
+   BOOST_TEST(*validator_calls == 1U);
+   BOOST_TEST(*handler_calls == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(http_positional_stream_response_decodes_ordinary_dto_body) {

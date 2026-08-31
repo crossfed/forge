@@ -320,6 +320,26 @@ add_test(
 )
 
 add_executable(
+   test_forge_plugins_descriptor_surfaces
+   package_plugins_descriptor_surfaces/main.cpp
+)
+target_link_libraries(
+   test_forge_plugins_descriptor_surfaces PRIVATE
+      forge_plugins_crypto_secrets
+      forge_plugins_crypto_signer
+      forge_plugins_db_store
+      forge_plugins_http_server
+      forge_plugins_p2p_node
+      forge_plugins_p2p_pubsub
+      forge_plugins_p2p_resolver
+)
+add_test(
+   NAME test_forge_plugins_descriptor_surfaces
+   COMMAND test_forge_plugins_descriptor_surfaces
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
    test_forge_chain_quorum
    unit/main.cpp
    chain_quorum/quorum_tests.cpp
@@ -1963,6 +1983,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_plugins_descriptor_surfaces
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_descriptor_surfaces
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-descriptor-surfaces
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_descriptor_surfaces
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_plugins_p2p_node
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2938,6 +2969,17 @@ add_test(
       --test-command forge_package_api_transport_component
 )
 set_tests_properties(test_forge_package_api_transport_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_descriptor_surfaces
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_descriptor_surfaces
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-descriptor-surfaces
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_descriptor_surfaces
+)
+set_tests_properties(test_forge_package_plugins_descriptor_surfaces PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_plugins_p2p_node
    COMMAND ${CMAKE_CTEST_COMMAND}

@@ -1,5 +1,6 @@
 add_library(
    forge_plugins_crypto_signer STATIC
+      descriptor.cpp
       plugin.cpp
       api_impl.cpp
       bls_api_impl.cpp
