@@ -9,6 +9,7 @@ module;
 #include <openssl/x509.h>
 
 #include <memory>
+#include <span>
 #include <string>
 
 module forge.crypto.pki.x509;
@@ -138,7 +139,7 @@ core::bytes certificate::extension(std::string_view oid) const {
 }
 
 core::bytes certificate::fingerprint_sha256() const {
-   const auto fingerprint = digest::sha256::hash(der_);
+   const auto fingerprint = digest::sha256::hash(std::span<const std::uint8_t>{der_});
    const auto bytes = fingerprint.to_uint8_span();
    return core::bytes(bytes.begin(), bytes.end());
 }
