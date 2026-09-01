@@ -222,6 +222,9 @@ void savanna_finality_trust_store::add_configured_root(savanna::finality_trust t
 
    for (const auto& configured : configured_roots_) {
       if (configured.position.block == entry.position.block) {
+         if (forge::raw::pack(*configured.trust) == forge::raw::pack(*entry.trust)) {
+            return;
+         }
          FORGE_THROW_EXCEPTION(exceptions::invalid_request,
                                "Savanna finality verifier contains a duplicate configured root");
       }

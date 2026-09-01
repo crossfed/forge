@@ -1768,9 +1768,8 @@ BOOST_AUTO_TEST_CASE(portable_savanna_direct_construction_translates_invalid_tru
                          fixture.genesis_trust, std::vector<savanna::finality_trust>{std::move(foreign)}}),
                      api::exceptions::wrong_chain);
 
-   BOOST_CHECK_THROW(static_cast<void>(api::savanna_finality_verifier{
-                         fixture.genesis_trust, std::vector<savanna::finality_trust>{fixture.genesis_trust}}),
-                     api::exceptions::invalid_request);
+   BOOST_CHECK_NO_THROW(static_cast<void>(api::savanna_finality_verifier{
+       fixture.genesis_trust, std::vector<savanna::finality_trust>{fixture.genesis_trust}}));
 }
 
 BOOST_AUTO_TEST_CASE(portable_factory_requires_a_chain_bound_finality_verifier) {
@@ -1845,11 +1844,24 @@ BOOST_AUTO_TEST_CASE(portable_factory_rejects_cross_chain_trust_before_selecting
        api::exceptions::wrong_chain);
 }
 
-BOOST_AUTO_TEST_CASE(portable_savanna_multi_trust_rejects_invalid_public_trust_sets) {
+BOOST_AUTO_TEST_CASE(portable_savanna_restores_an_identical_configured_checkpoint_without_ratchet) {
    const auto fixture = make_rich_portable_fixture();
-   BOOST_CHECK_THROW(static_cast<void>(api::make_savanna_finality_verifier_with_trusts(
-                         fixture.genesis_trust, {fixture.checkpoint_trust, fixture.checkpoint_trust})),
-                     api::exceptions::invalid_request);
+   const auto configured = api::make_savanna_finality_verifier(fixture.checkpoint_trust);
+   const auto configured_trust = forge::raw::pack(configured->preferred_trust());
+   const auto configured_anchor = configured->preferred_trust_anchor();
+   BOOST_REQUIRE(configured_anchor.has_value());
+   BOOST_CHECK(*configured_anchor == savanna::trust_anchor(fixture.checkpoint_trust).block);
+
+   // The second identical root models restoring the last persisted checkpoint at process restart.
+   const auto restored =
+       api::make_savanna_finality_verifier_with_trusts(fixture.checkpoint_trust, {fixture.checkpoint_trust});
+   BOOST_CHECK(forge::raw::pack(restored->preferred_trust()) == configured_trust);
+   BOOST_REQUIRE(restored->preferred_trust_anchor().has_value());
+   BOOST_CHECK(*restored->preferred_trust_anchor() == *configured_anchor);
+}
+
+BOOST_AUTO_TEST_CASE(portable_savanna_multi_trust_rejects_distinct_public_trust_sets) {
+   const auto fixture = make_rich_portable_fixture();
    auto foreign_checkpoint = std::get<savanna::finality_checkpoint_bootstrap>(fixture.checkpoint_trust);
    foreign_checkpoint.chain._hash[0] ^= 1U;
    const auto mixed = std::vector<savanna::finality_trust>{
