@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.29.0.md](releases/8.29.0.md) | Forge 8.29.0 Admin HTTP integration, plugin and snapshot contracts, canonical Raw bool streams, and portable verified Chain reads. |
 | [releases/8.28.0.md](releases/8.28.0.md) | Forge 8.28.0 native admin foundation, clean tooling and VM identities, and typed Chain state projections. |
 | [releases/8.27.1.md](releases/8.27.1.md) | Forge 8.27.1 Linux transaction builder module portability fix. |
 | [releases/8.27.0.md](releases/8.27.0.md) | Forge 8.27.0 managed P2P remotes and configured signing providers. |
