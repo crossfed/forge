@@ -549,6 +549,26 @@ class deadline_remote_invoker final : public forge::api::core::remote_invoker {
    std::size_t calls = 0;
 };
 
+class trust_required_remote_invoker final : public forge::api::core::remote_invoker {
+ public:
+   boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+      ++calls;
+      const auto descriptor = forge::chain::api::info::describe();
+      const auto* method = forge::api::core::find_method(descriptor, value.method);
+      if (method == nullptr) {
+         throw forge::api::core::exceptions::protocol_error{"remote test method descriptor is missing"};
+      }
+      const auto error = forge::chain::api::exceptions::trust_required{"remote finality trust is outside retention"};
+      co_return forge::api::core::response{
+          .api = std::move(value.api),
+          .method = std::move(value.method),
+          .error = forge::api::core::project_error(*method, error),
+      };
+   }
+
+   std::size_t calls = 0;
+};
+
 class accepting_audit_verifier final : public forge::chain::api::audit_verifier {
  public:
    [[nodiscard]] std::optional<forge::chain::protocol::block_id> preferred_finality_anchor() const override {
@@ -2160,6 +2180,23 @@ BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exc
    auto remote = forge::api::core::proxy<forge::chain::api::transaction>{invoker};
    BOOST_CHECK_THROW(run(remote.await_transaction({.timeout_ms = 1U})),
                      forge::chain::api::exceptions::deadline_exceeded);
+   BOOST_TEST(invoker->calls == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_audited_query_remote_restores_trust_required) {
+   const auto descriptor = forge::chain::api::info::describe();
+   const auto* method = forge::api::core::find_method(descriptor, "get");
+   BOOST_REQUIRE(method != nullptr);
+   const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::trust_required>();
+   const auto declared = std::ranges::find(method->errors, identity, &forge::api::core::error_descriptor::identity);
+   BOOST_REQUIRE(declared != method->errors.end());
+   BOOST_CHECK(declared->status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(!declared->retryable);
+
+   auto invoker = std::make_shared<trust_required_remote_invoker>();
+   auto remote = forge::api::core::proxy<forge::chain::api::info>{invoker};
+   BOOST_CHECK_THROW(run(remote.get({.audit = forge::chain::protocol::audit_mode::required})),
+                     forge::chain::api::exceptions::trust_required);
    BOOST_TEST(invoker->calls == 1U);
 }
 

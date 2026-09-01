@@ -71,6 +71,8 @@ template <auto Method, typename Builder> void declare_audited_query(Builder& met
        "audit_not_supported", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
    method.template error<anchor_unavailable>("anchor_unavailable",
                                              {.status_code = forge::api::core::status::not_found, .retryable = false});
+   method.template error<trust_required>(
+       "trust_required", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }
 
 template <auto Method, typename Builder> void declare_historical_query(Builder& method) {
