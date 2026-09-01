@@ -6,6 +6,7 @@ module;
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <condition_variable>
 #include <exception>
 #include <functional>
 #include <map>
