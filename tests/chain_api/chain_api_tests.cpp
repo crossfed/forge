@@ -3560,6 +3560,56 @@ BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_wi
                      forge::chain::api::exceptions::audit_not_supported);
 }
 
+BOOST_AUTO_TEST_CASE(verified_change_requests_select_the_first_possible_witness_anchor) {
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::state>(
+       std::make_shared<state_service>(forge::chain::protocol::table_changes_response{}));
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       verifier,
+       std::make_shared<typed_changes_projection_verifier>(),
+   };
+
+   const auto check_table = [&](std::uint32_t from_block, std::uint32_t to_block, std::uint32_t expected_target) {
+      verifier->finality_anchor_targets.clear();
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_table_changes({
+                            .from_block = from_block,
+                            .to_block = to_block,
+                            .tables = {{.code = forge::chain::protocol::account_name{"table"}}},
+                        }))),
+                        forge::chain::api::exceptions::audit_not_supported);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), expected_target);
+   };
+   const auto check_account = [&](std::uint32_t from_block, std::uint32_t to_block, std::uint32_t expected_target) {
+      verifier->finality_anchor_targets.clear();
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_account_changes({
+                            .from_block = from_block,
+                            .to_block = to_block,
+                            .accounts = {forge::chain::protocol::account_name{"account"}},
+                        }))),
+                        forge::chain::api::exceptions::audit_not_supported);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), expected_target);
+   };
+
+   check_table(10U, 12U, 11U);
+   check_account(10U, 12U, 11U);
+   check_table(12U, 12U, 12U);
+   check_account(12U, 12U, 12U);
+   check_table(std::numeric_limits<std::uint32_t>::max() - 1U, std::numeric_limits<std::uint32_t>::max(),
+               std::numeric_limits<std::uint32_t>::max());
+   check_account(std::numeric_limits<std::uint32_t>::max() - 1U, std::numeric_limits<std::uint32_t>::max(),
+                 std::numeric_limits<std::uint32_t>::max());
+   check_table(std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max(),
+               std::numeric_limits<std::uint32_t>::max());
+   check_account(std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max(),
+                 std::numeric_limits<std::uint32_t>::max());
+}
+
 BOOST_AUTO_TEST_CASE(verified_table_changes_bind_opaque_cursor_and_enforce_lww_projection) {
    auto anchor = make_finality_anchor();
    anchor.block_num = 12U;

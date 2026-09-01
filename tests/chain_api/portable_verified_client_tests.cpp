@@ -1414,6 +1414,7 @@ protocol::table_changes_response make_empty_changes_response(const rich_portable
 struct rich_client_harness {
    api::verified_client client;
    std::shared_ptr<fixture_state_service> service;
+   std::shared_ptr<api::savanna_finality_verifier> finality;
 };
 
 rich_client_harness make_rich_client(const rich_portable_fixture& fixture, savanna::finality_trust trust,
@@ -1427,16 +1428,18 @@ rich_client_harness make_rich_client(const rich_portable_fixture& fixture, savan
    auto raw = api::raw_client{api::service_handles{
        .state_queries = services.get<api::state>(api::state::ref()),
    }};
-   auto verifier = api::make_savanna_finality_verifier_with_trusts(std::move(trust), std::move(additional_trusts));
+   auto savanna_finality =
+       api::make_savanna_finality_verifier_with_trusts(std::move(trust), std::move(additional_trusts));
    return {
        .client = api::make_verified_client(std::move(raw),
                                            {
                                                .chain = fixture.chain,
                                                .state_domain = fixture.state_domain,
-                                               .finality = std::move(verifier),
+                                               .finality = savanna_finality,
                                                .projections = api::make_contract_table_projection_verifier(),
                                            }),
        .service = std::move(service),
+       .finality = std::move(savanna_finality),
    };
 }
 
@@ -2171,6 +2174,45 @@ BOOST_AUTO_TEST_CASE(portable_factory_accepts_multi_block_changes_cursors_empty_
    account_request.key = protocol::account_name{"alice"};
    account_request.audit = protocol::audit_mode::required;
    BOOST_CHECK_THROW(run(harness.client.get_account(account_request)), api::exceptions::audit_not_supported);
+}
+
+BOOST_AUTO_TEST_CASE(portable_factory_uses_a_retained_early_anchor_for_historical_changes_after_ratchet) {
+   const auto fixture = make_rich_portable_fixture();
+   const auto checkpoint_anchor = savanna::trust_anchor(fixture.checkpoint_trust);
+   auto harness = make_rich_client(
+       fixture, fixture.genesis_trust, {fixture.checkpoint_trust}, fixture.checkpoint_finality,
+       [&](const auto& request) { return make_rich_rows_response(fixture, request, fixture.checkpoint_finality); },
+       [&](const auto& request) {
+          auto response = make_full_changes_response(fixture, request);
+          response.audit->finality = fixture.checkpoint_finality;
+          response.audit->ancestry = fixture.checkpoint_finality;
+          return response;
+       });
+
+   static_cast<void>(run(harness.client.get_table_rows(protocol::table_rows_request{
+       .code = protocol::account_name{fixture.rows_location.code},
+       .scope = protocol::name{fixture.rows_location.scope},
+       .table = protocol::table_name{fixture.rows_location.table},
+       .index = {.kind = protocol::table_index_kind::primary},
+       .limit = 2U,
+       .audit = protocol::audit_mode::required,
+   })));
+   BOOST_REQUIRE(harness.finality->preferred_trust_anchor().has_value());
+   BOOST_CHECK(*harness.finality->preferred_trust_anchor() == fixture.target_anchor.block);
+   BOOST_CHECK(harness.finality->trust_anchor_at_or_before(fixture.first_change_anchor.block_num) ==
+               checkpoint_anchor.block);
+
+   const auto changes = run(harness.client.get_table_changes(protocol::table_changes_request{
+       .from_block = protocol::calculate_block_num_from_id(checkpoint_anchor.block),
+       .to_block = fixture.target_anchor.block_num,
+       .tables = fixture.selectors,
+       .limit = 10U,
+       .audit = protocol::audit_mode::required,
+   }));
+   BOOST_REQUIRE_EQUAL(changes.blocks.size(), 2U);
+   BOOST_REQUIRE_EQUAL(harness.service->changes_requests().size(), 1U);
+   BOOST_REQUIRE(harness.service->changes_requests().front().finality_from.has_value());
+   BOOST_CHECK(*harness.service->changes_requests().front().finality_from == checkpoint_anchor.block);
 }
 
 BOOST_AUTO_TEST_CASE(portable_verified_client_rejects_malicious_rows_keys_payers_cursors_proofs_and_anchors) {

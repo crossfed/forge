@@ -81,6 +81,10 @@ protocol::block_num transaction_hint_target(const protocol::transaction_id& expe
    return *response.block_num;
 }
 
+protocol::block_num change_witness_target(protocol::block_num from_block, protocol::block_num to_block) {
+   return from_block < to_block ? from_block + 1U : to_block;
+}
+
 template <typename Request>
 void require_audit(Request& request, audit_verifier& verifier,
                    std::optional<protocol::block_num> target = std::nullopt) {
@@ -600,7 +604,7 @@ boost::asio::awaitable<protocol::account_response> verified_client::get_account(
 boost::asio::awaitable<protocol::account_changes_response>
 verified_client::get_account_changes(protocol::account_changes_request request) {
    auto& projections = require_projection(projections_, "state.get_account_changes");
-   require_audit(request, *verifier_, request.to_block);
+   require_audit(request, *verifier_, change_witness_target(request.from_block, request.to_block));
    auto response = co_await invoke_service<protocol::account_changes_response>(
        "state.get_account_changes", request, limits_, [&] { return client_.state().get_account_changes(request); });
    const auto& audit = verify_envelope(response);
@@ -654,7 +658,7 @@ verified_client::get_table_rows(protocol::table_rows_request request) {
 boost::asio::awaitable<protocol::table_changes_response>
 verified_client::get_table_changes(protocol::table_changes_request request) {
    auto& projections = require_projection(projections_, "state.get_table_changes");
-   require_audit(request, *verifier_, request.to_block);
+   require_audit(request, *verifier_, change_witness_target(request.from_block, request.to_block));
    auto response = co_await invoke_service<protocol::table_changes_response>(
        "state.get_table_changes", request, limits_, [&] { return client_.state().get_table_changes(request); });
    const auto& audit = verify_envelope(response);
