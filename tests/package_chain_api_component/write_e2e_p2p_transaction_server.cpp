@@ -129,10 +129,8 @@ p2p_publication_callbacks make_p2p_transaction_publication(std::shared_ptr<write
            [](forge::app::plugin_context& context) {
               return forge::api::core::binding()
                   .serve(context.apis())
-                  .export_api<chain_api::transaction>(
-                      {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
-                  .export_api<chain_api::submission>(
-                      {.id = {"forge.chain.api.submission"}, .major = 1, .min_revision = 0})
+                  .export_api<chain_api::transaction>(chain_api::transaction::ref())
+                  .export_api<chain_api::submission>(chain_api::submission::ref())
                   .build();
            },
    };

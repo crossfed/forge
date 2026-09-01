@@ -367,8 +367,9 @@ void router::mount_assets(asset_mount value, forge::asio::compute::executor read
 }
 
 void router::mount_assets(asset_bundle bundle) {
-   if (std::ranges::any_of(reserved_path_prefixes_,
-                           [&](const auto& prefix) { return asset_mounts_overlap(prefix, bundle.path()); })) {
+   if (std::ranges::any_of(reserved_path_prefixes_, [&](const auto& prefix) {
+          return asset_mounts_overlap(prefix, bundle.path()) && (bundle.path() != "/" || prefix == "/");
+       })) {
       throw exceptions::conflict{"HTTP asset mount overlaps a reserved API path prefix"};
    }
    for (const auto& existing : asset_mounts_) {
@@ -388,8 +389,9 @@ void router::reserve_path_prefix(std::string path) {
    while (prefix.size() > 1U && prefix.ends_with('/')) {
       prefix.pop_back();
    }
-   if (std::ranges::any_of(asset_mounts_,
-                           [&](const auto& mount) { return asset_mounts_overlap(prefix, mount.path()); })) {
+   if (std::ranges::any_of(asset_mounts_, [&](const auto& mount) {
+          return asset_mounts_overlap(prefix, mount.path()) && (mount.path() != "/" || prefix == "/");
+       })) {
       throw exceptions::conflict{"reserved HTTP path prefix overlaps an asset mount"};
    }
    if (!std::ranges::contains(reserved_path_prefixes_, prefix)) {

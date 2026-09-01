@@ -56,6 +56,19 @@ explicitly keeps OpenSSL's system-default protocol range to preserve its prior
 compatibility behavior. SNI and hostname verification remain separate: the
 client configures both for each HTTPS connection.
 
+`forge::net::http::client_options` extends that existing TLS context/provider:
+the default provider uses system trust, while a caller may supply a provider
+with a client certificate for mTLS, an explicit SNI name, an expected hostname,
+and an optional SHA-256 leaf certificate pin. HTTPS always requires
+`verify_peer`; a client cannot disable certificate verification. Its optional
+per-request header provider is bounded and cannot set `Host`, framing, or
+hop-by-hop headers, so request ownership and transport framing remain with the
+client. The provider runs synchronously before request enqueueing, must be
+nonblocking and thread-safe, and has no cancellation channel. Its output is
+rejected when a header name collides case-insensitively with the request or with
+another provider header; this includes `Authorization`. Its execution consumes
+the request timeout budget before transport work begins.
+
 `forge::net::http::server` can instead receive a shared
 `forge::net::tls::context_provider`. Listener mode is fixed when the server
 starts: a TLS listener completes a TLS 1.3 server handshake before parsing any
@@ -323,9 +336,13 @@ router.mount_assets(
    asset_reads.get_executor());
 ```
 
-Asset mounts cannot overlap each other or a reserved typed API prefix. A normal
+Asset mounts cannot overlap each other or a reserved typed API prefix, except
+that a root (`/`) SPA mount may coexist with reserved API prefixes. A normal
 route always wins over an asset request, and a reserved API miss remains a 404
-rather than falling through to the SPA.
+rather than falling through to the SPA. This permits a root SPA with
+`/api/v1`: exact API routes run first, unknown `/api/v1/*` stays an API 404,
+and only `GET`/`HEAD` requests outside the reserved API namespace may use asset
+fallback.
 
 ### Mount API Bindings
 

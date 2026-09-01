@@ -29,6 +29,7 @@ enum class code : std::uint16_t {
    admission_rejected = 14,
    history_unavailable = 15,
    not_found = 16,
+   snapshot_lost = 17,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -48,6 +49,7 @@ using conflict = forge::exceptions::coded_exception<code, code::conflict>;
 using admission_rejected = forge::exceptions::coded_exception<code, code::admission_rejected>;
 using history_unavailable = forge::exceptions::coded_exception<code, code::history_unavailable>;
 using not_found = forge::exceptions::coded_exception<code, code::not_found>;
+using snapshot_lost = forge::exceptions::coded_exception<code, code::snapshot_lost>;
 
 namespace descriptor {
 
@@ -69,6 +71,8 @@ template <auto Method, typename Builder> void declare_audited_query(Builder& met
        "audit_not_supported", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
    method.template error<anchor_unavailable>("anchor_unavailable",
                                              {.status_code = forge::api::core::status::not_found, .retryable = false});
+   method.template error<trust_required>(
+       "trust_required", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }
 
 template <auto Method, typename Builder> void declare_historical_query(Builder& method) {
@@ -80,6 +84,11 @@ template <auto Method, typename Builder> void declare_historical_query(Builder& 
 template <typename Builder> void declare_not_found(Builder& method) {
    method.template error<not_found>("not_found",
                                     {.status_code = forge::api::core::status::not_found, .retryable = false});
+}
+
+template <typename Builder> void declare_snapshot_lost(Builder& method) {
+   method.template error<snapshot_lost>(
+       "snapshot_lost", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }
 
 template <typename Builder> void declare_deadline(Builder& method) {

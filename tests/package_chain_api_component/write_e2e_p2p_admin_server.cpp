@@ -107,7 +107,7 @@ p2p_publication_callbacks make_p2p_admin_publication(std::shared_ptr<write_p2p_a
            [](forge::app::plugin_context& context) {
               return forge::api::core::binding()
                   .serve(context.apis())
-                  .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 2, .min_revision = 0})
+                  .export_api<chain_api::admin>(chain_api::admin::ref())
                   .build();
            },
    };

@@ -3,6 +3,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/api/core/macros.hpp>
 #include <forge/api/http/macros.hpp>
+#include <forge/exceptions/macros.hpp>
 
 #include <string>
 #include <type_traits>
@@ -41,8 +42,21 @@ class admin
 
    virtual boost::asio::awaitable<protocol::push_block_response> push_block(protocol::signed_block value) = 0;
    virtual boost::asio::awaitable<protocol::snapshot_response> create_snapshot(std::string name) = 0;
+   virtual boost::asio::awaitable<protocol::snapshot_lifecycle_response> request_snapshot(protocol::snapshot_request) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "idempotent snapshot requests are not implemented by this node");
+   }
+   virtual boost::asio::awaitable<protocol::snapshot_lifecycle_response>
+   snapshot_status(protocol::snapshot_status_request) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "snapshot status is not implemented by this node");
+   }
    virtual boost::asio::awaitable<protocol::prune_response> prune(protocol::prune_request value) = 0;
    virtual boost::asio::awaitable<protocol::producer_status_response> producer_status(protocol::admin_query value) = 0;
+   virtual boost::asio::awaitable<protocol::operator_identity> get_operator_identity(protocol::admin_query) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "operator identity is not implemented by this node");
+   }
+   virtual boost::asio::awaitable<protocol::node_status> get_node_status(protocol::admin_query) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "node status is not implemented by this node");
+   }
    virtual boost::asio::awaitable<protocol::supported_protocol_features_response>
    supported_protocol_features(protocol::supported_protocol_features_request value) = 0;
    virtual boost::asio::awaitable<protocol::ram_corrections_response>
@@ -73,8 +87,15 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
       static_cast<void>(Method);
       ::forge::chain::api::exceptions::descriptor::declare_common(method);
       using request_type = method_request_t<Method>;
+      if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::snapshot_status_request>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      }
+      if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::snapshot_request>) {
+         ::forge::chain::api::exceptions::descriptor::declare_snapshot_lost(method);
+      }
       if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::signed_block> ||
                     std::is_same_v<request_type, ::std::string> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::snapshot_request> ||
                     std::is_same_v<request_type, ::forge::chain::protocol::prune_request> ||
                     std::is_same_v<request_type, ::forge::chain::protocol::producer_pause_request> ||
                     std::is_same_v<request_type, ::forge::chain::protocol::producer_runtime_options> ||
@@ -91,13 +112,21 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
 } // namespace forge::api::core
 
 FORGE_EXPORT_API(
-    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 2, 0),
+    ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 2, 3),
     FORGE_API_METHOD_TYPED(push_block, ::forge::chain::protocol::signed_block,
                            ::forge::chain::protocol::push_block_response),
     FORGE_API_METHOD(create_snapshot, name),
+    FORGE_API_METHOD_TYPED_SINCE(request_snapshot, ::forge::chain::protocol::snapshot_request,
+                                 ::forge::chain::protocol::snapshot_lifecycle_response, 2),
+    FORGE_API_METHOD_TYPED_SINCE(snapshot_status, ::forge::chain::protocol::snapshot_status_request,
+                                 ::forge::chain::protocol::snapshot_lifecycle_response, 2),
     FORGE_API_METHOD_TYPED(prune, ::forge::chain::protocol::prune_request, ::forge::chain::protocol::prune_response),
     FORGE_API_METHOD_TYPED(producer_status, ::forge::chain::protocol::admin_query,
                            ::forge::chain::protocol::producer_status_response),
+    FORGE_API_METHOD_TYPED_SINCE(get_operator_identity, ::forge::chain::protocol::admin_query,
+                                 ::forge::chain::protocol::operator_identity, 1),
+    FORGE_API_METHOD_TYPED_SINCE(get_node_status, ::forge::chain::protocol::admin_query,
+                                 ::forge::chain::protocol::node_status, 1),
     FORGE_API_METHOD_TYPED(supported_protocol_features, ::forge::chain::protocol::supported_protocol_features_request,
                            ::forge::chain::protocol::supported_protocol_features_response),
     FORGE_API_METHOD_TYPED(account_ram_corrections, ::forge::chain::protocol::ram_corrections_request,
@@ -121,8 +150,12 @@ FORGE_EXPORT_API(
 FORGE_HTTP_API(
     ::forge::chain::api::admin, FORGE_HTTP_POST(push_block, "/v1/chain/admin/blocks", accepted),
     FORGE_HTTP_POST(create_snapshot, "/v1/chain/admin/snapshots?name={name}", accepted),
+    FORGE_HTTP_POST(request_snapshot, "/v1/chain/admin/snapshot-requests", accepted, FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(snapshot_status, "/v1/chain/admin/snapshot-requests/{request_id}", FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(prune, "/v1/chain/admin/pruning", ok),
     FORGE_HTTP_GET(producer_status, "/v1/chain/admin/producer", FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(get_operator_identity, "/v1/chain/admin/operator-identity", FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(get_node_status, "/v1/chain/admin/node-status", FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(supported_protocol_features,
                    "/v1/chain/admin/protocol-features/supported?exclude_disabled={exclude_disabled}"
                    "&exclude_unactivatable={exclude_unactivatable}",

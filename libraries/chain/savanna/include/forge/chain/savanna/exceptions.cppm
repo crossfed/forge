@@ -20,6 +20,10 @@ enum class code : std::uint16_t {
    invalid_proof_of_possession = 8,
    validation_root_unavailable = 9,
    invalid_finalizer_safety_state = 10,
+   invalid_genesis = 11,
+   invalid_extension = 12,
+   invalid_header = 13,
+   invalid_merkle = 14,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.savanna")
@@ -32,9 +36,11 @@ using invalid_qc = forge::exceptions::coded_exception<code, code::invalid_qc>;
 using invalid_qc_signature = forge::exceptions::coded_exception<code, code::invalid_qc_signature>;
 using invalid_validation_state = forge::exceptions::coded_exception<code, code::invalid_validation_state>;
 using invalid_proof_of_possession = forge::exceptions::coded_exception<code, code::invalid_proof_of_possession>;
-using validation_root_unavailable =
-    forge::exceptions::coded_exception<code, code::validation_root_unavailable>;
-using invalid_finalizer_safety_state =
-    forge::exceptions::coded_exception<code, code::invalid_finalizer_safety_state>;
+using validation_root_unavailable = forge::exceptions::coded_exception<code, code::validation_root_unavailable>;
+using invalid_finalizer_safety_state = forge::exceptions::coded_exception<code, code::invalid_finalizer_safety_state>;
+using invalid_genesis = forge::exceptions::coded_exception<code, code::invalid_genesis>;
+using invalid_extension = forge::exceptions::coded_exception<code, code::invalid_extension>;
+using invalid_header = forge::exceptions::coded_exception<code, code::invalid_header>;
+using invalid_merkle = forge::exceptions::coded_exception<code, code::invalid_merkle>;
 
 } // namespace forge::chain::savanna::exceptions

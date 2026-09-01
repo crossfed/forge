@@ -1,5 +1,6 @@
 add_library(
    forge_plugins_p2p_node STATIC
+      descriptor.cpp
       plugin.cpp
       api_impl.cpp
       api_publication_generation.cpp

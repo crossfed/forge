@@ -9,4 +9,5 @@ target_link_libraries(
       forge_crypto_core
       forge_crypto_digest
       forge_exceptions
+      forge_raw
 )

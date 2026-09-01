@@ -10,6 +10,7 @@ module;
 #include <cstdint>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -40,11 +41,64 @@ decltype(auto) invoke_verifier(const char* message, Function&& function) {
    }
 }
 
-template <typename Request> void require_audit(Request& request, audit_verifier& verifier) {
+std::optional<protocol::block_num> block_num(const std::optional<protocol::block_id>& block) {
+   return block ? std::optional{protocol::calculate_block_num_from_id(*block)} : std::nullopt;
+}
+
+std::optional<protocol::block_num> target_block(const protocol::block_request& request) {
+   return request.num ? request.num : block_num(request.id);
+}
+
+std::optional<protocol::block_num> target_block(const protocol::block_range_request& request) {
+   if (request.limit == 0U) {
+      return request.first;
+   }
+   const auto last = static_cast<std::uint64_t>(request.first) + request.limit - 1U;
+   return last <= std::numeric_limits<protocol::block_num>::max()
+              ? std::optional{static_cast<protocol::block_num>(last)}
+              : std::nullopt;
+}
+
+protocol::block_num transaction_hint_target(const protocol::transaction_id& expected,
+                                            const protocol::transaction_status_response& response) {
+   if (response.id != expected) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction hint has the wrong transaction id");
+   }
+   if (response.state != protocol::transaction_lifecycle::included &&
+       response.state != protocol::transaction_lifecycle::finalized) {
+      FORGE_THROW_EXCEPTION(exceptions::audit_not_supported,
+                            "chain API cannot prove a transaction before canonical inclusion");
+   }
+   if (!response.block_num) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction hint omits its inclusion block number");
+   }
+   if (response.block && protocol::calculate_block_num_from_id(*response.block) != *response.block_num) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction hint contains an inconsistent inclusion block");
+   }
+   return *response.block_num;
+}
+
+protocol::block_num change_witness_target(protocol::block_num from_block, protocol::block_num to_block) {
+   return from_block < to_block ? from_block + 1U : to_block;
+}
+
+template <typename Request>
+void require_audit(Request& request, audit_verifier& verifier,
+                   std::optional<protocol::block_num> target = std::nullopt) {
    request.audit = protocol::audit_mode::required;
    if (!request.finality_from) {
-      request.finality_from = invoke_verifier<exceptions::anchor_unavailable>(
-          "chain API trust anchor provider failed", [&] { return verifier.preferred_finality_anchor(); });
+      const auto selected =
+          invoke_verifier<exceptions::anchor_unavailable>("chain API trust anchor provider failed", [&] {
+             return target ? verifier.finality_anchor_at_or_before(*target) : verifier.preferred_finality_anchor();
+          });
+      if (target && !selected) {
+         FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable,
+                               "chain API verifier has no trusted finality anchor for the requested target");
+      }
+      request.finality_from = selected;
    }
 }
 
@@ -135,6 +189,14 @@ projection_verifier& require_projection(const std::shared_ptr<projection_verifie
 
 std::optional<protocol::block_id> audit_verifier::preferred_finality_anchor() const {
    return std::nullopt;
+}
+
+std::optional<protocol::block_id> audit_verifier::finality_anchor_at_or_before(protocol::block_num target) const {
+   const auto preferred = preferred_finality_anchor();
+   if (preferred && protocol::calculate_block_num_from_id(*preferred) > target) {
+      return std::nullopt;
+   }
+   return preferred;
 }
 
 const protocol::bytes& require_content_witness(const protocol::audit_bundle& audit, protocol::digest expected,
@@ -380,7 +442,7 @@ boost::asio::awaitable<protocol::info_response> verified_client::get_info() {
 }
 
 boost::asio::awaitable<protocol::info_response> verified_client::get_info(protocol::anchored_request request) {
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::info_response>("info.get", request, limits_,
                                                                     [&] { return client_.info().get(request); });
@@ -401,7 +463,7 @@ boost::asio::awaitable<protocol::info_response> verified_client::get_info(protoc
 }
 
 boost::asio::awaitable<protocol::block_response> verified_client::get_block(protocol::block_request request) {
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, target_block(request));
    const auto requested_id = request.id;
    const auto requested_num = request.num;
    auto response = co_await invoke_service<protocol::block_response>(
@@ -419,7 +481,7 @@ boost::asio::awaitable<protocol::block_response> verified_client::get_block(prot
 }
 
 boost::asio::awaitable<protocol::block_header_response> verified_client::get_header(protocol::block_request request) {
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, target_block(request));
    const auto requested_id = request.id;
    const auto requested_num = request.num;
    auto response = co_await invoke_service<protocol::block_header_response>(
@@ -438,7 +500,7 @@ boost::asio::awaitable<protocol::block_header_response> verified_client::get_hea
 boost::asio::awaitable<protocol::block_state_response>
 verified_client::get_block_state(protocol::block_request request) {
    auto& projections = require_projection(projections_, "block.get_block_state");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, target_block(request));
    auto response = co_await invoke_service<protocol::block_state_response>(
        "block.get_block_state", request, limits_, [&] { return client_.blocks().get_block_state(request); });
    const auto& audit = verify_envelope(response);
@@ -449,7 +511,7 @@ verified_client::get_block_state(protocol::block_request request) {
 boost::asio::awaitable<protocol::block_range_response>
 verified_client::get_canonical_range(protocol::block_range_request request) {
    auto& projections = require_projection(projections_, "block.get_canonical_range");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, target_block(request));
    auto response = co_await invoke_service<protocol::block_range_response>(
        "block.get_canonical_range", request, limits_, [&] { return client_.blocks().get_canonical_range(request); });
    const auto& audit = verify_envelope(response);
@@ -460,7 +522,7 @@ verified_client::get_canonical_range(protocol::block_range_request request) {
 boost::asio::awaitable<protocol::protocol_features_response>
 verified_client::get_activated_protocol_features(protocol::protocol_features_request request) {
    auto& projections = require_projection(projections_, "block.get_activated_protocol_features");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::protocol_features_response>(
        "block.get_activated_protocol_features", request, limits_,
@@ -475,7 +537,7 @@ verified_client::get_activated_protocol_features(protocol::protocol_features_req
 boost::asio::awaitable<protocol::consensus_parameters_response>
 verified_client::get_consensus_parameters(protocol::anchored_request request) {
    auto& projections = require_projection(projections_, "block.get_consensus_parameters");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::consensus_parameters_response>(
        "block.get_consensus_parameters", request, limits_,
@@ -490,7 +552,7 @@ verified_client::get_consensus_parameters(protocol::anchored_request request) {
 boost::asio::awaitable<protocol::producers_response>
 verified_client::get_producers(protocol::producers_request request) {
    auto& projections = require_projection(projections_, "block.get_producers");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::producers_response>(
        "block.get_producers", request, limits_, [&] { return client_.blocks().get_producers(request); });
@@ -503,7 +565,7 @@ verified_client::get_producers(protocol::producers_request request) {
 boost::asio::awaitable<protocol::producer_schedule_response>
 verified_client::get_producer_schedule(protocol::anchored_request request) {
    auto& projections = require_projection(projections_, "block.get_producer_schedule");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::producer_schedule_response>(
        "block.get_producer_schedule", request, limits_,
@@ -517,7 +579,7 @@ verified_client::get_producer_schedule(protocol::anchored_request request) {
 boost::asio::awaitable<protocol::finalizer_info_response>
 verified_client::get_finalizer_info(protocol::anchored_request request) {
    auto& projections = require_projection(projections_, "block.get_finalizer_info");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::finalizer_info_response>(
        "block.get_finalizer_info", request, limits_, [&] { return client_.blocks().get_finalizer_info(request); });
@@ -529,7 +591,7 @@ verified_client::get_finalizer_info(protocol::anchored_request request) {
 
 boost::asio::awaitable<protocol::account_response> verified_client::get_account(protocol::account_request request) {
    auto& projections = require_projection(projections_, "state.get_account");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::account_response>(
        "state.get_account", request, limits_, [&] { return client_.state().get_account(request); });
@@ -542,7 +604,7 @@ boost::asio::awaitable<protocol::account_response> verified_client::get_account(
 boost::asio::awaitable<protocol::account_changes_response>
 verified_client::get_account_changes(protocol::account_changes_request request) {
    auto& projections = require_projection(projections_, "state.get_account_changes");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, change_witness_target(request.from_block, request.to_block));
    auto response = co_await invoke_service<protocol::account_changes_response>(
        "state.get_account_changes", request, limits_, [&] { return client_.state().get_account_changes(request); });
    const auto& audit = verify_envelope(response);
@@ -557,7 +619,7 @@ verified_client::get_account_changes(protocol::account_changes_request request) 
 
 boost::asio::awaitable<protocol::code_response> verified_client::get_code(protocol::code_request request) {
    auto& projections = require_projection(projections_, "state.get_code");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::code_response>("state.get_code", request, limits_,
                                                                     [&] { return client_.state().get_code(request); });
@@ -570,7 +632,7 @@ boost::asio::awaitable<protocol::code_response> verified_client::get_code(protoc
 boost::asio::awaitable<protocol::permission_links_response>
 verified_client::get_permission_links(protocol::permission_links_request request) {
    auto& projections = require_projection(projections_, "state.get_permission_links");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::permission_links_response>(
        "state.get_permission_links", request, limits_, [&] { return client_.state().get_permission_links(request); });
@@ -583,7 +645,7 @@ verified_client::get_permission_links(protocol::permission_links_request request
 boost::asio::awaitable<protocol::table_rows_response>
 verified_client::get_table_rows(protocol::table_rows_request request) {
    auto& projections = require_projection(projections_, "state.get_table_rows");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::table_rows_response>(
        "state.get_table_rows", request, limits_, [&] { return client_.state().get_table_rows(request); });
@@ -596,7 +658,7 @@ verified_client::get_table_rows(protocol::table_rows_request request) {
 boost::asio::awaitable<protocol::table_changes_response>
 verified_client::get_table_changes(protocol::table_changes_request request) {
    auto& projections = require_projection(projections_, "state.get_table_changes");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, change_witness_target(request.from_block, request.to_block));
    auto response = co_await invoke_service<protocol::table_changes_response>(
        "state.get_table_changes", request, limits_, [&] { return client_.state().get_table_changes(request); });
    const auto& audit = verify_envelope(response);
@@ -612,7 +674,7 @@ verified_client::get_table_changes(protocol::table_changes_request request) {
 boost::asio::awaitable<protocol::table_scope_response>
 verified_client::get_table_scope(protocol::table_scope_request request) {
    auto& projections = require_projection(projections_, "state.get_table_scope");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::table_scope_response>(
        "state.get_table_scope", request, limits_, [&] { return client_.state().get_table_scope(request); });
@@ -625,7 +687,7 @@ verified_client::get_table_scope(protocol::table_scope_request request) {
 boost::asio::awaitable<protocol::currency_balance_response>
 verified_client::get_currency_balance(protocol::currency_balance_request request) {
    auto& projections = require_projection(projections_, "state.get_currency_balance");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::currency_balance_response>(
        "state.get_currency_balance", request, limits_, [&] { return client_.state().get_currency_balance(request); });
@@ -638,7 +700,7 @@ verified_client::get_currency_balance(protocol::currency_balance_request request
 boost::asio::awaitable<protocol::currency_stats_response>
 verified_client::get_currency_stats(protocol::currency_stats_request request) {
    auto& projections = require_projection(projections_, "state.get_currency_stats");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::currency_stats_response>(
        "state.get_currency_stats", request, limits_, [&] { return client_.state().get_currency_stats(request); });
@@ -651,7 +713,7 @@ verified_client::get_currency_stats(protocol::currency_stats_request request) {
 boost::asio::awaitable<protocol::scheduled_response>
 verified_client::get_scheduled_transactions(protocol::scheduled_request request) {
    auto& projections = require_projection(projections_, "state.get_scheduled_transactions");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response =
        co_await invoke_service<protocol::scheduled_response>("state.get_scheduled_transactions", request, limits_, [&] {
@@ -667,7 +729,7 @@ verified_client::get_scheduled_transactions(protocol::scheduled_request request)
 boost::asio::awaitable<protocol::authorizers_response>
 verified_client::get_accounts_by_authorizers(protocol::authorizers_request request) {
    auto& projections = require_projection(projections_, "state.get_accounts_by_authorizers");
-   require_audit(request, *verifier_);
+   require_audit(request, *verifier_, block_num(request.anchor));
    const auto requested_anchor = request.anchor;
    auto response = co_await invoke_service<protocol::authorizers_response>(
        "state.get_accounts_by_authorizers", request, limits_,
@@ -681,22 +743,47 @@ verified_client::get_accounts_by_authorizers(protocol::authorizers_request reque
 
 boost::asio::awaitable<protocol::transaction_status_response>
 verified_client::get_transaction_status(protocol::transaction_status_request request) {
-   require_audit(request, *verifier_);
    const auto expected = request.id;
-   auto response = co_await invoke_service<protocol::transaction_status_response>(
-       "transaction.get_status", request, limits_, [&] { return client_.transactions().get_status(request); });
+   auto response = protocol::transaction_status_response{};
+   if (request.finality_from) {
+      require_audit(request, *verifier_);
+      response = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.get_status", request, limits_, [&] { return client_.transactions().get_status(request); });
+   } else {
+      request.audit = protocol::audit_mode::none;
+      const auto hint = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.get_status", request, limits_, [&] { return client_.transactions().get_status(request); });
+      auto confirmation = protocol::transaction_status_request{.id = expected};
+      require_audit(confirmation, *verifier_, transaction_hint_target(expected, hint));
+      response = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.get_status", confirmation, limits_,
+          [&] { return client_.transactions().get_status(confirmation); });
+   }
    verify_transaction_status(expected, response);
    co_return response;
 }
 
 boost::asio::awaitable<protocol::transaction_status_response>
 verified_client::await_transaction(protocol::transaction_await_request request) {
-   require_audit(request, *verifier_);
    const auto expected = request.id;
    const auto desired = request.desired;
-   auto response = co_await invoke_service<protocol::transaction_status_response>(
-       "transaction.await_transaction", request, limits_,
-       [&] { return client_.transactions().await_transaction(request); });
+   auto response = protocol::transaction_status_response{};
+   if (request.finality_from) {
+      require_audit(request, *verifier_);
+      response = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.await_transaction", request, limits_,
+          [&] { return client_.transactions().await_transaction(request); });
+   } else {
+      request.audit = protocol::audit_mode::none;
+      const auto hint = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.await_transaction", request, limits_,
+          [&] { return client_.transactions().await_transaction(request); });
+      auto confirmation = protocol::transaction_status_request{.id = expected};
+      require_audit(confirmation, *verifier_, transaction_hint_target(expected, hint));
+      response = co_await invoke_service<protocol::transaction_status_response>(
+          "transaction.get_status", confirmation, limits_,
+          [&] { return client_.transactions().get_status(confirmation); });
+   }
    verify_transaction_status(expected, response);
    if ((desired == protocol::transaction_lifecycle::finalized &&
         response.state != protocol::transaction_lifecycle::finalized) ||

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.28.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.29.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -861,6 +861,12 @@ if(FORGE_ENABLE_TOOLING)
       tooling_manifest
       tooling_testing
    )
+endif()
+
+# forge_chain_api owns the contract-table projection verifier used by the portable client.
+set(FORGE_HAS_PORTABLE_VERIFIED_CLIENT OFF)
+if(TARGET forge_chain_savanna AND TARGET forge_chain_api)
+   set(FORGE_HAS_PORTABLE_VERIFIED_CLIENT ON)
 endif()
 
 add_library(forge STATIC forge.cpp)

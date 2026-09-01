@@ -43,8 +43,11 @@ chain/root commitment is returned in the audited response context.
 Audited requests may also provide `finality_from`, the caller's already trusted
 genesis or checkpoint block. It is a proof-construction hint, not server-provided
 trust: `verified_client` fills it from the installed verifier and still verifies
-the returned witness locally. Recent trusted checkpoints therefore keep finality
-witnesses bounded without weakening the trust bootstrap.
+the returned witness locally. When a request names a historical block or range,
+the client selects the newest retained trust anchor at or before that known
+target instead of blindly using the current preferred checkpoint. Recent trusted
+checkpoints therefore keep finality witnesses bounded without weakening the
+trust bootstrap.
 Table-scope continuation uses the transport-neutral protocol `bytes` value;
 the HTTP GET binding carries it through the shared JSON query codec and other
 transports carry the same bytes without a transport-specific cursor DTO.
@@ -86,11 +89,69 @@ Forge exceptions and translate implementation `std`/Boost failures into their
 own typed Forge error contracts. Asio operation cancellation remains a typed
 `forge::asio::exceptions::canceled` result rather than an availability error.
 
+## Portable verified client
+
+forge.chain.api.verified_client_factory composes the Forge authenticated-state
+verifier with a caller-owned finality verifier. A Savanna product constructs
+that verifier from its trusted genesis or checkpoint bootstraps, then supplies
+the raw client, chain ID, state domain and projection verifier:
+
+~~~
+import forge.chain.api.contract_table_projection_verifier;
+import forge.chain.api.savanna_finality_verifier;
+import forge.chain.api.verified_client_factory;
+
+auto finality = forge::chain::api::make_savanna_finality_verifier_with_trusts(
+    settings.finality_trust,
+    settings.additional_finality_trusts);
+auto client = forge::chain::api::make_verified_client(
+    raw,
+    {
+        .chain = settings.chain,
+        .state_domain = settings.state_domain,
+        .finality = finality,
+        .projections = forge::chain::api::make_contract_table_projection_verifier(),
+    });
+~~~
+
+`verified_client` requires a non-null verifier whose declared trusted chain
+matches `options.chain` before it can issue a raw request. It never accepts a
+bootstrap or selects trust from another options field. The public
+`savanna_finality_verifier` verifies each returned witness against a configured
+root or one of its 16 newest rolling checkpoints, then atomically promotes a
+locally replayed checkpoint only when it descends from the current preferred
+anchor. Each rolling checkpoint retains its bounded canonical replay ancestry;
+an exact known checkpoint or an older replay can only cache state when its
+finalized height and block ID match that retained canonical ancestry. A
+competing branch fails as `invalid_finality`, and an older checkpoint beyond
+the retained ancestry fails as `trust_required`, without changing trust.
+Configured roots remain available, while `trust_anchor_at_or_before()`
+selects the newest configured or rolling checkpoint that does not exceed a
+known response target. Historical transaction status calls without an explicit
+`finality_from` first obtain an unaudited inclusion-height hint, then issue a
+separate audited status confirmation using that locally selected retained
+anchor; a missing height or unavailable retained anchor fails locally before a
+confirmation request, and only the confirmed response is returned or verified. `preferred_trust()`
+and `replay_state()` expose the selected locally trusted state to consumers
+that need Savanna-specific projection verification. The exact verified replay
+state is retained in the same bounded parallel-response window, so immediate
+replay of an in-flight response does not depend on its source checkpoint still
+being retained. Forge verifies the witness locally; it does not load trust
+material from files or select product policy. The contract-table projection
+verifier covers get_table_rows and get_table_changes, including canonical key
+layout, row/payer bytes, ordering, deletion, cursors and authenticated
+continuations. It intentionally does not verify table scope or native product
+projections. Those calls fail closed unless a product installs its own
+projection verifier.
+
 ## Typed block, info and admin reads
 
-`forge.chain.api.block`, `forge.chain.api.info` and
-`forge.chain.api.admin` are contract version `2.0`. This is a clean break:
+`forge.chain.api.block` and `forge.chain.api.info` are contract version `2.0`;
+`forge.chain.api.admin` is version `2.1`. Major version 2 is a clean break:
 there are no compatibility aliases, legacy readers or alternate JSON modes.
+Admin revision 1 appends the read-only `get_operator_identity` and
+`get_node_status` capability-descriptor methods, mapped to
+`/v1/chain/admin/operator-identity` and `/v1/chain/admin/node-status`.
 
 Block responses use the complete host `activated_protocol_feature_info` and
 reuse the canonical

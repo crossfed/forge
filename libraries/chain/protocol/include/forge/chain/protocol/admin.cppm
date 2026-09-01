@@ -13,6 +13,7 @@ export import forge.chain.protocol.account_ram_correction;
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.block;
 export import forge.chain.protocol.protocol_feature;
+export import forge.crypto.bls.serialization;
 
 import forge.raw.codec;
 import forge.variant.containers;
@@ -28,6 +29,36 @@ enum class list_update : std::uint8_t {
 
 struct admin_query {
    bool operator==(const admin_query&) const = default;
+};
+
+enum class operator_role : std::uint8_t {
+   producer,
+   finalizer,
+};
+
+struct operator_identity {
+   account_name producer;
+   public_key block_public_key;
+   forge::crypto::bls::public_key finalizer_public_key;
+   std::vector<operator_role> enabled_roles;
+
+   bool operator==(const operator_identity&) const = default;
+};
+
+enum class node_lifecycle_state : std::uint8_t {
+   starting,
+   running,
+   stopping,
+   stopped,
+   failed,
+};
+
+struct node_status {
+   time_point process_start = time_point{};
+   std::uint64_t uptime_ms = 0;
+   node_lifecycle_state lifecycle = node_lifecycle_state::starting;
+
+   bool operator==(const node_status&) const = default;
 };
 
 struct producer_runtime_options {
@@ -219,6 +250,34 @@ struct push_block_response {
    bool operator==(const push_block_response&) const = default;
 };
 
+enum class snapshot_state : std::uint8_t {
+   pending,
+   completed,
+};
+
+struct snapshot_request {
+   std::string request_id;
+   std::string name;
+
+   bool operator==(const snapshot_request&) const = default;
+};
+
+struct snapshot_status_request {
+   std::string request_id;
+
+   bool operator==(const snapshot_status_request&) const = default;
+};
+
+struct snapshot_lifecycle_response {
+   std::string request_id;
+   std::string name;
+   snapshot_state state = snapshot_state::pending;
+   std::optional<block_id> head;
+   std::optional<std::uint32_t> head_num;
+
+   bool operator==(const snapshot_lifecycle_response&) const = default;
+};
+
 struct snapshot_response {
    std::string name;
    block_id head;
@@ -242,7 +301,11 @@ struct prune_response {
 };
 
 BOOST_DESCRIBE_ENUM(list_update, add, remove, replace)
+BOOST_DESCRIBE_ENUM(operator_role, producer, finalizer)
+BOOST_DESCRIBE_ENUM(node_lifecycle_state, starting, running, stopping, stopped, failed)
 BOOST_DESCRIBE_STRUCT(admin_query, (), ())
+BOOST_DESCRIBE_STRUCT(operator_identity, (), (producer, block_public_key, finalizer_public_key, enabled_roles))
+BOOST_DESCRIBE_STRUCT(node_status, (), (process_start, uptime_ms, lifecycle))
 BOOST_DESCRIBE_STRUCT(producer_runtime_options, (),
                       (max_transaction_time_ms, max_irreversible_block_age_seconds, produce_block_offset_ms,
                        subjective_cpu_leeway_us, greylist_limit))
@@ -273,6 +336,10 @@ BOOST_DESCRIBE_STRUCT(snapshot_schedule, (), (id, request, pending_blocks))
 BOOST_DESCRIBE_STRUCT(snapshot_requests_response, (), (schedules))
 BOOST_DESCRIBE_STRUCT(integrity_hash_response, (), (head, hash))
 BOOST_DESCRIBE_STRUCT(push_block_response, (), (id, num, accepted, duplicate))
+BOOST_DESCRIBE_ENUM(snapshot_state, pending, completed)
+BOOST_DESCRIBE_STRUCT(snapshot_request, (), (request_id, name))
+BOOST_DESCRIBE_STRUCT(snapshot_status_request, (), (request_id))
+BOOST_DESCRIBE_STRUCT(snapshot_lifecycle_response, (), (request_id, name, state, head, head_num))
 BOOST_DESCRIBE_STRUCT(snapshot_response, (), (name, head, head_num))
 BOOST_DESCRIBE_STRUCT(prune_request, (), (through_block, max_records))
 BOOST_DESCRIBE_STRUCT(prune_response, (), (records, complete))

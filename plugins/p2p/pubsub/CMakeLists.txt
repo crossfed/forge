@@ -1,5 +1,6 @@
 add_library(
    forge_plugins_p2p_pubsub STATIC
+      descriptor.cpp
       plugin.cpp
       config.cpp
       join_waiter.cpp

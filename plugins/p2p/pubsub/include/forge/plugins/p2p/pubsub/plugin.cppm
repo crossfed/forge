@@ -8,6 +8,8 @@ module;
 
 export module forge.plugins.p2p.pubsub.plugin;
 
+export import forge.plugins.p2p.pubsub.descriptor;
+
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;

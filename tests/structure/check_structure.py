@@ -697,6 +697,7 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
    for token in (
       "export module forge.auth.pairing.pairing",
       "begin_bootstrap",
+      "identify_bootstrap_token",
       "consume_bootstrap",
       "supersede_pending",
       "identify_pre_session",
@@ -726,6 +727,7 @@ def check_auth_pairing_boundaries(root: Path, errors: list[str]) -> None:
       "pre_session_digest",
       "pre_session_consumed",
       "issue_distinct_token",
+      "identify_bootstrap_token",
       "identify_pre_session",
       "consume_approved_pre_session",
       "approved_credential",
@@ -1416,9 +1418,56 @@ def check_chain_savanna_boundaries(root: Path, errors: list[str]) -> None:
    if not component.exists():
       return
 
-   forbidden = {
-      "forge.chain.protocol": "protocol modules",
-      "forge::chain::protocol": "protocol namespace",
+   neutral = {
+      "include/forge/chain/savanna/exceptions.cppm",
+      "include/forge/chain/savanna/types.cppm",
+      "include/forge/chain/savanna/policy.cppm",
+      "include/forge/chain/savanna/finality_core.cppm",
+      "include/forge/chain/savanna/qc.cppm",
+      "include/forge/chain/savanna/vote.cppm",
+      "include/forge/chain/savanna/vote_accumulator.cppm",
+      "include/forge/chain/savanna/validation.cppm",
+      "include/forge/chain/savanna/finalizer_safety.cppm",
+      "include/forge/chain/savanna/rank.cppm",
+      "types.cpp",
+      "policy.cpp",
+      "finality_core.cpp",
+      "qc.cpp",
+      "vote.cpp",
+      "vote_accumulator.cpp",
+      "vote_accumulator_impl.cpp",
+      "details/vote_accumulator_impl.hxx",
+      "validation.cpp",
+      "finalizer_safety.cpp",
+      "rank.cpp",
+   }
+   protocol_bound = {
+      "include/forge/chain/savanna/policy_state.cppm",
+      "include/forge/chain/savanna/extensions.cppm",
+      "include/forge/chain/savanna/genesis.cppm",
+      "include/forge/chain/savanna/header_state.cppm",
+      "include/forge/chain/savanna/candidate.cppm",
+      "include/forge/chain/savanna/checkpoint.cppm",
+      "include/forge/chain/savanna/admission.cppm",
+      "include/forge/chain/savanna/finality_witness.cppm",
+      "policy_state.cpp",
+      "extensions.cpp",
+      "genesis.cpp",
+      "header_state.cpp",
+      "admission.cpp",
+      "finality_witness.cpp",
+   }
+   actual = {
+      str(path.relative_to(component))
+      for path in source_files(root, ("libraries/chain/savanna",))
+      if "values" not in path.relative_to(component).parts
+   }
+   for relative in sorted((neutral | protocol_bound) - actual):
+      errors.append(f"libraries/chain/savanna/{relative}: required Savanna module source is missing")
+   for relative in sorted(actual - (neutral | protocol_bound)):
+      errors.append(f"libraries/chain/savanna/{relative}: unclassified Savanna production source")
+
+   forbidden_everywhere = {
       "bls12-381": "private BLS backend",
       "bls12_381": "private BLS backend",
       "blockchain::": "product namespace",
@@ -1429,9 +1478,36 @@ def check_chain_savanna_boundaries(root: Path, errors: list[str]) -> None:
    for path in source_files(root, ("libraries/chain/savanna",)):
       relative = path.relative_to(root)
       source = path.read_text(errors="ignore")
-      for token, owner in forbidden.items():
+      for token, owner in forbidden_everywhere.items():
          if token in source:
-            errors.append(f"{relative}: Savanna kernel must not depend on {owner} ({token})")
+            errors.append(f"{relative}: Savanna must not depend on {owner} ({token})")
+
+   protocol_import = re.compile(
+      r"(?:forge\.chain\.protocol(?:\.|\b)|forge::chain::protocol|forge/chain/protocol)"
+   )
+   for relative in sorted(neutral):
+      path = component / relative
+      if path.is_file() and protocol_import.search(path.read_text(errors="ignore")):
+         errors.append(f"{path.relative_to(root)}: neutral Savanna kernel imports Chain Protocol")
+
+   values = component / "values"
+   for path in source_files(root, ("libraries/chain/savanna/values",)):
+      if protocol_import.search(path.read_text(errors="ignore")):
+         errors.append(f"{path.relative_to(root)}: neutral Savanna values import Chain Protocol")
+
+   cmake = component / "CMakeLists.txt"
+   cmake_source = cmake.read_text(errors="ignore")
+   target_definitions = re.findall(r"\badd_library\s*\(\s*(forge_chain_savanna\S*)", cmake_source)
+   if target_definitions != ["forge_chain_savanna"]:
+      errors.append(
+         f"{cmake.relative_to(root)}: protocol-bound Savanna integration must remain in the single "
+         "forge_chain_savanna target"
+      )
+   if "forge_chain_protocol" not in cmake_source:
+      errors.append(f"{cmake.relative_to(root)}: forge_chain_savanna must link its approved protocol integration")
+   for relative in sorted(path for path in protocol_bound if path.endswith(".cpp")):
+      if Path(relative).name not in cmake_source:
+         errors.append(f"{cmake.relative_to(root)}: forge_chain_savanna omits {relative}")
 
 
 def check_bls_value_ownership(root: Path, files: list[Path], errors: list[str]) -> None:

@@ -19,8 +19,8 @@ find_package(Forge CONFIG REQUIRED COMPONENTS chain_savanna)
 target_link_libraries(my_target PRIVATE Forge::forge_chain_savanna)
 ```
 
-The component automatically provides Chain Core, Chain Quorum, Crypto BLS,
-Crypto Digest, Raw and Variant dependencies.
+The component automatically provides Chain Core, Chain Protocol, Chain Quorum,
+Crypto Asymmetric, Crypto BLS, Crypto Digest, Raw and Variant dependencies.
 
 ## Modules
 
@@ -34,6 +34,17 @@ Crypto Digest, Raw and Variant dependencies.
 - `forge.chain.savanna.finalizer_safety`
 - `forge.chain.savanna.rank`
 - `forge.chain.savanna.exceptions`
+
+The same `forge_chain_savanna` target also provides the protocol-bound modules
+`policy_state`, `extensions`, `genesis`, `header_state`, `candidate`,
+`checkpoint`, `admission` and `finality_witness`; this upper integration is not
+a second target or facade. Neutrality is module-level: `exceptions`, `types`,
+`policy`, `finality_core`, `qc`, `vote`, `vote_accumulator`, `validation`,
+`finalizer_safety` and `rank`, including their implementation files, have no
+Chain Protocol import. `policy_state` holds protocol-bearing finalizer proofs
+and producer schedule state without duplicating the neutral types and policy
+modules. `genesis` owns the value, validation and chain-ID calculation only;
+file and JSON loading remain product-owned.
 
 ## Operational Types
 
@@ -112,6 +123,17 @@ roots and preimages. The prefix frontier keeps the complete Merkle history in
 `O(log N)` space. A caller chooses and enforces its reversible window by
 advancing the state whenever finality moves. Looking up a pruned root throws
 `validation_root_unavailable`.
+
+## Finality Trust Advance
+
+`advance_finality_trust()` derives a checkpoint bootstrap solely from a
+caller-trusted genesis or checkpoint bootstrap, a decoded witness (or its Raw
+proof) and a finalized `state_anchor`. It replays headers, producer signatures,
+QC, policy transitions and validation state before it advances validation to
+the finalized target. The returned checkpoint is local replay output; witness
+bytes never supply a checkpoint as trust material. Use
+`advance_finality_trust_with_replay()` when the verified replay anchors are
+also needed for an ancestry-aware trust promotion.
 
 `append()` is `O(log N)` and does not replay the retained range. Full replay is
 performed by explicit `validate()` and by Raw decoding. The Raw v1 layout is:

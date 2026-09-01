@@ -144,6 +144,20 @@ std::optional<protocol::block_id> authenticated_audit_verifier::preferred_finali
    }
 }
 
+std::optional<protocol::block_id>
+authenticated_audit_verifier::finality_anchor_at_or_before(protocol::block_num target) const {
+   try {
+      return finality_->trust_anchor_at_or_before(target);
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed");
+   }
+}
+
 void authenticated_audit_verifier::verify_context(const protocol::response_context& context) {
    if (context.chain != options_.chain || (context.anchor && context.anchor->chain != options_.chain)) {
       FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API response belongs to another chain");

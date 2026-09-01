@@ -276,6 +276,26 @@ target_link_libraries(
    Boost::included_unit_test_framework
 )
 add_test(NAME test_forge_chain_api COMMAND test_forge_chain_api WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_chain_portable_verified_client
+   unit/main.cpp
+   chain_api/portable_verified_client_tests.cpp
+   chain_api/contract_commitment_compatibility_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_portable_verified_client
+   forge_chain_api
+   forge_codec_hex
+   forge_db_authenticated
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_chain_portable_verified_client
+   COMMAND test_forge_chain_portable_verified_client
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 add_test(
    NAME test_forge_chain_api_spring_manifest
    COMMAND
@@ -291,6 +311,14 @@ add_test(
    COMMAND
       ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_typed_state_surface.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+add_test(
+   NAME test_forge_chain_api_portable_verified_client
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_portable_verified_client.py
       ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
@@ -316,6 +344,26 @@ target_link_libraries(
 add_test(
    NAME test_forge_plugins_http_server
    COMMAND test_forge_plugins_http_server
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
+   test_forge_plugins_descriptor_surfaces
+   package_plugins_descriptor_surfaces/main.cpp
+)
+target_link_libraries(
+   test_forge_plugins_descriptor_surfaces PRIVATE
+      forge_plugins_crypto_secrets
+      forge_plugins_crypto_signer
+      forge_plugins_db_store
+      forge_plugins_http_server
+      forge_plugins_p2p_node
+      forge_plugins_p2p_pubsub
+      forge_plugins_p2p_resolver
+)
+add_test(
+   NAME test_forge_plugins_descriptor_surfaces
+   COMMAND test_forge_plugins_descriptor_surfaces
    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
@@ -1963,6 +2011,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_plugins_descriptor_surfaces
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_descriptor_surfaces
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-descriptor-surfaces
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_descriptor_surfaces
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_plugins_p2p_node
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2938,6 +2997,17 @@ add_test(
       --test-command forge_package_api_transport_component
 )
 set_tests_properties(test_forge_package_api_transport_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_descriptor_surfaces
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_descriptor_surfaces
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-descriptor-surfaces
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_descriptor_surfaces
+)
+set_tests_properties(test_forge_package_plugins_descriptor_surfaces PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_plugins_p2p_node
    COMMAND ${CMAKE_CTEST_COMMAND}

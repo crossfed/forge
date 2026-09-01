@@ -99,8 +99,8 @@ p2p_publication_callbacks make_p2p_info_block_publication(std::shared_ptr<read_p
            [](forge::app::plugin_context& context) {
               return forge::api::core::binding()
                   .serve(context.apis())
-                  .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 2, .min_revision = 0})
-                  .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 2, .min_revision = 0})
+                  .export_api<chain_api::info>(chain_api::info::ref())
+                  .export_api<chain_api::block>(chain_api::block::ref())
                   .build();
            },
    };

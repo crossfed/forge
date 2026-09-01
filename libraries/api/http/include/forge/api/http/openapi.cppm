@@ -9,6 +9,7 @@ module;
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -400,5 +401,30 @@ template <typename Interface> [[nodiscard]] forge::variant openapi(openapi_info 
    return detail::build_openapi_document(forge::api::core::api_traits<Interface>::describe(),
                                          traits<Interface>::openapi_operations(), std::move(info));
 }
+
+class openapi_document_builder {
+ public:
+   openapi_document_builder();
+   ~openapi_document_builder();
+
+   openapi_document_builder(const openapi_document_builder&) = delete;
+   openapi_document_builder& operator=(const openapi_document_builder&) = delete;
+   openapi_document_builder(openapi_document_builder&&) noexcept;
+   openapi_document_builder& operator=(openapi_document_builder&&) noexcept;
+
+   template <typename Interface> openapi_document_builder& add(std::string_view base_path) {
+      add(forge::api::core::api_traits<Interface>::describe(), traits<Interface>::openapi_operations(), base_path);
+      return *this;
+   }
+
+   [[nodiscard]] forge::variant build(openapi_info info) const;
+
+ private:
+   void add(forge::api::core::descriptor api, std::vector<openapi_operation> operations, std::string_view base_path);
+
+   struct impl;
+
+   std::unique_ptr<impl> impl_;
+};
 
 } // namespace forge::api::http

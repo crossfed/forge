@@ -91,7 +91,7 @@ p2p_publication_callbacks make_p2p_state_publication(std::shared_ptr<read_p2p_st
            [](forge::app::plugin_context& context) {
               return forge::api::core::binding()
                   .serve(context.apis())
-                  .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 3, .min_revision = 0})
+                  .export_api<chain_api::state>(chain_api::state::ref())
                   .build();
            },
    };

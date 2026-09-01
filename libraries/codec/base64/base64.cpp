@@ -2,6 +2,7 @@ module;
 
 #include <forge/exceptions/policy.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -128,7 +129,14 @@ std::string encode(std::string_view input, encode_options options) {
 }
 
 std::vector<std::uint8_t> decode(std::string_view input, decode_options options) {
-   const auto normalized = normalize(input, options.ignore_ascii_whitespace);
+   auto normalized_storage = std::string{};
+   auto normalized = input;
+   if (options.ignore_ascii_whitespace) {
+      normalized_storage = normalize(input, true);
+      normalized = normalized_storage;
+   } else if (std::ranges::any_of(input, is_ascii_whitespace)) {
+      fail("base64 input contains whitespace");
+   }
    if (normalized.empty()) {
       return {};
    }

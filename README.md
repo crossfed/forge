@@ -183,8 +183,8 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config_core`. |
-| [auth/pairing](libraries/auth/pairing/README.md) | `forge_auth_pairing` | Product-neutral bootstrap, pairing and credential state transitions. | `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`. |
-| [auth/session](libraries/auth/session/README.md) | `forge_auth_session` | Product-neutral digest-only session, CSRF and credential-binding transitions. | `forge_auth_pairing`, `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`. |
+| [auth/pairing](libraries/auth/pairing/README.md) | `forge_auth_pairing` | Product-neutral bootstrap, pairing and credential state transitions with canonical persisted Raw serialization. | `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
+| [auth/session](libraries/auth/session/README.md) | `forge_auth_session` | Product-neutral digest-only session, CSRF and credential-binding transitions with canonical persisted Raw serialization. | `forge_auth_pairing`, `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
 | [auth/http](libraries/auth/http/README.md) | `forge_auth_http` | Browser session evidence, exact Origin/CSRF policy, cookie emission and security headers. | `forge_auth_session`, `forge_net_http`. |
 | [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, strict cookies, hardened streamed assets, router, middleware, client/server with optional fixed-mode TLS listener. | `forge_net_tls`, `forge_net_websocket`, Boost.Beast/URL/Asio. |
 | [net/tls](libraries/net/tls/README.md) | `forge_net_tls` | Immutable TLS context snapshots, trust loading and peer verification. | `forge_exceptions`, `forge_crypto_pki`, Boost.Asio SSL, Boost.Beast, OpenSSL. |
@@ -265,7 +265,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.28.0 release notes](docs/releases/8.28.0.md).
+[Forge 8.29.0 release notes](docs/releases/8.29.0.md).
 
 ## Совместимость
 

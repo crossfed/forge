@@ -62,6 +62,10 @@ using transport_deadline = std::chrono::steady_clock::time_point;
    return options;
 }
 
+[[nodiscard]] std::shared_ptr<tls::context_provider> make_https_client_context_provider() {
+   return std::make_shared<tls::context_provider>(make_https_client_context_options());
+}
+
 transport_deadline make_deadline(std::chrono::milliseconds timeout) noexcept {
    const auto now = std::chrono::steady_clock::now();
    const auto remaining = transport_deadline::max() - now;
@@ -78,6 +82,12 @@ template <typename Stream> void expire_at(Stream& stream, transport_deadline dea
 
 [[noreturn]] void raise_deadline() {
    throw exceptions::gateway_timeout{"HTTP request exceeded its transport deadline"};
+}
+
+void require_tls_peer_verification(const tls::context_snapshot_ptr& snapshot) {
+   if (!snapshot || snapshot->verification() != tls::peer_verification::verify_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::bad_request, "HTTPS client requires TLS peer verification");
+   }
 }
 
 void require_deadline(transport_deadline deadline) {
@@ -299,45 +309,36 @@ awaitable<bool> cancel_body_at_deadline(body_reader& body, transport_deadline de
 awaitable<std::optional<body_chunk>> read_body_until(body_reader& body, transport_deadline deadline) {
    require_deadline(deadline);
    const auto executor = co_await asio::this_coro::executor;
-   const auto inherited_cancellation =
-      co_await asio::this_coro::cancellation_state;
+   const auto inherited_cancellation = co_await asio::this_coro::cancellation_state;
    auto parent_cancellation_slot = inherited_cancellation.slot();
-   auto body_cancellation = asio::cancellation_state{
-      parent_cancellation_slot,
-      [&body](asio::cancellation_type type) noexcept {
-         if (type != asio::cancellation_type::none) {
-            body.cancel();
-         }
-         return type;
-      },
-      asio::enable_total_cancellation{}};
-   const auto clear_cancellation =
-      [](asio::cancellation_slot* slot) noexcept {
-         try {
-            slot->clear();
-         } catch (...) {
-            // Cancellation cleanup cannot escape the body-read boundary.
-         }
-      };
-   auto cancellation_cleanup =
-      std::unique_ptr<asio::cancellation_slot, decltype(clear_cancellation)>{
-         &parent_cancellation_slot, clear_cancellation};
-   if (inherited_cancellation.cancelled() !=
-       asio::cancellation_type::none) {
+   auto body_cancellation = asio::cancellation_state{parent_cancellation_slot,
+                                                     [&body](asio::cancellation_type type) noexcept {
+                                                        if (type != asio::cancellation_type::none) {
+                                                           body.cancel();
+                                                        }
+                                                        return type;
+                                                     },
+                                                     asio::enable_total_cancellation{}};
+   const auto clear_cancellation = [](asio::cancellation_slot* slot) noexcept {
+      try {
+         slot->clear();
+      } catch (...) {
+         // Cancellation cleanup cannot escape the body-read boundary.
+      }
+   };
+   auto cancellation_cleanup = std::unique_ptr<asio::cancellation_slot, decltype(clear_cancellation)>{
+       &parent_cancellation_slot, clear_cancellation};
+   if (inherited_cancellation.cancelled() != asio::cancellation_type::none) {
       body.cancel();
-      throw forge::asio::exceptions::canceled{
-         "HTTP request body read was canceled"};
+      throw forge::asio::exceptions::canceled{"HTTP request body read was canceled"};
    }
    using namespace asio::experimental::awaitable_operators;
-   auto outcome = co_await asio::co_spawn(
-      executor,
-      asio::co_spawn(executor, body.async_read(),
-                     asio::as_tuple(use_awaitable)) ||
-         cancel_body_at_deadline(body, deadline),
-      asio::bind_cancellation_slot(body_cancellation.slot(), use_awaitable));
+   auto outcome = co_await asio::co_spawn(executor,
+                                          asio::co_spawn(executor, body.async_read(), asio::as_tuple(use_awaitable)) ||
+                                              cancel_body_at_deadline(body, deadline),
+                                          asio::bind_cancellation_slot(body_cancellation.slot(), use_awaitable));
    if (body_cancellation.cancelled() != asio::cancellation_type::none) {
-      throw forge::asio::exceptions::canceled{
-         "HTTP request body read was canceled"};
+      throw forge::asio::exceptions::canceled{"HTTP request body read was canceled"};
    }
    if (outcome.index() != 0U) {
       if (std::get<1>(outcome)) {
@@ -493,19 +494,26 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       }
    };
 
-   explicit impl(forge::asio::runtime& runtime_value, base_url endpoint_value)
+   explicit impl(forge::asio::runtime& runtime_value, base_url endpoint_value,
+                 std::shared_ptr<tls::context_provider> tls_context_provider_value,
+                 tls::client_stream_options tls_stream_options_value, tls::peer_validation tls_peer_validation_value)
        : runtime(runtime_value), endpoint(std::move(endpoint_value)), strand(asio::make_strand(runtime.context())),
-         tls_context_provider(make_https_client_context_options()) {}
+         tls_context_provider_ptr(std::move(tls_context_provider_value)),
+         tls_stream_options(std::move(tls_stream_options_value)),
+         tls_peer_validation(std::move(tls_peer_validation_value)) {
+      if (!tls_context_provider_ptr) {
+         FORGE_THROW_EXCEPTION(exceptions::bad_request, "HTTP TLS context provider must not be empty");
+      }
+   }
 
    awaitable<tcp::resolver::results_type> resolve(transport_deadline deadline) {
       require_deadline(deadline);
       auto request_resolver = tcp::resolver{strand};
       auto timer = asio::steady_timer{strand, deadline};
       using namespace asio::experimental::awaitable_operators;
-      auto outcome = co_await (
-         request_resolver.async_resolve(endpoint.host, endpoint.port,
-                                        asio::as_tuple(use_awaitable)) ||
-         timer.async_wait(asio::as_tuple(use_awaitable)));
+      auto outcome =
+          co_await (request_resolver.async_resolve(endpoint.host, endpoint.port, asio::as_tuple(use_awaitable)) ||
+                    timer.async_wait(asio::as_tuple(use_awaitable)));
       if (outcome.index() != 0U) {
          const auto [timer_error] = std::get<1>(outcome);
          if (!timer_error) {
@@ -542,11 +550,19 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 
    void configure_tls_client_stream(beast::ssl_stream<beast::tcp_stream>& stream,
                                     const tls::context_snapshot& snapshot) const {
-      tls::configure_client_stream(stream.native_handle(), snapshot, {.endpoint_host = endpoint.host});
+      auto options = tls_stream_options;
+      if (options.endpoint_host.empty()) {
+         options.endpoint_host = endpoint.host;
+      }
+      tls::configure_client_stream(stream.native_handle(), snapshot, std::move(options));
    }
 
    void validate_tls_peer(beast::ssl_stream<beast::tcp_stream>& stream, const tls::context_snapshot& snapshot) const {
-      tls::validate_peer(stream.native_handle(), snapshot, {.expected_host = endpoint.host});
+      auto validation = tls_peer_validation;
+      if (validation.expected_host.empty()) {
+         validation.expected_host = endpoint.host;
+      }
+      tls::validate_peer(stream.native_handle(), snapshot, validation);
    }
 
    awaitable<void> ensure_tls_connected(transport_deadline deadline) {
@@ -556,7 +572,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 
       auto results = co_await resolve(deadline);
 
+      auto& tls_context_provider = *tls_context_provider_ptr;
       auto context_snapshot = tls_context_provider.snapshot();
+      require_tls_peer_verification(context_snapshot);
       auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
       configure_tls_client_stream(*stream, *context_snapshot);
 
@@ -656,7 +674,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    awaitable<response> do_tls_streaming_request(forge::net::http::request request_value, body_reader body,
                                                 transport_deadline deadline) {
       auto results = co_await resolve(deadline);
+      auto& tls_context_provider = *tls_context_provider_ptr;
       auto context_snapshot = tls_context_provider.snapshot();
+      require_tls_peer_verification(context_snapshot);
       auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
       configure_tls_client_stream(*stream, *context_snapshot);
 
@@ -720,7 +740,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    awaitable<response_stream> do_tls_stream_request(forge::net::http::request request_value,
                                                     std::optional<body_reader> body, transport_deadline deadline) {
       auto results = co_await resolve(deadline);
+      auto& tls_context_provider = *tls_context_provider_ptr;
       auto context_snapshot = tls_context_provider.snapshot();
+      require_tls_peer_verification(context_snapshot);
       auto stream = tls::make_beast_stream(context_snapshot, beast::tcp_stream{strand});
       configure_tls_client_stream(*stream, *context_snapshot);
 
@@ -1179,7 +1201,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
    base_url endpoint;
    asio::strand<asio::io_context::executor_type> strand;
    beast::flat_buffer buffer;
-   tls::context_provider tls_context_provider;
+   std::shared_ptr<tls::context_provider> tls_context_provider_ptr;
+   tls::client_stream_options tls_stream_options;
+   tls::peer_validation tls_peer_validation;
    std::unique_ptr<beast::tcp_stream> plain_stream;
    std::shared_ptr<beast::ssl_stream<beast::tcp_stream>> tls_stream;
    bool plain_connected = false;
@@ -1194,7 +1218,22 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 };
 
 connection::connection(forge::asio::runtime& runtime, base_url endpoint) try
-    : impl_(std::make_shared<impl>(runtime, std::move(endpoint))) {
+    : connection(runtime, std::move(endpoint), {.tls_context_provider = make_https_client_context_provider()}) {
+} catch (const forge::exceptions::base&) {
+   throw;
+} catch (const boost::system::system_error& error) {
+   raise_transport_implementation_error(error);
+} catch (const std::exception& error) {
+   raise_transport_implementation_error(error);
+} catch (...) {
+   raise_transport_implementation_error();
+}
+
+connection::connection(forge::asio::runtime& runtime, base_url endpoint, connection_options options) try
+    : impl_(std::make_shared<impl>(runtime, std::move(endpoint),
+                                   options.tls_context_provider ? std::move(options.tls_context_provider)
+                                                                : make_https_client_context_provider(),
+                                   std::move(options.tls_stream_options), std::move(options.tls_peer_validation))) {
 } catch (const forge::exceptions::base&) {
    throw;
 } catch (const boost::system::system_error& error) {

@@ -54,6 +54,12 @@ struct dotted_config {
 
 struct throwing_json_value {};
 
+struct byte_payload {
+   std::vector<std::uint8_t> value;
+};
+
+BOOST_DESCRIBE_STRUCT(byte_payload, (), (value))
+
 } // namespace forge_json_tests
 
 BOOST_DESCRIBE_STRUCT(forge_json_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
@@ -88,6 +94,14 @@ namespace forge_json_tests {
 
 void to_variant(const throwing_json_value&, forge::variant&) {
    throw std::runtime_error{"test JSON conversion failure"};
+}
+
+void from_variant(const forge::variant& source, byte_payload& value) {
+   forge::from_variant(source, value);
+}
+
+void to_variant(const byte_payload& value, forge::variant& output) {
+   forge::to_variant(value, output);
 }
 
 } // namespace forge_json_tests
@@ -1241,6 +1255,38 @@ BOOST_AUTO_TEST_CASE(json_write_escapes_control_bytes_inside_strings) {
    const auto parsed = forge::codec::json::read_value(written.text);
    BOOST_REQUIRE(parsed.ok());
    BOOST_TEST(parsed.value.get_object()["text"].get_string() == expected);
+}
+
+BOOST_AUTO_TEST_CASE(json_large_unsigned_byte_vectors_avoid_per_element_schema_materialization) {
+   auto expected = forge_json_tests::byte_payload{};
+   expected.value.resize(64U * 1024U);
+   for (auto index = std::size_t{}; index < expected.value.size(); ++index) {
+      expected.value[index] = static_cast<std::uint8_t>(index);
+   }
+
+   auto encoded = std::string{"{\"value\":["};
+   encoded.reserve(expected.value.size() * 4U);
+   for (auto index = std::size_t{}; index < expected.value.size(); ++index) {
+      if (index != 0U) {
+         encoded.push_back(',');
+      }
+      encoded.append(std::to_string(expected.value[index]));
+   }
+   encoded.append("]}");
+   const auto written = forge::codec::json::write(expected);
+   BOOST_REQUIRE(written.ok());
+   const auto decoded = forge::codec::json::read<forge_json_tests::byte_payload>(
+       encoded, {.described_records = forge::codec::json::described_record_policy::exact});
+   const auto decode_failure = decoded.diagnostics.empty()
+                                   ? std::string{"missing JSON diagnostic"}
+                                   : decoded.diagnostics.front().path + ": " + decoded.diagnostics.front().message;
+   BOOST_REQUIRE_MESSAGE(decoded.ok(), decode_failure);
+   BOOST_TEST(decoded.value.value == expected.value, boost::test_tools::per_element());
+
+   const auto invalid = forge::codec::json::read<forge_json_tests::byte_payload>(
+       R"({"value":[0,256]})", {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(!invalid.ok());
+   BOOST_TEST(invalid.diagnostics.front().path == "value[1]");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

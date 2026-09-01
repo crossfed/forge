@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <typeindex>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -33,12 +34,17 @@
 #include <forge/exceptions/macros.hpp>
 
 import forge.api.core.connection;
+import forge.api.core.binding;
 import forge.api.core.exceptions;
 import forge.api.core.registry;
+import forge.api.http.binding;
 import forge.api.http.client_response;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
+import forge.api.http.proxy;
+import forge.asio.blocking;
 import forge.asio.exceptions;
+import forge.asio.runtime;
 import forge.chain.api.admin;
 import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
@@ -56,13 +62,23 @@ import forge.chain.api.verified_client;
 import forge.chain.core.merkle;
 import forge.chain.protocol.audit;
 import forge.chain.protocol.account_authority;
+import forge.codec.hex;
+import forge.codec.json;
+import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
+import forge.exceptions;
+import forge.net.http.base_url;
+import forge.net.http.client;
+import forge.net.http.router;
+import forge.net.http.server;
 import forge.net.http.types;
 import forge.raw.raw;
 import forge.schema.exceptions;
 import forge.schema.scalar;
+import forge.variant.described;
+import forge.variant.value;
 
 namespace {
 
@@ -161,6 +177,9 @@ class block_service final : public forge::chain::api::block {
 
    boost::asio::awaitable<forge::chain::protocol::producers_response>
    get_producers(forge::chain::protocol::producers_request) override {
+      if (throw_producers_not_found) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::not_found, "producer table is not available");
+      }
       co_return forge::chain::protocol::producers_response{};
    }
 
@@ -174,9 +193,134 @@ class block_service final : public forge::chain::api::block {
       co_return forge::chain::protocol::finalizer_info_response{};
    }
 
+   bool throw_producers_not_found = false;
+
  private:
    forge::chain::protocol::block_response response_;
    forge::chain::protocol::block_header_response header_response_;
+};
+
+class snapshot_admin_service final : public forge::chain::api::admin {
+ public:
+   explicit snapshot_admin_service(forge::chain::protocol::snapshot_response response)
+       : response_{std::move(response)} {}
+
+   boost::asio::awaitable<forge::chain::protocol::push_block_response>
+   push_block(forge::chain::protocol::signed_block) override {
+      co_return forge::chain::protocol::push_block_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_response> create_snapshot(std::string name) override {
+      auto response = response_;
+      response.name = std::move(name);
+      co_return response;
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_lifecycle_response>
+   request_snapshot(forge::chain::protocol::snapshot_request request) override {
+      if (request.request_id == lost_request_id) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::snapshot_lost,
+                               "snapshot request anchor is no longer canonical");
+      }
+      if (accepted_request && accepted_request->request_id == request.request_id &&
+          accepted_request->name != request.name) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::conflict,
+                               "snapshot request id was already used with another name");
+      }
+      accepted_request = request;
+      co_return lifecycle(request);
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_lifecycle_response>
+   snapshot_status(forge::chain::protocol::snapshot_status_request request) override {
+      if (!accepted_request || request.request_id != accepted_request->request_id) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::not_found, "snapshot identity is not known");
+      }
+      co_return lifecycle(*accepted_request);
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::prune_response>
+   prune(forge::chain::protocol::prune_request) override {
+      co_return forge::chain::protocol::prune_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::producer_status_response>
+   producer_status(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::producer_status_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::supported_protocol_features_response>
+   supported_protocol_features(forge::chain::protocol::supported_protocol_features_request) override {
+      co_return forge::chain::protocol::supported_protocol_features_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::ram_corrections_response>
+   account_ram_corrections(forge::chain::protocol::ram_corrections_request) override {
+      co_return forge::chain::protocol::ram_corrections_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::unapplied_transactions_response>
+   unapplied_transactions(forge::chain::protocol::unapplied_transactions_request) override {
+      co_return forge::chain::protocol::unapplied_transactions_response{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_requests_response>
+   snapshot_requests(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::snapshot_requests_response{};
+   }
+
+   boost::asio::awaitable<bool> configure_pause(forge::chain::protocol::producer_pause_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_runtime_options(forge::chain::protocol::producer_runtime_options) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_greylist(forge::chain::protocol::greylist_update_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> set_access_policy(forge::chain::protocol::producer_access_policy) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_schedule>
+   schedule_snapshot(forge::chain::protocol::snapshot_schedule_request) override {
+      co_return forge::chain::protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::snapshot_schedule>
+   unschedule_snapshot(forge::chain::protocol::snapshot_schedule_id) override {
+      co_return forge::chain::protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<forge::chain::protocol::integrity_hash_response>
+   integrity_hash(forge::chain::protocol::admin_query) override {
+      co_return forge::chain::protocol::integrity_hash_response{};
+   }
+
+   boost::asio::awaitable<bool> schedule_protocol_features(std::vector<forge::chain::protocol::digest>) override {
+      co_return false;
+   }
+
+   forge::chain::protocol::snapshot_state state = forge::chain::protocol::snapshot_state::pending;
+   std::optional<forge::chain::protocol::snapshot_request> accepted_request;
+   std::string lost_request_id;
+
+ private:
+   forge::chain::protocol::snapshot_lifecycle_response
+   lifecycle(const forge::chain::protocol::snapshot_request& request) const {
+      return {
+          .request_id = request.request_id,
+          .name = request.name,
+          .state = state,
+          .head = response_.head,
+          .head_num = response_.head_num,
+      };
+   }
+
+   forge::chain::protocol::snapshot_response response_;
 };
 
 class info_service final : public forge::chain::api::info {
@@ -303,16 +447,22 @@ class state_service final : public forge::chain::api::state {
 class transaction_service final : public forge::chain::api::transaction {
  public:
    explicit transaction_service(forge::chain::protocol::transaction_status_response response)
-       : response_{std::move(response)} {}
+       : status_responses_{response}, await_responses_{std::move(response)} {}
+
+   transaction_service(std::vector<forge::chain::protocol::transaction_status_response> status_responses,
+                       std::vector<forge::chain::protocol::transaction_status_response> await_responses)
+       : status_responses_{std::move(status_responses)}, await_responses_{std::move(await_responses)} {}
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
-   get_status(forge::chain::protocol::transaction_status_request) override {
-      co_return response_;
+   get_status(forge::chain::protocol::transaction_status_request request) override {
+      status_requests.push_back(std::move(request));
+      co_return next_response(status_responses_, next_status_response_);
    }
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
-   await_transaction(forge::chain::protocol::transaction_await_request) override {
-      co_return response_;
+   await_transaction(forge::chain::protocol::transaction_await_request request) override {
+      await_requests.push_back(std::move(request));
+      co_return next_response(await_responses_, next_await_response_);
    }
 
    boost::asio::awaitable<std::vector<forge::chain::protocol::public_key>>
@@ -330,8 +480,24 @@ class transaction_service final : public forge::chain::api::transaction {
       co_return forge::chain::protocol::transaction_read_only_response{};
    }
 
+   std::vector<forge::chain::protocol::transaction_status_request> status_requests;
+   std::vector<forge::chain::protocol::transaction_await_request> await_requests;
+
  private:
-   forge::chain::protocol::transaction_status_response response_;
+   static forge::chain::protocol::transaction_status_response
+   next_response(const std::vector<forge::chain::protocol::transaction_status_response>& responses, std::size_t& next) {
+      if (responses.empty()) {
+         return {};
+      }
+      const auto index = std::min(next, responses.size() - 1U);
+      ++next;
+      return responses[index];
+   }
+
+   std::vector<forge::chain::protocol::transaction_status_response> status_responses_;
+   std::vector<forge::chain::protocol::transaction_status_response> await_responses_;
+   std::size_t next_status_response_ = 0;
+   std::size_t next_await_response_ = 0;
 };
 
 class submission_service final : public forge::chain::api::submission {
@@ -405,6 +571,26 @@ class deadline_remote_invoker final : public forge::api::core::remote_invoker {
    std::size_t calls = 0;
 };
 
+class trust_required_remote_invoker final : public forge::api::core::remote_invoker {
+ public:
+   boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+      ++calls;
+      const auto descriptor = forge::chain::api::info::describe();
+      const auto* method = forge::api::core::find_method(descriptor, value.method);
+      if (method == nullptr) {
+         throw forge::api::core::exceptions::protocol_error{"remote test method descriptor is missing"};
+      }
+      const auto error = forge::chain::api::exceptions::trust_required{"remote finality trust is outside retention"};
+      co_return forge::api::core::response{
+          .api = std::move(value.api),
+          .method = std::move(value.method),
+          .error = forge::api::core::project_error(*method, error),
+      };
+   }
+
+   std::size_t calls = 0;
+};
+
 class accepting_audit_verifier final : public forge::chain::api::audit_verifier {
  public:
    [[nodiscard]] std::optional<forge::chain::protocol::block_id> preferred_finality_anchor() const override {
@@ -412,6 +598,12 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
          throw std::runtime_error{"test preferred anchor failure"};
       }
       return preferred_anchor;
+   }
+
+   [[nodiscard]] std::optional<forge::chain::protocol::block_id>
+   finality_anchor_at_or_before(forge::chain::protocol::block_num target) const override {
+      finality_anchor_targets.push_back(target);
+      return retained_anchor ? retained_anchor : preferred_finality_anchor();
    }
 
    void verify_context(const forge::chain::protocol::response_context&) override {
@@ -489,7 +681,9 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    bool throw_nonstandard_state_point = false;
    bool throw_standard_transaction = false;
    bool throw_standard_preferred_anchor = false;
-   std::optional<forge::chain::protocol::block_id> preferred_anchor;
+   std::optional<forge::chain::protocol::block_id> preferred_anchor = forge::chain::protocol::block_id{};
+   std::optional<forge::chain::protocol::block_id> retained_anchor;
+   mutable std::vector<forge::chain::protocol::block_num> finality_anchor_targets;
 };
 
 class account_projection_verifier final : public forge::chain::api::projection_verifier {
@@ -1167,9 +1361,11 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
                   {"get_required_keys", "compute_transaction", "send_read_only_transaction"});
    require_routes(submissions, method::post, {"submit", "submit_batch"});
    require_routes(admin, method::get,
-                  {"producer_status", "supported_protocol_features", "account_ram_corrections",
-                   "unapplied_transactions", "snapshot_requests", "integrity_hash"});
-   require_routes(admin, method::post, {"push_block", "create_snapshot", "prune", "schedule_snapshot"});
+                  {"producer_status", "get_operator_identity", "get_node_status", "supported_protocol_features",
+                   "account_ram_corrections", "unapplied_transactions", "snapshot_status", "snapshot_requests",
+                   "integrity_hash"});
+   require_routes(admin, method::post,
+                  {"push_block", "create_snapshot", "request_snapshot", "prune", "schedule_snapshot"});
    require_routes(admin, method::put, {"configure_pause", "set_access_policy", "schedule_protocol_features"});
    require_routes(admin, method::patch, {"update_runtime_options", "update_greylist"});
    require_routes(admin, method::delete_, {"unschedule_snapshot"});
@@ -1181,15 +1377,222 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
 }
 
 BOOST_AUTO_TEST_CASE(chain_block_info_admin_contracts_are_version_2) {
-   const auto descriptors = std::array{forge::chain::api::block::describe(), forge::chain::api::info::describe(),
-                                       forge::chain::api::admin::describe()};
-   for (const auto& descriptor : descriptors) {
-      BOOST_TEST(descriptor.version.major == 2U);
-      BOOST_TEST(descriptor.version.revision == 0U);
-   }
+   const auto block = forge::chain::api::block::describe();
+   const auto info = forge::chain::api::info::describe();
+   const auto admin = forge::chain::api::admin::describe();
+   BOOST_TEST(block.version.major == 2U);
+   BOOST_TEST(block.version.revision == 1U);
+   BOOST_TEST(info.version.major == 2U);
+   BOOST_TEST(info.version.revision == 0U);
+   BOOST_TEST(admin.version.major == 2U);
+   BOOST_TEST(admin.version.revision == 3U);
    BOOST_TEST(forge::chain::api::block::ref().major == 2U);
+   BOOST_TEST(forge::chain::api::block::ref().min_revision == 1U);
    BOOST_TEST(forge::chain::api::info::ref().major == 2U);
    BOOST_TEST(forge::chain::api::admin::ref().major == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_snapshot_lifecycle_descriptor_and_codecs_are_revision_2_compatible) {
+   auto head = forge::chain::protocol::block_id{};
+   head._hash[0] = 0x42U;
+   const auto created = forge::chain::protocol::snapshot_response{
+       .name = "snapshot-a",
+       .head = head,
+       .head_num = 42U,
+   };
+   const auto request = forge::chain::protocol::snapshot_request{
+       .request_id = "request-42",
+       .name = "snapshot-a",
+   };
+   const auto status_request = forge::chain::protocol::snapshot_status_request{.request_id = request.request_id};
+   const auto lifecycle = forge::chain::protocol::snapshot_lifecycle_response{
+       .request_id = request.request_id,
+       .name = request.name,
+       .state = forge::chain::protocol::snapshot_state::completed,
+       .head = head,
+       .head_num = 42U,
+   };
+
+   const auto descriptor = forge::chain::api::admin::describe();
+   const auto* create = forge::api::core::find_method(descriptor, "create_snapshot");
+   const auto* request_method = forge::api::core::find_method(descriptor, "request_snapshot");
+   const auto* status = forge::api::core::find_method(descriptor, "snapshot_status");
+   BOOST_REQUIRE(create != nullptr);
+   BOOST_REQUIRE(request_method != nullptr);
+   BOOST_REQUIRE(status != nullptr);
+   BOOST_TEST(descriptor.version.revision == 3U);
+   BOOST_TEST(request_method->since_revision == 2U);
+   BOOST_TEST(status->since_revision == 2U);
+   BOOST_CHECK(create->response_type == std::type_index{typeid(forge::chain::protocol::snapshot_response)});
+   BOOST_CHECK(request_method->request_type == std::type_index{typeid(forge::chain::protocol::snapshot_request)});
+   BOOST_CHECK(request_method->response_type ==
+               std::type_index{typeid(forge::chain::protocol::snapshot_lifecycle_response)});
+   BOOST_CHECK(status->request_type == std::type_index{typeid(forge::chain::protocol::snapshot_status_request)});
+   BOOST_CHECK(status->response_type == std::type_index{typeid(forge::chain::protocol::snapshot_lifecycle_response)});
+
+   const auto old_snapshot_wire = forge::codec::hex::decode(
+       "0a736e617073686f742d6142000000000000000000000000000000000000000000000000000000000000002a000000");
+   BOOST_CHECK(forge::raw::pack(created) == old_snapshot_wire);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_response>(old_snapshot_wire) == created);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_request>(forge::raw::pack(request)) ==
+               request);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_status_request>(
+                   forge::raw::pack(status_request)) == status_request);
+   BOOST_CHECK(forge::raw::unpack_exact<forge::chain::protocol::snapshot_lifecycle_response>(
+                   forge::raw::pack(lifecycle)) == lifecycle);
+
+   const auto created_json = forge::codec::json::write(created);
+   const auto lifecycle_request_json = forge::codec::json::write(request);
+   const auto status_request_json = forge::codec::json::write(status_request);
+   const auto response_json = forge::codec::json::write(lifecycle);
+   BOOST_REQUIRE(created_json.ok());
+   BOOST_REQUIRE(lifecycle_request_json.ok());
+   BOOST_REQUIRE(status_request_json.ok());
+   BOOST_REQUIRE(response_json.ok());
+   BOOST_CHECK(created_json.text.find("\"state\"") == std::string::npos);
+   const auto json_options = forge::codec::json::read_options{
+       .unknown_fields = forge::codec::json::unknown_field_policy::error,
+   };
+   const auto created_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_response>(created_json.text, json_options);
+   const auto lifecycle_request_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_request>(lifecycle_request_json.text, json_options);
+   const auto status_request_round_trip = forge::codec::json::read<forge::chain::protocol::snapshot_status_request>(
+       status_request_json.text, json_options);
+   const auto response_round_trip =
+       forge::codec::json::read<forge::chain::protocol::snapshot_lifecycle_response>(response_json.text, json_options);
+   BOOST_REQUIRE(created_round_trip.ok());
+   BOOST_REQUIRE(lifecycle_request_round_trip.ok());
+   BOOST_REQUIRE(status_request_round_trip.ok());
+   BOOST_REQUIRE(response_round_trip.ok());
+   BOOST_CHECK(created_round_trip.value == created);
+   BOOST_CHECK(lifecycle_request_round_trip.value == request);
+   BOOST_CHECK(status_request_round_trip.value == status_request);
+   BOOST_CHECK(response_round_trip.value == lifecycle);
+}
+
+BOOST_AUTO_TEST_CASE(chain_block_descriptor_declares_not_found_only_for_entity_lookups) {
+   const auto descriptor = forge::chain::api::block::describe();
+   const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
+
+   for (const auto name : {"get_block", "get_header", "get_block_state", "get_producers"}) {
+      const auto* method = forge::api::core::find_method(descriptor, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, not_found, &forge::api::core::error_descriptor::identity) !=
+                  method->errors.end());
+   }
+   for (const auto name : {"get_canonical_range", "get_activated_protocol_features", "get_consensus_parameters",
+                           "get_producer_schedule", "get_finalizer_info"}) {
+      const auto* method = forge::api::core::find_method(descriptor, name);
+      BOOST_REQUIRE(method != nullptr);
+      BOOST_CHECK(std::ranges::find(method->errors, not_found, &forge::api::core::error_descriptor::identity) ==
+                  method->errors.end());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(chain_producers_http_roundtrip_preserves_typed_not_found) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto service = std::make_shared<block_service>(forge::chain::protocol::block_response{});
+   service->throw_producers_not_found = true;
+
+   auto apis = forge::api::core::registry{};
+   apis.install<forge::chain::api::block>(forge::chain::api::block::describe(), service);
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<forge::chain::api::block>()
+                    .build());
+
+   auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
+   server.start();
+   try {
+      auto client = forge::net::http::client{
+          runtime,
+          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+      };
+      auto remote = forge::asio::blocking::run(runtime, forge::api::http::remote<forge::chain::api::block>(client));
+      BOOST_CHECK_THROW(
+          forge::asio::blocking::run(runtime, remote->get_producers(forge::chain::protocol::producers_request{})),
+          forge::chain::api::exceptions::not_found);
+   } catch (...) {
+      server.stop();
+      throw;
+   }
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(chain_snapshot_http_roundtrip_preserves_lifecycle_and_typed_not_found) {
+   auto head = forge::chain::protocol::block_id{};
+   head._hash[0] = 0x42U;
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto service = std::make_shared<snapshot_admin_service>(forge::chain::protocol::snapshot_response{
+       .name = "snapshot-a",
+       .head = head,
+       .head_num = 42U,
+   });
+
+   auto apis = forge::api::core::registry{};
+   apis.install<forge::chain::api::admin>(forge::chain::api::admin::describe(), service);
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<forge::chain::api::admin>()
+                    .build());
+
+   auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
+   server.start();
+   try {
+      auto client = forge::net::http::client{
+          runtime,
+          forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+      };
+      auto remote = forge::asio::blocking::run(runtime, forge::api::http::remote<forge::chain::api::admin>(client));
+
+      const auto created = forge::asio::blocking::run(runtime, remote->create_snapshot("snapshot-a"));
+      BOOST_TEST(created.head == head);
+      BOOST_TEST(created.head_num == 42U);
+
+      const auto request = forge::chain::protocol::snapshot_request{
+          .request_id = "request-42",
+          .name = "snapshot-a",
+      };
+      const auto pending = forge::asio::blocking::run(runtime, remote->request_snapshot(request));
+      BOOST_CHECK(pending.state == forge::chain::protocol::snapshot_state::pending);
+      BOOST_TEST(pending.request_id == request.request_id);
+      BOOST_REQUIRE(pending.head.has_value());
+      BOOST_TEST(*pending.head == head);
+
+      const auto replay = forge::asio::blocking::run(runtime, remote->request_snapshot(request));
+      BOOST_CHECK(replay == pending);
+
+      auto mismatched = request;
+      mismatched.name = "snapshot-b";
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->request_snapshot(mismatched)),
+                        forge::chain::api::exceptions::conflict);
+
+      service->lost_request_id = "lost-request";
+      auto lost = request;
+      lost.request_id = service->lost_request_id;
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->request_snapshot(lost)),
+                        forge::chain::api::exceptions::snapshot_lost);
+
+      const auto status_request = forge::chain::protocol::snapshot_status_request{.request_id = request.request_id};
+      service->state = forge::chain::protocol::snapshot_state::completed;
+      const auto completed = forge::asio::blocking::run(runtime, remote->snapshot_status(status_request));
+      BOOST_CHECK(completed.state == forge::chain::protocol::snapshot_state::completed);
+      BOOST_TEST(completed.request_id == request.request_id);
+
+      auto unknown = status_request;
+      unknown.request_id = "unknown-request";
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, remote->snapshot_status(unknown)),
+                        forge::chain::api::exceptions::not_found);
+   } catch (...) {
+      server.stop();
+      throw;
+   }
+   server.stop();
 }
 
 BOOST_AUTO_TEST_CASE(chain_state_v3_declares_only_typed_state_reads_and_public_history_error) {
@@ -1810,17 +2213,62 @@ BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exc
    BOOST_TEST(invoker->calls == 1U);
 }
 
+BOOST_AUTO_TEST_CASE(chain_audited_query_remote_restores_trust_required) {
+   const auto descriptor = forge::chain::api::info::describe();
+   const auto* method = forge::api::core::find_method(descriptor, "get");
+   BOOST_REQUIRE(method != nullptr);
+   const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::trust_required>();
+   const auto declared = std::ranges::find(method->errors, identity, &forge::api::core::error_descriptor::identity);
+   BOOST_REQUIRE(declared != method->errors.end());
+   BOOST_CHECK(declared->status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(!declared->retryable);
+
+   auto invoker = std::make_shared<trust_required_remote_invoker>();
+   auto remote = forge::api::core::proxy<forge::chain::api::info>{invoker};
+   BOOST_CHECK_THROW(run(remote.get({.audit = forge::chain::protocol::audit_mode::required})),
+                     forge::chain::api::exceptions::trust_required);
+   BOOST_TEST(invoker->calls == 1U);
+}
+
 BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_methods) {
    const auto descriptor = forge::chain::api::admin::describe();
    const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::conflict>();
    const auto* push = forge::api::core::find_method(descriptor, "push_block");
    const auto* status = forge::api::core::find_method(descriptor, "producer_status");
+   const auto* operator_identity = forge::api::core::find_method(descriptor, "get_operator_identity");
+   const auto* node_status = forge::api::core::find_method(descriptor, "get_node_status");
+   const auto* snapshot_status = forge::api::core::find_method(descriptor, "snapshot_status");
+   const auto* snapshot_request = forge::api::core::find_method(descriptor, "request_snapshot");
+   const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
+   const auto snapshot_lost = forge::api::core::exception_identity<forge::chain::api::exceptions::snapshot_lost>();
    BOOST_REQUIRE(push != nullptr);
    BOOST_REQUIRE(status != nullptr);
+   BOOST_REQUIRE(operator_identity != nullptr);
+   BOOST_REQUIRE(node_status != nullptr);
+   BOOST_REQUIRE(snapshot_status != nullptr);
+   BOOST_REQUIRE(snapshot_request != nullptr);
    BOOST_CHECK(std::ranges::find(push->errors, identity, &forge::api::core::error_descriptor::identity) !=
                push->errors.end());
    BOOST_CHECK(std::ranges::find(status->errors, identity, &forge::api::core::error_descriptor::identity) ==
                status->errors.end());
+   BOOST_CHECK(std::ranges::find(operator_identity->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               operator_identity->errors.end());
+   BOOST_CHECK(std::ranges::find(node_status->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               node_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_status->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               snapshot_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_status->errors, not_found, &forge::api::core::error_descriptor::identity) !=
+               snapshot_status->errors.end());
+   BOOST_CHECK(std::ranges::find(snapshot_request->errors, snapshot_lost,
+                                 &forge::api::core::error_descriptor::identity) != snapshot_request->errors.end());
+   for (const auto& method : descriptor.methods) {
+      if (method.name != "request_snapshot") {
+         BOOST_CHECK(std::ranges::find(method.errors, snapshot_lost, &forge::api::core::error_descriptor::identity) ==
+                     method.errors.end());
+      }
+   }
+   BOOST_TEST(operator_identity->since_revision == 1U);
+   BOOST_TEST(node_status->since_revision == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
@@ -1923,6 +2371,61 @@ BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
    BOOST_TEST(schema["format"].as_string() == "forge-public-key");
 }
 
+BOOST_AUTO_TEST_CASE(chain_admin_operator_identity_preserves_non_k1_key_across_raw_variant_and_http_json) {
+   auto r1 = forge::crypto::asymmetric::r1_public_key{};
+   r1.data[0] = static_cast<char>(0x02);
+   auto finalizer_bytes = forge::crypto::bls::public_key::data_type{};
+   const auto finalizer_wire = forge::codec::hex::decode(
+       "f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c580"
+       "50bd5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e");
+   BOOST_REQUIRE(finalizer_wire.size() == finalizer_bytes.size());
+   std::ranges::copy(finalizer_wire, finalizer_bytes.begin());
+   const auto identity = forge::chain::protocol::operator_identity{
+       .producer = forge::chain::protocol::account_name{"operator"},
+       .block_public_key = forge::chain::protocol::public_key{r1},
+       .finalizer_public_key = forge::crypto::bls::public_key{finalizer_bytes},
+       .enabled_roles = {forge::chain::protocol::operator_role::producer},
+   };
+
+   const auto raw = forge::raw::unpack<forge::chain::protocol::operator_identity>(forge::raw::pack(identity));
+   BOOST_CHECK(raw == identity);
+   BOOST_CHECK(std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(raw.block_public_key));
+
+   auto variant = forge::variant{};
+   forge::to_variant(identity, variant);
+   auto variant_round_trip = forge::chain::protocol::operator_identity{};
+   forge::from_variant(variant, variant_round_trip);
+   BOOST_CHECK(variant_round_trip == identity);
+   BOOST_CHECK(std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(variant_round_trip.block_public_key));
+
+   const auto http_json = forge::codec::json::write(identity);
+   BOOST_REQUIRE(http_json.ok());
+   const auto http_round_trip = forge::codec::json::read<forge::chain::protocol::operator_identity>(
+       http_json.text,
+       {.source_name = "http.operator_identity", .unknown_fields = forge::codec::json::unknown_field_policy::error});
+   BOOST_REQUIRE(http_round_trip.ok());
+   BOOST_CHECK(http_round_trip.value == identity);
+   BOOST_CHECK(
+       std::holds_alternative<forge::crypto::asymmetric::r1_public_key>(http_round_trip.value.block_public_key));
+}
+
+BOOST_AUTO_TEST_CASE(http_response_decode_reports_safe_codec_location) {
+   auto response = forge::net::http::response{forge::net::http::status::ok, 11};
+   response.body() = R"({"enabled_roles":["not-an-operator-role"],"secret-bearing-field\n":true})";
+
+   try {
+      static_cast<void>(forge::api::http::detail::decode_response_body<forge::chain::protocol::operator_identity>(
+          response, forge::api::http::body_codec::json));
+      BOOST_FAIL("invalid typed HTTP response was accepted");
+   } catch (const std::exception& error) {
+      const auto chain = forge::exceptions::format_exception_chain(error);
+      BOOST_TEST(chain.find("diagnostic_code=json.type") != std::string::npos);
+      BOOST_TEST(chain.find("diagnostic_path_size=") != std::string::npos);
+      BOOST_TEST(chain.find("secret-bearing-field") == std::string::npos);
+      BOOST_TEST(chain.find(response.body()) == std::string::npos);
+   }
+}
+
 BOOST_AUTO_TEST_CASE(chain_state_selector_openapi_requires_exactly_one_id_or_key) {
    const auto document = forge::api::http::openapi<forge::chain::api::state>();
    const auto check = [&](const char* path, std::initializer_list<std::string_view> other_fields) {
@@ -2021,6 +2524,17 @@ BOOST_AUTO_TEST_CASE(chain_block_info_admin_openapi_exposes_canonical_typed_reco
    BOOST_TEST(!info_properties.get_object().contains("total_cpu_weight"));
 
    const auto admin = forge::api::http::openapi<forge::chain::api::admin>();
+   const auto& operator_identity = admin["paths"]["/v1/chain/admin/operator-identity"]["get"]["responses"]["200"]
+                                        ["content"]["application/json"]["schema"]["properties"];
+   BOOST_TEST(operator_identity.get_object().contains("producer"));
+   BOOST_TEST(operator_identity.get_object().contains("block_public_key"));
+   BOOST_TEST(operator_identity.get_object().contains("finalizer_public_key"));
+   BOOST_TEST(operator_identity.get_object().contains("enabled_roles"));
+   const auto& node_status = admin["paths"]["/v1/chain/admin/node-status"]["get"]["responses"]["200"]["content"]
+                                  ["application/json"]["schema"]["properties"];
+   BOOST_TEST(node_status.get_object().contains("process_start"));
+   BOOST_TEST(node_status.get_object().contains("uptime_ms"));
+   BOOST_TEST(node_status.get_object().contains("lifecycle"));
    const auto& supported_feature_properties =
        admin["paths"]["/v1/chain/admin/protocol-features/supported"]["get"]["responses"]["200"]["content"]
             ["application/json"]["schema"]["properties"]["features"]["items"]["properties"];
@@ -2546,7 +3060,7 @@ BOOST_AUTO_TEST_CASE(verified_await_transaction_enforces_requested_finality) {
           }},
           std::make_shared<accepting_audit_verifier>(),
       };
-      return run(client.await_transaction({.id = id, .desired = desired}));
+      return run(client.await_transaction({.id = id, .desired = desired, .finality_from = anchor.block}));
    };
 
    BOOST_CHECK_THROW(static_cast<void>(await(response, forge::chain::protocol::transaction_lifecycle::finalized)),
@@ -2587,8 +3101,165 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
        verifier,
    };
 
-   static_cast<void>(run(client.get_transaction_status({.id = id})));
+   static_cast<void>(
+       run(client.get_transaction_status({.id = id, .finality_from = forge::chain::protocol::block_id{}})));
    BOOST_TEST(verifier->transaction_verifications == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_transaction_uses_an_unaudited_height_hint_then_a_retained_trust_anchor) {
+   auto id = forge::chain::protocol::transaction_id{};
+   id._hash[0] = 41U;
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.block_num = 7U;
+   response.context.anchor = forge::chain::protocol::state_anchor{.block_num = 7U};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
+   };
+
+   auto confirmation = response;
+   confirmation.block_num = 8U;
+   confirmation.context.anchor = forge::chain::protocol::state_anchor{.block_num = 8U};
+
+   auto services = forge::api::core::registry{};
+   auto service = std::make_shared<transaction_service>(
+       std::vector<forge::chain::protocol::transaction_status_response>{response, confirmation},
+       std::vector<forge::chain::protocol::transaction_status_response>{response});
+   services.install<forge::chain::api::transaction>(service);
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto retained = forge::chain::protocol::block_id{};
+   retained._hash[0] = 3U;
+   verifier->retained_anchor = retained;
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+       }},
+       verifier,
+   };
+
+   const auto status = run(client.get_transaction_status({.id = id}));
+   BOOST_REQUIRE(status.block_num);
+   BOOST_CHECK_EQUAL(*status.block_num, 8U);
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 2U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::none);
+   BOOST_CHECK(!service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(service->status_requests[1].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[1].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[1].finality_from == retained);
+   BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets[0], 7U);
+
+   service->status_requests.clear();
+   const auto awaited = run(client.await_transaction({.id = id}));
+   BOOST_REQUIRE(awaited.block_num);
+   BOOST_CHECK_EQUAL(*awaited.block_num, 8U);
+   BOOST_REQUIRE_EQUAL(service->await_requests.size(), 1U);
+   BOOST_CHECK(service->await_requests[0].audit == forge::chain::protocol::audit_mode::none);
+   BOOST_CHECK(!service->await_requests[0].finality_from.has_value());
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[0].finality_from == retained);
+   BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 2U);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets[1], 7U);
+
+   service->status_requests.clear();
+   auto explicit_anchor = forge::chain::protocol::block_id{};
+   explicit_anchor._hash[0] = 2U;
+   static_cast<void>(run(client.get_transaction_status({.id = id, .finality_from = explicit_anchor})));
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[0].finality_from == explicit_anchor);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.size(), 2U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_transaction_hint_requires_a_bound_height_and_retained_anchor) {
+   auto id = forge::chain::protocol::transaction_id{};
+   id._hash[0] = 43U;
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.block_num = 7U;
+   response.context.anchor = forge::chain::protocol::state_anchor{.block_num = 7U};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
+   };
+
+   const auto make_client = [](const std::shared_ptr<transaction_service>& service,
+                               const std::shared_ptr<accepting_audit_verifier>& verifier) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::transaction>(service);
+      return forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+          }},
+          verifier,
+      };
+   };
+
+   {
+      auto missing_height = response;
+      missing_height.block_num.reset();
+      const auto service = std::make_shared<transaction_service>(std::move(missing_height));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(service->status_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      auto wrong_id = response;
+      ++wrong_id.id._hash[0];
+      const auto service = std::make_shared<transaction_service>(std::move(wrong_id));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      auto inconsistent_block = response;
+      inconsistent_block.block = forge::chain::protocol::block_id{};
+      const auto service = std::make_shared<transaction_service>(std::move(inconsistent_block));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      const auto service = std::make_shared<transaction_service>(response);
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      verifier->preferred_anchor.reset();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::anchor_unavailable);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(service->status_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), 7U);
+   }
+   {
+      const auto service = std::make_shared<transaction_service>(response);
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      verifier->preferred_anchor.reset();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.await_transaction({.id = id}))),
+                        forge::chain::api::exceptions::anchor_unavailable);
+      BOOST_REQUIRE_EQUAL(service->await_requests.size(), 1U);
+      BOOST_CHECK(service->await_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_CHECK(service->status_requests.empty());
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), 7U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transaction_ids) {
@@ -2738,7 +3409,8 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_exec
        verifier,
    };
 
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status(
+                         {.id = id, .finality_from = forge::chain::protocol::block_id{}}))),
                      forge::chain::api::exceptions::invalid_transaction_proof);
    BOOST_TEST(verifier->transaction_verifications == 0U);
 }
@@ -2766,7 +3438,8 @@ BOOST_AUTO_TEST_CASE(verified_transaction_translates_verifier_failures_to_typed_
        verifier,
    };
 
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status(
+                         {.id = id, .finality_from = forge::chain::protocol::block_id{}}))),
                      forge::chain::api::exceptions::invalid_transaction_proof);
 }
 
@@ -2885,6 +3558,56 @@ BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_wi
                      forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.send_read_only_transaction(forge::chain::protocol::transaction_read_only_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
+}
+
+BOOST_AUTO_TEST_CASE(verified_change_requests_select_the_first_possible_witness_anchor) {
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::state>(
+       std::make_shared<state_service>(forge::chain::protocol::table_changes_response{}));
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       verifier,
+       std::make_shared<typed_changes_projection_verifier>(),
+   };
+
+   const auto check_table = [&](std::uint32_t from_block, std::uint32_t to_block, std::uint32_t expected_target) {
+      verifier->finality_anchor_targets.clear();
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_table_changes({
+                            .from_block = from_block,
+                            .to_block = to_block,
+                            .tables = {{.code = forge::chain::protocol::account_name{"table"}}},
+                        }))),
+                        forge::chain::api::exceptions::audit_not_supported);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), expected_target);
+   };
+   const auto check_account = [&](std::uint32_t from_block, std::uint32_t to_block, std::uint32_t expected_target) {
+      verifier->finality_anchor_targets.clear();
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_account_changes({
+                            .from_block = from_block,
+                            .to_block = to_block,
+                            .accounts = {forge::chain::protocol::account_name{"account"}},
+                        }))),
+                        forge::chain::api::exceptions::audit_not_supported);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), expected_target);
+   };
+
+   check_table(10U, 12U, 11U);
+   check_account(10U, 12U, 11U);
+   check_table(12U, 12U, 12U);
+   check_account(12U, 12U, 12U);
+   check_table(std::numeric_limits<std::uint32_t>::max() - 1U, std::numeric_limits<std::uint32_t>::max(),
+               std::numeric_limits<std::uint32_t>::max());
+   check_account(std::numeric_limits<std::uint32_t>::max() - 1U, std::numeric_limits<std::uint32_t>::max(),
+                 std::numeric_limits<std::uint32_t>::max());
+   check_table(std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max(),
+               std::numeric_limits<std::uint32_t>::max());
+   check_account(std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max(),
+                 std::numeric_limits<std::uint32_t>::max());
 }
 
 BOOST_AUTO_TEST_CASE(verified_table_changes_bind_opaque_cursor_and_enforce_lww_projection) {

@@ -3,6 +3,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/api/core/macros.hpp>
 #include <forge/api/http/macros.hpp>
+#include <type_traits>
 
 export module forge.chain.api.block;
 
@@ -59,12 +60,21 @@ template <> struct method_descriptor_customization<::forge::chain::api::block> {
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::block, EnableRaw>& method) {
       ::forge::chain::api::exceptions::descriptor::declare_historical_query<Method>(method);
+      if constexpr (std::is_same_v<decltype(Method), decltype(&::forge::chain::api::block::get_block)>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      } else if constexpr (std::is_same_v<decltype(Method), decltype(&::forge::chain::api::block::get_header)>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      } else if constexpr (std::is_same_v<decltype(Method), decltype(&::forge::chain::api::block::get_block_state)>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      } else if constexpr (std::is_same_v<decltype(Method), decltype(&::forge::chain::api::block::get_producers)>) {
+         ::forge::chain::api::exceptions::descriptor::declare_not_found(method);
+      }
    }
 };
 
 } // namespace forge::api::core
 
-FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api.block", 2, 0),
+FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api.block", 2, 1),
                  FORGE_API_METHOD_TYPED(get_block, ::forge::chain::protocol::block_request,
                                         ::forge::chain::protocol::block_response),
                  FORGE_API_METHOD_TYPED(get_header, ::forge::chain::protocol::block_request,

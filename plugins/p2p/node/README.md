@@ -52,6 +52,7 @@ isolated codec and interop fixtures do not promote this plugin to production.
 - Config section: `plugins.p2p.node`
 - Public modules:
   - `forge.plugins.p2p.node.plugin`
+  - `forge.plugins.p2p.node.descriptor`
   - `forge.plugins.p2p.node.api`
   - `forge.plugins.p2p.node.types`
   - `forge.plugins.p2p.node.exceptions`
