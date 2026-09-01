@@ -50,6 +50,27 @@ std::optional<protocol::block_id> savanna_finality_trust_store::preferred_trust_
    return preferred_entry_locked().position.block;
 }
 
+std::optional<protocol::block_id>
+savanna_finality_trust_store::trust_anchor_at_or_before(protocol::block_num target) const {
+   const auto lock = std::lock_guard{mutex_};
+   const auto prefer = [&](const trusted_entry* current, const trusted_entry& candidate) {
+      if (candidate.position.finalized_block_num > target) {
+         return current;
+      }
+      return !current || candidate.position.finalized_block_num > current->position.finalized_block_num ? &candidate
+                                                                                                        : current;
+   };
+
+   const auto* selected = static_cast<const trusted_entry*>(nullptr);
+   for (const auto& configured : configured_roots_) {
+      selected = prefer(selected, configured);
+   }
+   for (const auto& rolling : rolling_checkpoints_) {
+      selected = prefer(selected, rolling);
+   }
+   return selected ? std::optional{selected->position.block} : std::nullopt;
+}
+
 protocol::chain_id savanna_finality_trust_store::trusted_chain() const {
    return chain_;
 }
@@ -62,9 +83,8 @@ std::shared_ptr<const savanna::header_state>
 savanna_finality_trust_store::cached_replay_state(const protocol::state_anchor& anchor,
                                                   const protocol::digest& proof_digest) const {
    const auto lock = std::lock_guard{mutex_};
-   const auto found = std::ranges::find_if(replay_states_, [&](const auto& entry) {
-      return entry.anchor == anchor && entry.proof_digest == proof_digest;
-   });
+   const auto found = std::ranges::find_if(
+       replay_states_, [&](const auto& entry) { return entry.anchor == anchor && entry.proof_digest == proof_digest; });
    return found == replay_states_.end() ? nullptr : found->state;
 }
 
@@ -92,9 +112,9 @@ savanna_finality_trust_store::take_snapshot(const protocol::state_anchor& expect
 void savanna_finality_trust_store::install_verified(savanna::finality_checkpoint_bootstrap checkpoint,
                                                     const savanna::finality_replay& replay,
                                                     const protocol::state_anchor& anchor,
-                                                    const protocol::digest& proof_digest,
-                                                    savanna::header_state state) {
+                                                    const protocol::digest& proof_digest, savanna::header_state state) {
    auto candidate = make_checkpoint_entry(std::move(checkpoint));
+   candidate.canonical_anchors = canonical_anchors(replay, candidate.position, limits_);
    auto replay_entry = replay_state_entry{
        .anchor = anchor,
        .proof_digest = proof_digest,
@@ -121,8 +141,17 @@ void savanna_finality_trust_store::install_verified(savanna::finality_checkpoint
    }
 
    if (candidate.position.finalized_block_num < current.position.finalized_block_num) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
-                            "Savanna finality checkpoint would roll back the preferred finalized height");
+      const auto* canonical = find_canonical_anchor_at_height_locked(candidate.position.finalized_block_num);
+      if (!canonical) {
+         FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality checkpoint is older than preferred trust "
+                                                           "and its canonical ancestry is no longer retained");
+      }
+      if (canonical->block != candidate.position.block) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                               "Savanna finality checkpoint conflicts with retained canonical ancestry");
+      }
+      commit_replay_state_locked(std::move(replay_entry));
+      return;
    }
 
    if (!replay_contains(replay, current.position)) {
@@ -185,11 +214,12 @@ savanna_finality_trust_store::make_configured_entry(savanna::finality_trust trus
    }
    const auto anchor = savanna::trust_anchor(trust);
    return {
-       .position = {
-           .chain = anchor.chain,
-           .block = anchor.block,
-           .finalized_block_num = operational_block_num(trust),
-       },
+       .position =
+           {
+               .chain = anchor.chain,
+               .block = anchor.block,
+               .finalized_block_num = operational_block_num(trust),
+           },
        .checkpoint_bytes = std::move(checkpoint_bytes),
        .trust = std::make_shared<const savanna::finality_trust>(std::move(trust)),
    };
@@ -201,14 +231,46 @@ savanna_finality_trust_store::make_checkpoint_entry(savanna::finality_checkpoint
    auto trust = savanna::finality_trust{std::move(checkpoint)};
    const auto anchor = savanna::trust_anchor(trust);
    return {
-       .position = {
-           .chain = anchor.chain,
-           .block = anchor.block,
-           .finalized_block_num = operational_block_num(trust),
-       },
+       .position =
+           {
+               .chain = anchor.chain,
+               .block = anchor.block,
+               .finalized_block_num = operational_block_num(trust),
+           },
        .checkpoint_bytes = std::move(checkpoint_bytes),
        .trust = std::make_shared<const savanna::finality_trust>(std::move(trust)),
    };
+}
+
+std::vector<protocol::state_anchor>
+savanna_finality_trust_store::canonical_anchors(const savanna::finality_replay& replay,
+                                                const savanna_trusted_position& checkpoint,
+                                                savanna::finality_witness_limits limits) {
+   auto result = std::vector<protocol::state_anchor>{};
+   result.reserve(std::min(replay.anchors.size(), static_cast<std::size_t>(limits.max_blocks)));
+   auto previous = std::optional<protocol::block_num>{};
+   auto contains_checkpoint = false;
+   for (const auto& anchor : replay.anchors) {
+      if (anchor.chain != checkpoint.chain || (previous && anchor.block_num <= *previous)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "Savanna finality replay has invalid canonical ancestry");
+      }
+      previous = anchor.block_num;
+      if (anchor.block_num > checkpoint.finalized_block_num) {
+         continue;
+      }
+      if (result.size() == limits.max_blocks) {
+         FORGE_THROW_EXCEPTION(exceptions::resource_exhausted,
+                               "Savanna finality checkpoint canonical ancestry exceeds the witness block limit");
+      }
+      contains_checkpoint = contains_checkpoint ||
+                            (anchor.block == checkpoint.block && anchor.block_num == checkpoint.finalized_block_num);
+      result.push_back(anchor);
+   }
+   if (!contains_checkpoint) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "Savanna finality replay does not contain its finalized checkpoint");
+   }
+   return result;
 }
 
 void savanna_finality_trust_store::add_configured_root(savanna::finality_trust trust) {
@@ -239,7 +301,7 @@ void savanna_finality_trust_store::add_configured_root(savanna::finality_trust t
 const savanna_finality_trust_store::trusted_entry& savanna_finality_trust_store::preferred_entry_locked() const {
    const auto prefer = [](const trusted_entry* current, const trusted_entry& candidate) {
       return !current || candidate.position.finalized_block_num > current->position.finalized_block_num ? &candidate
-                                                                                                            : current;
+                                                                                                        : current;
    };
 
    const auto* preferred = static_cast<const trusted_entry*>(nullptr);
@@ -263,6 +325,28 @@ savanna_finality_trust_store::find_at_height_locked(protocol::block_num height) 
    return rolling == rolling_checkpoints_.end() ? nullptr : &*rolling;
 }
 
+const protocol::state_anchor*
+savanna_finality_trust_store::find_canonical_anchor_at_height_locked(protocol::block_num height) const {
+   const auto* selected = static_cast<const protocol::state_anchor*>(nullptr);
+   for (const auto& checkpoint : rolling_checkpoints_) {
+      for (const auto& anchor : checkpoint.canonical_anchors) {
+         if (anchor.block_num != height) {
+            continue;
+         }
+         if (anchor.chain != chain_) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                                  "Savanna finality checkpoint retains canonical ancestry for another chain");
+         }
+         if (selected && *selected != anchor) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                                  "Savanna finality checkpoints retain conflicting canonical ancestry");
+         }
+         selected = &anchor;
+      }
+   }
+   return selected;
+}
+
 void savanna_finality_trust_store::reject_conflicting_height(const trusted_entry& existing,
                                                              const trusted_entry& candidate) {
    if (existing.position.finalized_block_num != candidate.position.finalized_block_num) {
@@ -278,9 +362,8 @@ void savanna_finality_trust_store::reject_conflicting_height(const trusted_entry
 
 bool savanna_finality_trust_store::has_replay_state_locked(const protocol::state_anchor& anchor,
                                                            const protocol::digest& proof_digest) const {
-   return std::ranges::any_of(replay_states_, [&](const auto& entry) {
-      return entry.anchor == anchor && entry.proof_digest == proof_digest;
-   });
+   return std::ranges::any_of(
+       replay_states_, [&](const auto& entry) { return entry.anchor == anchor && entry.proof_digest == proof_digest; });
 }
 
 void savanna_finality_trust_store::commit_replay_state_locked(replay_state_entry staged) {

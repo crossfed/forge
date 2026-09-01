@@ -16,6 +16,7 @@ module;
 module forge.chain.api.finality;
 
 import forge.chain.api.exceptions;
+import forge.chain.protocol.block;
 
 namespace forge::chain::api {
 
@@ -25,6 +26,14 @@ std::optional<protocol::chain_id> finality_verifier::trusted_chain() const {
 
 std::optional<protocol::block_id> finality_verifier::preferred_trust_anchor() const {
    return std::nullopt;
+}
+
+std::optional<protocol::block_id> finality_verifier::trust_anchor_at_or_before(protocol::block_num target) const {
+   const auto preferred = preferred_trust_anchor();
+   if (preferred && protocol::calculate_block_num_from_id(*preferred) > target) {
+      return std::nullopt;
+   }
+   return preferred;
 }
 
 namespace {
@@ -153,6 +162,23 @@ std::optional<protocol::block_id> cached_finality_verifier::preferred_trust_anch
    }
    try {
       return impl_->delegate->preferred_trust_anchor();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed");
+   }
+}
+
+std::optional<protocol::block_id>
+cached_finality_verifier::trust_anchor_at_or_before(protocol::block_num target) const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "cached finality verifier is not initialized");
+   }
+   try {
+      return impl_->delegate->trust_anchor_at_or_before(target);
    } catch (const forge::exceptions::base&) {
       throw;
    } catch (const std::exception& error) {

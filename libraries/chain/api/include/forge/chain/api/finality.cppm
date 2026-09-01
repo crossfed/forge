@@ -17,6 +17,7 @@ class finality_verifier {
 
    [[nodiscard]] virtual std::optional<protocol::chain_id> trusted_chain() const;
    [[nodiscard]] virtual std::optional<protocol::block_id> preferred_trust_anchor() const;
+   [[nodiscard]] virtual std::optional<protocol::block_id> trust_anchor_at_or_before(protocol::block_num target) const;
 
    virtual void verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) = 0;
 
@@ -37,6 +38,7 @@ class cached_finality_verifier final : public finality_verifier {
 
    [[nodiscard]] std::optional<protocol::chain_id> trusted_chain() const override;
    [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const override;
+   [[nodiscard]] std::optional<protocol::block_id> trust_anchor_at_or_before(protocol::block_num target) const override;
 
    void verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) override;
 

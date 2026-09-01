@@ -28,6 +28,7 @@ class savanna_finality_trust_store {
 
    [[nodiscard]] savanna::finality_trust preferred_trust() const;
    [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const;
+   [[nodiscard]] std::optional<protocol::block_id> trust_anchor_at_or_before(protocol::block_num target) const;
    [[nodiscard]] protocol::chain_id trusted_chain() const;
    [[nodiscard]] savanna::finality_witness_limits witness_limits() const;
    [[nodiscard]] std::shared_ptr<const savanna::header_state>
@@ -49,6 +50,7 @@ class savanna_finality_trust_store {
       savanna_trusted_position position;
       std::optional<protocol::bytes> checkpoint_bytes;
       std::shared_ptr<const savanna::finality_trust> trust;
+      std::vector<protocol::state_anchor> canonical_anchors;
    };
 
    struct replay_state_entry {
@@ -59,9 +61,13 @@ class savanna_finality_trust_store {
 
    [[nodiscard]] static trusted_entry make_configured_entry(savanna::finality_trust trust);
    [[nodiscard]] static trusted_entry make_checkpoint_entry(savanna::finality_checkpoint_bootstrap checkpoint);
+   [[nodiscard]] static std::vector<protocol::state_anchor>
+   canonical_anchors(const savanna::finality_replay& replay, const savanna_trusted_position& checkpoint,
+                     savanna::finality_witness_limits limits);
    void add_configured_root(savanna::finality_trust trust);
    [[nodiscard]] const trusted_entry& preferred_entry_locked() const;
    [[nodiscard]] const trusted_entry* find_at_height_locked(protocol::block_num height) const;
+   [[nodiscard]] const protocol::state_anchor* find_canonical_anchor_at_height_locked(protocol::block_num height) const;
    static void reject_conflicting_height(const trusted_entry& existing, const trusted_entry& candidate);
    [[nodiscard]] bool has_replay_state_locked(const protocol::state_anchor& anchor,
                                               const protocol::digest& proof_digest) const;

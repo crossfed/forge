@@ -447,16 +447,22 @@ class state_service final : public forge::chain::api::state {
 class transaction_service final : public forge::chain::api::transaction {
  public:
    explicit transaction_service(forge::chain::protocol::transaction_status_response response)
-       : response_{std::move(response)} {}
+       : status_responses_{response}, await_responses_{std::move(response)} {}
+
+   transaction_service(std::vector<forge::chain::protocol::transaction_status_response> status_responses,
+                       std::vector<forge::chain::protocol::transaction_status_response> await_responses)
+       : status_responses_{std::move(status_responses)}, await_responses_{std::move(await_responses)} {}
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
-   get_status(forge::chain::protocol::transaction_status_request) override {
-      co_return response_;
+   get_status(forge::chain::protocol::transaction_status_request request) override {
+      status_requests.push_back(std::move(request));
+      co_return next_response(status_responses_, next_status_response_);
    }
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
-   await_transaction(forge::chain::protocol::transaction_await_request) override {
-      co_return response_;
+   await_transaction(forge::chain::protocol::transaction_await_request request) override {
+      await_requests.push_back(std::move(request));
+      co_return next_response(await_responses_, next_await_response_);
    }
 
    boost::asio::awaitable<std::vector<forge::chain::protocol::public_key>>
@@ -474,8 +480,24 @@ class transaction_service final : public forge::chain::api::transaction {
       co_return forge::chain::protocol::transaction_read_only_response{};
    }
 
+   std::vector<forge::chain::protocol::transaction_status_request> status_requests;
+   std::vector<forge::chain::protocol::transaction_await_request> await_requests;
+
  private:
-   forge::chain::protocol::transaction_status_response response_;
+   static forge::chain::protocol::transaction_status_response
+   next_response(const std::vector<forge::chain::protocol::transaction_status_response>& responses, std::size_t& next) {
+      if (responses.empty()) {
+         return {};
+      }
+      const auto index = std::min(next, responses.size() - 1U);
+      ++next;
+      return responses[index];
+   }
+
+   std::vector<forge::chain::protocol::transaction_status_response> status_responses_;
+   std::vector<forge::chain::protocol::transaction_status_response> await_responses_;
+   std::size_t next_status_response_ = 0;
+   std::size_t next_await_response_ = 0;
 };
 
 class submission_service final : public forge::chain::api::submission {
@@ -578,6 +600,12 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
       return preferred_anchor;
    }
 
+   [[nodiscard]] std::optional<forge::chain::protocol::block_id>
+   finality_anchor_at_or_before(forge::chain::protocol::block_num target) const override {
+      finality_anchor_targets.push_back(target);
+      return retained_anchor ? retained_anchor : preferred_finality_anchor();
+   }
+
    void verify_context(const forge::chain::protocol::response_context&) override {
       if (throw_standard_context) {
          throw std::runtime_error{"test context verifier failure"};
@@ -653,7 +681,9 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    bool throw_nonstandard_state_point = false;
    bool throw_standard_transaction = false;
    bool throw_standard_preferred_anchor = false;
-   std::optional<forge::chain::protocol::block_id> preferred_anchor;
+   std::optional<forge::chain::protocol::block_id> preferred_anchor = forge::chain::protocol::block_id{};
+   std::optional<forge::chain::protocol::block_id> retained_anchor;
+   mutable std::vector<forge::chain::protocol::block_num> finality_anchor_targets;
 };
 
 class account_projection_verifier final : public forge::chain::api::projection_verifier {
@@ -3030,7 +3060,7 @@ BOOST_AUTO_TEST_CASE(verified_await_transaction_enforces_requested_finality) {
           }},
           std::make_shared<accepting_audit_verifier>(),
       };
-      return run(client.await_transaction({.id = id, .desired = desired}));
+      return run(client.await_transaction({.id = id, .desired = desired, .finality_from = anchor.block}));
    };
 
    BOOST_CHECK_THROW(static_cast<void>(await(response, forge::chain::protocol::transaction_lifecycle::finalized)),
@@ -3071,8 +3101,165 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
        verifier,
    };
 
-   static_cast<void>(run(client.get_transaction_status({.id = id})));
+   static_cast<void>(
+       run(client.get_transaction_status({.id = id, .finality_from = forge::chain::protocol::block_id{}})));
    BOOST_TEST(verifier->transaction_verifications == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_transaction_uses_an_unaudited_height_hint_then_a_retained_trust_anchor) {
+   auto id = forge::chain::protocol::transaction_id{};
+   id._hash[0] = 41U;
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.block_num = 7U;
+   response.context.anchor = forge::chain::protocol::state_anchor{.block_num = 7U};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
+   };
+
+   auto confirmation = response;
+   confirmation.block_num = 8U;
+   confirmation.context.anchor = forge::chain::protocol::state_anchor{.block_num = 8U};
+
+   auto services = forge::api::core::registry{};
+   auto service = std::make_shared<transaction_service>(
+       std::vector<forge::chain::protocol::transaction_status_response>{response, confirmation},
+       std::vector<forge::chain::protocol::transaction_status_response>{response});
+   services.install<forge::chain::api::transaction>(service);
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto retained = forge::chain::protocol::block_id{};
+   retained._hash[0] = 3U;
+   verifier->retained_anchor = retained;
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+       }},
+       verifier,
+   };
+
+   const auto status = run(client.get_transaction_status({.id = id}));
+   BOOST_REQUIRE(status.block_num);
+   BOOST_CHECK_EQUAL(*status.block_num, 8U);
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 2U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::none);
+   BOOST_CHECK(!service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(service->status_requests[1].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[1].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[1].finality_from == retained);
+   BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets[0], 7U);
+
+   service->status_requests.clear();
+   const auto awaited = run(client.await_transaction({.id = id}));
+   BOOST_REQUIRE(awaited.block_num);
+   BOOST_CHECK_EQUAL(*awaited.block_num, 8U);
+   BOOST_REQUIRE_EQUAL(service->await_requests.size(), 1U);
+   BOOST_CHECK(service->await_requests[0].audit == forge::chain::protocol::audit_mode::none);
+   BOOST_CHECK(!service->await_requests[0].finality_from.has_value());
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[0].finality_from == retained);
+   BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 2U);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets[1], 7U);
+
+   service->status_requests.clear();
+   auto explicit_anchor = forge::chain::protocol::block_id{};
+   explicit_anchor._hash[0] = 2U;
+   static_cast<void>(run(client.get_transaction_status({.id = id, .finality_from = explicit_anchor})));
+   BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+   BOOST_CHECK(service->status_requests[0].audit == forge::chain::protocol::audit_mode::required);
+   BOOST_REQUIRE(service->status_requests[0].finality_from.has_value());
+   BOOST_CHECK(*service->status_requests[0].finality_from == explicit_anchor);
+   BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.size(), 2U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_transaction_hint_requires_a_bound_height_and_retained_anchor) {
+   auto id = forge::chain::protocol::transaction_id{};
+   id._hash[0] = 43U;
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.block_num = 7U;
+   response.context.anchor = forge::chain::protocol::state_anchor{.block_num = 7U};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
+   };
+
+   const auto make_client = [](const std::shared_ptr<transaction_service>& service,
+                               const std::shared_ptr<accepting_audit_verifier>& verifier) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::transaction>(service);
+      return forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+          }},
+          verifier,
+      };
+   };
+
+   {
+      auto missing_height = response;
+      missing_height.block_num.reset();
+      const auto service = std::make_shared<transaction_service>(std::move(missing_height));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(service->status_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      auto wrong_id = response;
+      ++wrong_id.id._hash[0];
+      const auto service = std::make_shared<transaction_service>(std::move(wrong_id));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      auto inconsistent_block = response;
+      inconsistent_block.block = forge::chain::protocol::block_id{};
+      const auto service = std::make_shared<transaction_service>(std::move(inconsistent_block));
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(verifier->finality_anchor_targets.empty());
+   }
+   {
+      const auto service = std::make_shared<transaction_service>(response);
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      verifier->preferred_anchor.reset();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                        forge::chain::api::exceptions::anchor_unavailable);
+      BOOST_REQUIRE_EQUAL(service->status_requests.size(), 1U);
+      BOOST_CHECK(service->status_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), 7U);
+   }
+   {
+      const auto service = std::make_shared<transaction_service>(response);
+      const auto verifier = std::make_shared<accepting_audit_verifier>();
+      verifier->preferred_anchor.reset();
+      auto client = make_client(service, verifier);
+      BOOST_CHECK_THROW(static_cast<void>(run(client.await_transaction({.id = id}))),
+                        forge::chain::api::exceptions::anchor_unavailable);
+      BOOST_REQUIRE_EQUAL(service->await_requests.size(), 1U);
+      BOOST_CHECK(service->await_requests.front().audit == forge::chain::protocol::audit_mode::none);
+      BOOST_CHECK(service->status_requests.empty());
+      BOOST_REQUIRE_EQUAL(verifier->finality_anchor_targets.size(), 1U);
+      BOOST_CHECK_EQUAL(verifier->finality_anchor_targets.front(), 7U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transaction_ids) {
@@ -3222,7 +3409,8 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_exec
        verifier,
    };
 
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status(
+                         {.id = id, .finality_from = forge::chain::protocol::block_id{}}))),
                      forge::chain::api::exceptions::invalid_transaction_proof);
    BOOST_TEST(verifier->transaction_verifications == 0U);
 }
@@ -3250,7 +3438,8 @@ BOOST_AUTO_TEST_CASE(verified_transaction_translates_verifier_failures_to_typed_
        verifier,
    };
 
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status(
+                         {.id = id, .finality_from = forge::chain::protocol::block_id{}}))),
                      forge::chain::api::exceptions::invalid_transaction_proof);
 }
 

@@ -43,8 +43,11 @@ chain/root commitment is returned in the audited response context.
 Audited requests may also provide `finality_from`, the caller's already trusted
 genesis or checkpoint block. It is a proof-construction hint, not server-provided
 trust: `verified_client` fills it from the installed verifier and still verifies
-the returned witness locally. Recent trusted checkpoints therefore keep finality
-witnesses bounded without weakening the trust bootstrap.
+the returned witness locally. When a request names a historical block or range,
+the client selects the newest retained trust anchor at or before that known
+target instead of blindly using the current preferred checkpoint. Recent trusted
+checkpoints therefore keep finality witnesses bounded without weakening the
+trust bootstrap.
 Table-scope continuation uses the transport-neutral protocol `bytes` value;
 the HTTP GET binding carries it through the shared JSON query codec and other
 transports carry the same bytes without a transport-specific cursor DTO.
@@ -117,9 +120,18 @@ bootstrap or selects trust from another options field. The public
 `savanna_finality_verifier` verifies each returned witness against a configured
 root or one of its 16 newest rolling checkpoints, then atomically promotes a
 locally replayed checkpoint only when it descends from the current preferred
-anchor. An exact known checkpoint is a no-op; an unknown lower checkpoint, a
-competing branch or a canonical checkpoint conflict fails without changing
-trust. `preferred_trust()`
+anchor. Each rolling checkpoint retains its bounded canonical replay ancestry;
+an exact known checkpoint or an older replay can only cache state when its
+finalized height and block ID match that retained canonical ancestry. A
+competing branch fails as `invalid_finality`, and an older checkpoint beyond
+the retained ancestry fails as `trust_required`, without changing trust.
+Configured roots remain available, while `trust_anchor_at_or_before()`
+selects the newest configured or rolling checkpoint that does not exceed a
+known response target. Historical transaction status calls without an explicit
+`finality_from` first obtain an unaudited inclusion-height hint, then issue a
+separate audited status confirmation using that locally selected retained
+anchor; a missing height or unavailable retained anchor fails locally before a
+confirmation request, and only the confirmed response is returned or verified. `preferred_trust()`
 and `replay_state()` expose the selected locally trusted state to consumers
 that need Savanna-specific projection verification. The exact verified replay
 state is retained in the same bounded parallel-response window, so immediate

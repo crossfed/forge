@@ -147,6 +147,14 @@ std::optional<protocol::block_id> savanna_finality_verifier::preferred_trust_anc
    return translate_finality_failure([&] { return impl_->trust_store.preferred_trust_anchor(); });
 }
 
+std::optional<protocol::block_id>
+savanna_finality_verifier::trust_anchor_at_or_before(protocol::block_num target) const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "Savanna finality verifier is not initialized");
+   }
+   return translate_finality_failure([&] { return impl_->trust_store.trust_anchor_at_or_before(target); });
+}
+
 savanna::header_state savanna_finality_verifier::replay_state(const protocol::state_anchor& expected,
                                                               const protocol::proof_blob& proof) const {
    if (!impl_) {

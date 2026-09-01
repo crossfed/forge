@@ -1,5 +1,6 @@
 #include <concepts>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -14,6 +15,10 @@ bool portable_verified_client_package_contract() {
                               api::verified_client (*)(api::raw_client, api::verified_client_options)>);
    static_assert(
        std::same_as<decltype(api::verified_client_options::finality), std::shared_ptr<api::finality_verifier>>);
+   using trust_anchor_selector =
+       std::optional<forge::chain::protocol::block_id> (api::finality_verifier::*)(forge::chain::protocol::block_num)
+           const;
+   static_assert(std::same_as<decltype(&api::finality_verifier::trust_anchor_at_or_before), trust_anchor_selector>);
    using single_trust_factory = std::shared_ptr<api::savanna_finality_verifier> (*)(
        forge::chain::savanna::finality_trust, forge::chain::savanna::finality_witness_limits);
    using multi_trust_factory = std::shared_ptr<api::savanna_finality_verifier> (*)(

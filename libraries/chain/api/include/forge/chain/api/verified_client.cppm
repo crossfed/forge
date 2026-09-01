@@ -67,6 +67,8 @@ class audit_verifier {
    virtual ~audit_verifier() = default;
 
    [[nodiscard]] virtual std::optional<protocol::block_id> preferred_finality_anchor() const;
+   [[nodiscard]] virtual std::optional<protocol::block_id>
+   finality_anchor_at_or_before(protocol::block_num target) const;
 
    virtual void verify_context(const protocol::response_context& context) = 0;
    virtual void verify_finality(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) = 0;

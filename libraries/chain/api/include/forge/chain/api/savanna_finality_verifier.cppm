@@ -27,6 +27,7 @@ class savanna_finality_verifier final : public finality_verifier {
    [[nodiscard]] std::optional<protocol::chain_id> trusted_chain() const override;
    [[nodiscard]] savanna::finality_trust preferred_trust() const;
    [[nodiscard]] std::optional<protocol::block_id> preferred_trust_anchor() const override;
+   [[nodiscard]] std::optional<protocol::block_id> trust_anchor_at_or_before(protocol::block_num target) const override;
    [[nodiscard]] savanna::header_state replay_state(const protocol::state_anchor& expected,
                                                     const protocol::proof_blob& proof) const;
 
