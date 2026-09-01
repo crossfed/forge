@@ -393,4 +393,19 @@ BOOST_AUTO_TEST_CASE(array) {
    check_variant_round_trip2(std::array{1, 2, 3});
 }
 
+BOOST_AUTO_TEST_CASE(unsigned_byte_vectors_use_the_byte_array_limit) {
+   constexpr auto general_container_limit = std::size_t{1024U * 1024U};
+   const auto bytes = std::vector<std::uint8_t>(general_container_limit + 1U, 0xa5U);
+
+   auto encoded = forge::variant{};
+   BOOST_CHECK_NO_THROW(forge::to_variant(bytes, encoded));
+
+   auto decoded = std::vector<std::uint8_t>{};
+   BOOST_CHECK_NO_THROW(forge::from_variant(encoded, decoded));
+   BOOST_TEST(decoded == bytes, boost::test_tools::per_element());
+
+   const auto ordinary = std::vector<std::uint16_t>(general_container_limit + 1U, 7U);
+   BOOST_CHECK_THROW(forge::to_variant(ordinary, encoded), std::range_error);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
