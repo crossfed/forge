@@ -265,7 +265,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.29.0 release notes](docs/releases/8.29.0.md).
+[Forge 8.29.1 release notes](docs/releases/8.29.1.md).
 
 ## Совместимость
 
@@ -435,4 +435,4 @@ commercial software. Downstream products may use separate licensing terms for
 their product layers.
 
 Canonical upstream:
-https://github.com/vbytemaster/forge
+https://github.com/crossfed/forge

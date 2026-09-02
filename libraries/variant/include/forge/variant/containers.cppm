@@ -9,6 +9,8 @@ module;
 #include <unordered_set>
 #include <vector>
 #include <boost/multi_index_container_fwd.hpp>
+#include <cstdint>
+#include <type_traits>
 
 export module forge.variant.containers;
 
@@ -167,7 +169,8 @@ template <typename T> void to_variant(const std::deque<T>& t, variant& v) {
 
 template <typename T> void from_variant(const variant& var, std::vector<T>& tmp) {
    const variants& vars = var.get_array();
-   if (vars.size() > MAX_NUM_ARRAY_ELEMENTS)
+   constexpr auto max_elements = std::is_same_v<T, std::uint8_t> ? MAX_SIZE_OF_BYTE_ARRAYS : MAX_NUM_ARRAY_ELEMENTS;
+   if (vars.size() > max_elements)
       throw std::range_error("too large");
    tmp.clear();
    tmp.reserve(vars.size());
@@ -177,7 +180,8 @@ template <typename T> void from_variant(const variant& var, std::vector<T>& tmp)
 }
 
 template <typename T> void to_variant(const std::vector<T>& t, variant& v) {
-   if (t.size() > MAX_NUM_ARRAY_ELEMENTS)
+   constexpr auto max_elements = std::is_same_v<T, std::uint8_t> ? MAX_SIZE_OF_BYTE_ARRAYS : MAX_NUM_ARRAY_ELEMENTS;
+   if (t.size() > max_elements)
       throw std::range_error("too large");
    variants vars(t.size());
    for (size_t i = 0; i < t.size(); ++i) {

@@ -11,6 +11,7 @@ module;
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <cstring>
 #include <deque>
 #include <functional>
