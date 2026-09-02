@@ -929,12 +929,20 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
       "credential_generation",
       "idle_timeout",
       "session_state",
+      "device_grant_record",
+      "device_grant_issuance",
+      "device_grant_refresh",
+      "device_grant_state",
+      "rotation_generation",
    ):
       if token not in types_module:
          errors.append(f"libraries/auth/session/include/forge/auth/session/types.cppm: session record is missing {token}")
    session_record_match = re.search(r"struct session_record \{(.*?)\n\};", types_module, re.DOTALL)
    if session_record_match is not None and "secret_string" in session_record_match.group(1):
       errors.append("libraries/auth/session/include/forge/auth/session/types.cppm: persisted session record must not contain clear secrets")
+   device_grant_match = re.search(r"struct device_grant_record \{(.*?)\n\};", types_module, re.DOTALL)
+   if device_grant_match is not None and "secret_string" in device_grant_match.group(1):
+      errors.append("libraries/auth/session/include/forge/auth/session/types.cppm: persisted device grant must not contain a clear token")
 
    session_module = (leaf / "include" / "forge" / "auth" / "session" / "session.cppm").read_text(errors="ignore")
    for token in (
@@ -948,6 +956,13 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
       "rotate_session",
       "logout_session",
       "revoke_session",
+      "issue_device_grant",
+      "validate_device_grant_issuance",
+      "identify_device_grant_token",
+      "validate_device_grant",
+      "rotate_device_grant",
+      "refresh_device_grant",
+      "revoke_device_grant",
    ):
       if token not in session_module:
          errors.append(f"libraries/auth/session/include/forge/auth/session/session.cppm: session transition is missing {token}")
@@ -979,6 +994,10 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
       "*record.terminal_at < record.last_activity_at",
       "*record.terminal_at >= record.idle_expires_at",
       "session and CSRF digests must differ",
+      "device grant token was replayed after rotation",
+      "record.rotation_generation + 1",
+      "record.state = device_grant_state::rotated",
+      "record.state = device_grant_state::revoked",
    ):
       if token not in session_source:
          errors.append(f"libraries/auth/session/session.cpp: session security invariant is missing {token}")
@@ -1039,6 +1058,11 @@ def check_auth_session_boundaries(root: Path, errors: list[str]) -> None:
       "malformed_persisted_timestamps_are_rejected_without_mutation",
       "extreme_time_options_are_checked_without_overflow",
       "rotation_prevents_fixation_and_logout_revoke_are_terminal",
+      "device_grant_rotation_preserves_absolute_expiry_and_detects_replay",
+      "device_grant_is_credential_bound_and_does_not_issue_a_session",
+      "device_grant_refresh_rotates_grant_and_issues_bound_session",
+      "device_grant_expiry_revoke_and_backdated_transitions_are_terminal",
+      "device_grant_raw_round_trip_rejects_malformed_state",
    ):
       if token not in session_tests:
          errors.append(f"tests/auth/session_tests.cpp: session regression is missing ({token})")
