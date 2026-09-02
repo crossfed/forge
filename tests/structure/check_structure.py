@@ -460,6 +460,13 @@ def check_tls_context_ownership(root: Path, errors: list[str]) -> None:
    if 'elseif("${component}" STREQUAL "plugins_http_server")' not in package_config or \
       '_forge_add_component(plugins_crypto_secrets)' not in package_config.partition('elseif("${component}" STREQUAL "plugins_http_server")')[2].partition('elseif("${component}" STREQUAL "plugins_log_otlp")')[0]:
       errors.append("cmake/ForgeConfig.cmake.in: plugins_http_server package component must resolve Crypto Secrets")
+   if 'elseif("${component}" STREQUAL "plugins_log_otlp")' not in package_config or \
+      '_forge_add_component(plugins_crypto_secrets)' not in package_config.partition('elseif("${component}" STREQUAL "plugins_log_otlp")')[2].partition('elseif("${component}" STREQUAL "plugins_db_store")')[0]:
+      errors.append("cmake/ForgeConfig.cmake.in: plugins_log_otlp package component must resolve Crypto Secrets")
+
+   otlp_plugin_cmake = (root / "plugins/log/otlp/CMakeLists.txt").read_text(errors="ignore")
+   if "forge_plugins_crypto_secrets" not in otlp_plugin_cmake:
+      errors.append("plugins/log/otlp/CMakeLists.txt: OTLP secret headers require Crypto Secrets")
 
 
 def check_http_cookie_asset_boundaries(root: Path, errors: list[str]) -> None:
