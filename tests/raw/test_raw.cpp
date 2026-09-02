@@ -44,6 +44,21 @@ struct A {
 };
 BOOST_DESCRIBE_STRUCT(A, (), (x, y, z))
 
+struct optional_nested_aggregate {
+   struct value_type {
+      std::string first;
+      std::string second;
+
+      bool operator==(const value_type&) const = default;
+   };
+
+   std::optional<value_type> value;
+
+   bool operator==(const optional_nested_aggregate&) const = default;
+};
+BOOST_DESCRIBE_STRUCT(optional_nested_aggregate::value_type, (), (first, second))
+BOOST_DESCRIBE_STRUCT(optional_nested_aggregate, (), (value))
+
 class short_write_streambuf final : public std::streambuf {
  protected:
    std::streamsize xsputn(const char*, std::streamsize size) override {
@@ -775,6 +790,16 @@ BOOST_AUTO_TEST_CASE(unpacking_optional) {
       forge::raw::unpack(ds, t);
       BOOST_TEST((s == t));
    }
+}
+
+BOOST_AUTO_TEST_CASE(unpacking_optional_nested_aggregate) {
+   const auto source =
+       optional_nested_aggregate{.value = optional_nested_aggregate::value_type{.first = "alpha", .second = "beta"}};
+   const auto encoded = forge::raw::pack(source);
+   const auto decoded = forge::raw::unpack_exact<optional_nested_aggregate>(encoded);
+   BOOST_REQUIRE(decoded.value.has_value());
+   BOOST_TEST(decoded.value->first == "alpha");
+   BOOST_TEST(decoded.value->second == "beta");
 }
 
 // Verify std::shared_ptr is unpacked correctly, especially a null shared_ptr will always

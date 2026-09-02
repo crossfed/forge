@@ -1,8 +1,10 @@
 module;
 
 #include <algorithm>
+#include <cstdint>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 module forge.cli.command;
 

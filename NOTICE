@@ -24,4 +24,4 @@ upstream Apache License 2.0 with LLVM Exceptions. Exact pins and boundaries are
 recorded in `PROVENANCE.md` and `THIRD_PARTY_LICENSES`.
 
 Canonical upstream:
-https://github.com/vbytemaster/forge
+https://github.com/crossfed/forge

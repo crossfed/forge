@@ -644,7 +644,7 @@ template <typename Stream, typename T> void unpack(Stream& stream, std::optional
       value.reset();
       return;
    }
-   value.emplace();
+   value.emplace(T{});
    unpack(stream, *value);
 }
 
