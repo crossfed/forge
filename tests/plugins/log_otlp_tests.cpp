@@ -35,6 +35,7 @@ import forge.net.http.server;
 import forge.net.http.types;
 import forge.log.logger;
 import forge.log.logger_config;
+import forge.log.record;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.exceptions;
 import forge.plugins.crypto.secrets.types;
@@ -121,6 +122,15 @@ class fake_collector {
    mutable std::mutex mutex_;
    mutable std::condition_variable ready_;
    std::vector<collected_request> requests_;
+};
+
+class capture_sink final : public forge::sink {
+ public:
+   void log(const forge::log_record& record) override {
+      records.push_back(record);
+   }
+
+   std::vector<forge::log_record> records;
 };
 
 [[nodiscard]] forge::config::core::value logger_route(std::string name, std::string level = "info", bool enabled = true,
@@ -273,6 +283,34 @@ BOOST_AUTO_TEST_CASE(log_otlp_disabled_config_does_not_export_and_api_is_unavail
    BOOST_CHECK_THROW(forge::asio::blocking::run(harness.runtime, api->metrics()),
                      log_otlp::exceptions::exporter_unavailable);
    BOOST_CHECK_THROW(forge::asio::blocking::run(harness.runtime, api->flush()),
+                     log_otlp::exceptions::exporter_unavailable);
+
+   harness.shutdown();
+}
+
+BOOST_AUTO_TEST_CASE(log_otlp_disabled_config_keeps_named_routes_on_the_console_parent_without_an_exporter) {
+   forge::configure_logging(forge::logging_config::default_config());
+   auto shared_sink = std::make_shared<capture_sink>();
+   auto console_parent = forge::logger::get("default");
+   console_parent.add_sink(shared_sink);
+   forge::logger::update("default", console_parent);
+
+   auto harness = plugin_harness{};
+   auto document = plugin_config("http://127.0.0.1:4318", {logger_route("spine.runtime", "debug")});
+   document.set("plugins.log.otlp.enabled", false);
+   harness.configure(document);
+   harness.provide_and_start();
+
+   auto named = forge::logger::get("spine.runtime");
+   BOOST_REQUIRE(named.get_parent() != nullptr);
+   named.debug("named route remains visible without OTLP");
+
+   BOOST_REQUIRE_EQUAL(shared_sink->records.size(), 1U);
+   BOOST_TEST(shared_sink->records.front().logger == "spine.runtime");
+   BOOST_TEST(shared_sink->records.front().message == "named route remains visible without OTLP");
+
+   auto api = harness.apis.get<log_otlp::api>(log_otlp::api::ref());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(harness.runtime, api->metrics()),
                      log_otlp::exceptions::exporter_unavailable);
 
    harness.shutdown();

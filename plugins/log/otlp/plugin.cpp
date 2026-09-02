@@ -120,9 +120,19 @@ boost::asio::awaitable<void> plugin::startup() {
    if (impl_->started) {
       co_return;
    }
-   impl_->started = true;
    impl_->stopping = false;
+   const auto configure_route = [](const logger_route& route) {
+      auto logger = forge::logger::get(route.name);
+      logger.set_name(route.name);
+      logger.set_enabled(route.enabled);
+      logger.set_log_level(parse_log_level(route.level));
+      forge::logger::update(route.name, logger);
+   };
+   for (const auto& route : impl_->settings.loggers) {
+      configure_route(route);
+   }
    if (!impl_->settings.enabled) {
+      impl_->started = true;
       co_return;
    }
    if (impl_->runtime == nullptr) {
@@ -167,19 +177,17 @@ boost::asio::awaitable<void> plugin::startup() {
       }
       impl_->exporter = std::make_shared<forge::otlp::log_exporter>(*impl_->runtime, std::move(options));
       impl_->sink = std::make_shared<forge::otlp::log_sink>(impl_->exporter);
-      const auto attach_route = [this](const logger_route& route) {
-         auto logger = forge::logger::get(route.name);
-         logger.set_name(route.name);
-         logger.set_enabled(route.enabled);
-         logger.set_log_level(parse_log_level(route.level));
-         if (route.export_logs) {
-            logger.add_sink(impl_->sink);
-            impl_->attached_loggers.push_back(attached_logger{.name = route.name, .logger = logger});
+      const auto attach_export_sink = [this](const logger_route& route) {
+         if (!route.export_logs) {
+            return;
          }
+         auto logger = forge::logger::get(route.name);
+         logger.add_sink(impl_->sink);
+         impl_->attached_loggers.push_back(attached_logger{.name = route.name, .logger = logger});
          forge::logger::update(route.name, logger);
       };
       for (const auto& route : impl_->settings.loggers) {
-         attach_route(route);
+         attach_export_sink(route);
       }
       if (impl_->settings.crash_spool.enabled) {
          const auto crash_options = make_crash_spool_options(impl_->settings);
@@ -188,6 +196,7 @@ boost::asio::awaitable<void> plugin::startup() {
             co_await forge::otlp::async_resend_crashes(*impl_->exporter, crash_options);
          }
       }
+      impl_->started = true;
    } catch (const exceptions::startup_failed&) {
       impl_->detach_sink();
       impl_->sink.reset();

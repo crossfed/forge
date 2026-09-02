@@ -115,8 +115,10 @@ plugins:
         resend-on-startup: true
 ```
 
-`enabled: false` is a no-op: no exporter is created, no sink is attached and no
-network work is started.
+`enabled: false` disables only OTLP export: no exporter is created, no OTLP
+sink is attached and no network work is started. Configured logger routes still
+apply their `enabled` and `level` settings, and named routes retain the default
+console parent.
 
 ### Header Sources
 
@@ -192,7 +194,8 @@ queue/export counters from the underlying `forge_otlp` exporter.
 - Do not log secrets in logger names, resource attributes or structured fields.
 - Use `secret-id` plus `purpose` for cloud authorization headers. Header source
   validation runs before HTTP requests are built.
-- `enabled: false` creates no exporter and starts no network work.
+- `enabled: false` creates no exporter and starts no network work, but still
+  configures logger routes and their console-parent routing.
 - Flush during shutdown when callers require best-effort delivery of queued
   records.
 
