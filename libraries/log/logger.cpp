@@ -111,7 +111,7 @@ void deliver(const std::vector<std::shared_ptr<sink>>& sinks, const log_record& 
 } // namespace
 
 static void ensure_default_logging_configured() {
-   static const bool configured = configure_logging(logging_config::default_config());
+   static const bool configured = log_config::configure_logging(logging_config::default_config());
    (void)configured;
 }
 
@@ -279,6 +279,7 @@ logger& logger::default_logger() {
 }
 
 void logger::update(const std::string& name, logger& log) {
+   ensure_default_logging_configured();
    log_config::update_logger(name, log);
 }
 

@@ -197,6 +197,21 @@ BOOST_AUTO_TEST_CASE(hierarchy_additively_routes_legacy_messages_to_parent_sinks
    BOOST_TEST(record.fields.front().value == "node-7");
 }
 
+BOOST_AUTO_TEST_CASE(named_logger_inherits_the_configured_default_route_and_preserves_its_name) {
+   auto parent = forge::logger{"default"};
+   parent.set_log_level(forge::log_level::info);
+   auto sink = std::make_shared<capture_sink>();
+   parent.add_sink(sink);
+   forge::logger::update("default", parent);
+
+   auto child = forge::logger::get("test.configured-child");
+   child.info("ready");
+
+   BOOST_REQUIRE_EQUAL(sink->records.size(), 1U);
+   BOOST_TEST(sink->records.front().logger == "test.configured-child");
+   BOOST_TEST(sink->records.front().message == "ready");
+}
+
 BOOST_AUTO_TEST_CASE(exception_chain_can_be_routed_to_logger) {
    auto logger = forge::logger{"test.exception"};
    logger.set_log_level(forge::log_level::debug);
