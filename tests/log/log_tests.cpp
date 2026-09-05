@@ -15,6 +15,7 @@ import forge.exceptions;
 import forge.log.appender;
 import forge.log.log_message;
 import forge.log.logger;
+import forge.log.logger_config;
 import forge.log.record;
 import forge.variant.value;
 
@@ -48,6 +49,16 @@ std::string read_file(const std::filesystem::path& path) {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(log_test_suite)
+
+BOOST_AUTO_TEST_CASE(default_configuration_is_constructible_by_module_consumers) {
+   const auto config = forge::logging_config::default_config();
+
+   BOOST_REQUIRE_EQUAL(config.appenders.size(), 2U);
+   BOOST_REQUIRE_EQUAL(config.loggers.size(), 1U);
+   BOOST_CHECK_EQUAL(config.loggers.front().name, forge::default_logger_name);
+   BOOST_REQUIRE_EQUAL(config.loggers.front().appenders.size(), 1U);
+   BOOST_CHECK_EQUAL(config.loggers.front().appenders.front(), "stderr");
+}
 
 BOOST_AUTO_TEST_CASE(disabled_level_does_not_build_record) {
    auto logger = forge::logger{"test.disabled"};

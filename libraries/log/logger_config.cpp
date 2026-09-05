@@ -5,6 +5,8 @@ module;
 #include <mutex>
 #include <unordered_map>
 #include <string>
+#include <utility>
+#include <vector>
 
 module forge.log.logger_config;
 
@@ -171,7 +173,7 @@ logging_config logging_config::default_config() {
    dlc.name = default_logger_name;
    dlc.level = log_level::info;
    dlc.appenders.push_back("stderr");
-   cfg.loggers.push_back(dlc);
+   cfg.loggers.push_back(std::move(dlc));
    return cfg;
 }
 
