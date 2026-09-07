@@ -5,10 +5,23 @@
 
 namespace forge::crypto::symmetric::xsalsa20::detail {
 
+inline constexpr auto counter_block_size = std::size_t{64};
+
+struct counter_position {
+   std::uint64_t next_block_counter = 0;
+   std::size_t block_offset = counter_block_size;
+   bool exhausted = false;
+};
+
+[[nodiscard]] bool requires_block(const counter_position& position) noexcept;
+[[nodiscard]] std::size_t available_in_block(const counter_position& position) noexcept;
+void require_capacity(const counter_position& position, std::size_t size);
+[[nodiscard]] counter_position advance_after_block_load(counter_position position) noexcept;
+[[nodiscard]] counter_position advance_after_consume(counter_position position, std::size_t size) noexcept;
+
 class counter_state {
  public:
    counter_state() noexcept;
-   counter_state(std::uint64_t next_block_counter, std::size_t block_offset, bool exhausted) noexcept;
 
    [[nodiscard]] std::uint64_t next_block_counter() const noexcept;
    [[nodiscard]] std::size_t block_offset() const noexcept;
@@ -21,9 +34,7 @@ class counter_state {
    void consume(std::size_t size) noexcept;
 
  private:
-   std::uint64_t next_block_counter_ = 0;
-   std::size_t block_offset_ = 0;
-   bool exhausted_ = false;
+   counter_position position_;
 };
 
 } // namespace forge::crypto::symmetric::xsalsa20::detail

@@ -451,6 +451,7 @@ FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(xsalsa20_counter_state_preserves_last_block_and_rejected_capacity_state) try {
    using forge::crypto::symmetric::xsalsa20::detail::counter_state;
+   using forge::crypto::symmetric::xsalsa20::detail::counter_position;
 
    const auto initial = counter_state{};
    BOOST_CHECK_EQUAL(initial.next_block_counter(), 0U);
@@ -458,31 +459,33 @@ BOOST_AUTO_TEST_CASE(xsalsa20_counter_state_preserves_last_block_and_rejected_ca
    BOOST_CHECK(!initial.exhausted());
 
    const auto final_counter = std::numeric_limits<std::uint64_t>::max();
-   auto state = counter_state{final_counter, xsalsa20::block_size, false};
-   BOOST_CHECK(state.requires_block());
-   BOOST_CHECK_EQUAL(state.next_block_counter(), final_counter);
-   BOOST_CHECK(!state.exhausted());
+   auto position = counter_position{
+       .next_block_counter = final_counter,
+       .block_offset = xsalsa20::detail::counter_block_size,
+       .exhausted = false,
+   };
+   BOOST_CHECK(xsalsa20::detail::requires_block(position));
 
-   state.require_capacity(xsalsa20::block_size);
-   state.commit_loaded_block();
-   BOOST_CHECK(!state.requires_block());
-   BOOST_CHECK(state.exhausted());
-   BOOST_CHECK_EQUAL(state.next_block_counter(), final_counter);
+   xsalsa20::detail::require_capacity(position, xsalsa20::detail::counter_block_size);
+   position = xsalsa20::detail::advance_after_block_load(position);
+   BOOST_CHECK(!xsalsa20::detail::requires_block(position));
+   BOOST_CHECK(position.exhausted);
+   BOOST_CHECK_EQUAL(position.next_block_counter, final_counter);
 
-   state.consume(17U);
-   BOOST_CHECK_EQUAL(state.block_offset(), 17U);
-   BOOST_CHECK_EQUAL(state.available_in_block(), xsalsa20::block_size - 17U);
-   state.consume(state.available_in_block());
-   BOOST_CHECK(state.requires_block());
+   position = xsalsa20::detail::advance_after_consume(position, 17U);
+   BOOST_CHECK_EQUAL(position.block_offset, 17U);
+   xsalsa20::detail::require_capacity(position, 47U);
 
-   const auto next_counter_before = state.next_block_counter();
-   const auto block_offset_before = state.block_offset();
-   const auto exhausted_before = state.exhausted();
-   const auto reject_capacity = [&] { state.require_capacity(1U); };
+   const auto position_before_rejection = position;
+   const auto reject_capacity = [&] { xsalsa20::detail::require_capacity(position, 48U); };
    BOOST_CHECK_THROW(reject_capacity(), xsalsa20::exceptions::counter_exhausted);
-   BOOST_CHECK_EQUAL(state.next_block_counter(), next_counter_before);
-   BOOST_CHECK_EQUAL(state.block_offset(), block_offset_before);
-   BOOST_CHECK_EQUAL(state.exhausted(), exhausted_before);
+   BOOST_CHECK_EQUAL(position.next_block_counter, position_before_rejection.next_block_counter);
+   BOOST_CHECK_EQUAL(position.block_offset, position_before_rejection.block_offset);
+   BOOST_CHECK_EQUAL(position.exhausted, position_before_rejection.exhausted);
+
+   position = xsalsa20::detail::advance_after_consume(position, 47U);
+   const auto reject_next_byte = [&] { xsalsa20::detail::require_capacity(position, 1U); };
+   BOOST_CHECK_THROW(reject_next_byte(), xsalsa20::exceptions::counter_exhausted);
 }
 FORGE_LOG_AND_RETHROW();
 
