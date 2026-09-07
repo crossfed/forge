@@ -14,6 +14,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.net.pnet.protector;
+import forge.net.tcp.exceptions;
 import forge.net.transport.exceptions;
 import forge.net.transport.stream;
 
@@ -30,6 +31,16 @@ namespace {
       case forge::net::pnet::exceptions::code::canceled:
          FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::canceled, error.what());
       case forge::net::pnet::exceptions::code::invalid_options:
+         break;
+      }
+   }
+   if (const auto code = forge::net::tcp::exceptions::code_of(error)) {
+      switch (*code) {
+      case forge::net::tcp::exceptions::code::closed:
+         FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::closed, error.what());
+      case forge::net::tcp::exceptions::code::canceled:
+         FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::canceled, error.what());
+      default:
          break;
       }
    }

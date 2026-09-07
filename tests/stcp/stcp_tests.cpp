@@ -62,6 +62,7 @@ import forge.net.tcp.exceptions;
 import forge.net.tcp.listener;
 import forge.net.transport.buffer;
 import forge.net.transport.endpoint;
+import forge.net.transport.exceptions;
 import forge.net.transport.stream;
 
 
@@ -367,6 +368,37 @@ class observed_transport_stream final : public forge::net::transport::detail::st
    bytes pending_;
    std::size_t read_fragment_size_ = 0;
    std::atomic_bool cancel_requested_ = false;
+};
+
+class failing_transport_stream final : public forge::net::transport::detail::stream_concept {
+ public:
+   [[nodiscard]] bool valid() const noexcept override {
+      return !canceled_;
+   }
+
+   [[nodiscard]] std::int64_t id() const noexcept override {
+      return 1;
+   }
+
+   boost::asio::awaitable<void> async_write(std::span<const std::uint8_t>) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<bytes> async_read() override {
+      throw forge::net::transport::exceptions::protocol_error{"synthetic non-terminal transport failure"};
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      canceled_ = true;
+      co_return;
+   }
+
+   void cancel() override {
+      canceled_ = true;
+   }
+
+ private:
+   bool canceled_ = false;
 };
 
 [[nodiscard]] forge::net::transport::stream_connection
@@ -875,6 +907,21 @@ boost::asio::awaitable<void> stcp_transport_upgrade_timeout_requests_one_lower_c
    BOOST_TEST(state->cancel_requests.load(std::memory_order_relaxed) == 1U);
    co_await server_tcp.async_close();
    co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_preserves_non_terminal_failure() {
+   const auto material = make_tls_material();
+   auto lower = forge::net::transport::stream_connection{
+       .local_endpoint = loopback(4101),
+       .remote_endpoint = loopback(4102),
+       .stream = forge::net::transport::detail::stream_access::make(
+           std::make_shared<failing_transport_stream>()),
+   };
+
+   BOOST_CHECK_THROW(
+       static_cast<void>(co_await forge::net::stcp::async_upgrade_client(
+           std::move(lower), client_options(material), std::optional{std::chrono::milliseconds{1000}})),
+       forge::net::stcp::exceptions::handshake_failed);
 }
 
 boost::asio::awaitable<void> stcp_transport_upgrade_stop_requests_one_lower_cancel() {
@@ -1465,6 +1512,11 @@ BOOST_AUTO_TEST_CASE(stcp_generic_transport_timeout_requests_one_lower_cancel) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    BOOST_CHECK(forge::asio::blocking::run_for(
        runtime, stcp_transport_upgrade_timeout_requests_one_lower_cancel(), std::chrono::seconds{2}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_generic_transport_preserves_non_terminal_lower_failure) {
+   auto runtime = forge::asio::runtime{};
+   forge::asio::blocking::run(runtime, stcp_transport_upgrade_preserves_non_terminal_failure());
 }
 
 BOOST_AUTO_TEST_CASE(stcp_generic_transport_stop_requests_one_lower_cancel) {

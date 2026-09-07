@@ -52,7 +52,7 @@ namespace {
       if (code == forge::net::transport::exceptions::code::closed) {
          return boost::asio::error::eof;
       }
-      return boost::asio::error::connection_reset;
+      return boost::asio::error::fault;
    } catch (const boost::system::system_error& value) {
       return value.code();
    } catch (...) {
