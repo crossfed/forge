@@ -40,6 +40,7 @@ struct resource_manager::state {
    [[nodiscard]] ledger_attempt reserve_session(session_direction direction) noexcept;
    [[nodiscard]] ledger_attempt reserve_stream(peer_id peer, session_direction direction) noexcept;
    [[nodiscard]] dial_attempt reserve_dial() noexcept;
+   [[nodiscard]] dial_attempt reserve_dial(peer_id peer) noexcept;
    [[nodiscard]] bool dial_active(const std::shared_ptr<dial_ledger>& value) const noexcept;
    [[nodiscard]] bool dial_bound(const std::shared_ptr<dial_ledger>& value) const noexcept;
    [[nodiscard]] transition_result bind_dial(const std::shared_ptr<dial_ledger>& value, peer_id peer) noexcept;
@@ -68,6 +69,7 @@ struct resource_manager::state {
    };
 
    [[nodiscard]] ledger_attempt make_ledger_locked() noexcept;
+   [[nodiscard]] dial_attempt reserve_dial_locked(std::optional<peer_id> peer) noexcept;
    [[nodiscard]] bool reject_limit_locked(std::uint64_t& reason) noexcept;
    [[nodiscard]] bool reject_invalid_transition_locked() noexcept;
    void record_runtime_failure_locked() noexcept;

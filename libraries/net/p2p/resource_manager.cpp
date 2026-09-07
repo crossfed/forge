@@ -72,15 +72,14 @@ resource_manager::reservation_result<resource_manager::dial_reservation> resourc
 
 resource_manager::reservation_result<resource_manager::dial_reservation>
 resource_manager::reserve_dial(peer_id peer) noexcept {
-   auto reservation = reserve_dial();
-   if (!reservation) {
-      return reservation;
+   if (!state_) {
+      return reservation_result<dial_reservation>{transition_result::invalid_transition};
    }
-   const auto outcome = reservation->bind(std::move(peer));
-   if (outcome != transition_result::accepted) {
-      return reservation_result<dial_reservation>{outcome};
+   auto attempt = state_->reserve_dial(std::move(peer));
+   if (!attempt.reservation) {
+      return reservation_result<dial_reservation>{attempt.outcome};
    }
-   return reservation;
+   return reservation_result<dial_reservation>{dial_reservation{state_, std::move(attempt.reservation)}};
 }
 
 resource_manager::reservation_result<resource_manager::stream_reservation>

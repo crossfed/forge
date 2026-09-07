@@ -501,6 +501,30 @@ BOOST_AUTO_TEST_CASE(resource_manager_root_admissions_preserve_correlated_outcom
    BOOST_TEST(dial_after.runtime_failures == dial_before.runtime_failures + 1U);
    BOOST_TEST(dial_after.active_dials == 0U);
 
+   auto invalid_dial_manager = resource_manager{resource_manager::limits{
+       .max_dial_attempts = 0,
+   }};
+   const auto invalid_dial_before = invalid_dial_manager.current();
+   detail::fail_next_dial_reserve_prepare_for_test();
+   auto validation_first_dial = invalid_dial_manager.reserve_dial(test_peer(""));
+   BOOST_TEST(!validation_first_dial);
+   BOOST_TEST(
+       transition_matches(validation_first_dial.outcome(), resource_manager::transition_result::invalid_transition));
+   const auto invalid_dial_after = invalid_dial_manager.current();
+   BOOST_TEST(invalid_dial_after.denied == invalid_dial_before.denied);
+   BOOST_TEST(invalid_dial_after.invalid_transitions == invalid_dial_before.invalid_transitions + 1U);
+   BOOST_TEST(invalid_dial_after.runtime_failures == invalid_dial_before.runtime_failures);
+
+   auto valid_after_invalid = invalid_dial_manager.reserve_dial(test_peer("validation-first"));
+   BOOST_TEST(!valid_after_invalid);
+   BOOST_TEST(transition_matches(valid_after_invalid.outcome(), resource_manager::transition_result::policy_rejected));
+
+   auto failpoint_probe = resource_manager{};
+   auto failed_after_invalid = failpoint_probe.reserve_dial(test_peer("failpoint-remains-armed"));
+   BOOST_TEST(!failed_after_invalid);
+   BOOST_TEST(transition_matches(failed_after_invalid.outcome(), resource_manager::transition_result::runtime_failure));
+   BOOST_TEST(failpoint_probe.current().active_dials == 0U);
+
    auto stream_manager = resource_manager{};
    const auto stream_before = stream_manager.current();
    detail::fail_next_stream_reserve_prepare_for_test();

@@ -493,6 +493,20 @@ resource_manager::state::reserve_stream(peer_id peer, session_direction directio
 
 resource_manager::state::dial_attempt resource_manager::state::reserve_dial() noexcept {
    auto lock = std::scoped_lock{mutex_};
+   return reserve_dial_locked(std::nullopt);
+}
+
+resource_manager::state::dial_attempt resource_manager::state::reserve_dial(peer_id peer) noexcept {
+   auto lock = std::scoped_lock{mutex_};
+   if (peer.value.empty()) {
+      static_cast<void>(reject_invalid_transition_locked());
+      return {.outcome = transition_result::invalid_transition};
+   }
+   return reserve_dial_locked(std::optional<peer_id>{std::move(peer)});
+}
+
+resource_manager::state::dial_attempt
+resource_manager::state::reserve_dial_locked(std::optional<peer_id> peer) noexcept {
    if (snapshot_.active_dials >= limits_.max_dial_attempts) {
       static_cast<void>(reject_limit_locked(snapshot_.denied_dials));
       return {.outcome = transition_result::policy_rejected};
@@ -501,9 +515,29 @@ resource_manager::state::dial_attempt resource_manager::state::reserve_dial() no
       record_runtime_failure_locked();
       return {.outcome = transition_result::runtime_failure};
    }
+   if (peer) {
+      const auto found = dial_attempts_by_peer_.find(*peer);
+      const auto attempts = found == dial_attempts_by_peer_.end() ? 0 : found->second;
+      if (attempts >= limits_.max_dial_attempts_per_peer) {
+         static_cast<void>(reject_limit_locked(snapshot_.denied_dials));
+         return {.outcome = transition_result::policy_rejected};
+      }
+      if (dial_bind_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+         record_runtime_failure_locked();
+         return {.outcome = transition_result::runtime_failure};
+      }
+   }
    try {
       auto result = std::make_shared<dial_ledger>();
+      auto peer_scope = dial_attempts_by_peer_.end();
+      if (peer) {
+         result->peer = std::move(peer);
+         peer_scope = dial_attempts_by_peer_.try_emplace(*result->peer).first;
+      }
       ++snapshot_.active_dials;
+      if (peer_scope != dial_attempts_by_peer_.end()) {
+         ++peer_scope->second;
+      }
       return {.reservation = std::move(result), .outcome = transition_result::accepted};
    } catch (...) {
       record_runtime_failure_locked();
