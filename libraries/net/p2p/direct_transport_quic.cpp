@@ -51,41 +51,14 @@ import forge.net.transport.limits;
 import forge.net.transport.session;
 
 #include "details/direct_transport.hxx"
-#include "details/direct_transport_quic.hxx"
 #include "details/cancellation_latch.hxx"
 #include "details/connection_gate.hxx"
 #include "details/owner_cancellation.hxx"
+#include "details/pending_quic_connection.hxx"
 #include "details/quic_client_token_cache.hxx"
 #include "details/quic_client_options.hxx"
 
 namespace forge::net::p2p::direct {
-
-void detail::pending_quic_connection::install(forge::net::quic::connection value) noexcept {
-   const auto lock = std::scoped_lock{mutex_};
-   value_.emplace(std::move(value));
-}
-
-forge::net::quic::connection* detail::pending_quic_connection::get() noexcept {
-   const auto lock = std::scoped_lock{mutex_};
-   return value_ ? &*value_ : nullptr;
-}
-
-forge::net::quic::connection detail::pending_quic_connection::take() noexcept {
-   const auto lock = std::scoped_lock{mutex_};
-   if (!value_) {
-      return {};
-   }
-   auto result = std::move(*value_);
-   value_.reset();
-   return result;
-}
-
-void detail::pending_quic_connection::request_cancel() noexcept {
-   const auto lock = std::scoped_lock{mutex_};
-   if (value_) {
-      value_->request_cancel();
-   }
-}
 
 namespace {
 
