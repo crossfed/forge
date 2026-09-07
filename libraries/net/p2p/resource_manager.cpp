@@ -35,68 +35,80 @@ resource_manager::snapshot resource_manager::current() const noexcept {
    return state_ ? state_->current() : snapshot{};
 }
 
-std::optional<resource_manager::lifecycle_reservation> resource_manager::reserve_lifecycle() noexcept {
+resource_manager::reservation_result<resource_manager::lifecycle_reservation>
+resource_manager::reserve_lifecycle() noexcept {
    if (!state_) {
-      return std::nullopt;
+      return reservation_result<lifecycle_reservation>{transition_result::invalid_transition};
    }
-   auto ledger = state_->reserve_lifecycle();
-   if (!ledger) {
-      return std::nullopt;
+   auto attempt = state_->reserve_lifecycle();
+   if (!attempt.reservation) {
+      return reservation_result<lifecycle_reservation>{attempt.outcome};
    }
-   return lifecycle_reservation{state_, std::move(ledger)};
+   return reservation_result<lifecycle_reservation>{lifecycle_reservation{state_, std::move(attempt.reservation)}};
 }
 
-std::optional<resource_manager::session_reservation>
+resource_manager::reservation_result<resource_manager::session_reservation>
 resource_manager::reserve_session(session_direction direction) noexcept {
    if (!state_) {
-      return std::nullopt;
+      return reservation_result<session_reservation>{transition_result::invalid_transition};
    }
-   auto ledger = state_->reserve_session(direction);
-   if (!ledger) {
-      return std::nullopt;
+   auto attempt = state_->reserve_session(direction);
+   if (!attempt.reservation) {
+      return reservation_result<session_reservation>{attempt.outcome};
    }
-   return session_reservation{state_, std::move(ledger)};
+   return reservation_result<session_reservation>{session_reservation{state_, std::move(attempt.reservation)}};
 }
 
-std::optional<resource_manager::dial_reservation> resource_manager::reserve_dial() noexcept {
+resource_manager::reservation_result<resource_manager::dial_reservation> resource_manager::reserve_dial() noexcept {
    if (!state_) {
-      return std::nullopt;
+      return reservation_result<dial_reservation>{transition_result::invalid_transition};
    }
-   auto ledger = state_->reserve_dial();
-   if (!ledger) {
-      return std::nullopt;
+   auto attempt = state_->reserve_dial();
+   if (!attempt.reservation) {
+      return reservation_result<dial_reservation>{attempt.outcome};
    }
-   return dial_reservation{state_, std::move(ledger)};
+   return reservation_result<dial_reservation>{dial_reservation{state_, std::move(attempt.reservation)}};
 }
 
-std::optional<resource_manager::dial_reservation> resource_manager::reserve_dial(peer_id peer) noexcept {
+resource_manager::reservation_result<resource_manager::dial_reservation>
+resource_manager::reserve_dial(peer_id peer) noexcept {
    auto reservation = reserve_dial();
-   if (!reservation || reservation->bind(std::move(peer)) != transition_result::accepted) {
-      return std::nullopt;
+   if (!reservation) {
+      return reservation;
+   }
+   const auto outcome = reservation->bind(std::move(peer));
+   if (outcome != transition_result::accepted) {
+      return reservation_result<dial_reservation>{outcome};
    }
    return reservation;
 }
 
-std::optional<resource_manager::stream_reservation>
+resource_manager::reservation_result<resource_manager::stream_reservation>
 resource_manager::reserve_stream(peer_id peer, session_direction direction) noexcept {
    if (!state_) {
-      return std::nullopt;
+      return reservation_result<stream_reservation>{transition_result::invalid_transition};
    }
-   auto ledger = state_->reserve_stream(std::move(peer), direction);
-   if (!ledger) {
-      return std::nullopt;
+   auto attempt = state_->reserve_stream(std::move(peer), direction);
+   if (!attempt.reservation) {
+      return reservation_result<stream_reservation>{attempt.outcome};
    }
-   return stream_reservation{state_, std::move(ledger)};
+   return reservation_result<stream_reservation>{stream_reservation{state_, std::move(attempt.reservation)}};
 }
 
-std::optional<resource_manager::relay_reservation> resource_manager::reserve_relay(peer_id peer) noexcept {
-   if (!state_ || !state_->reserve_relay(peer)) {
-      return std::nullopt;
+resource_manager::reservation_result<resource_manager::relay_reservation>
+resource_manager::reserve_relay(peer_id peer) noexcept {
+   if (!state_) {
+      return reservation_result<relay_reservation>{transition_result::invalid_transition};
    }
-   return relay_reservation{state_, std::move(peer)};
+   const auto outcome = state_->reserve_relay(peer);
+   if (outcome != transition_result::accepted) {
+      return reservation_result<relay_reservation>{outcome};
+   }
+   return reservation_result<relay_reservation>{relay_reservation{state_, std::move(peer)}};
 }
 
-std::optional<resource_manager::relay_reservation> resource_manager::reserve_relay(scope value) noexcept {
+resource_manager::reservation_result<resource_manager::relay_reservation>
+resource_manager::reserve_relay(scope value) noexcept {
    return reserve_relay(std::move(value.peer));
 }
 

@@ -8,6 +8,7 @@ module;
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 export module forge.net.p2p.resource_manager;
 
@@ -177,6 +178,9 @@ class resource_manager {
    class memory_reservation;
    class file_descriptor_reservation;
 
+   template <typename Reservation>
+   class reservation_result;
+
    enum class transition_result : std::uint8_t {
       accepted,
       policy_rejected,
@@ -190,13 +194,14 @@ class resource_manager {
 
    [[nodiscard]] const limits& configured_limits() const noexcept;
    [[nodiscard]] snapshot current() const noexcept;
-   [[nodiscard]] std::optional<lifecycle_reservation> reserve_lifecycle() noexcept;
-   [[nodiscard]] std::optional<session_reservation> reserve_session(session_direction direction) noexcept;
-   [[nodiscard]] std::optional<dial_reservation> reserve_dial() noexcept;
-   [[nodiscard]] std::optional<dial_reservation> reserve_dial(peer_id peer) noexcept;
-   [[nodiscard]] std::optional<stream_reservation> reserve_stream(peer_id peer, session_direction direction) noexcept;
-   [[nodiscard]] std::optional<relay_reservation> reserve_relay(peer_id peer) noexcept;
-   [[nodiscard]] std::optional<relay_reservation> reserve_relay(scope value) noexcept;
+   [[nodiscard]] reservation_result<lifecycle_reservation> reserve_lifecycle() noexcept;
+   [[nodiscard]] reservation_result<session_reservation> reserve_session(session_direction direction) noexcept;
+   [[nodiscard]] reservation_result<dial_reservation> reserve_dial() noexcept;
+   [[nodiscard]] reservation_result<dial_reservation> reserve_dial(peer_id peer) noexcept;
+   [[nodiscard]] reservation_result<stream_reservation> reserve_stream(peer_id peer,
+                                                                        session_direction direction) noexcept;
+   [[nodiscard]] reservation_result<relay_reservation> reserve_relay(peer_id peer) noexcept;
+   [[nodiscard]] reservation_result<relay_reservation> reserve_relay(scope value) noexcept;
    [[nodiscard]] transition_result record_malformed(peer_id peer) noexcept;
    [[nodiscard]] transition_result record_malformed(scope value) noexcept;
 
@@ -373,6 +378,79 @@ class resource_manager::file_descriptor_reservation {
    std::shared_ptr<state> owner_;
    std::shared_ptr<ledger> ledger_;
    std::size_t count_ = 0;
+};
+
+template <typename Reservation>
+class resource_manager::reservation_result {
+ public:
+   reservation_result(reservation_result&& other) noexcept
+       : value_(std::move(other.value_)), outcome_(other.outcome_) {
+      normalize_outcome();
+      other.reset();
+   }
+
+   reservation_result& operator=(reservation_result&& other) noexcept {
+      if (this != &other) {
+         value_ = std::move(other.value_);
+         outcome_ = other.outcome_;
+         normalize_outcome();
+         other.reset();
+      }
+      return *this;
+   }
+   reservation_result(const reservation_result&) = delete;
+   reservation_result& operator=(const reservation_result&) = delete;
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return outcome_ == transition_result::accepted && value_.has_value();
+   }
+
+   [[nodiscard]] Reservation* operator->() noexcept {
+      return &*value_;
+   }
+
+   [[nodiscard]] const Reservation* operator->() const noexcept {
+      return &*value_;
+   }
+
+   [[nodiscard]] Reservation& operator*() & noexcept {
+      return *value_;
+   }
+
+   [[nodiscard]] const Reservation& operator*() const& noexcept {
+      return *value_;
+   }
+
+   [[nodiscard]] Reservation&& operator*() && noexcept {
+      return std::move(*value_);
+   }
+
+   [[nodiscard]] transition_result outcome() const noexcept {
+      return outcome_;
+   }
+
+   void reset() noexcept {
+      value_.reset();
+      outcome_ = transition_result::invalid_transition;
+   }
+
+ private:
+   friend class resource_manager;
+
+   explicit reservation_result(transition_result outcome) noexcept
+       : outcome_(outcome == transition_result::accepted ? transition_result::invalid_transition : outcome) {}
+
+   explicit reservation_result(Reservation value) noexcept
+       : value_(std::move(value)), outcome_(transition_result::accepted) {}
+
+   void normalize_outcome() noexcept {
+      if (!value_ && outcome_ == transition_result::accepted) {
+         outcome_ = transition_result::invalid_transition;
+      }
+   }
+
+   std::optional<Reservation> value_;
+   transition_result outcome_ = transition_result::invalid_transition;
 };
 
 } // namespace forge::net::p2p

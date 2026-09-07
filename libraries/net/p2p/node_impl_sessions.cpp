@@ -425,13 +425,17 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
    }
    auto owned_dial = std::optional<resource_manager::dial_reservation>{};
    if (logical_dial == nullptr) {
-      owned_dial = resources.reserve_dial();
-      if (!owned_dial) {
-         auto lock = std::scoped_lock{mutex};
-         ++metrics_value.backpressure_rejections;
-         ++metrics_value.connection_rejections;
-         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P logical dial limit reached");
+      auto dial_admission = resources.reserve_dial();
+      if (!dial_admission) {
+         if (dial_admission.outcome() == resource_manager::transition_result::policy_rejected) {
+            auto lock = std::scoped_lock{mutex};
+            ++metrics_value.backpressure_rejections;
+            ++metrics_value.connection_rejections;
+            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P logical dial limit reached");
+         }
+         FORGE_THROW_EXCEPTION(exceptions::internal, "P2P logical dial resource admission failed");
       }
+      owned_dial.emplace(std::move(*dial_admission));
       logical_dial = &*owned_dial;
    }
    if (expected_peer && !logical_dial->bound()) {
@@ -448,10 +452,13 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
    }
    auto reservation = resources.reserve_session(resource_manager::session_direction::outbound);
    if (!reservation) {
-      auto lock = std::scoped_lock{mutex};
-      ++metrics_value.backpressure_rejections;
-      ++metrics_value.connection_rejections;
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P pending outbound session limit reached");
+      if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+         auto lock = std::scoped_lock{mutex};
+         ++metrics_value.backpressure_rejections;
+         ++metrics_value.connection_rejections;
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P pending outbound session limit reached");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P outbound session resource admission failed");
    }
    auto descriptor = reservation->reserve_file_descriptors(1);
    if (!descriptor) {
@@ -553,10 +560,13 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
    const auto attempts = std::min(max_direct_endpoints, preferred.size());
    auto dial = resources.reserve_dial();
    if (!dial) {
-      auto lock = std::scoped_lock{mutex};
-      ++metrics_value.backpressure_rejections;
-      ++metrics_value.connection_rejections;
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P per-peer dial limit reached");
+      if (dial.outcome() == resource_manager::transition_result::policy_rejected) {
+         auto lock = std::scoped_lock{mutex};
+         ++metrics_value.backpressure_rejections;
+         ++metrics_value.connection_rejections;
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P per-peer dial limit reached");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P direct dial resource admission failed");
    }
    const auto dial_transition = dial->bind(peer);
    if (dial_transition != resource_manager::transition_result::accepted) {
@@ -728,10 +738,13 @@ void node::impl::launch_session_accept_loop(std::shared_ptr<node::impl::session_
                 self->resources.reserve_stream(session->info.remote_peer, resource_manager::session_direction::inbound);
             if (!reservation) {
                stream.cancel();
-               auto lock = std::scoped_lock{self->mutex};
-               ++self->metrics_value.backpressure_rejections;
-               ++self->metrics_value.protocol_rejections;
-               continue;
+               if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+                  auto lock = std::scoped_lock{self->mutex};
+                  ++self->metrics_value.backpressure_rejections;
+                  ++self->metrics_value.protocol_rejections;
+                  continue;
+               }
+               FORGE_THROW_EXCEPTION(exceptions::internal, "P2P inbound stream resource admission failed");
             }
             auto accepted = std::make_shared<forge::net::transport::stream>(std::move(stream));
             auto admission = std::make_shared<resource_manager::stream_reservation>(std::move(*reservation));

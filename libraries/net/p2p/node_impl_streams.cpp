@@ -95,10 +95,13 @@ node::impl::open_session_stream(const std::shared_ptr<session_state>& session, c
    const auto direction = resource_manager::session_direction::outbound;
    auto reservation = resources.reserve_stream(session->info.remote_peer, direction);
    if (!reservation) {
-      auto lock = std::scoped_lock{mutex};
-      ++metrics_value.backpressure_rejections;
-      ++metrics_value.protocol_rejections;
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P stream limit reached");
+      if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+         auto lock = std::scoped_lock{mutex};
+         ++metrics_value.backpressure_rejections;
+         ++metrics_value.protocol_rejections;
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P stream limit reached");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P stream resource admission failed");
    }
    auto [guarded, resource] = detail::prepare_resource_stream(std::move(*reservation));
    auto raw = co_await session->connection.async_open_stream();
@@ -140,7 +143,10 @@ node::impl::open_yamux_stream(const peer_id& peer, const std::shared_ptr<forge::
                               const protocol_id& protocol, bool relay) {
    auto reservation = resources.reserve_stream(peer, resource_manager::session_direction::outbound);
    if (!reservation) {
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P relayed stream limit reached");
+      if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P relayed stream limit reached");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P relayed stream resource admission failed");
    }
    auto [guarded, resource] = detail::prepare_resource_stream(std::move(*reservation));
    auto raw = co_await yamux->async_open_stream();

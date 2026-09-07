@@ -163,7 +163,7 @@
         ]
       },
       "header_features": {},
-      "sha256": "8c2e0a12e8f9a0e63aa13c008dca47a6dcb19a569b912781a46ae802821d6adb",
+      "sha256": "126d11658c179985a791f84c4010f73e94e9393c75b178e9a04f55960650a72f",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -887,6 +887,7 @@
       "builtin_protocols": [],
       "capabilities": [],
       "public_components": [
+        "resource_manager::reservation_result",
         "resource_manager::lifecycle_reservation",
         "resource_manager::memory_reservation",
         "resource_manager::file_descriptor_reservation"

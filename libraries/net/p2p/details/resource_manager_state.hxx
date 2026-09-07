@@ -22,19 +22,29 @@ struct resource_manager::dial_ledger {
 };
 
 struct resource_manager::state {
+   struct ledger_attempt {
+      std::shared_ptr<ledger> reservation;
+      transition_result outcome = transition_result::runtime_failure;
+   };
+
+   struct dial_attempt {
+      std::shared_ptr<dial_ledger> reservation;
+      transition_result outcome = transition_result::runtime_failure;
+   };
+
    explicit state(limits value) noexcept;
 
    [[nodiscard]] const limits& configured_limits() const noexcept;
    [[nodiscard]] snapshot current() const noexcept;
-   [[nodiscard]] std::shared_ptr<ledger> reserve_lifecycle() noexcept;
-   [[nodiscard]] std::shared_ptr<ledger> reserve_session(session_direction direction) noexcept;
-   [[nodiscard]] std::shared_ptr<ledger> reserve_stream(peer_id peer, session_direction direction) noexcept;
-   [[nodiscard]] std::shared_ptr<dial_ledger> reserve_dial() noexcept;
+   [[nodiscard]] ledger_attempt reserve_lifecycle() noexcept;
+   [[nodiscard]] ledger_attempt reserve_session(session_direction direction) noexcept;
+   [[nodiscard]] ledger_attempt reserve_stream(peer_id peer, session_direction direction) noexcept;
+   [[nodiscard]] dial_attempt reserve_dial() noexcept;
    [[nodiscard]] bool dial_active(const std::shared_ptr<dial_ledger>& value) const noexcept;
    [[nodiscard]] bool dial_bound(const std::shared_ptr<dial_ledger>& value) const noexcept;
    [[nodiscard]] transition_result bind_dial(const std::shared_ptr<dial_ledger>& value, peer_id peer) noexcept;
    void release_dial(const std::shared_ptr<dial_ledger>& value) noexcept;
-   [[nodiscard]] bool reserve_relay(const peer_id& peer) noexcept;
+   [[nodiscard]] transition_result reserve_relay(const peer_id& peer) noexcept;
    void release_relay(const peer_id& peer) noexcept;
    [[nodiscard]] transition_result record_malformed(const peer_id& peer) noexcept;
    [[nodiscard]] bool session_established(const std::shared_ptr<ledger>& value) const noexcept;
@@ -57,7 +67,7 @@ struct resource_manager::state {
       scope_totals usage;
    };
 
-   [[nodiscard]] std::shared_ptr<ledger> make_ledger_locked() noexcept;
+   [[nodiscard]] ledger_attempt make_ledger_locked() noexcept;
    [[nodiscard]] bool reject_limit_locked(std::uint64_t& reason) noexcept;
    [[nodiscard]] bool reject_invalid_transition_locked() noexcept;
    void record_runtime_failure_locked() noexcept;
@@ -102,5 +112,10 @@ void fail_next_service_bind_prepare_for_test() noexcept;
 void fail_next_session_establish_prepare_for_test() noexcept;
 void fail_next_dial_bind_prepare_for_test() noexcept;
 void fail_next_malformed_record_prepare_for_test() noexcept;
+void fail_next_lifecycle_reserve_prepare_for_test() noexcept;
+void fail_next_session_reserve_prepare_for_test() noexcept;
+void fail_next_dial_reserve_prepare_for_test() noexcept;
+void fail_next_stream_reserve_prepare_for_test() noexcept;
+void fail_next_relay_reserve_prepare_for_test() noexcept;
 
 } // namespace forge::net::p2p::detail

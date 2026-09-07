@@ -3443,7 +3443,16 @@ struct engine_listener::impl {
          case initial_token_disposition::accept:
             break;
          }
-         connection = create_server_connection(hd, token, from);
+         try {
+            connection = create_server_connection(hd, token, from);
+         } catch (const engine_failure& error) {
+            if (error.kind() == engine_error_kind::internal_error) {
+               pending_accept_error = error.kind();
+               pending_accept_failure_text = error.message();
+               wake(accept_waiters);
+            }
+            throw;
+         }
          register_connection_cid(connection, cid_key(hd.dcid.data, hd.dcid.datalen));
          auto local_cid = ngtcp2_cid{};
          ngtcp2_conn_get_scid(connection->conn, &local_cid);
@@ -3486,7 +3495,7 @@ struct engine_listener::impl {
          try {
             admission = options.inbound_admission();
          } catch (...) {
-            throw_engine(engine_error_kind::backpressure_rejected, "QUIC inbound admission rejected");
+            throw_engine(engine_error_kind::internal_error, "QUIC inbound admission failed internally");
          }
          if (!admission) {
             throw_engine(engine_error_kind::backpressure_rejected, "QUIC inbound admission rejected");

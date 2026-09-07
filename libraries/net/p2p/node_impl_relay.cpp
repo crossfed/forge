@@ -220,8 +220,11 @@ bool node::impl::remember_inbound_relay_reservation(const peer_id& owner, relay:
    } else {
       auto acquired = resources.reserve_relay(resource_manager::scope{.peer = owner, .protocol = builtins::relay_hop});
       if (!acquired) {
-         ++metrics_value.relay_reservation_rejections;
-         return false;
+         if (acquired.outcome() == resource_manager::transition_result::policy_rejected) {
+            ++metrics_value.relay_reservation_rejections;
+            return false;
+         }
+         FORGE_THROW_EXCEPTION(exceptions::internal, "P2P relay reservation resource admission failed");
       }
       resource = std::move(*acquired);
       reservation_id = next_reservation_id++;
@@ -266,9 +269,12 @@ std::optional<node::impl::relay_admission> node::impl::begin_relay(const peer_id
    }
    auto circuit = resources.reserve_relay(owner);
    if (!circuit) {
-      ++metrics_value.relay_rejections;
-      status = relay::status::resource_limit_exceeded;
-      return std::nullopt;
+      if (circuit.outcome() == resource_manager::transition_result::policy_rejected) {
+         ++metrics_value.relay_rejections;
+         status = relay::status::resource_limit_exceeded;
+         return std::nullopt;
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P relay circuit resource admission failed");
    }
    auto reservation_id = std::optional<std::uint64_t>{};
    if (options.limits.relay.require_reservation) {
@@ -670,10 +676,13 @@ node::impl::ensure_relay_session(const peer_id& peer, const peer_id& relay_peer,
    connection_gate->peer_dial(peer);
    auto reservation = resources.reserve_session(resource_manager::session_direction::outbound);
    if (!reservation) {
-      auto lock = std::scoped_lock{mutex};
-      ++metrics_value.backpressure_rejections;
-      ++metrics_value.connection_rejections;
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P pending outbound relay session limit reached");
+      if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+         auto lock = std::scoped_lock{mutex};
+         ++metrics_value.backpressure_rejections;
+         ++metrics_value.connection_rejections;
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P pending outbound relay session limit reached");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P outbound relay session resource admission failed");
    }
    auto upgraded = co_await open_relay_yamux(
        peer, relay_peer, timeout, [this, &reservation](const peer_id& authenticated_peer) {
@@ -771,16 +780,19 @@ boost::asio::awaitable<void> node::impl::handle_relay_stop(std::shared_ptr<node:
    connection_gate->accept(local_endpoint, remote_endpoint);
    auto reservation = resources.reserve_session(resource_manager::session_direction::inbound);
    if (!reservation) {
-      {
-         auto lock = std::scoped_lock{mutex};
-         ++metrics_value.backpressure_rejections;
-         ++metrics_value.connection_rejections;
+      if (reservation.outcome() == resource_manager::transition_result::policy_rejected) {
+         {
+            auto lock = std::scoped_lock{mutex};
+            ++metrics_value.backpressure_rejections;
+            ++metrics_value.connection_rejections;
+         }
+         co_await stream.async_write(relay::codec::encode_stop(relay::stop_message{
+             .kind = relay::stop_message::message_kind::status,
+             .status = relay::status::resource_limit_exceeded,
+         }));
+         co_return;
       }
-      co_await stream.async_write(relay::codec::encode_stop(relay::stop_message{
-          .kind = relay::stop_message::message_kind::status,
-          .status = relay::status::resource_limit_exceeded,
-      }));
-      co_return;
+      FORGE_THROW_EXCEPTION(exceptions::internal, "P2P inbound relay session resource admission failed");
    }
    co_await stream.async_write(relay::codec::encode_stop(relay::stop_message{
        .kind = relay::stop_message::message_kind::status,

@@ -6917,7 +6917,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_voucher_uses_signed_envelope_and_rejects_stale_or
        reservation->bind_service(service) != resource_manager::stream_reservation::bind_result::accepted) {
       return std::nullopt;
    }
-   return reservation;
+   return std::optional<resource_manager::stream_reservation>{std::move(*reservation)};
 }
 
 BOOST_AUTO_TEST_CASE(p2p_resource_manager_relay_stream_uses_normal_stream_and_memory_limits) {
@@ -7327,7 +7327,8 @@ BOOST_AUTO_TEST_CASE(p2p_relay_byte_limits_are_independent_per_circuit_direction
 
 [[nodiscard]] std::optional<resource_manager::relay_reservation>
 reserve_relay_circuit_for_test(resource_manager& manager, const peer_id& owner) {
-   return manager.reserve_relay(owner);
+   auto reservation = manager.reserve_relay(owner);
+   return reservation ? std::optional<resource_manager::relay_reservation>{std::move(*reservation)} : std::nullopt;
 }
 
 [[nodiscard]] std::optional<resource_manager::stream_reservation>
@@ -7338,7 +7339,7 @@ reserve_relay_hop_stream_for_test(resource_manager& manager, const peer_id& owne
        reservation->bind_service("p2p.relay") != resource_manager::stream_reservation::bind_result::accepted) {
       return std::nullopt;
    }
-   return reservation;
+   return std::optional<resource_manager::stream_reservation>{std::move(*reservation)};
 }
 
 BOOST_AUTO_TEST_CASE(p2p_relay_deadline_cancel_before_wait_is_latched) {

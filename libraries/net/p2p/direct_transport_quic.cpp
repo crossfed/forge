@@ -266,7 +266,10 @@ class quic_profile final {
       try {
          auto lifecycle = resources_.reserve_lifecycle();
          if (!lifecycle) {
-            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P QUIC listener lifecycle limit reached");
+            if (lifecycle.outcome() == resource_manager::transition_result::policy_rejected) {
+               FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P QUIC listener lifecycle limit reached");
+            }
+            FORGE_THROW_EXCEPTION(exceptions::internal, "P2P QUIC listener lifecycle resource admission failed");
          }
          auto descriptor = lifecycle->reserve_file_descriptors(1);
          if (!descriptor) {
@@ -536,7 +539,10 @@ class quic_profile final {
           .inbound_admission = [resources = resources_]() mutable -> std::shared_ptr<void> {
              auto admission = resources.reserve_session(resource_manager::session_direction::inbound);
              if (!admission) {
-                return {};
+                if (admission.outcome() == resource_manager::transition_result::policy_rejected) {
+                   return {};
+                }
+                FORGE_THROW_EXCEPTION(exceptions::internal, "P2P QUIC inbound session resource admission failed");
              }
              return std::make_shared<resource_manager::session_reservation>(std::move(*admission));
           },

@@ -19,6 +19,11 @@ void fail_next_service_bind_prepare_for_test() noexcept;
 void fail_next_session_establish_prepare_for_test() noexcept;
 void fail_next_dial_bind_prepare_for_test() noexcept;
 void fail_next_malformed_record_prepare_for_test() noexcept;
+void fail_next_lifecycle_reserve_prepare_for_test() noexcept;
+void fail_next_session_reserve_prepare_for_test() noexcept;
+void fail_next_dial_reserve_prepare_for_test() noexcept;
+void fail_next_stream_reserve_prepare_for_test() noexcept;
+void fail_next_relay_reserve_prepare_for_test() noexcept;
 }
 
 namespace forge::net::p2p {
@@ -460,6 +465,158 @@ BOOST_AUTO_TEST_CASE(resource_manager_separates_policy_rejection_from_invalid_an
    BOOST_TEST(after_runtime.runtime_failures == after_invalid.runtime_failures + 3U);
    BOOST_TEST(after_runtime.transient.outbound_connections == 1U);
    BOOST_TEST(after_runtime.peers.outbound_connections == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(resource_manager_root_admissions_preserve_correlated_outcomes) {
+   auto lifecycle_manager = resource_manager{};
+   const auto lifecycle_before = lifecycle_manager.current();
+   detail::fail_next_lifecycle_reserve_prepare_for_test();
+   auto lifecycle = lifecycle_manager.reserve_lifecycle();
+   BOOST_TEST(!lifecycle);
+   BOOST_TEST(transition_matches(lifecycle.outcome(), resource_manager::transition_result::runtime_failure));
+   const auto lifecycle_after = lifecycle_manager.current();
+   BOOST_TEST(lifecycle_after.denied == lifecycle_before.denied);
+   BOOST_TEST(lifecycle_after.runtime_failures == lifecycle_before.runtime_failures + 1U);
+
+   auto session_manager = resource_manager{};
+   const auto session_before = session_manager.current();
+   detail::fail_next_session_reserve_prepare_for_test();
+   auto session = session_manager.reserve_session(resource_manager::session_direction::inbound);
+   BOOST_TEST(!session);
+   BOOST_TEST(transition_matches(session.outcome(), resource_manager::transition_result::runtime_failure));
+   const auto session_after = session_manager.current();
+   BOOST_TEST(session_after.denied == session_before.denied);
+   BOOST_TEST(session_after.runtime_failures == session_before.runtime_failures + 1U);
+   BOOST_TEST(session_after.system.inbound_connections == 0U);
+   BOOST_TEST(session_after.transient.inbound_connections == 0U);
+
+   auto dial_manager = resource_manager{};
+   const auto dial_before = dial_manager.current();
+   detail::fail_next_dial_reserve_prepare_for_test();
+   auto dial = dial_manager.reserve_dial();
+   BOOST_TEST(!dial);
+   BOOST_TEST(transition_matches(dial.outcome(), resource_manager::transition_result::runtime_failure));
+   const auto dial_after = dial_manager.current();
+   BOOST_TEST(dial_after.denied == dial_before.denied);
+   BOOST_TEST(dial_after.runtime_failures == dial_before.runtime_failures + 1U);
+   BOOST_TEST(dial_after.active_dials == 0U);
+
+   auto stream_manager = resource_manager{};
+   const auto stream_before = stream_manager.current();
+   detail::fail_next_stream_reserve_prepare_for_test();
+   auto stream =
+       stream_manager.reserve_stream(test_peer("stream-runtime"), resource_manager::session_direction::outbound);
+   BOOST_TEST(!stream);
+   BOOST_TEST(transition_matches(stream.outcome(), resource_manager::transition_result::runtime_failure));
+   const auto stream_after = stream_manager.current();
+   BOOST_TEST(stream_after.denied == stream_before.denied);
+   BOOST_TEST(stream_after.runtime_failures == stream_before.runtime_failures + 1U);
+   BOOST_TEST(stream_after.system.outbound_streams == 0U);
+   BOOST_TEST(stream_after.transient.outbound_streams == 0U);
+   BOOST_TEST(stream_after.active_peer_scopes == 0U);
+
+   auto relay_manager = resource_manager{};
+   const auto relay_before = relay_manager.current();
+   detail::fail_next_relay_reserve_prepare_for_test();
+   auto relay = relay_manager.reserve_relay(test_peer("relay-runtime"));
+   BOOST_TEST(!relay);
+   BOOST_TEST(transition_matches(relay.outcome(), resource_manager::transition_result::runtime_failure));
+   const auto relay_after = relay_manager.current();
+   BOOST_TEST(relay_after.denied == relay_before.denied);
+   BOOST_TEST(relay_after.runtime_failures == relay_before.runtime_failures + 1U);
+   BOOST_TEST(relay_after.active_relay_reservations == 0U);
+
+   auto policy_manager = resource_manager{resource_manager::limits{
+       .system = {.max_inbound_connections = 0},
+   }};
+   auto policy = policy_manager.reserve_session(resource_manager::session_direction::inbound);
+   BOOST_TEST(!policy);
+   BOOST_TEST(transition_matches(policy.outcome(), resource_manager::transition_result::policy_rejected));
+   BOOST_TEST(policy_manager.current().denied_connections == 1U);
+
+   auto dial_policy_manager = resource_manager{resource_manager::limits{
+       .max_dial_attempts = 0,
+   }};
+   auto dial_policy = dial_policy_manager.reserve_dial();
+   BOOST_TEST(!dial_policy);
+   BOOST_TEST(transition_matches(dial_policy.outcome(), resource_manager::transition_result::policy_rejected));
+   BOOST_TEST(dial_policy_manager.current().denied_dials == 1U);
+
+   auto stream_policy_manager = resource_manager{resource_manager::limits{
+       .system = {.max_streams = 0},
+   }};
+   auto stream_policy =
+       stream_policy_manager.reserve_stream(test_peer("stream-policy"), resource_manager::session_direction::outbound);
+   BOOST_TEST(!stream_policy);
+   BOOST_TEST(transition_matches(stream_policy.outcome(), resource_manager::transition_result::policy_rejected));
+   BOOST_TEST(stream_policy_manager.current().denied_streams == 1U);
+
+   auto relay_policy_manager = resource_manager{resource_manager::limits{
+       .max_relay_reservations = 0,
+   }};
+   auto relay_policy = relay_policy_manager.reserve_relay(test_peer("relay-policy"));
+   BOOST_TEST(!relay_policy);
+   BOOST_TEST(transition_matches(relay_policy.outcome(), resource_manager::transition_result::policy_rejected));
+   BOOST_TEST(relay_policy_manager.current().denied_relays == 1U);
+
+   auto invalid_manager = resource_manager{};
+   auto invalid_stream =
+       invalid_manager.reserve_stream(test_peer(""), resource_manager::session_direction::outbound);
+   BOOST_TEST(!invalid_stream);
+   BOOST_TEST(transition_matches(invalid_stream.outcome(), resource_manager::transition_result::invalid_transition));
+   auto invalid_dial = invalid_manager.reserve_dial(test_peer(""));
+   BOOST_TEST(!invalid_dial);
+   BOOST_TEST(transition_matches(invalid_dial.outcome(), resource_manager::transition_result::invalid_transition));
+   auto invalid_relay = invalid_manager.reserve_relay(test_peer(""));
+   BOOST_TEST(!invalid_relay);
+   BOOST_TEST(transition_matches(invalid_relay.outcome(), resource_manager::transition_result::invalid_transition));
+   BOOST_TEST(invalid_manager.current().denied == 0U);
+   BOOST_TEST(invalid_manager.current().invalid_transitions == 3U);
+
+   auto accepted_manager = resource_manager{};
+   auto accepted = accepted_manager.reserve_lifecycle();
+   BOOST_REQUIRE(accepted);
+   BOOST_TEST(transition_matches(accepted.outcome(), resource_manager::transition_result::accepted));
+   BOOST_TEST(accepted->active());
+}
+
+BOOST_AUTO_TEST_CASE(resource_manager_root_results_normalize_move_and_reset_states) {
+   auto manager = resource_manager{};
+   auto accepted = manager.reserve_lifecycle();
+   BOOST_REQUIRE(accepted);
+
+   auto moved = std::move(accepted);
+   BOOST_TEST(!accepted);
+   BOOST_TEST(transition_matches(accepted.outcome(), resource_manager::transition_result::invalid_transition));
+   BOOST_REQUIRE(moved);
+   BOOST_TEST(transition_matches(moved.outcome(), resource_manager::transition_result::accepted));
+   BOOST_TEST(moved->active());
+
+   auto assigned = manager.reserve_lifecycle();
+   BOOST_REQUIRE(assigned);
+   assigned = std::move(moved);
+   BOOST_TEST(!moved);
+   BOOST_TEST(transition_matches(moved.outcome(), resource_manager::transition_result::invalid_transition));
+   BOOST_REQUIRE(assigned);
+   BOOST_TEST(transition_matches(assigned.outcome(), resource_manager::transition_result::accepted));
+   BOOST_TEST(assigned->active());
+
+   assigned.reset();
+   BOOST_TEST(!assigned);
+   BOOST_TEST(transition_matches(assigned.outcome(), resource_manager::transition_result::invalid_transition));
+
+   auto policy_manager = resource_manager{resource_manager::limits{
+       .max_dial_attempts = 0,
+   }};
+   auto rejected = policy_manager.reserve_dial();
+   BOOST_TEST(!rejected);
+   BOOST_TEST(transition_matches(rejected.outcome(), resource_manager::transition_result::policy_rejected));
+
+   auto moved_rejected = std::move(rejected);
+   BOOST_TEST(!rejected);
+   BOOST_TEST(transition_matches(rejected.outcome(), resource_manager::transition_result::invalid_transition));
+   BOOST_TEST(!moved_rejected);
+   BOOST_TEST(transition_matches(moved_rejected.outcome(), resource_manager::transition_result::policy_rejected));
 }
 
 BOOST_AUTO_TEST_CASE(resource_manager_reports_service_bind_allocation_failure_without_policy_denial) {

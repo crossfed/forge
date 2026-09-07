@@ -2082,6 +2082,38 @@ BOOST_AUTO_TEST_CASE(quic_connect_timeout_limits_stalled_handshake_budget) {
    blackhole.close();
 }
 
+BOOST_AUTO_TEST_CASE(quic_throwing_inbound_admission_surfaces_internal_accept_failure) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto calls = std::atomic_size_t{0};
+   auto options = loopback_server_options();
+   options.inbound_admission = [&calls]() -> std::shared_ptr<void> {
+      ++calls;
+      throw std::bad_alloc{};
+   };
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, std::move(options)};
+   auto client = connector{runtime};
+   auto client_options = loopback_client_options();
+   client_options.handshake_timeout = std::chrono::milliseconds{500};
+   client_options.connect_timeout = std::chrono::milliseconds{1'000};
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto attempted = boost::asio::co_spawn(runtime.context(),
+                                           client.async_connect(server.local_endpoint(), client_options),
+                                           boost::asio::use_future);
+
+   auto result = std::optional<exceptions::code>{};
+   try {
+      static_cast<void>(get_with_deadline(accepted, std::chrono::milliseconds{2'000}, "throwing inbound admission"));
+   } catch (const forge::exceptions::base& error) {
+      result = exceptions::code_of(error);
+   }
+
+   BOOST_REQUIRE(calls.load(std::memory_order_relaxed) > 0U);
+   BOOST_REQUIRE(result.has_value());
+   BOOST_TEST(static_cast<int>(*result) == static_cast<int>(exceptions::code::internal));
+   server.stop();
+   static_cast<void>(attempted);
+}
+
 BOOST_AUTO_TEST_CASE(quic_failed_handshake_releases_listener_connection_slot) {
    auto limits =
        transport_limits{.max_connections = 1, .max_streams_per_connection = 16, .max_queued_bytes = 16 * 1024 * 1024};

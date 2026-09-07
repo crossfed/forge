@@ -163,7 +163,10 @@ class tcp_profile final {
       try {
          auto lifecycle = resources_.reserve_lifecycle();
          if (!lifecycle) {
-            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P TCP listener lifecycle limit reached");
+            if (lifecycle.outcome() == resource_manager::transition_result::policy_rejected) {
+               FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P TCP listener lifecycle limit reached");
+            }
+            FORGE_THROW_EXCEPTION(exceptions::internal, "P2P TCP listener lifecycle resource admission failed");
          }
          auto descriptor = lifecycle->reserve_file_descriptors(1);
          if (!descriptor) {
@@ -346,7 +349,10 @@ class tcp_profile final {
             gate_->accept(local_endpoint, remote_endpoint);
             auto admission = resources_.reserve_session(resource_manager::session_direction::inbound);
             if (!admission) {
-               FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P inbound session limit reached");
+               if (admission.outcome() == resource_manager::transition_result::policy_rejected) {
+                  FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P inbound session limit reached");
+               }
+               FORGE_THROW_EXCEPTION(exceptions::internal, "P2P inbound TCP session resource admission failed");
             }
             auto descriptor = admission->reserve_file_descriptors(1);
             if (!descriptor) {
@@ -417,7 +423,7 @@ class tcp_profile final {
                 .session = std::move(*upgraded.session).as_transport(),
                 .local_endpoint = std::move(local_endpoint),
                 .remote_endpoint = std::move(remote_endpoint),
-                .admission = std::move(admission),
+                .admission = std::move(*admission),
                 .native_lifetime = std::move(native_lifetime),
                 .authentication = upgraded.authentication,
             };

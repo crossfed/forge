@@ -45,6 +45,10 @@ Canonical source links:
   destroyed and release exactly once when their owning buffer or native lifetime
   is destroyed. Queued outbound chunks retain their explicit memory child through
   drain, acknowledgement or reset.
+- Preview root lifecycle, session, dial, stream and relay admission returns a
+  correlated result. Only `policy_rejected` maps to local backpressure or a
+  relay resource-limit status; `invalid_transition` and `runtime_failure` are
+  internal failures and do not increment policy-rejection metrics.
 - QUIC callers should still use `async_close()` for deterministic protocol close.
   As a C++ safety fallback, a live stream retains the native connection after its
   connection facade is dropped. Once the last facade/stream owner disappears,

@@ -26,6 +26,11 @@ std::atomic_bool service_bind_prepare_failpoint = false;
 std::atomic_bool session_establish_prepare_failpoint = false;
 std::atomic_bool dial_bind_prepare_failpoint = false;
 std::atomic_bool malformed_record_prepare_failpoint = false;
+std::atomic_bool lifecycle_reserve_prepare_failpoint = false;
+std::atomic_bool session_reserve_prepare_failpoint = false;
+std::atomic_bool dial_reserve_prepare_failpoint = false;
+std::atomic_bool stream_reserve_prepare_failpoint = false;
+std::atomic_bool relay_reserve_prepare_failpoint = false;
 
 template <typename T> [[nodiscard]] bool can_add(T current, T delta, T limit) noexcept {
    return current <= limit && delta <= limit - current;
@@ -154,18 +159,18 @@ resource_manager::snapshot resource_manager::state::current() const noexcept {
    return out;
 }
 
-std::shared_ptr<resource_manager::ledger> resource_manager::state::make_ledger_locked() noexcept {
+resource_manager::state::ledger_attempt resource_manager::state::make_ledger_locked() noexcept {
    if (next_ledger_id_ == 0) {
       record_runtime_failure_locked();
-      return nullptr;
+      return {.outcome = transition_result::runtime_failure};
    }
    try {
       auto result = std::make_shared<ledger>();
       result->id = next_ledger_id_++;
-      return result;
+      return {.reservation = std::move(result), .outcome = transition_result::accepted};
    } catch (...) {
       record_runtime_failure_locked();
-      return nullptr;
+      return {.outcome = transition_result::runtime_failure};
    }
 }
 
@@ -400,12 +405,16 @@ void resource_manager::state::cleanup_scopes_locked(const ledger& value) noexcep
    }
 }
 
-std::shared_ptr<resource_manager::ledger> resource_manager::state::reserve_lifecycle() noexcept {
+resource_manager::state::ledger_attempt resource_manager::state::reserve_lifecycle() noexcept {
    auto lock = std::scoped_lock{mutex_};
+   if (lifecycle_reserve_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+      record_runtime_failure_locked();
+      return {.outcome = transition_result::runtime_failure};
+   }
    return make_ledger_locked();
 }
 
-std::shared_ptr<resource_manager::ledger>
+resource_manager::state::ledger_attempt
 resource_manager::state::reserve_session(session_direction direction) noexcept {
    auto lock = std::scoped_lock{mutex_};
    const auto delta = connection_delta(direction);
@@ -414,26 +423,34 @@ resource_manager::state::reserve_session(session_direction direction) noexcept {
        !can_add_locked(transient_, limits_.transient, delta, memory_priority::always) ||
        !can_add_locked(local, limits_.connection, delta, memory_priority::always)) {
       static_cast<void>(reject_limit_locked(snapshot_.denied_connections));
-      return nullptr;
+      return {.outcome = transition_result::policy_rejected};
+   }
+   if (session_reserve_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+      record_runtime_failure_locked();
+      return {.outcome = transition_result::runtime_failure};
    }
    auto result = make_ledger_locked();
-   if (!result) {
-      return nullptr;
+   if (!result.reservation) {
+      return result;
    }
-   result->value_kind = ledger::kind::connection;
-   result->direction = direction;
-   result->usage = delta;
-   result->transient = true;
-   add_to_current_scopes_locked(*result, delta);
+   result.reservation->value_kind = ledger::kind::connection;
+   result.reservation->direction = direction;
+   result.reservation->usage = delta;
+   result.reservation->transient = true;
+   add_to_current_scopes_locked(*result.reservation, delta);
    return result;
 }
 
-std::shared_ptr<resource_manager::ledger>
+resource_manager::state::ledger_attempt
 resource_manager::state::reserve_stream(peer_id peer, session_direction direction) noexcept {
    auto lock = std::scoped_lock{mutex_};
    if (peer.value.empty()) {
       static_cast<void>(reject_invalid_transition_locked());
-      return nullptr;
+      return {.outcome = transition_result::invalid_transition};
+   }
+   if (stream_reserve_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+      record_runtime_failure_locked();
+      return {.outcome = transition_result::runtime_failure};
    }
    const auto delta = stream_delta(direction);
    const auto local = scope_account{};
@@ -449,44 +466,48 @@ resource_manager::state::reserve_stream(peer_id peer, session_direction directio
             peers_.erase(peer_scope);
          }
          static_cast<void>(reject_limit_locked(snapshot_.denied_streams));
-         return nullptr;
+         return {.outcome = transition_result::policy_rejected};
       }
       auto result = make_ledger_locked();
-      if (!result) {
+      if (!result.reservation) {
          if (peer_inserted && empty(peer_scope->second.usage)) {
             peers_.erase(peer_scope);
          }
-         return nullptr;
+         return result;
       }
-      result->value_kind = ledger::kind::stream;
-      result->direction = direction;
-      result->usage = delta;
-      result->peer = std::move(peer);
-      result->transient = true;
-      add_to_current_scopes_locked(*result, delta);
+      result.reservation->value_kind = ledger::kind::stream;
+      result.reservation->direction = direction;
+      result.reservation->usage = delta;
+      result.reservation->peer = std::move(peer);
+      result.reservation->transient = true;
+      add_to_current_scopes_locked(*result.reservation, delta);
       return result;
    } catch (...) {
       if (peer_inserted && peer_scope != peers_.end() && empty(peer_scope->second.usage)) {
          peers_.erase(peer_scope);
       }
       record_runtime_failure_locked();
-      return nullptr;
+      return {.outcome = transition_result::runtime_failure};
    }
 }
 
-std::shared_ptr<resource_manager::dial_ledger> resource_manager::state::reserve_dial() noexcept {
+resource_manager::state::dial_attempt resource_manager::state::reserve_dial() noexcept {
    auto lock = std::scoped_lock{mutex_};
    if (snapshot_.active_dials >= limits_.max_dial_attempts) {
       static_cast<void>(reject_limit_locked(snapshot_.denied_dials));
-      return nullptr;
+      return {.outcome = transition_result::policy_rejected};
+   }
+   if (dial_reserve_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+      record_runtime_failure_locked();
+      return {.outcome = transition_result::runtime_failure};
    }
    try {
       auto result = std::make_shared<dial_ledger>();
       ++snapshot_.active_dials;
-      return result;
+      return {.reservation = std::move(result), .outcome = transition_result::accepted};
    } catch (...) {
       record_runtime_failure_locked();
-      return nullptr;
+      return {.outcome = transition_result::runtime_failure};
    }
 }
 
@@ -552,23 +573,29 @@ void resource_manager::state::release_dial(const std::shared_ptr<dial_ledger>& v
    value->peer.reset();
 }
 
-bool resource_manager::state::reserve_relay(const peer_id& peer) noexcept {
+resource_manager::transition_result resource_manager::state::reserve_relay(const peer_id& peer) noexcept {
    auto lock = std::scoped_lock{mutex_};
    if (peer.value.empty()) {
-      return reject_invalid_transition_locked();
+      static_cast<void>(reject_invalid_transition_locked());
+      return transition_result::invalid_transition;
    }
    if (snapshot_.active_relay_reservations >= limits_.max_relay_reservations) {
-      return reject_limit_locked(snapshot_.denied_relays);
+      static_cast<void>(reject_limit_locked(snapshot_.denied_relays));
+      return transition_result::policy_rejected;
+   }
+   if (relay_reserve_prepare_failpoint.exchange(false, std::memory_order_relaxed)) {
+      record_runtime_failure_locked();
+      return transition_result::runtime_failure;
    }
    try {
       auto [entry, inserted] = relay_reservations_by_peer_.try_emplace(peer);
       static_cast<void>(inserted);
       ++entry->second;
       ++snapshot_.active_relay_reservations;
-      return true;
+      return transition_result::accepted;
    } catch (...) {
       record_runtime_failure_locked();
-      return false;
+      return transition_result::runtime_failure;
    }
 }
 
@@ -876,6 +903,26 @@ void fail_next_dial_bind_prepare_for_test() noexcept {
 
 void fail_next_malformed_record_prepare_for_test() noexcept {
    malformed_record_prepare_failpoint.store(true, std::memory_order_relaxed);
+}
+
+void fail_next_lifecycle_reserve_prepare_for_test() noexcept {
+   lifecycle_reserve_prepare_failpoint.store(true, std::memory_order_relaxed);
+}
+
+void fail_next_session_reserve_prepare_for_test() noexcept {
+   session_reserve_prepare_failpoint.store(true, std::memory_order_relaxed);
+}
+
+void fail_next_dial_reserve_prepare_for_test() noexcept {
+   dial_reserve_prepare_failpoint.store(true, std::memory_order_relaxed);
+}
+
+void fail_next_stream_reserve_prepare_for_test() noexcept {
+   stream_reserve_prepare_failpoint.store(true, std::memory_order_relaxed);
+}
+
+void fail_next_relay_reserve_prepare_for_test() noexcept {
+   relay_reserve_prepare_failpoint.store(true, std::memory_order_relaxed);
 }
 
 } // namespace detail
