@@ -25,7 +25,7 @@ class session_retirement {
    [[nodiscard]] bool terminal() const noexcept;
 
    [[nodiscard]] close_start begin_close(bool allow_untracked) noexcept;
-   [[nodiscard]] bool complete_terminal() noexcept;
+   [[nodiscard]] bool complete_terminal(session_teardown::ticket& ticket) noexcept;
    void quarantine() noexcept;
 
  private:

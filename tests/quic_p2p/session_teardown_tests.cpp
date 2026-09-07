@@ -58,6 +58,12 @@ bool wait_for_count(const std::atomic_size_t& value, std::size_t expected,
    return value.load(std::memory_order_acquire) == expected;
 }
 
+boost::asio::awaitable<bool> wait_for_terminal_cleanup(
+    detail::session_teardown* teardown, const std::atomic_bool* ownership_released) {
+   co_await teardown->wait();
+   co_return ownership_released->load(std::memory_order_acquire);
+}
+
 class throwing_cancel_session final : public forge::net::transport::detail::session_concept {
  public:
    [[nodiscard]] bool valid() const noexcept override {
@@ -805,13 +811,26 @@ BOOST_AUTO_TEST_CASE(p2p_session_retirement_releases_terminal_tracking_once) {
               static_cast<int>(detail::session_retirement::close_start::started));
    BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
               static_cast<int>(detail::session_retirement::close_start::in_flight));
-   BOOST_TEST(retirement.complete_terminal());
-   BOOST_TEST(!retirement.complete_terminal());
+   auto terminal_ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(retirement.complete_terminal(terminal_ticket));
+   BOOST_TEST(terminal_ticket.active());
+   auto duplicate_ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(!retirement.complete_terminal(duplicate_ticket));
    BOOST_TEST(retirement.terminal());
    BOOST_TEST(!retirement.tracked());
 
+   auto ownership_released = std::atomic_bool{false};
    teardown.start({});
-   forge::asio::blocking::run(runtime, teardown.wait());
+   auto stopped = boost::asio::co_spawn(
+       runtime.context(), wait_for_terminal_cleanup(&teardown, &ownership_released), boost::asio::use_future);
+   BOOST_TEST(static_cast<int>(stopped.wait_for(std::chrono::milliseconds{20})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   ownership_released.store(true, std::memory_order_release);
+   terminal_ticket.release();
+   BOOST_REQUIRE(static_cast<int>(stopped.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   BOOST_TEST(stopped.get());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantines_untracked_close_without_duplicate_attempt) {

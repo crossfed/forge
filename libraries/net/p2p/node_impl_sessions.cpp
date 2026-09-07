@@ -145,10 +145,12 @@ boost::asio::awaitable<void> node::impl::async_retire_session(const std::shared_
       co_return;
    }
 
-   if (session->retirement.complete_terminal()) {
+   auto teardown_ticket = detail::session_teardown::ticket{};
+   if (session->retirement.complete_terminal(teardown_ticket)) {
       session->native_lifetime.reset();
       session->resource.release();
       forget_retired_session(session);
+      teardown_ticket.release();
    }
 }
 

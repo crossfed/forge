@@ -56,8 +56,7 @@ session_retirement::close_start session_retirement::begin_close(bool allow_untra
    return close_start::started;
 }
 
-bool session_retirement::complete_terminal() noexcept {
-   auto ticket = session_teardown::ticket{};
+bool session_retirement::complete_terminal(session_teardown::ticket& ticket) noexcept {
    {
       const auto lock = std::scoped_lock{mutex_};
       if (terminal_) {
@@ -67,7 +66,6 @@ bool session_retirement::complete_terminal() noexcept {
       close_in_flight_ = false;
       ticket = std::move(ticket_);
    }
-   ticket.release();
    return true;
 }
 
