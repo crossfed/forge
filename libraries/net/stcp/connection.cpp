@@ -81,6 +81,11 @@ enum class connection_state : std::uint8_t {
       FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp handshake canceled",
                             forge::exceptions::ctx("reason", error.message()));
    }
+   if (error == boost::asio::error::eof || error == boost::asio::error::connection_reset ||
+       error == boost::asio::error::broken_pipe || error == boost::asio::ssl::error::stream_truncated) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "stcp peer closed during handshake",
+                            forge::exceptions::ctx("reason", error.message()));
+   }
    FORGE_THROW_EXCEPTION(exceptions::handshake_failed, std::move(message),
                          forge::exceptions::ctx("reason", error.message()));
 }

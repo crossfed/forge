@@ -170,6 +170,8 @@ add_library(
    details/session_retirement.hxx
    session_teardown.cpp
    details/session_teardown.hxx
+   private_transport_stream.cpp
+   details/private_transport_stream.hxx
    stream_upgrade.cpp
    details/stream_upgrade.hxx
 )

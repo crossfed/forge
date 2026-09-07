@@ -1295,7 +1295,8 @@ endpoint start_pnet_nonce_rejecting_tcp_peer(forge::asio::runtime& runtime, std:
    return make_tcp_endpoint(port);
 }
 
-std::pair<endpoint, std::future<void>> start_pnet_noise_closing_tcp_peer(forge::asio::runtime& runtime) {
+std::pair<endpoint, std::future<void>>
+start_pnet_security_closing_tcp_peer(forge::asio::runtime& runtime, protocol_id security_protocol) {
    auto listener = std::make_shared<forge::net::tcp::listener>(runtime.context().get_executor(),
                                                                make_tcp_endpoint(0).transport);
    auto protector = private_network_protector();
@@ -1305,13 +1306,13 @@ std::pair<endpoint, std::future<void>> start_pnet_noise_closing_tcp_peer(forge::
 
    boost::asio::co_spawn(
        runtime.context(),
-       [listener, protector]() -> boost::asio::awaitable<void> {
+       [listener, protector, security_protocol = std::move(security_protocol)]() -> boost::asio::awaitable<void> {
           auto connection = co_await listener->async_accept();
           auto protected_connection = co_await protector->async_protect(std::move(connection));
           auto protected_stream = forge::net::p2p::stream{std::move(protected_connection.stream)};
-          const auto noise = protocol_id{.value = "/noise"};
-          auto selected = co_await protocol_negotiation::async_accept(std::move(protected_stream), {noise});
-          if (selected.protocol != noise) {
+          auto selected =
+              co_await protocol_negotiation::async_accept(std::move(protected_stream), {security_protocol});
+          if (selected.protocol != security_protocol) {
              throw std::runtime_error{"PNET closing peer selected an unexpected security protocol"};
           }
           co_await listener->async_close();
@@ -4718,20 +4719,22 @@ BOOST_AUTO_TEST_CASE(p2p_private_network_maps_absent_and_truncated_peer_nonce_to
 }
 
 BOOST_AUTO_TEST_CASE(p2p_private_network_maps_post_selection_pnet_close_to_p2p_closed) {
-   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto client = node{runtime, private_network_options_for(make_test_identity())};
-   auto [peer_endpoint, peer_finished] = start_pnet_noise_closing_tcp_peer(runtime);
+   for (const auto& protocol : {protocol_id{.value = "/noise"}, protocol_id{.value = "/tls/1.0.0"}}) {
+      auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+      auto client = node{runtime, private_network_options_for(make_test_identity())};
+      auto [peer_endpoint, peer_finished] = start_pnet_security_closing_tcp_peer(runtime, protocol);
 
-   try {
-      static_cast<void>(forge::asio::blocking::run(runtime, client.async_connect(peer_endpoint)));
-      BOOST_FAIL("private P2P connect accepted a peer that closed before the Noise handshake");
-   } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::closed));
+      try {
+         static_cast<void>(forge::asio::blocking::run(runtime, client.async_connect(peer_endpoint)));
+         BOOST_FAIL("private P2P connect accepted a peer that closed before the security handshake");
+      } catch (const forge::exceptions::base& error) {
+         BOOST_REQUIRE(exceptions::code_of(error).has_value());
+         BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::closed));
+      }
+
+      wait_for_server(peer_finished, std::chrono::seconds{2}, "post-selection PNET closing peer");
+      forge::asio::blocking::run(runtime, client.async_stop());
    }
-
-   wait_for_server(peer_finished, std::chrono::seconds{2}, "post-selection PNET closing peer");
-   forge::asio::blocking::run(runtime, client.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_private_network_rejects_non_tcp_and_relay_operations_before_io) {

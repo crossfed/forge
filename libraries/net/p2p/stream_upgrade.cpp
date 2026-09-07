@@ -47,6 +47,7 @@ import forge.net.yamux.session;
 
 #include "details/identity_signature.hxx"
 #include "details/libp2p_tls.hxx"
+#include "details/private_transport_stream.hxx"
 #include "details/protobuf.hxx"
 #include "details/stream_upgrade.hxx"
 #include "details/cancellation_latch.hxx"
@@ -1073,7 +1074,8 @@ upgrade_outbound_private_tcp(forge::net::tcp::connection connection, const node:
          auto source = forge::net::transport::stream_connection{
              .local_endpoint = std::move(local),
              .remote_endpoint = std::move(remote),
-             .stream = std::move(*protected_stream).into_transport_stream(),
+             .stream = detail::adapt_private_transport_stream(
+                 std::move(*protected_stream).into_transport_stream()),
          };
          co_return co_await finish_tls_outbound(std::move(source), options, identity, std::move(expected_peer), deadline,
                                                 std::move(callbacks));
@@ -1117,7 +1119,8 @@ upgrade_inbound_private_tcp(forge::net::tcp::connection connection, const node::
          auto source = forge::net::transport::stream_connection{
              .local_endpoint = std::move(local),
              .remote_endpoint = std::move(remote),
-             .stream = std::move(*protected_stream).into_transport_stream(),
+             .stream = detail::adapt_private_transport_stream(
+                 std::move(*protected_stream).into_transport_stream()),
          };
          co_return co_await finish_tls_inbound(std::move(source), options, identity, std::move(expected_peer), deadline,
                                                std::move(callbacks));
