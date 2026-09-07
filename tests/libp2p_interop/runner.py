@@ -64,7 +64,7 @@ CURRENT_ACCEPTANCE_SCENARIOS = {
     "quic_rendezvous/rendezvous_register_discover": ("rendezvous_rust",),
 }
 DIAL_TIMEOUT_SECONDS = 90
-PNET_FINGERPRINT_DOMAIN = b"forge-p2p-stage6-pnet-fingerprint-v1\0"
+PNET_FINGERPRINT_DOMAIN = b"forge.net.pnet.operational-fingerprint.v1\0"
 NATIVE_TOPOLOGIES = (
     ("forge", "go", "go"),
     ("go", "forge", "forge"),
@@ -1108,12 +1108,46 @@ def run_pnet_control(dialer_binary: Path, dialer: str, listener_binary: Path, li
         server.close()
     listener_result = wait_json(listener_result_file, 20)
     listener_result["result_file"] = str(listener_result_file)
+    expected_sources = {
+        "forge": "forge.node.metrics",
+        "go": "go-libp2p.connection-gater",
+        "rust": "rust-libp2p.swarm-events",
+    }
+    for endpoint, payload in (("dialer", result), ("listener", listener_result)):
+        counters = [
+            payload.get(name)
+            for name in ("attempted_connections", "established_connections", "identify_streams", "application_streams")
+        ]
+        implementation = payload.get("implementation")
+        if implementation not in expected_sources or payload.get("counter_source") != expected_sources[implementation]:
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} lacks runtime counter provenance")
+        if any(type(value) is not int or value < 0 for value in counters):
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} has invalid observed counters")
+        rejected_before_identify = counters[1:] == [0, 0, 0]
+        if payload.get("rejected_before_identify") is not rejected_before_identify or not rejected_before_identify:
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} crossed the session boundary")
+    if result["attempted_connections"] < 1:
+        raise RuntimeError(f"{dialer}->{listener} pnet {control} did not observe its dial attempt")
+    if listener_result["attempted_connections"] < 1:
+        raise RuntimeError(f"{dialer}->{listener} pnet {control} did not observe listener ingress")
     return {
         "result": result,
         "listener_process": listener_evidence(server),
         "listener_result": listener_result,
         "listener_result_file": str(listener_result_file),
     }
+
+
+def require_pnet_dial_evidence(result: dict, implementation: str) -> None:
+    security = result.get("negotiated_security")
+    if security not in {"/noise", "/tls/1.0.0"}:
+        raise RuntimeError(f"{implementation} pnet dial lacks observed Noise/TLS negotiation: {result}")
+    if result.get("negotiated_muxer") != "/yamux/1.0.0":
+        raise RuntimeError(f"{implementation} pnet dial lacks observed Yamux negotiation: {result}")
+    if implementation == "rust":
+        for field in ("autonat_v2_active", "relay_service_active", "relay_client_active", "dcutr_active"):
+            if result.get(field) is not False:
+                raise RuntimeError(f"Rust pnet dial did not prove {field}=false: {result}")
 
 
 def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str,
@@ -1160,6 +1194,8 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
             pnet_key_file=pnet_key_file,
             pnet_fingerprint=pnet_fingerprint,
         )
+        if pnet_profile:
+            require_pnet_dial_evidence(result, dialer)
         if scenario == "identify" and dialer == "go" and listener == "forge":
             if result.get("signed_peer_record") is not True:
                 raise RuntimeError("Go libp2p did not receive Forge's signed Identify peer record")
@@ -1172,6 +1208,10 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")
+        if pnet_profile and listener == "rust":
+            for field in ("autonat_v2_active", "relay_service_active", "relay_client_active", "dcutr_active"):
+                if delivered.get(field) is not False:
+                    raise RuntimeError(f"Rust pnet listener did not prove {field}=false: {delivered}")
         controls = {}
         if pnet_profile:
             controls = {
@@ -1608,7 +1648,7 @@ def main() -> int:
                             artifacts.append(
                                 run_pair_with_transport(
                                     binaries[dialer], dialer, binaries[listener], listener, scenario, root,
-                                    "tcp-pnet", "private_network", ("tcp", "yamux", "pnet"),
+                                    "tcp-pnet", "private_network", ("tcp", "pnet", "yamux"),
                                     f"private_tcp_yamux_pnet/{scenario}", acceptance_scenario_id,
                                     pnet_key_file, pnet_mismatch_key_file, pnet_fingerprint,
                                 )

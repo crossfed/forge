@@ -567,6 +567,18 @@ bool node::impl::private_network_enabled() const noexcept {
    return options.private_network.has_value();
 }
 
+void node::impl::require_private_protocol_allowed(const protocol_id& protocol) const {
+   if (!private_network_enabled()) {
+      return;
+   }
+   if (protocol == builtins::autonat_v1 || protocol == builtins::autonat_v2_dial_request ||
+       protocol == builtins::autonat_v2_dial_back || protocol == builtins::relay_hop ||
+       protocol == builtins::relay_stop || protocol == builtins::dcutr) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network profile does not permit reserved protocol " + protocol.value);
+   }
+}
+
 void node::impl::require_private_direct_tcp(const forge::net::p2p::endpoint& endpoint,
                                             std::string_view operation) const {
    if (private_network_enabled() && !endpoint.is_direct_tcp()) {
@@ -675,10 +687,6 @@ std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control_l
    }
    out.reserve(out.size() + handlers.size());
    for (const auto& [protocol, _] : handlers) {
-      if (private_network_enabled() &&
-          (protocol == builtins::relay_stop || protocol == builtins::dcutr || protocol == builtins::relay_hop)) {
-         continue;
-      }
       out.push_back(protocol);
    }
    return out;

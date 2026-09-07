@@ -25,7 +25,8 @@ wrong PSK normally becomes a later security-negotiation failure.
 
 The registered live interop contract covers the four direct Forge/Go/Rust
 TCP/Yamux directions and separately indexes missing-key and mismatched-key
-controls before Identify or an application stream. It records PNET negotiation
+controls with an observed outbound dial boundary and listener ingress, followed
+by rejection before Identify or an application stream. It records PNET negotiation
 and the non-secret operational fingerprint on both endpoints. Registration is
 not a passing-run claim and does not extend to QUIC, Relay, or DCUtR.
 

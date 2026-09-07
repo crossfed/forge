@@ -30,21 +30,21 @@
     "fixtures/pnet/swarm.key": "a2602305a7773371a5232eb73d3ee4af3fba1efee04c03afa981554a6bebd176",
     "go_fixture/go.mod": "d932393c652c4fcab045bc9e35d70bb8ee6700610b63f5ed9c4d2b3b8e1e6be2",
     "go_fixture/go.sum": "4c5c4bab5b838e9027b83777413feb9c2540f2d0c076c86214a549cfad47902a",
-    "go_fixture/main.go": "89dd5abd61a42bacccf5c161509d6a9170552511ef3733a9c0e60db8a857b36e",
-    "rust_fixture/Cargo.lock": "9574d4685de5f685a3894edc8b6034f728737ec525e60f5274eb3c02ff37c350",
+    "go_fixture/main.go": "8f09fef725f1dcdc13ae963aec1a8a16eb872f708a284c4dda1a1af249333f27",
+    "rust_fixture/Cargo.lock": "3c43c578fee49b4b602b009541317b8b87a4fb943b079d34e689db0ef49c072c",
     "rust_fixture/Cargo.toml": "112685a538de4e142689ea35224189a2716a56394e7e359ed79765bdeaca57c8",
-    "rust_fixture/main.rs": "fb34225fb947b117018d826660e3fd2d0ce35688c3e25fb95c5c20af78a68fcc",
+    "rust_fixture/main.rs": "4bd1c1bbb61bc8f250dfa72a8659b1fc0d1cb098b5e247dde206e63a979ed5d2",
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
     "../CMakeLists.txt": "27c228e7aa2b42f5fb8a9c94eb7e1c3f0a08d7689a77837a971054db76bac921",
     "check_fixture_lock.py": "18da8fbf8fd92de7d9d0cb9b0c1b92badb27319aa82a6e490dd65cfc4cb3a62b",
-    "forge_interop_fixture.cpp": "5a32b676548f4af10777d3d795c43a1242c692a52662e18a89b8f7fef0215717",
+    "forge_interop_fixture.cpp": "53bbb26a0fe1a02f22c546bc2a9b4d4f337274f0938ebb0e55191d8c4a62b069",
     "provenance.py": "9ae5c8ffa3d9dcd646c2a5c7148e79cd5086d60ecb156d81374fda2ca00609ec",
-    "runner.py": "8ac2fa5bba7488a2c03687581ac492f9d36d7afda4a26964622c916cf0649223"
+    "runner.py": "5fc5b96e097d7e13589de416d78fac2d45f92c1a7f449e28e02fd987ea1c012b"
   },
   "evidence_sources": {
-    "donor_cases.json": "1c2cc1b94517b9703fe6ab91899c6f27d975268cc7314b4ff600a06ef4408256"
+    "donor_cases.json": "bd677ade405b6aa153906db5ddce6ee411091e4f4440b3f966f484df3c3fcaaf"
   },
   "regression_sources": {
     "test_provenance.py": "10ffe7cdff1d79e19d44b3eebf4bb0019656abbae6036af046a815e6669bc1ef"
@@ -62,7 +62,7 @@
         "rust_fixture/Cargo.toml",
         "rust_fixture/Cargo.lock"
       ],
-      "sha256": "6a3ce7d0952e028db265abb89515e6eacc2f47d69603e29d198ee3ab57cd0319"
+      "sha256": "bc6d11c2ca81b7163dfbd030a6e09082e8b9e804eae30e45e5c86ebcabeb03a3"
     }
   },
   "donors": [

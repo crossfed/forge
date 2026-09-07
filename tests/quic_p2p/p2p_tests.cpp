@@ -91,6 +91,7 @@ import forge.crypto.asymmetric.p256;
 import forge.crypto.pki.pem;
 import forge.crypto.asymmetric.rsa;
 import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.symmetric.xsalsa20;
 import forge.crypto.pki.x509;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
@@ -131,6 +132,7 @@ import forge.net.transport.frame;
 import forge.net.transport.stream;
 import forge.net.tcp.connection;
 import forge.net.tcp.listener;
+import forge.net.yamux.session;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -220,6 +222,7 @@ FORGE_API(::p2p_live_types::live_api, FORGE_API_CONTRACT("test.p2p.live", 1, 0),
 #include "../../libraries/net/p2p/details/lifecycle_tracker.hxx"
 #include "../../libraries/net/p2p/details/topology_dht_fanout.hxx"
 #include "../../libraries/net/p2p/details/topology_peer_exchange_claims.hxx"
+#include "../../libraries/net/p2p/details/stream_upgrade.hxx"
 
 namespace forge::net::p2p {
 
@@ -1252,6 +1255,38 @@ endpoint start_stalling_tcp_peer(forge::asio::runtime& runtime,
              co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
           }
           auto ignored = boost::system::error_code{};
+          socket->close(ignored);
+          acceptor->close(ignored);
+       },
+       asio::detached);
+
+   return make_tcp_endpoint(port);
+}
+
+endpoint start_pnet_nonce_rejecting_tcp_peer(forge::asio::runtime& runtime, std::size_t returned_nonce_bytes) {
+   namespace asio = boost::asio;
+   using asio_tcp = asio::ip::tcp;
+   auto acceptor = std::make_shared<asio_tcp::acceptor>(runtime.context(), asio_tcp::endpoint{asio_tcp::v4(), 0});
+   auto socket = std::make_shared<asio_tcp::socket>(runtime.context());
+   const auto port = acceptor->local_endpoint().port();
+
+   asio::co_spawn(
+       runtime.context(),
+       [acceptor, socket, returned_nonce_bytes]() -> asio::awaitable<void> {
+          auto error = boost::system::error_code{};
+          co_await acceptor->async_accept(*socket, asio::redirect_error(asio::use_awaitable, error));
+          if (!error) {
+             auto local_nonce = std::array<std::uint8_t, forge::crypto::symmetric::xsalsa20::nonce_size>{};
+             co_await asio::async_read(*socket, asio::buffer(local_nonce),
+                                       asio::redirect_error(asio::use_awaitable, error));
+             if (!error && returned_nonce_bytes != 0) {
+                auto peer_nonce = std::array<std::uint8_t, forge::crypto::symmetric::xsalsa20::nonce_size>{};
+                co_await asio::async_write(*socket, asio::buffer(peer_nonce.data(), returned_nonce_bytes),
+                                           asio::redirect_error(asio::use_awaitable, error));
+             }
+          }
+          auto ignored = boost::system::error_code{};
+          socket->shutdown(asio_tcp::socket::shutdown_both, ignored);
           socket->close(ignored);
           acceptor->close(ignored);
        },
@@ -4613,18 +4648,40 @@ BOOST_AUTO_TEST_CASE(p2p_private_network_rejects_mismatched_key_and_listener_sur
    auto good_client = node{runtime, private_network_options_for(make_test_identity(), 17)};
    const auto server_endpoint = listen_tcp(server, runtime);
    const auto server_before = server.metrics();
+   const auto client_before = bad_client.metrics();
 
    BOOST_CHECK_THROW(static_cast<void>(forge::asio::blocking::run(runtime, bad_client.async_connect(server_endpoint))),
                      forge::exceptions::base);
    const auto server_after_rejection = server.metrics();
+   const auto client_after_rejection = bad_client.metrics();
    BOOST_CHECK_EQUAL(server_after_rejection.sessions_opened, server_before.sessions_opened);
    BOOST_CHECK_EQUAL(server_after_rejection.active_sessions, server_before.active_sessions);
+   BOOST_CHECK_EQUAL(client_after_rejection.path_direct_attempts, client_before.path_direct_attempts + 1U);
    BOOST_CHECK(!server.peers().find(bad_client.local_peer()).has_value());
    static_cast<void>(forge::asio::blocking::run(runtime, good_client.async_connect(server_endpoint)));
 
    forge::asio::blocking::run(runtime, bad_client.async_stop());
    forge::asio::blocking::run(runtime, good_client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_private_network_maps_absent_and_truncated_peer_nonce_to_closed) {
+   for (const auto returned_nonce_bytes : {std::size_t{0}, std::size_t{7}}) {
+      auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+      auto client = node{runtime, private_network_options_for(make_test_identity())};
+      const auto endpoint = start_pnet_nonce_rejecting_tcp_peer(runtime, returned_nonce_bytes);
+
+      try {
+         static_cast<void>(forge::asio::blocking::run(runtime, client.async_connect(endpoint)));
+         BOOST_FAIL("private P2P connect accepted a missing or truncated peer nonce");
+      } catch (const forge::exceptions::base& error) {
+         BOOST_TEST(exceptions::is(error, exceptions::code::closed));
+      }
+      BOOST_CHECK_EQUAL(client.metrics().sessions_opened, 0U);
+      BOOST_CHECK_EQUAL(client.metrics().active_sessions, 0U);
+
+      forge::asio::blocking::run(runtime, client.async_stop());
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_private_network_rejects_non_tcp_and_relay_operations_before_io) {
@@ -4656,7 +4713,7 @@ BOOST_AUTO_TEST_CASE(p2p_private_network_rejects_non_tcp_and_relay_operations_be
    forge::asio::blocking::run(runtime, value.async_stop());
 }
 
-BOOST_AUTO_TEST_CASE(p2p_private_network_options_fail_fast_for_disallowed_profiles) {
+BOOST_AUTO_TEST_CASE(p2p_private_network_options_and_reserved_protocols_fail_fast) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto quic = private_network_options_for(make_test_identity());
    quic.capabilities.add(capabilities::direct_quic);
@@ -4672,11 +4729,35 @@ BOOST_AUTO_TEST_CASE(p2p_private_network_options_fail_fast_for_disallowed_profil
 
    auto value = node{runtime, private_network_options_for(make_test_identity())};
    const auto handler = [](node::incoming_protocol_stream) -> boost::asio::awaitable<void> { co_return; };
-   BOOST_CHECK_THROW(value.register_protocol_handler(builtins::autonat_v1, handler), exceptions::invalid_options);
-   BOOST_CHECK_THROW(value.register_protocol_handler(builtins::autonat_v2_dial_request, handler),
-                     exceptions::invalid_options);
-   BOOST_CHECK_THROW(value.register_protocol_handler(builtins::autonat_v2_dial_back, handler),
-                     exceptions::invalid_options);
+   const auto reserved = std::array{
+       builtins::autonat_v1,
+       builtins::autonat_v2_dial_request,
+       builtins::autonat_v2_dial_back,
+       builtins::relay_hop,
+       builtins::relay_stop,
+       builtins::dcutr,
+   };
+   const auto direct_attempts = value.metrics().path_direct_attempts;
+   for (const auto& protocol : reserved) {
+      BOOST_CHECK_THROW(value.register_protocol_handler(protocol, handler), exceptions::invalid_options);
+      BOOST_CHECK_THROW(
+          static_cast<void>(forge::asio::blocking::run(
+              runtime, value.async_open_protocol_stream(peer(247), protocol))),
+          exceptions::invalid_options);
+      BOOST_CHECK_EQUAL(value.metrics().path_direct_attempts, direct_attempts);
+   }
+
+   const auto allowed = std::array{
+       builtins::kad_dht,
+       builtins::rendezvous,
+       builtins::meshsub_v11,
+       protocol_id{.value = "/forge/private-network/custom/1"},
+   };
+   for (const auto& protocol : allowed) {
+      BOOST_CHECK_NO_THROW(value.register_protocol_handler(protocol, handler));
+      BOOST_CHECK(value.unregister_protocol_handler(protocol));
+   }
+   forge::asio::blocking::run(runtime, value.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_direct_tcp_protocol_timeout_cancels_only_stalled_yamux_stream) {
@@ -5217,6 +5298,67 @@ BOOST_AUTO_TEST_CASE(p2p_stream_with_buffer_uses_transport_bounds_and_preserves_
    const auto second_read = forge::asio::blocking::run(runtime, value.async_read_frame(options));
    BOOST_TEST(second_read == second, boost::test_tools::per_element());
    BOOST_TEST(backend->chunk_reads == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_private_v1_lazy_security_negotiation_preserves_coalesced_handshake_tail) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   const auto security_protocols = std::array{
+       protocol_id{.value = "/noise"},
+       protocol_id{.value = "/tls/1.0.0"},
+   };
+
+   for (const auto& security_protocol : security_protocols) {
+      const auto handshake_prefix = security_protocol.value == "/noise"
+                                        ? std::vector<std::uint8_t>{0x00, 0x20, 0x01, 0x02, 0x03}
+                                        : std::vector<std::uint8_t>{0x16, 0x03, 0x03, 0x00, 0x05};
+      auto outbound_backend = std::make_shared<queued_transport_stream>(801);
+      auto outbound_input = protocol_negotiation::encode_frame(protocol_negotiation::encode_message(
+          protocol_negotiation::message{.kind = protocol_negotiation::message_kind::header,
+                                        .protocol = protocol_negotiation::multistream_v1}));
+      if (security_protocol.value == "/noise") {
+         const auto unavailable = protocol_negotiation::encode_frame(protocol_negotiation::encode_message(
+             protocol_negotiation::message{.kind = protocol_negotiation::message_kind::not_available,
+                                           .protocol = protocol_negotiation::not_available}));
+         outbound_input.insert(outbound_input.end(), unavailable.begin(), unavailable.end());
+      }
+      const auto outbound_selection = protocol_negotiation::encode_frame(protocol_negotiation::encode_message(
+          protocol_negotiation::message{.kind = protocol_negotiation::message_kind::protocol,
+                                        .protocol = security_protocol}));
+      outbound_input.insert(outbound_input.end(), outbound_selection.begin(), outbound_selection.end());
+      outbound_input.insert(outbound_input.end(), handshake_prefix.begin(), handshake_prefix.end());
+      outbound_backend->reads.push_back(std::move(outbound_input));
+      auto outbound_stream = forge::net::p2p::stream{
+          forge::net::transport::detail::stream_access::make(outbound_backend)};
+
+      const auto outbound_selected = forge::asio::blocking::run(
+          runtime, detail::select_private_stream_security_protocol(outbound_stream));
+      BOOST_TEST(outbound_selected.value == security_protocol.value);
+      BOOST_TEST(outbound_backend->chunk_reads == 1U);
+      const auto outbound_security_input = forge::asio::blocking::run(runtime, outbound_stream.async_read());
+      BOOST_TEST(outbound_security_input == handshake_prefix, boost::test_tools::per_element());
+      BOOST_TEST(outbound_backend->chunk_reads == 1U);
+
+      auto inbound_backend = std::make_shared<queued_transport_stream>(802);
+      auto inbound_input = protocol_negotiation::encode_frame(protocol_negotiation::encode_message(
+          protocol_negotiation::message{.kind = protocol_negotiation::message_kind::header,
+                                        .protocol = protocol_negotiation::multistream_v1}));
+      const auto inbound_proposal = protocol_negotiation::encode_frame(protocol_negotiation::encode_message(
+          protocol_negotiation::message{.kind = protocol_negotiation::message_kind::protocol,
+                                        .protocol = security_protocol}));
+      inbound_input.insert(inbound_input.end(), inbound_proposal.begin(), inbound_proposal.end());
+      inbound_input.insert(inbound_input.end(), handshake_prefix.begin(), handshake_prefix.end());
+      inbound_backend->reads.push_back(std::move(inbound_input));
+      auto inbound_stream = forge::net::p2p::stream{
+          forge::net::transport::detail::stream_access::make(inbound_backend)};
+
+      const auto inbound_selected = forge::asio::blocking::run(
+          runtime, detail::accept_private_stream_security_protocol(inbound_stream));
+      BOOST_TEST(inbound_selected.value == security_protocol.value);
+      BOOST_TEST(inbound_backend->chunk_reads == 1U);
+      const auto inbound_security_input = forge::asio::blocking::run(runtime, inbound_stream.async_read());
+      BOOST_TEST(inbound_security_input == handshake_prefix, boost::test_tools::per_element());
+      BOOST_TEST(inbound_backend->chunk_reads == 1U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_stream_rejects_oversized_prefetched_frame_with_transport_limit) {

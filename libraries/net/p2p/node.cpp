@@ -722,6 +722,7 @@ boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::
       options.allow_relay = false;
       options.allow_hole_punch = false;
    }
+   self->record_path_attempt(path::kind::direct);
    auto session = co_await self->connect_direct(std::move(endpoint), std::move(options));
    co_await self->identify_session(session);
    co_return self->session_info_for(session);
@@ -900,6 +901,7 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P path attempt limits must be positive");
    }
    auto self = impl_;
+   self->require_private_protocol_allowed(protocol);
    if (self->private_network_enabled()) {
       if (options.relay_peer) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options,

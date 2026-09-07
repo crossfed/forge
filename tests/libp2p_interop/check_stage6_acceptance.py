@@ -64,7 +64,7 @@ DIRECTIONS = {"forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge"}
 SHA256 = re.compile(r"[0-9a-f]{64}")
 PROFILE_TRANSPORT_STACKS = {
     "native": {("quic",), ("tcp", "yamux")},
-    "private_network": {("tcp", "yamux", "pnet")},
+    "private_network": {("tcp", "pnet", "yamux")},
 }
 RUNNER_FLAGS = (
     "--enabled",
@@ -78,7 +78,13 @@ RUNNER_FLAGS = (
 ENABLED_VALUES = {"1", "ON", "on", "true", "TRUE", "yes", "YES"}
 PRIVATE_NETWORK_TRANSPORT = "tcp-pnet"
 PRIVATE_NETWORK_PSK_DEPENDENCY = "security.private_network_psk"
-PNET_FINGERPRINT_DOMAIN = b"forge-p2p-stage6-pnet-fingerprint-v1\0"
+PNET_FINGERPRINT_DOMAIN = b"forge.net.pnet.operational-fingerprint.v1\0"
+PNET_FORBIDDEN_RUNTIME_FLAGS = (
+    "autonat_v2_active",
+    "relay_service_active",
+    "relay_client_active",
+    "dcutr_active",
+)
 RELAY_NATIVE_PEER_ID_IDENTITY_CODE = 0
 RELAY_NATIVE_PEER_ID_SHA256_CODE = 0x12
 RELAY_NATIVE_PEER_ID_MAX_DIGEST_BYTES = 64
@@ -107,7 +113,7 @@ def expected_launcher_transport(profile: str, stack: tuple[str, ...], evidence_c
         return "quic"
     if profile == "native" and stack == ("tcp", "yamux"):
         return "tcp-tls" if evidence_contract in TLS_EVIDENCE_CONTRACTS else "tcp"
-    if profile == "private_network" and stack == ("tcp", "yamux", "pnet"):
+    if profile == "private_network" and stack == ("tcp", "pnet", "yamux"):
         return PRIVATE_NETWORK_TRANSPORT
     return None
 
@@ -900,15 +906,37 @@ def pnet_control_errors(record: dict, name: str) -> list[str]:
     listener = control.get("listener_result")
     if not isinstance(result, dict) or not isinstance(listener, dict):
         return [f"pnet {name} control lacks dialer/listener result evidence"]
-    expected = {
-        "status": "rejected", "control_kind": name, "attempted_connections": 1,
-        "established_connections": 0, "identify_streams": 0, "application_streams": 0,
-        "rejected_before_identify": True,
+    errors: list[str] = []
+    expected_sources = {
+        "forge": "forge.node.metrics",
+        "go": "go-libp2p.connection-gater",
+        "rust": "rust-libp2p.swarm-events",
     }
-    errors = [f"pnet {name} dialer control has invalid rejection counters" for key, value in expected.items()
-              if result.get(key) != value]
-    if listener.get("status") != "rejected" or listener.get("control_kind") != name:
-        errors.append(f"pnet {name} listener control lacks rejected terminal evidence")
+    for endpoint_name, payload in (("dialer", result), ("listener", listener)):
+        implementation = payload.get("implementation")
+        if payload.get("status") != "rejected" or payload.get("control_kind") != name:
+            errors.append(f"pnet {name} {endpoint_name} control lacks rejected terminal evidence")
+            continue
+        if implementation not in expected_sources or payload.get("counter_source") != expected_sources[implementation]:
+            errors.append(f"pnet {name} {endpoint_name} control lacks runtime counter provenance")
+        counters = {
+            key: payload.get(key)
+            for key in (
+                "attempted_connections", "established_connections", "identify_streams", "application_streams"
+            )
+        }
+        if any(type(value) is not int or value < 0 for value in counters.values()):
+            errors.append(f"pnet {name} {endpoint_name} control has invalid observed counters")
+            continue
+        if counters["attempted_connections"] < 1:
+            errors.append(f"pnet {name} {endpoint_name} control did not observe its connection boundary")
+        rejected_before_identify = (
+            counters["established_connections"] == 0
+            and counters["identify_streams"] == 0
+            and counters["application_streams"] == 0
+        )
+        if payload.get("rejected_before_identify") is not rejected_before_identify or not rejected_before_identify:
+            errors.append(f"pnet {name} {endpoint_name} control crossed the authenticated-session boundary")
     if listener.get("correlation_token") != result.get("correlation_token"):
         errors.append(f"pnet {name} control correlation differs between endpoints")
     expected_peer = result.get("expected_peer_id")
@@ -936,15 +964,22 @@ def validate_pnet_evidence(result: dict, record: dict, listener: Optional[dict])
         for field in ("pnet_enabled", "negotiated_pnet", "pnet_fingerprint")
     ):
         errors.append("pnet listener result does not report the same negotiated protection fingerprint")
+    for endpoint_name, payload in (("dialer", result), ("listener", listener)):
+        if isinstance(payload, dict) and payload.get("implementation") == "rust":
+            for field in PNET_FORBIDDEN_RUNTIME_FLAGS:
+                if payload.get(field) is not False:
+                    errors.append(f"pnet Rust {endpoint_name} did not prove {field}=false")
     if not (
         result.get("negotiated_transport") == "tcp"
+        and result.get("negotiated_security") in {"/noise", "/tls/1.0.0"}
+        and result.get("negotiated_muxer") == "/yamux/1.0.0"
         and result.get("authenticated_remote_peer_id") == record.get("peer_id")
-        and result.get("signed_peer_record") is True
+        and result.get("identify_observed") is True
         and result.get("echo_ok") is True
         and positive_integer(result.get("payload_bytes"))
         and nonempty_string(result.get("protocol"))
     ):
-        errors.append("pnet evidence lacks direct authenticated Identify and application-stream proof")
+        errors.append("pnet evidence lacks TCP -> PNET -> security -> Yamux authenticated stream proof")
     for control in ("missing_key", "mismatched_key"):
         errors.extend(pnet_control_errors(record, control))
     return errors
@@ -1577,13 +1612,13 @@ CURRENT_FIXTURES = {
     "relay_v2_client_transport": ("relay.circuit_v2_client_transport", "quic_base/relay_reserve", ("quic",), "relay_reserve"),
     "kademlia_amino": ("routing.kademlia_amino", "quic_dht/dht_provide_find_provider", ("quic",), "dht_provide_find_provider"),
     "rendezvous_rust": ("discovery.rendezvous", "quic_rendezvous/rendezvous_register_discover", ("quic",), "rendezvous_register_discover"),
-    "pnet": ("security.private_network_psk", "private_tcp_yamux_pnet/pnet", ("tcp", "yamux", "pnet"), "pnet"),
+    "pnet": ("security.private_network_psk", "private_tcp_yamux_pnet/pnet", ("tcp", "pnet", "yamux"), "pnet"),
 }
 
 
 def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
     capability_id, runner_scenario_id, stack, _ = CURRENT_FIXTURES[scenario_id]
-    profile = "private_network" if stack == ("tcp", "yamux", "pnet") else "native"
+    profile = "private_network" if stack == ("tcp", "pnet", "yamux") else "native"
     return {
         "interop_acceptance_registry": {
             "artifact_schema": ARTIFACT_SCHEMA,
@@ -1673,7 +1708,8 @@ def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
         })
     elif scenario_id == "pnet":
         result.update({
-            "signed_peer_record": True, "negotiated_transport": "tcp",
+            "identify_observed": True, "negotiated_transport": "tcp",
+            "negotiated_security": "/noise", "negotiated_muxer": "/yamux/1.0.0",
             "authenticated_remote_peer_id": "listener-peer", "protocol": "/forge/interop/echo/1",
             "payload_bytes": 7, "echo_ok": True, "pnet_enabled": True, "negotiated_pnet": True,
             "pnet_fingerprint": "0" * 64,
@@ -1681,12 +1717,17 @@ def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
         control_template = {
             "status": "rejected", "attempted_connections": 1, "established_connections": 0,
             "identify_streams": 0, "application_streams": 0, "rejected_before_identify": True,
-            "correlation_token": "pnet-control", "attempts": [{}],
+            "correlation_token": "pnet-control", "counter_source": "forge.node.metrics", "attempts": [{}],
         }
         for name in ("missing_key", "mismatched_key"):
             record[name] = {
-                "result": control_template | {"control_kind": name, "expected_peer_id": "control-peer"},
-                "listener_result": control_template | {"control_kind": name},
+                "result": control_template | {
+                    "implementation": "forge", "role": "dialer", "scenario": "pnet",
+                    "control_kind": name, "expected_peer_id": "control-peer",
+                },
+                "listener_result": control_template | {
+                    "implementation": "forge", "role": "listener", "scenario": "pnet", "control_kind": name,
+                },
                 "listener_process": {"peer_id": "control-peer"},
             }
     else:
@@ -1967,8 +2008,8 @@ def self_test() -> int:
             "registered_ttl_seconds", "discovered_ttl_seconds", "cookie_bytes",
         ),
         "pnet": (
-            "pnet_enabled", "negotiated_pnet", "pnet_fingerprint", "signed_peer_record",
-            "authenticated_remote_peer_id", "echo_ok", "payload_bytes",
+            "pnet_enabled", "negotiated_pnet", "pnet_fingerprint", "identify_observed",
+            "negotiated_security", "negotiated_muxer", "authenticated_remote_peer_id", "echo_ok", "payload_bytes",
         ),
     }
     for scenario_id, fields in mutations.items():
@@ -1978,6 +2019,38 @@ def self_test() -> int:
             validator = EVIDENCE_CONTRACT_VALIDATORS[evidence_contract_for(scenario_id)]
             if not validator(result, record, listener):
                 print(f"self-test failed: {scenario_id} accepted without {field}", file=sys.stderr)
+                return 1
+    result, record, listener = semantic_fixture("pnet")
+    result["implementation"] = "rust"
+    listener["implementation"] = "rust"
+    for payload in (result, listener):
+        payload.update({field: False for field in PNET_FORBIDDEN_RUNTIME_FLAGS})
+    if validate_pnet_evidence(result, record, listener):
+        print("self-test failed: valid Rust private profile evidence was rejected", file=sys.stderr)
+        return 1
+    for endpoint_name in ("dialer", "listener"):
+        for field in PNET_FORBIDDEN_RUNTIME_FLAGS:
+            result, record, listener = semantic_fixture("pnet")
+            result["implementation"] = "rust"
+            listener["implementation"] = "rust"
+            for payload in (result, listener):
+                payload.update({name: False for name in PNET_FORBIDDEN_RUNTIME_FLAGS})
+            (result if endpoint_name == "dialer" else listener)[field] = True
+            if not validate_pnet_evidence(result, record, listener):
+                print(
+                    f"self-test failed: Rust pnet accepted {endpoint_name} with {field}=true",
+                    file=sys.stderr,
+                )
+                return 1
+    for control_name in ("missing_key", "mismatched_key"):
+        for endpoint_name in ("result", "listener_result"):
+            result, record, listener = semantic_fixture("pnet")
+            record[control_name][endpoint_name]["attempted_connections"] = 0
+            if not validate_pnet_evidence(result, record, listener):
+                print(
+                    f"self-test failed: pnet accepted {control_name} without {endpoint_name} boundary evidence",
+                    file=sys.stderr,
+                )
                 return 1
     rust_relay, relay_record, relay_listener = rust_relay_reservation_fixture()
     if validate_relay_client_evidence(rust_relay, relay_record, relay_listener):

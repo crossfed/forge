@@ -24,6 +24,14 @@ struct upgrade_callbacks {
    std::function<void(const peer_id&)> upgraded;
 };
 
+namespace detail {
+
+boost::asio::awaitable<protocol_id> select_private_stream_security_protocol(forge::net::p2p::stream& stream);
+
+boost::asio::awaitable<protocol_id> accept_private_stream_security_protocol(forge::net::p2p::stream& stream);
+
+} // namespace detail
+
 boost::asio::awaitable<upgraded_session> upgrade_outbound_stream(forge::net::p2p::stream stream,
                                                                  const node::options& options,
                                                                  const libp2p_identity_material& identity,

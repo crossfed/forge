@@ -1137,7 +1137,7 @@ def main() -> int:
     }
     allowed_profile_transport_stacks = {
         "native": {("quic",), ("tcp", "yamux")},
-        "private_network": {("tcp", "yamux", "pnet")},
+        "private_network": {("tcp", "pnet", "yamux")},
     }
     seen_scenario_ids: set[str] = set()
     seen_evidence_contracts: set[str] = set()
@@ -1462,7 +1462,7 @@ def main() -> int:
         scenario = matching[0]
         if (
             scenario.get("profile") != "private_network"
-            or scenario.get("transport_stack") != ["tcp", "yamux", "pnet"]
+            or scenario.get("transport_stack") != ["tcp", "pnet", "yamux"]
             or scenario.get("activation") != "enabled"
             or scenario.get("registration") != "planned"
             or scenario.get("requires_capabilities") != ["security.private_network_psk"]

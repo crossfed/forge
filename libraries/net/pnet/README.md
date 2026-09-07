@@ -4,7 +4,7 @@
 `pre_shared_key` decodes the canonical libp2p swarm-key base16 form, owns its
 32-byte value as move-only secret material, and exposes only a domain-separated
 operational fingerprint. That fingerprint is SHA-256 over
-`"forge-p2p-stage6-pnet-fingerprint-v1" || 0x00 || decoded PSK`.
+`"forge.net.pnet.operational-fingerprint.v1" || 0x00 || decoded PSK`.
 
 `protector::async_protect` eagerly writes one local 24-byte nonce, then returns
 a stream whose peer nonce is read lazily. Read and write directions use
@@ -22,6 +22,6 @@ protected connection is returned normally.
 Forge TCP/Yamux directions using a canonical `swarm.key` source fixture outside
 the runner artifact directory. Both endpoint records must confirm PNET
 negotiation and the non-secret Forge operational fingerprint. Separate missing-
-key and mismatched-key controls require rejection before Identify or an
-application stream. Registration is not a passing live-run claim, and the
+key and mismatched-key controls require observed listener ingress followed by
+rejection before Identify or an application stream. Registration is not a passing live-run claim, and the
 evidence makes no QUIC, Relay, or DCUtR claim.

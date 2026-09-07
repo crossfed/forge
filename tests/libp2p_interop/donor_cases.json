@@ -412,7 +412,7 @@
     },
     {
       "id": "interop.live_private_network_pnet",
-      "protocol": "Private TCP/Yamux PNET",
+      "protocol": "Private TCP + PNET + Noise/TLS + Yamux",
       "source": "libp2p private-network PSK specification and pinned Go/Rust PNET transport implementations",
       "donor": "go-libp2p PNET protector and rust-libp2p PnetConfig stream handshake",
       "donor_file": [
@@ -426,7 +426,9 @@
         "canonical swarm.key PSK parsing",
         "eager local nonce",
         "lazy peer nonce",
-        "XSalsa20 stream protection"
+        "XSalsa20 stream protection",
+        "post-PNET Noise or TLS negotiation",
+        "post-security Yamux negotiation"
       ],
       "mapping_state": "mapped",
       "forge_tests": [ "test_forge_libp2p_interop pnet" ],

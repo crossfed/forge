@@ -498,8 +498,8 @@ BOOST_AUTO_TEST_CASE(key_parses_canonical_swarm_key_terminal_forms_and_fingerpri
        "/key/swarm/psk/1.0.0/\r\n/base16/\r\n000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"};
    const auto direct = pnet::pre_shared_key{fixture_key_bytes()};
    const auto expected = std::array<std::uint8_t, 32>{
-       0x70, 0x80, 0xd1, 0x2e, 0xb6, 0xfe, 0xa6, 0xd4, 0x52, 0xa4, 0x39, 0x57, 0x9d, 0x18, 0x69, 0x55,
-       0xd9, 0x5f, 0x2f, 0xd6, 0x17, 0x84, 0xa3, 0x07, 0x39, 0x97, 0x9a, 0xb3, 0x46, 0x87, 0xfb, 0x02,
+       0x7c, 0x29, 0x1e, 0xf5, 0xc4, 0x53, 0xde, 0x49, 0x1f, 0x0a, 0x6a, 0x21, 0x9e, 0xe8, 0xe3, 0x20,
+       0x77, 0x67, 0x44, 0x6d, 0xa3, 0x73, 0xdf, 0xbb, 0xbb, 0x91, 0xce, 0x7d, 0x55, 0x41, 0x85, 0x83,
    };
 
    const auto valid = std::array<std::string, 6>{swarm_key, swarm_key + "\n", swarm_key + "\r\n", crlf_swarm_key,
@@ -550,6 +550,22 @@ BOOST_AUTO_TEST_CASE(protector_eagerly_writes_one_local_nonce_before_returning_t
    std::copy(backing->writes.front().begin(), backing->writes.front().end(), nonce.begin());
    const auto decrypted = transform_with_nonce(fixture_key_bytes(), nonce, backing->writes[1]);
    BOOST_CHECK_EQUAL_COLLECTIONS(decrypted.begin(), decrypted.end(), plaintext.begin(), plaintext.end());
+}
+
+BOOST_AUTO_TEST_CASE(protector_awaitable_owns_the_key_when_its_owner_is_destroyed_before_await) {
+   auto runtime = forge::asio::runtime{};
+   auto backing = std::make_shared<scripted_transport_stream>();
+   auto operation = [&backing] {
+      auto owner = fixture_protector();
+      return owner.async_protect(raw_connection(backing));
+   }();
+
+   auto connection = forge::asio::blocking::run(runtime, std::move(operation));
+
+   BOOST_REQUIRE_EQUAL(backing->writes.size(), 1U);
+   BOOST_CHECK_EQUAL(backing->writes.front().size(), xsalsa20::nonce_size);
+   BOOST_CHECK(connection.stream.valid());
+   forge::asio::blocking::run(runtime, connection.stream.async_close());
 }
 
 BOOST_AUTO_TEST_CASE(protected_stream_rejects_eof_before_within_and_after_the_peer_nonce) {

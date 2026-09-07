@@ -34,7 +34,7 @@ import forge.crypto.symmetric.xsalsa20;
 namespace forge::net::pnet {
 namespace {
 
-inline constexpr auto fingerprint_domain = std::string_view{"forge-p2p-stage6-pnet-fingerprint-v1"};
+inline constexpr auto fingerprint_domain = std::string_view{"forge.net.pnet.operational-fingerprint.v1"};
 
 using decoded_key = std::array<std::uint8_t, pre_shared_key_size>;
 
@@ -47,6 +47,44 @@ void erase_decoded_key(decoded_key* value) noexcept {
 
 [[noreturn]] void throw_invalid_key(std::string_view message) {
    FORGE_THROW_EXCEPTION(exceptions::invalid_options, message);
+}
+
+enum class protect_operation_state : std::uint8_t {
+   active,
+   canceled,
+   completed,
+};
+
+boost::asio::awaitable<forge::net::transport::stream_connection>
+async_protect_with_key(std::shared_ptr<const pre_shared_key> key,
+                       forge::net::transport::stream_connection connection, std::stop_token stop) {
+   auto state = std::atomic{protect_operation_state::active};
+   auto cancellation = std::stop_callback{stop, [&state, &stream = connection.stream]() noexcept {
+                                              auto expected = protect_operation_state::active;
+                                              if (state.compare_exchange_strong(expected, protect_operation_state::canceled,
+                                                                                std::memory_order_acq_rel)) {
+                                                 stream.request_cancel();
+                                              }
+                                           }};
+   if (state.load(std::memory_order_acquire) == protect_operation_state::canceled) {
+      FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled before nonce exchange");
+   }
+
+   const auto local_nonce = forge::crypto::core::random_array<forge::crypto::symmetric::xsalsa20::nonce_size>();
+   try {
+      co_await connection.stream.async_write(std::span<const std::uint8_t>{local_nonce});
+   } catch (...) {
+      if (state.load(std::memory_order_acquire) == protect_operation_state::canceled) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled during nonce exchange");
+      }
+      throw;
+   }
+   auto expected = protect_operation_state::active;
+   if (!state.compare_exchange_strong(expected, protect_operation_state::completed, std::memory_order_acq_rel)) {
+      FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled during nonce exchange");
+   }
+   const auto executor = co_await boost::asio::this_coro::executor;
+   co_return detail::protected_stream::wrap(std::move(connection), std::move(key), local_nonce, executor);
 }
 
 } // namespace
@@ -135,42 +173,11 @@ operational_fingerprint protector::fingerprint() const {
 
 boost::asio::awaitable<forge::net::transport::stream_connection>
 protector::async_protect(forge::net::transport::stream_connection connection, std::stop_token stop) const {
-   if (!key_ || detail::pre_shared_key_access::bytes(*key_).size() != pre_shared_key_size) {
+   auto key = key_;
+   if (!key || detail::pre_shared_key_access::bytes(*key).size() != pre_shared_key_size) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "pnet protector requires a 32-byte pre-shared key");
    }
-
-   enum class operation_state : std::uint8_t {
-      active,
-      canceled,
-      completed,
-   };
-   auto state = std::atomic{operation_state::active};
-   auto cancellation = std::stop_callback{stop, [&state, &stream = connection.stream]() noexcept {
-                                              auto expected = operation_state::active;
-                                              if (state.compare_exchange_strong(expected, operation_state::canceled,
-                                                                                std::memory_order_acq_rel)) {
-                                                 stream.request_cancel();
-                                              }
-                                           }};
-   if (state.load(std::memory_order_acquire) == operation_state::canceled) {
-      FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled before nonce exchange");
-   }
-
-   const auto local_nonce = forge::crypto::core::random_array<forge::crypto::symmetric::xsalsa20::nonce_size>();
-   try {
-      co_await connection.stream.async_write(std::span<const std::uint8_t>{local_nonce});
-   } catch (...) {
-      if (state.load(std::memory_order_acquire) == operation_state::canceled) {
-         FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled during nonce exchange");
-      }
-      throw;
-   }
-   auto expected = operation_state::active;
-   if (!state.compare_exchange_strong(expected, operation_state::completed, std::memory_order_acq_rel)) {
-      FORGE_THROW_EXCEPTION(exceptions::canceled, "pnet protection was canceled during nonce exchange");
-   }
-   const auto executor = co_await boost::asio::this_coro::executor;
-   co_return detail::protected_stream::wrap(std::move(connection), key_, local_nonce, executor);
+   return async_protect_with_key(std::move(key), std::move(connection), stop);
 }
 
 } // namespace forge::net::pnet

@@ -465,17 +465,46 @@ std::string pnet_evidence(const std::map<std::string, std::string>& args) {
 }
 
 std::string pnet_rejection_evidence(const std::map<std::string, std::string>& args, std::string_view role,
+                                    const forge::net::p2p::node::metrics_snapshot& metrics,
                                     std::string_view expected_peer = {}) {
+   const auto dialer = role == "dialer";
+   const auto attempted_connections =
+       dialer ? metrics.path_direct_attempts : metrics.handshakes_completed + metrics.handshakes_failed;
+   const auto established_connections = metrics.sessions_opened;
+   const auto post_authentication_streams =
+       dialer ? metrics.protocol_streams_opened : metrics.protocol_streams_accepted;
+   // Forge does not split protocol counters by protocol. A rejected pre-session
+   // connection therefore proves that neither Identify nor application streams
+   // could have opened; any established session is conservatively a failure.
+   const auto identify_streams = established_connections == 0 ? 0 : post_authentication_streams;
+   const auto application_streams = established_connections == 0 ? 0 : post_authentication_streams;
+   const auto rejected_before_identify =
+       established_connections == 0 && identify_streams == 0 && application_streams == 0;
    auto value = "\"implementation\":\"forge\",\"role\":\"" + std::string{role} +
                 "\",\"scenario\":\"pnet\",\"status\":\"rejected\",\"control_kind\":\"" +
                 json_escape(required(args, "pnet-control")) + "\",\"correlation_token\":\"" +
                 json_escape(required(args, "pnet-correlation")) +
-                "\",\"attempted_connections\":1,\"established_connections\":0,\"identify_streams\":0,"
-                "\"application_streams\":0,\"rejected_before_identify\":true";
+                "\",\"counter_source\":\"forge.node.metrics\",\"attempted_connections\":" +
+                std::to_string(attempted_connections) +
+                ",\"established_connections\":" + std::to_string(established_connections) +
+                ",\"identify_streams\":" + std::to_string(identify_streams) +
+                ",\"application_streams\":" + std::to_string(application_streams) +
+                ",\"rejected_before_identify\":" + (rejected_before_identify ? "true" : "false");
    if (!expected_peer.empty()) {
       value += ",\"expected_peer_id\":\"" + json_escape(expected_peer) + "\"";
    }
    return value;
+}
+
+std::string_view negotiated_security(const forge::net::p2p::peer_authentication authentication) {
+   switch (authentication) {
+   case forge::net::p2p::peer_authentication::noise:
+      return "/noise";
+   case forge::net::p2p::peer_authentication::libp2p_tls:
+      return "/tls/1.0.0";
+   default:
+      throw std::runtime_error{"PNET stream did not expose an authenticated Noise/TLS channel"};
+   }
 }
 
 void configure_rendezvous_lifecycle_ttls(forge::net::p2p::node::options& options, const std::string_view scenario) {
@@ -894,7 +923,8 @@ int listen_mode(const std::map<std::string, std::string>& args) {
       std::this_thread::sleep_for(100ms);
    }
    if (!pnet_result_reported && scenario == "pnet" && !optional_value(args, "pnet-control").empty()) {
-      write_file(required(args, "result-file"), "{" + pnet_rejection_evidence(args, "listener") + "}\n");
+      write_file(required(args, "result-file"),
+                 "{" + pnet_rejection_evidence(args, "listener", value.metrics()) + "}\n");
    }
    const auto metrics = value.metrics();
    std::cerr << "forge listener metrics:"
@@ -1362,8 +1392,13 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
       if (echoed != bytes) {
          throw std::runtime_error{"FORGE echo mismatch"};
       }
-      return "\"protocol\":\"" + json_escape(echo_protocol) + "\",\"payload_bytes\":" + std::to_string(echoed.size()) +
-             ",\"echo_ok\":true";
+      auto evidence = "\"protocol\":\"" + json_escape(echo_protocol) + "\",\"payload_bytes\":" +
+                      std::to_string(echoed.size()) + ",\"echo_ok\":true";
+      if (scenario == "pnet") {
+         evidence += ",\"negotiated_security\":\"" + std::string{negotiated_security(stream.authentication())} +
+                     "\",\"negotiated_muxer\":\"/yamux/1.0.0\"";
+      }
+      return evidence;
    }
    if (scenario == "dcutr") {
       const auto status = forge::asio::blocking::run(runtime, value.async_attempt_hole_punch(peer));
@@ -1424,8 +1459,10 @@ int dial_mode(const std::map<std::string, std::string>& args) {
          if (scenario != "pnet" || optional_value(args, "pnet-control").empty()) {
             throw;
          }
+         const auto metrics = value.metrics();
          forge::asio::blocking::run(runtime, value.async_stop());
-         write_file(required(args, "result-file"), "{" + pnet_rejection_evidence(args, "dialer", peer.to_string()) + "}\n");
+         write_file(required(args, "result-file"),
+                    "{" + pnet_rejection_evidence(args, "dialer", metrics, peer.to_string()) + "}\n");
          return 0;
       }
       if (scenario == "pnet" && !optional_value(args, "pnet-control").empty()) {
@@ -1460,7 +1497,7 @@ int dial_mode(const std::map<std::string, std::string>& args) {
             throw std::runtime_error{"FORGE pnet connection did not complete authenticated direct Identify"};
          }
          connection_evidence = "\"negotiated_transport\":\"tcp\",\"authenticated_remote_peer_id\":\"" +
-                               json_escape(session.remote_peer.to_string()) + "\",\"signed_peer_record\":true";
+                               json_escape(session.remote_peer.to_string()) + "\",\"identify_observed\":true";
       }
    }
 
