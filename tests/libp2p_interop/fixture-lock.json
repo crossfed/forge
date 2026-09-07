@@ -26,23 +26,25 @@
     }
   },
   "fixture_files": {
+    "fixtures/pnet/mismatched-swarm.key": "8ad4a40c30bc50316be35d89f01fa68f28d288a0e00c301898ac3abaea64f7e5",
+    "fixtures/pnet/swarm.key": "a2602305a7773371a5232eb73d3ee4af3fba1efee04c03afa981554a6bebd176",
     "go_fixture/go.mod": "d932393c652c4fcab045bc9e35d70bb8ee6700610b63f5ed9c4d2b3b8e1e6be2",
     "go_fixture/go.sum": "4c5c4bab5b838e9027b83777413feb9c2540f2d0c076c86214a549cfad47902a",
-    "go_fixture/main.go": "a3df61259aeb2c3759c29421a5513bc86ab3f28510547687545895fbda1dcf19",
-    "rust_fixture/Cargo.lock": "14b5e00e49ffa65cc10ff42c2ec0ad49d7d3654846f749ca12d8e80090a6d781",
-    "rust_fixture/Cargo.toml": "a4992715e8f7eaa9576f9f8b9a877b52bb847eb0af0ec70e9078c8113b85d71e",
-    "rust_fixture/main.rs": "853fa22275ceee74dc2b1c71a9aeca0d8246ed74c0cbbe10b43df0785ee68074",
+    "go_fixture/main.go": "89dd5abd61a42bacccf5c161509d6a9170552511ef3733a9c0e60db8a857b36e",
+    "rust_fixture/Cargo.lock": "9574d4685de5f685a3894edc8b6034f728737ec525e60f5274eb3c02ff37c350",
+    "rust_fixture/Cargo.toml": "112685a538de4e142689ea35224189a2716a56394e7e359ed79765bdeaca57c8",
+    "rust_fixture/main.rs": "fb34225fb947b117018d826660e3fd2d0ce35688c3e25fb95c5c20af78a68fcc",
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
-    "../CMakeLists.txt": "9cb1bcba204b00072522f20f732e7fd36521c10e2b127b4e516317bc7de2a110",
-    "check_fixture_lock.py": "581a4216a24b96b89e4fefe26ece4cf5b587542495b9095ac4a6e5627561afc2",
-    "forge_interop_fixture.cpp": "3c089e65fd54305afd899bbb6f9818c3e4663fba3769fbc3d5123c3cfcdcfd7b",
+    "../CMakeLists.txt": "27c228e7aa2b42f5fb8a9c94eb7e1c3f0a08d7689a77837a971054db76bac921",
+    "check_fixture_lock.py": "18da8fbf8fd92de7d9d0cb9b0c1b92badb27319aa82a6e490dd65cfc4cb3a62b",
+    "forge_interop_fixture.cpp": "5a32b676548f4af10777d3d795c43a1242c692a52662e18a89b8f7fef0215717",
     "provenance.py": "9ae5c8ffa3d9dcd646c2a5c7148e79cd5086d60ecb156d81374fda2ca00609ec",
-    "runner.py": "3032c837bf74e0cc7513aa8384ee5a72066e239baf5069e66cb10141d899269c"
+    "runner.py": "8ac2fa5bba7488a2c03687581ac492f9d36d7afda4a26964622c916cf0649223"
   },
   "evidence_sources": {
-    "donor_cases.json": "70570aea6174158c9141a598ed270f80da9a7675d770f68427a54d8d8471e791"
+    "donor_cases.json": "1c2cc1b94517b9703fe6ab91899c6f27d975268cc7314b4ff600a06ef4408256"
   },
   "regression_sources": {
     "test_provenance.py": "10ffe7cdff1d79e19d44b3eebf4bb0019656abbae6036af046a815e6669bc1ef"
@@ -60,7 +62,7 @@
         "rust_fixture/Cargo.toml",
         "rust_fixture/Cargo.lock"
       ],
-      "sha256": "dfd58cfa79f1abb7fae7ac173ec8527a9e1301e638770ccadde133fedc158409"
+      "sha256": "6a3ce7d0952e028db265abb89515e6eacc2f47d69603e29d198ee3ab57cd0319"
     }
   },
   "donors": [

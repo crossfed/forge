@@ -30,6 +30,9 @@ using beast_tls_stream = boost::beast::ssl_stream<boost::beast::tcp_stream>;
 [[nodiscard]] context_snapshot_ptr make_context(context_options options);
 [[nodiscard]] std::shared_ptr<asio_tls_stream> make_asio_stream(context_snapshot_ptr snapshot,
                                                                 boost::asio::ip::tcp::socket socket);
+template <typename next_layer>
+[[nodiscard]] std::shared_ptr<boost::asio::ssl::stream<next_layer>> make_asio_stream(context_snapshot_ptr snapshot,
+                                                                                       next_layer stream);
 [[nodiscard]] std::shared_ptr<beast_tls_stream> make_beast_stream(context_snapshot_ptr snapshot,
                                                                   boost::beast::tcp_stream stream);
 
@@ -47,6 +50,9 @@ class context_snapshot {
    friend context_snapshot_ptr make_context(context_options options);
    friend std::shared_ptr<asio_tls_stream> make_asio_stream(context_snapshot_ptr snapshot,
                                                             boost::asio::ip::tcp::socket socket);
+   template <typename next_layer>
+   friend std::shared_ptr<boost::asio::ssl::stream<next_layer>> make_asio_stream(context_snapshot_ptr snapshot,
+                                                                                   next_layer stream);
    friend std::shared_ptr<beast_tls_stream> make_beast_stream(context_snapshot_ptr snapshot,
                                                               boost::beast::tcp_stream stream);
 
@@ -57,6 +63,17 @@ class context_snapshot {
 
    std::shared_ptr<impl> impl_;
 };
+
+template <typename next_layer>
+[[nodiscard]] std::shared_ptr<boost::asio::ssl::stream<next_layer>> make_asio_stream(context_snapshot_ptr snapshot,
+                                                                                       next_layer stream) {
+   if (!snapshot) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "TLS stream requires a context snapshot");
+   }
+
+   auto* result = new boost::asio::ssl::stream<next_layer>{std::move(stream), snapshot->context_for_stream()};
+   return {result, [snapshot = std::move(snapshot)](auto* value) { delete value; }};
+}
 
 void configure_client_stream(SSL* native_handle, const context_snapshot& snapshot, client_stream_options options);
 void classify_handshake_failure(SSL* native_handle, const context_snapshot& snapshot);

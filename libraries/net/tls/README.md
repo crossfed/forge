@@ -35,6 +35,12 @@ checks, fingerprint checks and custom peer validation belong to this leaf. Serve
 selection preserves client preference and returns OpenSSL `NOACK` for malformed
 or unmatched offers.
 
+`make_asio_stream<NextLayer>()` is an intentional public extension point for
+composed Asio byte streams, not a P2P-private helper. `NextLayer` must satisfy
+Boost.Asio's asynchronous stream requirements and retain its own cancellation
+and terminal-close semantics. Forge STCP uses this boundary to run TLS above a
+protected transport stream; the native TCP overload remains the simpler path.
+
 `context_provider::replace()` builds and validates the next immutable snapshot
 before publishing it atomically. New connections acquire a new snapshot; streams
 returned by `make_asio_stream()` and `make_beast_stream()` retain their original snapshot,

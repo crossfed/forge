@@ -78,6 +78,7 @@ RUNNER_FLAGS = (
 ENABLED_VALUES = {"1", "ON", "on", "true", "TRUE", "yes", "YES"}
 PRIVATE_NETWORK_TRANSPORT = "tcp-pnet"
 PRIVATE_NETWORK_PSK_DEPENDENCY = "security.private_network_psk"
+PNET_FINGERPRINT_DOMAIN = b"forge-p2p-stage6-pnet-fingerprint-v1\0"
 RELAY_NATIVE_PEER_ID_IDENTITY_CODE = 0
 RELAY_NATIVE_PEER_ID_SHA256_CODE = 0x12
 RELAY_NATIVE_PEER_ID_MAX_DIGEST_BYTES = 64
@@ -891,6 +892,64 @@ def validate_tls_evidence(result: dict, record: dict, listener: Optional[dict]) 
     return errors
 
 
+def pnet_control_errors(record: dict, name: str) -> list[str]:
+    control = record.get(name)
+    if not isinstance(control, dict):
+        return [f"pnet evidence lacks the {name} control"]
+    result = control.get("result")
+    listener = control.get("listener_result")
+    if not isinstance(result, dict) or not isinstance(listener, dict):
+        return [f"pnet {name} control lacks dialer/listener result evidence"]
+    expected = {
+        "status": "rejected", "control_kind": name, "attempted_connections": 1,
+        "established_connections": 0, "identify_streams": 0, "application_streams": 0,
+        "rejected_before_identify": True,
+    }
+    errors = [f"pnet {name} dialer control has invalid rejection counters" for key, value in expected.items()
+              if result.get(key) != value]
+    if listener.get("status") != "rejected" or listener.get("control_kind") != name:
+        errors.append(f"pnet {name} listener control lacks rejected terminal evidence")
+    if listener.get("correlation_token") != result.get("correlation_token"):
+        errors.append(f"pnet {name} control correlation differs between endpoints")
+    expected_peer = result.get("expected_peer_id")
+    listener_process = control.get("listener_process")
+    if not isinstance(listener_process, dict) or expected_peer != listener_process.get("peer_id"):
+        errors.append(f"pnet {name} control is not bound to its listener peer")
+    attempts = result.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) != 1:
+        errors.append(f"pnet {name} control did not record exactly one dial attempt")
+    return errors
+
+
+def validate_pnet_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+    errors: list[str] = []
+    expected_fingerprint = result.get("pnet_fingerprint")
+    if not (
+        result.get("pnet_enabled") is True
+        and result.get("negotiated_pnet") is True
+        and isinstance(expected_fingerprint, str)
+        and SHA256.fullmatch(expected_fingerprint)
+    ):
+        errors.append("pnet evidence lacks negotiated protection and a Forge operational fingerprint")
+    if not isinstance(listener, dict) or any(
+        listener.get(field) != result.get(field)
+        for field in ("pnet_enabled", "negotiated_pnet", "pnet_fingerprint")
+    ):
+        errors.append("pnet listener result does not report the same negotiated protection fingerprint")
+    if not (
+        result.get("negotiated_transport") == "tcp"
+        and result.get("authenticated_remote_peer_id") == record.get("peer_id")
+        and result.get("signed_peer_record") is True
+        and result.get("echo_ok") is True
+        and positive_integer(result.get("payload_bytes"))
+        and nonempty_string(result.get("protocol"))
+    ):
+        errors.append("pnet evidence lacks direct authenticated Identify and application-stream proof")
+    for control in ("missing_key", "mismatched_key"):
+        errors.extend(pnet_control_errors(record, control))
+    return errors
+
+
 def relay_native_quic_transport_endpoint(
     value: object, relay_peer: object,
 ) -> tuple[Optional[str], list[str]]:
@@ -1030,6 +1089,7 @@ EVIDENCE_CONTRACT_VALIDATORS = {
     **evidence_contracts(validate_relay_client_evidence, "relay_v2_client_transport"),
     **evidence_contracts(validate_kademlia_evidence, "kademlia_amino"),
     **evidence_contracts(validate_rendezvous_evidence, "rendezvous_rust"),
+    **evidence_contracts(validate_pnet_evidence, "pnet"),
 }
 
 
@@ -1068,6 +1128,95 @@ def validate_effective_configuration(record: dict, expected_profile: str,
     if record.get("effective_configuration") != expected:
         return ["raw runner effective configuration does not match launcher inputs"]
     return []
+
+
+def pnet_fingerprint_for_launcher_key(value: object, artifact_root: Path) -> tuple[Optional[str], list[str]]:
+    path = absolute_path(value)
+    if path is None or not path.is_file():
+        return None, ["pnet launcher key file is unavailable"]
+    if path_within(str(path), artifact_root) is not None:
+        return None, ["pnet launcher key file must remain outside the artifact directory"]
+    raw = path.read_bytes()
+    if raw.endswith(b"\r\n"):
+        raw = raw[:-2]
+    elif raw.endswith(b"\n"):
+        raw = raw[:-1]
+    lines = raw.split(b"\n")
+    if (
+        len(lines) != 3
+        or lines[0] != b"/key/swarm/psk/1.0.0/"
+        or lines[1] != b"/base16/"
+        or len(lines[2]) != 64
+        or any(value not in b"0123456789abcdef" for value in lines[2])
+    ):
+        return None, ["pnet launcher key file is not the canonical base16 swarm-key form"]
+    return hashlib.sha256(PNET_FINGERPRINT_DOMAIN + bytes.fromhex(lines[2].decode("ascii"))).hexdigest(), []
+
+
+def validate_pnet_launchers(record: dict, result: dict, listener: Optional[dict], dial_options: dict[str, str],
+                            listener_options: dict[str, str], artifact_root: Path) -> list[str]:
+    errors: list[str] = []
+    dial_fingerprint, dial_errors = pnet_fingerprint_for_launcher_key(dial_options.get("--pnet-key-file"), artifact_root)
+    listener_fingerprint, listener_errors = pnet_fingerprint_for_launcher_key(
+        listener_options.get("--pnet-key-file"), artifact_root
+    )
+    errors.extend(dial_errors)
+    errors.extend(listener_errors)
+    if (
+        dial_fingerprint is None
+        or listener_fingerprint is None
+        or dial_fingerprint != listener_fingerprint
+        or dial_options.get("--pnet-fingerprint") != dial_fingerprint
+        or listener_options.get("--pnet-fingerprint") != dial_fingerprint
+        or result.get("pnet_fingerprint") != dial_fingerprint
+        or not isinstance(listener, dict)
+        or listener.get("pnet_fingerprint") != dial_fingerprint
+    ):
+        errors.append("pnet launcher inputs and endpoint results do not independently bind the Forge fingerprint")
+    if listener_options.get("--features") != "ping,identify":
+        errors.append("pnet listener command claims a non-private capability set")
+
+    for name in ("missing_key", "mismatched_key"):
+        control = record.get(name)
+        if not isinstance(control, dict):
+            continue
+        control_result_value = control.get("result")
+        control_listener = control.get("listener_process")
+        attempts = control_result_value.get("attempts") if isinstance(control_result_value, dict) else None
+        if not isinstance(attempts, list) or len(attempts) != 1 or not isinstance(control_listener, dict):
+            continue
+        control_options, control_errors = command_options(attempts[0].get("command"), "dial")
+        errors.extend(control_errors)
+        listener_control_options, listener_control_errors = command_options(control_listener.get("command"), "listen")
+        errors.extend(listener_control_errors)
+        if (
+            control_options.get("--transport") != PRIVATE_NETWORK_TRANSPORT
+            or control_options.get("--pnet-control") != name
+            or control_options.get("--pnet-correlation") != control_result_value.get("correlation_token")
+            or control_options.get("--pnet-fingerprint") != dial_fingerprint
+            or listener_control_options.get("--transport") != PRIVATE_NETWORK_TRANSPORT
+            or listener_control_options.get("--pnet-control") != name
+            or listener_control_options.get("--pnet-correlation") != control_result_value.get("correlation_token")
+            or listener_control_options.get("--features") != "ping,identify"
+        ):
+            errors.append(f"pnet {name} control launcher does not bind its direct private-network attempt")
+        control_listener_fingerprint, control_listener_errors = pnet_fingerprint_for_launcher_key(
+            listener_control_options.get("--pnet-key-file"), artifact_root
+        )
+        errors.extend(control_listener_errors)
+        if control_listener_fingerprint != dial_fingerprint:
+            errors.append(f"pnet {name} control listener key differs from the positive profile")
+        if name == "missing_key":
+            if "--pnet-key-file" in control_options:
+                errors.append("pnet missing-key control unexpectedly configures a dialer key")
+        else:
+            control_fingerprint, control_key_errors = pnet_fingerprint_for_launcher_key(
+                control_options.get("--pnet-key-file"), artifact_root
+            )
+            errors.extend(control_key_errors)
+            if control_fingerprint is None or control_fingerprint == dial_fingerprint:
+                errors.append("pnet mismatched-key control does not use an independent key")
+    return errors
 
 def validate_successful_raw_record(
     record: object,
@@ -1146,6 +1295,8 @@ def validate_successful_raw_record(
         errors.extend(command_errors)
         required_options = {"--scenario", "--peer-id", "--addr", "--result-file", "--store-dir", "--transport"}
         optional_options = {"--payload", "--target-peer-id"}
+        if expected_profile == "private_network":
+            required_options |= {"--pnet-key-file", "--pnet-fingerprint"}
         if set(options) - (required_options | optional_options) or not required_options <= set(options):
             errors.append("raw runner dial command has an invalid option schema")
         elif (
@@ -1182,6 +1333,8 @@ def validate_successful_raw_record(
             errors.extend(command_errors)
             required_options = {"--ready-file", "--stop-file", "--store-dir", "--features", "--transport", "--scenario"}
             optional_options = {"--result-file", "--seed-file", "--seed-peer-id", "--seed-addr", "--expected-messages"}
+            if expected_profile == "private_network":
+                required_options |= {"--pnet-key-file", "--pnet-fingerprint"}
             if set(options) - (required_options | optional_options) or not required_options <= set(options):
                 errors.append("raw runner listener command has an invalid option schema")
             elif (
@@ -1218,6 +1371,10 @@ def validate_successful_raw_record(
     errors.extend(validate_result_semantics(
         expected_evidence_contract, payload or {}, record, listener_payload
     ))
+    if expected_profile == "private_network":
+        errors.extend(validate_pnet_launchers(
+            record, payload or {}, listener_payload, dial_options, listener_options, artifact_root
+        ))
     errors.extend(validate_effective_configuration(
         record,
         expected_profile,
@@ -1420,11 +1577,13 @@ CURRENT_FIXTURES = {
     "relay_v2_client_transport": ("relay.circuit_v2_client_transport", "quic_base/relay_reserve", ("quic",), "relay_reserve"),
     "kademlia_amino": ("routing.kademlia_amino", "quic_dht/dht_provide_find_provider", ("quic",), "dht_provide_find_provider"),
     "rendezvous_rust": ("discovery.rendezvous", "quic_rendezvous/rendezvous_register_discover", ("quic",), "rendezvous_register_discover"),
+    "pnet": ("security.private_network_psk", "private_tcp_yamux_pnet/pnet", ("tcp", "yamux", "pnet"), "pnet"),
 }
 
 
 def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
     capability_id, runner_scenario_id, stack, _ = CURRENT_FIXTURES[scenario_id]
+    profile = "private_network" if stack == ("tcp", "yamux", "pnet") else "native"
     return {
         "interop_acceptance_registry": {
             "artifact_schema": ARTIFACT_SCHEMA,
@@ -1434,7 +1593,7 @@ def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
                     "scenarios": [{
                         "id": scenario_id,
                         "runner_scenario_id": runner_scenario_id,
-                        "profile": "native",
+                        "profile": profile,
                         "transport_stack": list(stack),
                         "activation": "enabled",
                         "registration": "registered",
@@ -1512,12 +1671,34 @@ def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
             "record_sequence": 1, "record_address_count": 1, "registered_ttl_seconds": 60,
             "discovered_ttl_seconds": 60, "cookie_bytes": 8,
         })
+    elif scenario_id == "pnet":
+        result.update({
+            "signed_peer_record": True, "negotiated_transport": "tcp",
+            "authenticated_remote_peer_id": "listener-peer", "protocol": "/forge/interop/echo/1",
+            "payload_bytes": 7, "echo_ok": True, "pnet_enabled": True, "negotiated_pnet": True,
+            "pnet_fingerprint": "0" * 64,
+        })
+        control_template = {
+            "status": "rejected", "attempted_connections": 1, "established_connections": 0,
+            "identify_streams": 0, "application_streams": 0, "rejected_before_identify": True,
+            "correlation_token": "pnet-control", "attempts": [{}],
+        }
+        for name in ("missing_key", "mismatched_key"):
+            record[name] = {
+                "result": control_template | {"control_kind": name, "expected_peer_id": "control-peer"},
+                "listener_result": control_template | {"control_kind": name},
+                "listener_process": {"peer_id": "control-peer"},
+            }
     else:
         raise ValueError(f"unknown current fixture {scenario_id}")
     if stack == ("tcp", "yamux") and scenario_id not in {
         "tcp_yamux", "multistream_select", "noise_identity", "tls_identity",
     }:
         result.update({"negotiated_transport": "tcp"})
+    if scenario_id == "pnet":
+        return result, record, {
+            "pnet_enabled": True, "negotiated_pnet": True, "pnet_fingerprint": "0" * 64,
+        }
     return result, record, None
 
 
@@ -1784,6 +1965,10 @@ def self_test() -> int:
             "negotiated_protocol", "wire_registration_count", "signed_peer_record_valid",
             "matching_peer_record", "record_sequence", "record_address_count",
             "registered_ttl_seconds", "discovered_ttl_seconds", "cookie_bytes",
+        ),
+        "pnet": (
+            "pnet_enabled", "negotiated_pnet", "pnet_fingerprint", "signed_peer_record",
+            "authenticated_remote_peer_id", "echo_ok", "payload_bytes",
         ),
     }
     for scenario_id, fields in mutations.items():

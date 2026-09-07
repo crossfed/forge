@@ -66,6 +66,7 @@ import forge.net.p2p.exceptions;
 import forge.net.p2p.message;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.pubsub;
+import forge.net.p2p.private_network;
 import forge.net.p2p.reachability;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
@@ -358,6 +359,39 @@ void normalize_topology_capacity(node::options& options) noexcept {
 }
 
 void validate(const node::options& options) {
+   if (options.private_network) {
+      private_network::validate(*options.private_network);
+      if (options.capabilities.has(capabilities::direct_quic) || options.capabilities.has(capabilities::relay) ||
+          options.capabilities.has(capabilities::relay_reservation) ||
+          options.capabilities.has(capabilities::hole_punching)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P private-network profile permits only direct TCP transport");
+      }
+      if (options.relay_policy.service_enabled || options.relay_policy.client_enabled ||
+          options.relay_policy.auto_discovery_enabled) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P private-network profile requires every relay policy to be disabled");
+      }
+      if (!options.path_policy.allow_direct || options.path_policy.allow_relay || options.path_policy.allow_hole_punch) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P private-network profile requires a direct-only path policy");
+      }
+      const auto require_direct_tcp = [](const endpoint& value, std::string_view use) {
+         if (!value.is_direct_tcp()) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                                  "P2P private-network " + std::string{use} + " must be a direct TCP endpoint");
+         }
+      };
+      for (const auto& value : options.advertised_endpoints) {
+         require_direct_tcp(value, "advertised endpoint");
+      }
+      for (const auto& value : options.lifecycle.listen) {
+         require_direct_tcp(value, "lifecycle listener");
+      }
+      for (const auto& value : options.lifecycle.bootstrap) {
+         require_direct_tcp(value.address, "lifecycle bootstrap endpoint");
+      }
+   }
    const auto relay_duration = std::chrono::duration_cast<std::chrono::seconds>(options.limits.relay.max_duration);
    validate(options.limits.topology);
    for (const auto& point : options.limits.topology.rendezvous_points) {
@@ -529,6 +563,18 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
    }
 }
 
+bool node::impl::private_network_enabled() const noexcept {
+   return options.private_network.has_value();
+}
+
+void node::impl::require_private_direct_tcp(const forge::net::p2p::endpoint& endpoint,
+                                            std::string_view operation) const {
+   if (private_network_enabled() && !endpoint.is_direct_tcp()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network " + std::string{operation} + " requires a direct TCP endpoint");
+   }
+}
+
 detail::dht_profile_state& node::impl::dht_profile(const protocol_id& protocol) {
    const auto found = dht_profiles.find(protocol);
    if (found == dht_profiles.end()) {
@@ -597,12 +643,14 @@ std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control_l
 [[nodiscard]] std::vector<protocol_id> node::impl::supported_protocols_locked() const {
    auto out = std::vector<protocol_id>{builtins::ping,
                                        builtins::identify,
-                                       builtins::identify_push,
-                                       builtins::autonat_v2_dial_request,
-                                       builtins::autonat_v2_dial_back,
-                                       builtins::autonat_v1,
-                                       builtins::relay_stop,
-                                       builtins::dcutr};
+                                       builtins::identify_push};
+   if (!private_network_enabled()) {
+      out.push_back(builtins::autonat_v2_dial_request);
+      out.push_back(builtins::autonat_v2_dial_back);
+      out.push_back(builtins::autonat_v1);
+      out.push_back(builtins::relay_stop);
+      out.push_back(builtins::dcutr);
+   }
    if (options.capabilities.has(capabilities::relay) || options.capabilities.has(capabilities::relay_reservation)) {
       out.push_back(builtins::relay_hop);
    }
@@ -627,6 +675,10 @@ std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control_l
    }
    out.reserve(out.size() + handlers.size());
    for (const auto& [protocol, _] : handlers) {
+      if (private_network_enabled() &&
+          (protocol == builtins::relay_stop || protocol == builtins::dcutr || protocol == builtins::relay_hop)) {
+         continue;
+      }
       out.push_back(protocol);
    }
    return out;

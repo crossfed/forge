@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -49,6 +50,7 @@ import forge.net.p2p.identify;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
 import forge.net.p2p.peer_store;
+import forge.net.p2p.private_network;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.reachability;
@@ -56,6 +58,7 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.relay;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.net.pnet.protector;
 
 namespace {
 
@@ -424,6 +427,57 @@ forge::net::p2p::node::options node_options(const std::filesystem::path& store_p
    return node_options(store_path, local_identity());
 }
 
+void configure_private_network(forge::net::p2p::node::options& options,
+                               const std::map<std::string, std::string>& args, std::string_view transport) {
+   if (transport != "tcp-pnet") {
+      return;
+   }
+
+   // The missing-key control deliberately uses the same direct-TCP restrictions
+   // without installing a protector, so it can prove rejection against pnet.
+   options.capabilities = forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::peer_exchange};
+   options.relay_policy.service_enabled = false;
+   options.relay_policy.client_enabled = false;
+   options.relay_policy.auto_discovery_enabled = false;
+   options.path_policy.allow_direct = true;
+   options.path_policy.allow_relay = false;
+   options.path_policy.allow_hole_punch = false;
+
+   const auto key_file = optional_value(args, "pnet-key-file");
+   if (key_file.empty()) {
+      return;
+   }
+   auto input = std::ifstream{key_file, std::ios::binary};
+   if (!input) {
+      throw std::runtime_error{"could not open pnet key file"};
+   }
+   auto text = std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+   auto key = forge::net::pnet::pre_shared_key::parse_swarm_key(text);
+   options.private_network = forge::net::p2p::private_network::options{
+       .protector = std::make_shared<const forge::net::pnet::protector>(
+           forge::net::pnet::protector{std::move(key)}),
+   };
+}
+
+std::string pnet_evidence(const std::map<std::string, std::string>& args) {
+   return "\"pnet_enabled\":true,\"negotiated_pnet\":true,\"pnet_fingerprint\":\"" +
+          json_escape(required(args, "pnet-fingerprint")) + "\"";
+}
+
+std::string pnet_rejection_evidence(const std::map<std::string, std::string>& args, std::string_view role,
+                                    std::string_view expected_peer = {}) {
+   auto value = "\"implementation\":\"forge\",\"role\":\"" + std::string{role} +
+                "\",\"scenario\":\"pnet\",\"status\":\"rejected\",\"control_kind\":\"" +
+                json_escape(required(args, "pnet-control")) + "\",\"correlation_token\":\"" +
+                json_escape(required(args, "pnet-correlation")) +
+                "\",\"attempted_connections\":1,\"established_connections\":0,\"identify_streams\":0,"
+                "\"application_streams\":0,\"rejected_before_identify\":true";
+   if (!expected_peer.empty()) {
+      value += ",\"expected_peer_id\":\"" + json_escape(expected_peer) + "\"";
+   }
+   return value;
+}
+
 void configure_rendezvous_lifecycle_ttls(forge::net::p2p::node::options& options, const std::string_view scenario) {
    if (scenario != "rendezvous_lifecycle") {
       return;
@@ -452,7 +506,7 @@ forge::net::p2p::endpoint loopback_tcp_endpoint(std::uint16_t port = 0) {
 }
 
 forge::net::p2p::endpoint loopback_endpoint_for(std::string_view transport) {
-   if (transport == "tcp" || transport == "tcp-tls") {
+   if (transport == "tcp" || transport == "tcp-tls" || transport == "tcp-pnet") {
       return loopback_tcp_endpoint();
    }
    if (transport == "quic" || transport.empty()) {
@@ -768,8 +822,10 @@ persistence_contains(forge::asio::runtime& runtime,
 int listen_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    const auto scenario = optional_value(args, "scenario");
+   const auto transport = optional_value(args, "transport", "quic");
    auto persistence = forge::net::p2p::dht::record_store::make_memory_persistence();
    auto options = node_options(required(args, "store-dir"));
+   configure_private_network(options, args, transport);
    configure_rendezvous_lifecycle_ttls(options, scenario);
    options.dht_record_persistence.emplace(forge::net::p2p::builtins::kad_dht, persistence);
    auto value = forge::net::p2p::node{runtime, std::move(options)};
@@ -780,7 +836,6 @@ int listen_mode(const std::map<std::string, std::string>& args) {
    } else if (scenario == "gossipsub_mixed_mesh_stress") {
       stress_state = register_pubsub_stress_listener(runtime, value);
    }
-   const auto transport = optional_value(args, "transport", "quic");
    forge::asio::blocking::run(runtime, value.async_hydrate_peer_state());
    forge::asio::blocking::run(runtime, value.async_listen(loopback_endpoint_for(transport)));
    const auto local = value.local_endpoint();
@@ -795,7 +850,12 @@ int listen_mode(const std::map<std::string, std::string>& args) {
    const auto stop_file = std::filesystem::path{required(args, "stop-file")};
    auto seeded = false;
    auto value_record_reported = false;
+   auto pnet_result_reported = false;
    while (!std::filesystem::exists(stop_file)) {
+      if (!pnet_result_reported && scenario == "pnet" && value.metrics().sessions_opened > 0) {
+         write_file(required(args, "result-file"), "{\"implementation\":\"forge\",\"role\":\"listener\",\"scenario\":\"pnet\",\"status\":\"ok\"," + pnet_evidence(args) + "}\n");
+         pnet_result_reported = true;
+      }
       if (!value_record_reported && is_dht_value_scenario(scenario) &&
           persistence_contains(runtime, persistence, value_fixture(scenario))) {
          write_file(required(args, "result-file"),
@@ -832,6 +892,9 @@ int listen_mode(const std::map<std::string, std::string>& args) {
          seeded = true;
       }
       std::this_thread::sleep_for(100ms);
+   }
+   if (!pnet_result_reported && scenario == "pnet" && !optional_value(args, "pnet-control").empty()) {
+      write_file(required(args, "result-file"), "{" + pnet_rejection_evidence(args, "listener") + "}\n");
    }
    const auto metrics = value.metrics();
    std::cerr << "forge listener metrics:"
@@ -1282,7 +1345,7 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
              "\",\"payload_bytes\":" + std::to_string(message.data.size()) +
              ",\"signed\":" + std::string{message.signature.empty() ? "false" : "true"};
    }
-   if (scenario == "echo" || scenario == "echo_large") {
+   if (scenario == "echo" || scenario == "echo_large" || scenario == "pnet") {
       auto stream = forge::asio::blocking::run(
           runtime, value.async_open_protocol_stream(
                        peer, forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
@@ -1327,28 +1390,48 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
 int dial_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    const auto scenario = required(args, "scenario");
+   const auto transport = optional_value(args, "transport", "quic");
    auto options = node_options(required(args, "store-dir"));
+   configure_private_network(options, args, transport);
    auto value = forge::net::p2p::node{runtime, std::move(options)};
    forge::asio::blocking::run(runtime, value.async_hydrate_peer_state());
-   forge::asio::blocking::run(runtime, value.async_listen(loopback_quic_endpoint()));
+   forge::asio::blocking::run(runtime, value.async_listen(loopback_endpoint_for(transport)));
 
    auto remote = forge::net::p2p::parse_endpoint(required(args, "addr"));
    auto peer = forge::net::p2p::peer_id::from_string(required(args, "peer-id"));
+   const auto pnet_profile = transport == "tcp-pnet";
    value.peers().learn_endpoint(
        peer, remote,
        forge::net::p2p::capability_set{
-           .bits = forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::peer_exchange |
-                   forge::net::p2p::capabilities::autonat | forge::net::p2p::capabilities::relay |
-                   forge::net::p2p::capabilities::hole_punching | forge::net::p2p::capabilities::relay_reservation |
-                   forge::net::p2p::capabilities::rendezvous | forge::net::p2p::capabilities::pubsub});
+           .bits = pnet_profile
+                       ? forge::net::p2p::capabilities::peer_exchange
+                       : forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::peer_exchange |
+                             forge::net::p2p::capabilities::autonat | forge::net::p2p::capabilities::relay |
+                             forge::net::p2p::capabilities::hole_punching |
+                             forge::net::p2p::capabilities::relay_reservation |
+                             forge::net::p2p::capabilities::rendezvous | forge::net::p2p::capabilities::pubsub});
 
    auto connection_evidence = std::string{};
    if (scenario == "identify" || scenario.starts_with("dht_") || scenario == "gossipsub_publish" ||
-       scenario == "gossipsub_mixed_mesh_stress") {
-      const auto session = forge::asio::blocking::run(
-          runtime,
-          value.async_connect(remote, forge::net::p2p::node::connect_options{
-                                          .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false}));
+       scenario == "gossipsub_mixed_mesh_stress" || scenario == "pnet") {
+      auto session = forge::net::p2p::node::session_info{};
+      try {
+         session = forge::asio::blocking::run(
+             runtime,
+             value.async_connect(remote, forge::net::p2p::node::connect_options{
+                                             .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false}));
+      } catch (const std::exception&) {
+         if (scenario != "pnet" || optional_value(args, "pnet-control").empty()) {
+            throw;
+         }
+         forge::asio::blocking::run(runtime, value.async_stop());
+         write_file(required(args, "result-file"), "{" + pnet_rejection_evidence(args, "dialer", peer.to_string()) + "}\n");
+         return 0;
+      }
+      if (scenario == "pnet" && !optional_value(args, "pnet-control").empty()) {
+         forge::asio::blocking::run(runtime, value.async_stop());
+         throw std::runtime_error{"pnet rejection control unexpectedly established an authenticated session"};
+      }
       if (scenario == "identify" && session.identify_state != forge::net::p2p::identify::state::identified) {
          throw std::runtime_error{"FORGE automatic Identify did not complete, state=" +
                                   std::to_string(static_cast<int>(session.identify_state))};
@@ -1371,6 +1454,14 @@ int dial_mode(const std::map<std::string, std::string>& args) {
                                "\",\"authenticated_remote_peer_id\":\"" + json_escape(session.remote_peer.to_string()) +
                                "\"";
       }
+      if (scenario == "pnet") {
+         if (session.identify_state != forge::net::p2p::identify::state::identified ||
+             session.remote_peer != peer || session.path != forge::net::p2p::path::kind::direct) {
+            throw std::runtime_error{"FORGE pnet connection did not complete authenticated direct Identify"};
+         }
+         connection_evidence = "\"negotiated_transport\":\"tcp\",\"authenticated_remote_peer_id\":\"" +
+                               json_escape(session.remote_peer.to_string()) + "\",\"signed_peer_record\":true";
+      }
    }
 
    const auto details = run_scenario(runtime, value, scenario, optional_value(args, "payload", pubsub_payload), peer,
@@ -1379,6 +1470,7 @@ int dial_mode(const std::map<std::string, std::string>& args) {
    write_file(required(args, "result-file"), "{\"implementation\":\"forge\",\"role\":\"dialer\",\"scenario\":\"" +
                                                  json_escape(scenario) + "\",\"status\":\"ok\"," + details +
                                                  (connection_evidence.empty() ? "" : "," + connection_evidence) +
+                                                 (scenario == "pnet" ? "," + pnet_evidence(args) : "") +
                                                  "}\n");
    return 0;
 }

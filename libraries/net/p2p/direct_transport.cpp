@@ -51,7 +51,9 @@ registry::registry(forge::asio::runtime& runtime, const node::options& options,
    if (!gate) {
       gate = std::make_shared<forge::net::p2p::detail::connection_gate>(nullptr);
    }
-   register_quic_profile(*this, runtime, options, resources, gate);
+   if (!options.private_network) {
+      register_quic_profile(*this, runtime, options, resources, gate);
+   }
    register_tcp_profile(*this, runtime, options, identity, std::move(resources), std::move(gate));
 }
 

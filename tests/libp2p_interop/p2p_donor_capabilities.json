@@ -59,8 +59,7 @@
         "forge-crypto-xsalsa20-v1"
       ],
       "allowed_capability_owners": [
-        "reachability.private_internet_policy",
-        "security.private_network_psk"
+        "reachability.private_internet_policy"
       ]
     },
     {
@@ -362,7 +361,7 @@
         { "id": "dnsaddr_private_tcp_yamux_pnet", "runner_scenario_id": "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet", "profile": "private_network", "transport_stack": [ "tcp", "yamux", "pnet" ], "activation": "enabled", "registration": "planned", "requires_capabilities": [ "security.private_network_psk" ], "evidence_contract": "forge.p2p.evidence.dnsaddr_private_tcp_yamux_pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
       ] },
       "security.private_network_psk": { "scenarios": [
-        { "id": "pnet", "runner_scenario_id": "private_tcp_yamux_pnet/pnet", "profile": "private_network", "transport_stack": [ "tcp", "yamux", "pnet" ], "activation": "enabled", "registration": "planned", "evidence_contract": "forge.p2p.evidence.pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
+        { "id": "pnet", "runner_scenario_id": "private_tcp_yamux_pnet/pnet", "profile": "private_network", "transport_stack": [ "tcp", "yamux", "pnet" ], "activation": "enabled", "registration": "registered", "source_case_id": "interop.live_private_network_pnet", "evidence_contract": "forge.p2p.evidence.pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
       ] },
       "connections.coordinated_dial_port_reuse": { "scenarios": [
         { "id": "coordinated_dial_port_reuse", "runner_scenario_id": "tcp_stage6/coordinated_dial_port_reuse", "profile": "native", "transport_stack": [ "tcp", "yamux" ], "activation": "enabled", "registration": "planned", "evidence_contract": "forge.p2p.evidence.coordinated_dial_port_reuse.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" },
@@ -1157,9 +1156,8 @@
       "support_requirement": "required",
       "default_activation": "enabled",
       "interop_applicability": "go_and_rust",
-      "decision": "stage_6",
-      "planned_branch": "forge-p2p-private-network-v1",
-      "forge_feature_ids": [],
+      "decision": "current",
+      "forge_feature_ids": [ "security.private_network_psk" ],
       "donor_sources": [
         "donors/libp2p-specs/pnet/Private-Networks-PSK-V1.md",
         "donors/go-libp2p/p2p/net/pnet/psk_conn.go",

@@ -4,6 +4,7 @@ add_library(
    identity_signature.cpp
    details/identity_signature.hxx
    endpoint.cpp
+   private_network.cpp
    connection_gater.cpp
    connection_gate.cpp
    details/connection_gate.hxx
@@ -192,6 +193,7 @@ target_link_libraries(
       forge_net_quic
       forge_net_tcp
       forge_net_stcp
+      forge_net_pnet
       forge_net_yamux
       Boost::asio
 )

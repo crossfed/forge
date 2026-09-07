@@ -476,6 +476,7 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
                            resource_manager::dial_reservation* logical_dial,
                            std::shared_ptr<cancellation_latch> cancellation) {
    validate_operation_timeout(connect_options_value.timeout, "P2P connect timeout");
+   require_private_direct_tcp(endpoint, "connect");
    const auto deadline_at = std::chrono::steady_clock::now() + connect_options_value.timeout;
    auto endpoint_copy = endpoint;
    const auto expected_peer = connect_options_value.expected_peer ? connect_options_value.expected_peer : endpoint.peer;

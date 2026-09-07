@@ -395,6 +395,12 @@ void node::impl::register_protocol_handler(protocol_id protocol, node::protocol_
    if (protocol.value.empty() || protocol.value.front() != '/' || !handler) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P protocol handler requires protocol id and handler");
    }
+   if (private_network_enabled() &&
+       (protocol == builtins::autonat_v1 || protocol == builtins::autonat_v2_dial_request ||
+        protocol == builtins::autonat_v2_dial_back)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network AutoNAT requires an explicit Internet-egress policy");
+   }
    auto launch = false;
    {
       auto lock = std::scoped_lock{mutex};

@@ -3,7 +3,11 @@ add_library(
    connection.cpp
    connector.cpp
    details/handshake_deadline.hxx
+   details/stream_backend.hxx
+   details/transport_stream_adapter.hxx
    listener.cpp
+   stream_backend.cpp
+   transport_stream_adapter.cpp
 )
 forge_target_modules_at(forge_net_stcp net/stcp)
 

@@ -5,16 +5,20 @@ use std::{
     net::Ipv4Addr,
     num::NonZeroUsize,
     path::PathBuf,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
 use libp2p::kad::store::RecordStore;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, autonat, dcutr, gossipsub, identify, identity,
-    kad,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, Transport, autonat,
+    core::transport::upgrade::Version,
+    dcutr, gossipsub, identify, identity, kad,
     multiaddr::Protocol,
-    noise, ping, relay, rendezvous,
+    noise, ping,
+    pnet::{PnetConfig, PreSharedKey},
+    relay, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, tls, yamux,
 };
@@ -43,6 +47,10 @@ struct Options {
     payload: String,
     transport: String,
     expected_messages: usize,
+    pnet_key_file: PathBuf,
+    pnet_fingerprint: String,
+    pnet_control: String,
+    pnet_correlation: String,
 }
 
 #[derive(NetworkBehaviour)]
@@ -178,6 +186,10 @@ fn parse_args() -> Result<Options, Box<dyn Error>> {
             "--payload" => out.payload = value,
             "--transport" => out.transport = value,
             "--expected-messages" => out.expected_messages = value.parse()?,
+            "--pnet-key-file" => out.pnet_key_file = PathBuf::from(value),
+            "--pnet-fingerprint" => out.pnet_fingerprint = value,
+            "--pnet-control" => out.pnet_control = value,
+            "--pnet-correlation" => out.pnet_correlation = value,
             "--store-dir" | "--features" => {}
             _ => return Err(format!("unknown argument {key}").into()),
         }
@@ -247,10 +259,9 @@ fn behaviour_for(
     }
 }
 
-async fn new_swarm(
-    transport: &str,
-    scenario: &str,
-) -> Result<libp2p::Swarm<Behaviour>, Box<dyn Error>> {
+async fn new_swarm(opts: &Options) -> Result<libp2p::Swarm<Behaviour>, Box<dyn Error>> {
+    let transport = opts.transport.as_str();
+    let scenario = opts.scenario.as_str();
     let key = identity::Keypair::generate_ed25519();
     let mut swarm = match transport {
         "quic" | "" => SwarmBuilder::with_existing_identity(key)
@@ -279,10 +290,38 @@ async fn new_swarm(
             .with_relay_client(noise::Config::new, yamux::Config::default)?
             .with_behaviour(|key, relay_client| behaviour_for(key, relay_client, scenario))?
             .build(),
+        "tcp-pnet" if opts.pnet_key_file.as_os_str().is_empty() => {
+            SwarmBuilder::with_existing_identity(key)
+                .with_tokio()
+                .with_tcp(
+                    tcp::Config::default().nodelay(true),
+                    noise::Config::new,
+                    yamux::Config::default,
+                )?
+                .with_relay_client(noise::Config::new, yamux::Config::default)?
+                .with_behaviour(|key, relay_client| behaviour_for(key, relay_client, scenario))?
+                .build()
+        }
+        "tcp-pnet" => {
+            let text = fs::read_to_string(&opts.pnet_key_file)?;
+            let psk = PreSharedKey::from_str(&text)?;
+            SwarmBuilder::with_existing_identity(key)
+                .with_tokio()
+                .with_other_transport(move |key| {
+                    tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+                        .and_then(move |socket, _| PnetConfig::new(psk).handshake(socket))
+                        .upgrade(Version::V1Lazy)
+                        .authenticate(noise::Config::new(key).expect("valid noise identity"))
+                        .multiplex(yamux::Config::default)
+                })?
+                .with_relay_client(noise::Config::new, yamux::Config::default)?
+                .with_behaviour(|key, relay_client| behaviour_for(key, relay_client, scenario))?
+                .build()
+        }
         other => return Err(format!("unsupported transport {other}").into()),
     };
 
-    let listen_addr = if transport == "tcp" || transport == "tcp-tls" {
+    let listen_addr = if transport == "tcp" || transport == "tcp-tls" || transport == "tcp-pnet" {
         Multiaddr::empty()
             .with(Protocol::Ip4(Ipv4Addr::LOCALHOST))
             .with(Protocol::Tcp(0))
@@ -294,6 +333,23 @@ async fn new_swarm(
     };
     swarm.listen_on(listen_addr)?;
     Ok(swarm)
+}
+
+fn pnet_rejection(opts: &Options, role: &str, expected_peer: &str) -> serde_json::Value {
+    json!({
+        "implementation": "rust",
+        "role": role,
+        "scenario": "pnet",
+        "status": "rejected",
+        "control_kind": opts.pnet_control,
+        "correlation_token": opts.pnet_correlation,
+        "expected_peer_id": expected_peer,
+        "attempted_connections": 1,
+        "established_connections": 0,
+        "identify_streams": 0,
+        "application_streams": 0,
+        "rejected_before_identify": true
+    })
 }
 
 fn dht_provider_key() -> kad::RecordKey {
@@ -1488,7 +1544,7 @@ async fn wait_gossipsub_peer_and_publish(
 }
 
 async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
-    let mut swarm = new_swarm(&opts.transport, &opts.scenario).await?;
+    let mut swarm = new_swarm(&opts).await?;
     spawn_incoming_stream_echo(&mut swarm, "/forge/interop/relay-echo/1")?;
     if opts.scenario == "gossipsub_publish" || opts.scenario == "gossipsub_mixed_mesh_stress" {
         let topic = gossipsub::IdentTopic::new(PUBSUB_TOPIC);
@@ -1513,6 +1569,7 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
         None
     };
     let mut record_reported = false;
+    let mut pnet_reported = false;
     loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -1563,6 +1620,9 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
                     dht_seed_dial_started = true;
                 }
                 if ready && opts.stop_file.exists() {
+                    if !pnet_reported && opts.scenario == "pnet" && !opts.pnet_control.is_empty() {
+                        write_json(&opts.result_file, pnet_rejection(&opts, "listener", ""))?;
+                    }
                     if opts.scenario == "gossipsub_mixed_mesh_stress" {
                         let status = if payloads.len() >= opts.expected_messages && duplicates == 0 {
                             "ok"
@@ -1601,6 +1661,26 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
                             }))?;
                             ready = true;
                         }
+                    }
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. }
+                        if opts.scenario == "pnet" && !pnet_reported =>
+                    {
+                        write_json(
+                            &opts.result_file,
+                            json!({
+                                "implementation": "rust",
+                                "role": "listener",
+                                "scenario": "pnet",
+                                "status": "ok",
+                                "authenticated_remote_peer_id": peer_id.to_string(),
+                                "negotiated_transport": "tcp",
+                                "pnet_enabled": true,
+                                "negotiated_pnet": true,
+                                "pnet_fingerprint": opts.pnet_fingerprint
+                            }),
+                        )?;
+                        swarm.behaviour_mut().kad.add_address(&peer_id, transport_addr(endpoint.get_remote_address().clone()));
+                        pnet_reported = true;
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. }
                         if opts.scenario == "dht_hidden_find_peer" &&
@@ -1674,7 +1754,7 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
 }
 
 async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
-    let mut swarm = new_swarm(&opts.transport, &opts.scenario).await?;
+    let mut swarm = new_swarm(&opts).await?;
     let remote_peer: PeerId = opts.peer_id.parse()?;
     let remote: Multiaddr = opts.addr.parse()?;
     let relay_transport = if opts.scenario == "relay_reserve" {
@@ -1701,7 +1781,15 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
         let topic = gossipsub::IdentTopic::new(PUBSUB_TOPIC);
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
     }
-    swarm.dial(remote.clone())?;
+    if let Err(error) = swarm.dial(remote.clone()) {
+        if opts.scenario == "pnet" && !opts.pnet_control.is_empty() {
+            return write_json(
+                &opts.result_file,
+                pnet_rejection(&opts, "dialer", &remote_peer.to_string()),
+            );
+        }
+        return Err(error.into());
+    }
     let started = Instant::now();
     let mut connected = false;
     let mut ping_ok = false;
@@ -1722,7 +1810,8 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     .behaviour_mut()
                     .kad
                     .add_address(&remote_peer, transport_addr(remote.clone()));
-                if opts.scenario != "ping" && opts.scenario != "identify" {
+                if opts.scenario != "ping" && opts.scenario != "identify" && opts.scenario != "pnet"
+                {
                     break;
                 }
             }
@@ -1746,9 +1835,21 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                 eprintln!("rust-dial identify: protocols={}", info.protocols.len());
                 identify_count = info.protocols.len();
                 identify_signed_record = info.signed_peer_record.is_some();
-                if opts.scenario == "identify" {
+                if opts.scenario == "identify" || opts.scenario == "pnet" {
                     break;
                 }
+            }
+            SwarmEvent::OutgoingConnectionError {
+                peer_id: Some(peer_id),
+                ..
+            } if peer_id == remote_peer
+                && opts.scenario == "pnet"
+                && !opts.pnet_control.is_empty() =>
+            {
+                return write_json(
+                    &opts.result_file,
+                    pnet_rejection(&opts, "dialer", &remote_peer.to_string()),
+                );
             }
             other => {
                 eprintln!("rust-dial event: {other:?}");
@@ -1756,7 +1857,18 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
         }
     }
     if !connected {
+        if opts.scenario == "pnet" && !opts.pnet_control.is_empty() {
+            return write_json(
+                &opts.result_file,
+                pnet_rejection(&opts, "dialer", &remote_peer.to_string()),
+            );
+        }
         return Err("connection was not established".into());
+    }
+    if opts.scenario == "pnet" && !opts.pnet_control.is_empty() {
+        return Err(
+            "pnet rejection control unexpectedly established an authenticated session".into(),
+        );
     }
     if matches!(
         opts.scenario.as_str(),
@@ -1814,6 +1926,33 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     "protocol": "/forge/interop/relay-echo/1",
                     "payload_bytes": bytes,
                     "echo_ok": true
+                }),
+            )?;
+            return Ok(());
+        }
+        "pnet" => {
+            if identify_count == 0 || !identify_signed_record {
+                return Err("pnet connection did not complete authenticated Identify".into());
+            }
+            let bytes =
+                open_echo_stream_direct(&mut swarm, remote_peer, opts.payload.as_bytes()).await?;
+            write_json(
+                &opts.result_file,
+                json!({
+                    "implementation": "rust",
+                    "role": "dialer",
+                    "scenario": "pnet",
+                    "status": "ok",
+                    "protocol": "/forge/interop/relay-echo/1",
+                    "payload_bytes": bytes,
+                    "echo_ok": true,
+                    "protocol_count": identify_count,
+                    "signed_peer_record": identify_signed_record,
+                    "negotiated_transport": "tcp",
+                    "authenticated_remote_peer_id": authenticated_remote_peer_id,
+                    "pnet_enabled": true,
+                    "negotiated_pnet": true,
+                    "pnet_fingerprint": opts.pnet_fingerprint
                 }),
             )?;
             return Ok(());
@@ -2011,7 +2150,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
 }
 
 async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
-    let mut swarm = new_swarm(&opts.transport, &opts.scenario).await?;
+    let mut swarm = new_swarm(&opts).await?;
     spawn_incoming_stream_echo(&mut swarm, "/forge/interop/relay-echo/1")?;
     let peer = *swarm.local_peer_id();
     let relay_addr: Multiaddr = opts.relay_addr.parse()?;
@@ -2177,7 +2316,7 @@ async fn dial_and_wait(
 }
 
 async fn dial_relay(opts: Options) -> Result<(), Box<dyn Error>> {
-    let mut swarm = new_swarm(&opts.transport, &opts.scenario).await?;
+    let mut swarm = new_swarm(&opts).await?;
     let target_peer: PeerId = opts.peer_id.parse()?;
     let relay_peer: PeerId = opts.relay_peer_id.parse()?;
     let relay_addr: Multiaddr = opts.relay_addr.parse()?;

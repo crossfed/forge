@@ -86,11 +86,19 @@ boost::asio::awaitable<relay::reservation::info> node::async_reserve_relay(peer_
 boost::asio::awaitable<relay::reservation::info> node::async_reserve_relay(peer_id relay_peer,
                                                                            relay::reservation::options options) {
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network profile does not permit relay reservations");
+   }
    co_return co_await self->request_relay_reservation(relay_peer, options, node::connect_options{}.timeout);
 }
 
 boost::asio::awaitable<std::vector<relay::reservation::info>> node::async_refresh_relay_candidates() {
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network profile does not permit relay refresh");
+   }
    co_return co_await self->refresh_relay_candidates(std::nullopt, self->options.limits.topology.query_timeout);
 }
 
@@ -101,6 +109,10 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
 
 boost::asio::awaitable<void> node::async_cancel_relay(peer_id relay_peer) {
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network profile does not permit relay cancellation");
+   }
    {
       auto lock = std::scoped_lock{self->mutex};
       self->cleanup_expired_relay_reservations_locked();
@@ -115,6 +127,10 @@ boost::asio::awaitable<void> node::async_cancel_relay(peer_id relay_peer) {
 boost::asio::awaitable<hole_punch::status>
 node::async_attempt_hole_punch(peer_id peer, std::optional<peer_id> relay_peer, std::chrono::milliseconds timeout) {
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network profile does not permit hole punching");
+   }
    co_return co_await self->attempt_hole_punch(std::move(peer), std::move(relay_peer), timeout);
 }
 

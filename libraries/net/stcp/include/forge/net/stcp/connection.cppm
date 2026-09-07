@@ -21,6 +21,10 @@ export import forge.net.tcp.connection;
 import forge.net.tls.context;
 export import forge.net.transport.connector;
 
+namespace forge::net::stcp::detail {
+class stream_backend;
+}
+
 export namespace forge::net::stcp {
 
 class connection {
@@ -62,13 +66,19 @@ class connection {
    friend boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
                                                                   std::optional<std::chrono::milliseconds> timeout,
                                                                   std::stop_token stop);
+   friend boost::asio::awaitable<connection>
+   async_upgrade_client(transport::stream_connection source, client_options options,
+                        std::optional<std::chrono::milliseconds> timeout, std::stop_token stop);
+   friend boost::asio::awaitable<connection>
+   async_upgrade_server(transport::stream_connection source, server_options options,
+                        std::optional<std::chrono::milliseconds> timeout, std::stop_token stop);
 
-   using native_stream = boost::asio::ssl::stream<boost::asio::ip::tcp::socket>;
-   struct native_token {};
+   struct backend_token {};
    struct impl;
 
-   connection(native_token, std::shared_ptr<native_stream> stream, tls::context_snapshot_ptr context,
-              std::size_t read_chunk_size, std::shared_ptr<void> lifetime);
+   connection(backend_token, std::shared_ptr<detail::stream_backend> stream, tls::context_snapshot_ptr context,
+              std::size_t read_chunk_size, transport::endpoint local, transport::endpoint remote,
+              std::shared_ptr<void> lifetime);
 
    std::shared_ptr<impl> impl_;
 };
@@ -87,5 +97,11 @@ boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, 
                                                         std::stop_token stop);
 boost::asio::awaitable<connection> async_upgrade_server(tcp::connection source, server_options options,
                                                         std::chrono::milliseconds timeout, std::stop_token stop);
+boost::asio::awaitable<connection>
+async_upgrade_client(transport::stream_connection source, client_options options,
+                     std::optional<std::chrono::milliseconds> timeout = std::nullopt, std::stop_token stop = {});
+boost::asio::awaitable<connection>
+async_upgrade_server(transport::stream_connection source, server_options options,
+                     std::optional<std::chrono::milliseconds> timeout = std::nullopt, std::stop_token stop = {});
 
 } // namespace forge::net::stcp

@@ -689,11 +689,17 @@ bool node::unregister_protocol_handler(const protocol_id& protocol) {
 }
 
 void node::set_advertised_endpoints(std::vector<forge::net::p2p::endpoint> endpoints) {
+   if (impl_->private_network_enabled()) {
+      for (const auto& endpoint : endpoints) {
+         impl_->require_private_direct_tcp(endpoint, "advertised endpoint");
+      }
+   }
    impl_->set_advertised_endpoints(std::move(endpoints));
 }
 
 boost::asio::awaitable<void> node::async_listen(forge::net::p2p::endpoint endpoint) {
    auto self = impl_;
+   self->require_private_direct_tcp(endpoint, "listener");
    self->listen(std::move(endpoint));
    self->notify_listen_endpoints_changed();
    co_return;
@@ -707,6 +713,15 @@ boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::
                                                                node::connect_options options) {
    validate_operation_timeout(options.timeout, "P2P connect timeout");
    auto self = impl_;
+   self->require_private_direct_tcp(endpoint, "connect");
+   if (self->private_network_enabled()) {
+      if (options.relay_peer) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P private-network connect does not permit a relay peer");
+      }
+      options.allow_relay = false;
+      options.allow_hole_punch = false;
+   }
    auto session = co_await self->connect_direct(std::move(endpoint), std::move(options));
    co_await self->identify_session(session);
    co_return self->session_info_for(session);
@@ -719,6 +734,10 @@ boost::asio::awaitable<void> node::async_request_peer_exchange(peer_id peer) {
 
 boost::asio::awaitable<reachability::state> node::async_probe_reachability(peer_id observer) {
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P private-network AutoNAT requires an explicit Internet-egress policy");
+   }
    auto endpoints = self->local_endpoints_for_control();
    if (endpoints.empty()) {
       co_return reachability::state::private_network;
@@ -881,6 +900,14 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P path attempt limits must be positive");
    }
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      if (options.relay_peer) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                               "P2P private-network protocol open does not permit a relay peer");
+      }
+      options.allow_relay = false;
+      options.allow_hole_punch = false;
+   }
    auto effective = options;
    effective.allow_relay =
        effective.allow_relay && self->options.path_policy.allow_relay && self->options.relay_policy.client_enabled;
