@@ -210,6 +210,11 @@ items include:
   exposes libsodium headers, types or functions. The official release archive
   SHA-256 and complete 678-file tree manifest are recorded in
   `vendor/libsodium/MANIFEST.md`.
+- Botan test fixture: the 139-byte XSalsa20 vector in
+  `tests/crypto/test_symmetric.cpp` is copied only as a test fixture from
+  Botan commit `9bce628ffbe90d1cb9242ae0efcbf3bc2fb0123d`,
+  `src/tests/data/stream/salsa20.vec`, BSD-2-Clause. Botan is not vendored,
+  compiled, or a Forge build dependency.
 - `vendor/CLI11`: unmodified CLI11 `v2.6.2` header set, BSD-3-Clause. The tag
   resolves to commit `37bb6edc5317e99af72ef48405e65d9ca5218861`; the archive hash and imported
   file boundary are recorded in `vendor/CLI11/MANIFEST.md`. CLI11 is the

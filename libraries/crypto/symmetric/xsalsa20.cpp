@@ -2,6 +2,8 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
+#include "details/counter_state.hxx"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>

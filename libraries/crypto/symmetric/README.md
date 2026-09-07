@@ -24,6 +24,9 @@ bytes. `xsalsa20::stream` transforms supplied mutable spans in place and retains
 partial 64-byte blocks across calls, so callers can use separate instances for
 independent read and write directions. Arbitrary counter positioning is not
 exposed: a stream starts at counter zero and owns its complete counter range.
+Every independent stream or direction under a key requires a unique nonce.
+Never reuse the same key and nonce pair; separate read and write streams under
+one key must use distinct nonces.
 
 XSalsa20 provides no authentication. A caller must pair it with a suitable
 authentication boundary when active modification is in scope. The public module

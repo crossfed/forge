@@ -725,6 +725,7 @@ target_link_libraries(
    forge_raw
    Boost::included_unit_test_framework
 )
+target_include_directories(test_forge_crypto_symmetric PRIVATE ${CMAKE_SOURCE_DIR}/libraries/crypto/symmetric)
 add_test(NAME test_forge_crypto_symmetric COMMAND test_forge_crypto_symmetric WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(
    NAME test_forge_crypto_symmetric_xsalsa20_structure

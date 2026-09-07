@@ -2,9 +2,10 @@ add_library(
    forge_crypto_symmetric STATIC
    aes.cpp
    chacha20_poly1305.cpp
+   counter_state.cpp
    kdf.cpp
-   xsalsa20.cpp
    stream_impl.cpp
+   xsalsa20.cpp
 )
 forge_target_modules_at(forge_crypto_symmetric crypto/symmetric)
 target_sources(

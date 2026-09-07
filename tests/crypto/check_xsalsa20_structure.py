@@ -124,6 +124,7 @@ def main() -> int:
     library = source / "libraries" / "crypto" / "symmetric"
     required_pairs = (
         (library / "include" / "forge" / "crypto" / "symmetric" / "xsalsa20.cppm", library / "xsalsa20.cpp"),
+        (library / "details" / "counter_state.hxx", library / "counter_state.cpp"),
         (library / "details" / "stream_impl.hxx", library / "stream_impl.cpp"),
     )
     for header, implementation in required_pairs:
@@ -131,7 +132,12 @@ def main() -> int:
             errors.append(f"missing create-library pair: {header.name} / {implementation.name}")
 
     cmake = (library / "CMakeLists.txt").read_text()
-    for source_name in ("xsalsa20.cpp", "stream_impl.cpp", "$<TARGET_OBJECTS:forge_crypto_symmetric_xsalsa20_vendor>"):
+    for source_name in (
+        "counter_state.cpp",
+        "stream_impl.cpp",
+        "xsalsa20.cpp",
+        "$<TARGET_OBJECTS:forge_crypto_symmetric_xsalsa20_vendor>",
+    ):
         if source_name not in cmake:
             errors.append(f"symmetric CMake source list omits {source_name}")
 
