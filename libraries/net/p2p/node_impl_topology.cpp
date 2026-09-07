@@ -69,6 +69,7 @@ import forge.net.yamux.session;
 #include "details/owner_cancellation.hxx"
 #include "details/lifecycle_wakeup.hxx"
 #include "details/node_impl.hxx"
+#include "details/session_lifecycle.hxx"
 #include "details/topology_dht_fanout.hxx"
 #include "details/topology_peer_exchange_claims.hxx"
 #include "details/worker_stop_bridge.hxx"
@@ -308,11 +309,11 @@ boost::asio::awaitable<void> node::impl::async_close_topology_sessions(std::vect
          }
          const auto session = found->second;
          session->closed = true;
-         const auto peer = session->info.remote_peer;
-         sessions.erase(found);
-         connections.forget(id);
-         invalidate_pubsub_outbound_locked(peer, id);
-         removed.push_back(session);
+         if (const auto retired = retire_session_locked(session, true)) {
+            connections.forget(id);
+            invalidate_pubsub_outbound_locked(retired->info.remote_peer, id);
+            removed.push_back(retired);
+         }
       }
       for (const auto& session : removed) {
          const auto peer = session->info.remote_peer;
@@ -330,22 +331,11 @@ boost::asio::awaitable<void> node::impl::async_close_topology_sessions(std::vect
 
    for (const auto& session : removed) {
       identify_service.forget(session->id);
-      session->connection.cancel();
+      detail::request_session_cancel(session->connection);
    }
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
    for (const auto& session : removed) {
-      auto ticket = teardown.track([session] { session->connection.cancel(); });
-      if (!ticket.active()) {
-         session->resource.release();
-         continue;
-      }
-      try {
-         co_await session->connection.async_close();
-      } catch (...) {
-         session->connection.cancel();
-      }
-      session->resource.release();
-      ticket.release();
+      co_await async_retire_session(session, false);
    }
 }
 

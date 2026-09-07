@@ -22,6 +22,7 @@ module;
 #include <functional>
 #include <future>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -42,6 +43,7 @@ import forge.net.transport.session;
 #include "../../libraries/net/p2p/details/libp2p_identity_material.hxx"
 #include "../../libraries/net/p2p/details/operation_deadline.hxx"
 #include "../../libraries/net/p2p/details/session_lifecycle.hxx"
+#include "../../libraries/net/p2p/details/session_retirement.hxx"
 #include "../../libraries/net/p2p/details/session_teardown.hxx"
 
 namespace forge::net::p2p {
@@ -55,6 +57,51 @@ bool wait_for_count(const std::atomic_size_t& value, std::size_t expected,
    }
    return value.load(std::memory_order_acquire) == expected;
 }
+
+boost::asio::awaitable<bool> wait_for_terminal_cleanup(
+    detail::session_teardown* teardown, const std::atomic_bool* ownership_released) {
+   co_await teardown->wait();
+   co_return ownership_released->load(std::memory_order_acquire);
+}
+
+class throwing_cancel_session final : public forge::net::transport::detail::session_concept {
+ public:
+   [[nodiscard]] bool valid() const noexcept override {
+      return open_.load(std::memory_order_acquire);
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_open_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_accept_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      close_calls_.fetch_add(1, std::memory_order_release);
+      open_.store(false, std::memory_order_release);
+      co_return;
+   }
+
+   void cancel() override {
+      cancel_calls_.fetch_add(1, std::memory_order_release);
+      throw std::runtime_error{"expected throwing session cancel"};
+   }
+
+   [[nodiscard]] std::size_t cancel_calls() const noexcept {
+      return cancel_calls_.load(std::memory_order_acquire);
+   }
+
+   [[nodiscard]] std::size_t close_calls() const noexcept {
+      return close_calls_.load(std::memory_order_acquire);
+   }
+
+ private:
+   std::atomic_bool open_{true};
+   std::atomic_size_t cancel_calls_{0};
+   std::atomic_size_t close_calls_{0};
+};
 
 BOOST_AUTO_TEST_CASE(p2p_session_rejection_stages_transport_cancel_after_owner_unlock) {
    auto owner_mutex = std::mutex{};
@@ -104,7 +151,8 @@ BOOST_AUTO_TEST_CASE(p2p_cancellation_latch_stop_before_throwing_arm_propagates_
    BOOST_CHECK_THROW(latch.arm([&] {
       invoked.fetch_add(1, std::memory_order_release);
       throw std::runtime_error{"injected cancellation failure"};
-   }), std::runtime_error);
+   }),
+                     std::runtime_error);
 
    BOOST_TEST(invoked.load(std::memory_order_acquire) == 1U);
    BOOST_TEST(!latch.finish());
@@ -405,6 +453,37 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_cancels_tracked_background_operation) 
    BOOST_TEST(cancel_called.load(std::memory_order_acquire) == 1U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_noexcept_cancel_request_preserves_session_until_graceful_teardown) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto model = std::make_shared<throwing_cancel_session>();
+   auto candidate = forge::net::transport::detail::session_access::make(model);
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   BOOST_CHECK_NO_THROW(detail::request_session_cancel(candidate));
+   BOOST_TEST(model->cancel_calls() == 1U);
+   BOOST_TEST(candidate.valid());
+
+   auto ticket = teardown.track([&candidate] { detail::request_session_cancel(candidate); });
+   BOOST_REQUIRE(ticket.active());
+
+   teardown.start({});
+   BOOST_TEST(model->cancel_calls() == 2U);
+   BOOST_TEST(candidate.valid());
+
+   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+   BOOST_CHECK(stopped.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout);
+
+   forge::asio::blocking::run(runtime, candidate.async_close());
+   BOOST_TEST(model->close_calls() == 1U);
+   BOOST_TEST(!candidate.valid());
+   ticket.release();
+
+   const auto stopped_ready = stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready;
+   BOOST_CHECK(stopped_ready);
+   if (stopped_ready) {
+      stopped.get();
+   }
+}
+
 BOOST_AUTO_TEST_CASE(p2p_session_teardown_handles_concurrent_track_release_and_start) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    for (auto iteration = 0U; iteration < 1'000U; ++iteration) {
@@ -579,8 +658,11 @@ BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failu
           .listen = [](endpoint value) { return value; },
           .stop = std::move(stop),
           .async_stop = std::move(async_stop),
-          .async_connect = [](endpoint, const node::connect_options&, std::shared_ptr<cancellation_latch>)
-              -> boost::asio::awaitable<direct::connection> { co_return direct::connection{}; },
+          .async_connect = [](endpoint, const node::connect_options&, std::shared_ptr<cancellation_latch>,
+                              std::shared_ptr<void>, direct::authenticated_admission_handler)
+              -> boost::asio::awaitable<direct::connection> {
+             co_return direct::connection{};
+          },
           .async_accept = [](endpoint) -> boost::asio::awaitable<direct::connection> {
              co_return direct::connection{};
           },
@@ -697,6 +779,128 @@ BOOST_AUTO_TEST_CASE(p2p_direct_listener_stop_wins_after_accept_begins) {
    operations.push_back(registry.teardown_operation());
    teardown.start(std::move(operations));
    forge::asio::blocking::run(runtime, teardown.wait());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_transfers_active_map_node_without_replacement) {
+   struct retained_session {
+      detail::session_retirement retirement;
+   };
+
+   auto active_sessions = std::map<std::uint64_t, std::shared_ptr<retained_session>>{};
+   auto retiring_sessions = std::map<std::uint64_t, std::shared_ptr<retained_session>>{};
+   const auto session = std::make_shared<retained_session>();
+   active_sessions.emplace(17, session);
+
+   auto node = active_sessions.extract(17);
+   const auto transferred = retiring_sessions.insert(std::move(node));
+
+   BOOST_TEST(active_sessions.empty());
+   BOOST_TEST(transferred.inserted);
+   BOOST_TEST(transferred.position->second == session);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_releases_terminal_tracking_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto retirement = detail::session_retirement{};
+
+   BOOST_REQUIRE(retirement.track(teardown.track()));
+   BOOST_TEST(!retirement.track(teardown.track()));
+   BOOST_TEST(retirement.tracked());
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::started));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::in_flight));
+   auto terminal_ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(retirement.complete_terminal(terminal_ticket));
+   BOOST_TEST(terminal_ticket.active());
+   auto duplicate_ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(!retirement.complete_terminal(duplicate_ticket));
+   BOOST_TEST(retirement.terminal());
+   BOOST_TEST(!retirement.tracked());
+
+   auto ownership_released = std::atomic_bool{false};
+   teardown.start({});
+   auto stopped = boost::asio::co_spawn(
+       runtime.context(), wait_for_terminal_cleanup(&teardown, &ownership_released), boost::asio::use_future);
+   BOOST_TEST(static_cast<int>(stopped.wait_for(std::chrono::milliseconds{20})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   ownership_released.store(true, std::memory_order_release);
+   terminal_ticket.release();
+   BOOST_REQUIRE(static_cast<int>(stopped.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   BOOST_TEST(stopped.get());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantines_untracked_close_without_duplicate_attempt) {
+   auto retirement = detail::session_retirement{};
+
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::untracked));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(true)) ==
+              static_cast<int>(detail::session_retirement::close_start::started));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(true)) ==
+              static_cast<int>(detail::session_retirement::close_start::in_flight));
+   retirement.quarantine();
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::untracked));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_retains_authority_after_teardown_stop) {
+   struct retained_authority {
+      resource_manager::session_reservation reservation;
+      std::shared_ptr<void> native_lifetime;
+      detail::session_retirement retirement;
+   };
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto resources = resource_manager{resource_manager::limits{.system = {.max_connections = 1}}};
+   auto admission = resources.reserve_session(resource_manager::session_direction::outbound);
+   BOOST_REQUIRE(admission);
+   auto native_releases = std::atomic_size_t{0};
+   auto native_lifetime = std::shared_ptr<void>{new int{0}, [&native_releases](void* value) {
+                                                     delete static_cast<int*>(value);
+                                                     native_releases.fetch_add(1, std::memory_order_release);
+                                                  }};
+   auto authority = std::make_shared<retained_authority>();
+   authority->reservation = std::move(*admission);
+   authority->native_lifetime = std::move(native_lifetime);
+   auto retiring_sessions = std::map<std::uint64_t, std::shared_ptr<retained_authority>>{};
+   retiring_sessions.emplace(17, authority);
+   authority.reset();
+
+   auto retained = retiring_sessions.at(17);
+   auto close_calls = std::atomic_size_t{0};
+   auto operations = std::vector<detail::session_teardown::operation>{};
+   operations.push_back(detail::session_teardown::operation{
+       .close = [retained, &close_calls]() -> boost::asio::awaitable<void> {
+          if (retained->retirement.begin_close(true) != detail::session_retirement::close_start::started) {
+             co_return;
+          }
+          close_calls.fetch_add(1, std::memory_order_release);
+          try {
+             throw std::runtime_error{"expected terminal close failure"};
+          } catch (...) {
+             // A throwing async_close quarantines the session; only its node owner may release it later.
+             retained->retirement.quarantine();
+          }
+          co_return;
+       },
+   });
+   teardown.start(std::move(operations));
+   forge::asio::blocking::run(runtime, teardown.wait());
+
+   BOOST_TEST(close_calls.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 0U);
+   BOOST_TEST(!resources.reserve_session(resource_manager::session_direction::outbound));
+
+   retained.reset();
+   retiring_sessions.clear();
+
+   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 1U);
+   BOOST_REQUIRE(resources.reserve_session(resource_manager::session_direction::outbound));
 }
 
 } // namespace
