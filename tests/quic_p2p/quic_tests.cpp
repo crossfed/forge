@@ -11,6 +11,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -2248,6 +2249,123 @@ BOOST_AUTO_TEST_CASE(quic_connection_drop_releases_native_lifetime_without_expli
    server.stop();
 }
 
+BOOST_AUTO_TEST_CASE(quic_background_drain_exception_terminalizes_and_releases_lifetime) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto lifetime = std::make_shared<int>(1);
+   auto released = std::weak_ptr<void>{lifetime};
+   auto injected = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.connection_lifetime = std::move(lifetime);
+   options.test_failpoint = [injected](std::string_view name) {
+      return name == "background_stream_drain_failure" && !injected->exchange(true, std::memory_order_acq_rel);
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect background-failure QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept background-failure QUIC session");
+   auto stream = run_with_deadline(runtime, connection.async_open_stream(), std::chrono::milliseconds{5'000},
+                                   "open background-failure QUIC stream");
+
+   run_with_deadline(runtime, stream.async_write(std::vector<std::uint8_t>{'f'}), std::chrono::milliseconds{5'000},
+                     "queue injected background-failure QUIC write");
+   run_with_deadline(
+       runtime,
+       [&connection]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (!connection.metrics().closed) {
+             timer.expires_after(std::chrono::milliseconds{1});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{2'000}, "terminalize injected QUIC background failure");
+   BOOST_TEST(injected->load(std::memory_order_acquire));
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "join injected QUIC background failure");
+   run_with_deadline(
+       runtime,
+       [released]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (!released.expired()) {
+             timer.expires_after(std::chrono::milliseconds{1});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{2'000}, "release injected-failure QUIC native lifetime");
+   BOOST_TEST(released.expired());
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close injected-failure QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_concurrent_async_close_waits_for_terminal_cleanup_and_preserves_primary_error) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto lifetime = std::make_shared<int>(1);
+   auto released = std::weak_ptr<void>{lifetime};
+   auto barrier_mutex = std::make_shared<std::mutex>();
+   auto entered_changed = std::make_shared<std::condition_variable>();
+   auto release_changed = std::make_shared<std::condition_variable>();
+   auto entered = std::make_shared<std::atomic_bool>(false);
+   auto barrier_released = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.connection_lifetime = std::move(lifetime);
+   options.test_failpoint =
+       [barrier_mutex, entered_changed, release_changed, entered, barrier_released](std::string_view name) {
+      if (name != "async_close_before_send") {
+         return false;
+      }
+      auto lock = std::unique_lock{*barrier_mutex};
+      entered->store(true, std::memory_order_release);
+      entered_changed->notify_all();
+      release_changed->wait(lock, [&] { return barrier_released->load(std::memory_order_acquire); });
+      throw std::runtime_error{"injected QUIC close failure"};
+   };
+   auto release_guard =
+       std::shared_ptr<void>{new int{0}, [barrier_released, release_changed](int* value) noexcept {
+                               delete value;
+                               barrier_released->store(true, std::memory_order_release);
+                               release_changed->notify_all();
+                            }};
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect concurrent-close QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept concurrent-close QUIC session");
+   auto first_close = boost::asio::co_spawn(runtime.context(), connection.async_close(), boost::asio::use_future);
+
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(entered_changed->wait_for(lock, std::chrono::seconds{2},
+                                               [&] { return entered->load(std::memory_order_acquire); }));
+   }
+   auto second_close = boost::asio::co_spawn(runtime.context(), connection.async_close(), boost::asio::use_future);
+   BOOST_CHECK(second_close.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+
+   release_guard.reset();
+   BOOST_REQUIRE(first_close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_REQUIRE(second_close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(first_close.get(), std::runtime_error);
+   BOOST_CHECK_THROW(second_close.get(), std::runtime_error);
+   BOOST_TEST(connection.metrics().closed);
+   run_with_deadline(
+       runtime,
+       [released]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (!released.expired()) {
+             timer.expires_after(std::chrono::milliseconds{1});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{2'000}, "release failed-close QUIC native lifetime");
+   BOOST_TEST(released.expired());
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close concurrent-close QUIC peer");
+   server.stop();
+}
+
 BOOST_AUTO_TEST_CASE(quic_live_stream_survives_connection_facade_drop) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
@@ -2373,6 +2491,7 @@ BOOST_AUTO_TEST_CASE(quic_detached_unacknowledged_write_has_bounded_native_lifet
    options.connection_lifetime = std::move(lifetime);
    auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
    const auto payload = std::vector<std::uint8_t>{'n', 'o', '-', 'a', 'c', 'k'};
+   auto owner_released_at = std::chrono::steady_clock::time_point{};
 
    {
       auto connection = run_with_deadline(runtime, client.async_connect(proxy->local_endpoint(), std::move(options)),
@@ -2383,6 +2502,7 @@ BOOST_AUTO_TEST_CASE(quic_detached_unacknowledged_write_has_bounded_native_lifet
       run_with_deadline(runtime, client_stream.async_write(payload), std::chrono::milliseconds{5'000},
                         "accept unacknowledged QUIC write");
    }
+   owner_released_at = std::chrono::steady_clock::now();
 
    auto server_connection =
        get_with_deadline(accepted, std::chrono::milliseconds{10'000}, "accept unacknowledged QUIC session");
@@ -2393,7 +2513,10 @@ BOOST_AUTO_TEST_CASE(quic_detached_unacknowledged_write_has_bounded_native_lifet
    BOOST_TEST(received == payload, boost::test_tools::per_element());
    BOOST_TEST(!released.expired());
 
-   const auto started = std::chrono::steady_clock::now();
+   const auto deadline = owner_released_at + std::chrono::milliseconds{7'000};
+   const auto remaining =
+       std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+   BOOST_REQUIRE(remaining.count() > 0);
    run_with_deadline(
        runtime,
        [released]() -> boost::asio::awaitable<void> {
@@ -2403,10 +2526,11 @@ BOOST_AUTO_TEST_CASE(quic_detached_unacknowledged_write_has_bounded_native_lifet
              co_await timer.async_wait(boost::asio::use_awaitable);
           }
        }(),
-       std::chrono::milliseconds{7'000}, "bound unacknowledged QUIC native lifetime");
+       remaining, "bound unacknowledged QUIC native lifetime from owner drop");
    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-       std::chrono::steady_clock::now() - started);
+       std::chrono::steady_clock::now() - owner_released_at);
    BOOST_TEST(elapsed.count() >= 4'000);
+   BOOST_TEST(elapsed.count() < 7'000);
    BOOST_TEST(released.expired());
    BOOST_TEST(proxy->server_packets_held() > 0U);
    proxy->stop();

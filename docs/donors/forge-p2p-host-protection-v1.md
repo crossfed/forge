@@ -48,11 +48,14 @@ Canonical source links:
 - QUIC callers should still use `async_close()` for deterministic protocol close.
   As a C++ safety fallback, a live stream retains the native connection after its
   connection facade is dropped. Once the last facade/stream owner disappears,
-  accepted writes may drain until acknowledged for at most five seconds. The
-  connection then cancels and releases its native reservation even if a peer keeps
-  the connection active while withholding the stream acknowledgement. Pending and
-  retained writes never own the connection strongly, so this fallback cannot form
-  a connection/write ownership cycle.
+  accepted writes may drain until acknowledged for at most five seconds, measured
+  from that owner release rather than later strand scheduling. The connection then
+  cancels and releases its native reservation even if a peer keeps the connection
+  active while withholding the stream acknowledgement. Pending and retained writes
+  never own the connection strongly, so this fallback cannot form a
+  connection/write ownership cycle. Concurrent `async_close()` callers coalesce on
+  one terminal cleanup and observe its primary failure only after any close-packet
+  attempt and transport cleanup have completed.
 - `resource_manager::limits` and `snapshot` bound only dimensions explicitly
   reserved through `resource_manager`: scoped memory, file descriptors,
   connections, streams and the listed operational budgets. They do not claim a
