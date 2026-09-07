@@ -203,6 +203,13 @@ items include:
   `c8780aecc3dea7f4f2cb83e88bb4d33a622774bd`. Archive and per-file hashes,
   the exact imported file set, and the upstream mirror notice are recorded in
   `vendor/libmdbx/MANIFEST.md`. Forge does not export the MDBX C API.
+- `vendor/libsodium/upstream`: unmodified official libsodium `1.0.22` release
+  tree, ISC. Forge compiles only the portable XSalsa20 source subset through
+  the private `forge_crypto_symmetric_xsalsa20_vendor` object target. The
+  Forge-owned integration shim is outside `upstream/`; no public Forge module
+  exposes libsodium headers, types or functions. The official release archive
+  SHA-256 and complete 678-file tree manifest are recorded in
+  `vendor/libsodium/MANIFEST.md`.
 - `vendor/CLI11`: unmodified CLI11 `v2.6.2` header set, BSD-3-Clause. The tag
   resolves to commit `37bb6edc5317e99af72ef48405e65d9ca5218861`; the archive hash and imported
   file boundary are recorded in `vendor/CLI11/MANIFEST.md`. CLI11 is the

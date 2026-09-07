@@ -423,6 +423,70 @@ if(FORGE_ENABLE_MDBX)
    target_link_libraries(mdbx-internal PUBLIC Threads::Threads)
 endif()
 
+# Keep the XSalsa20 subset private to forge_crypto_symmetric. The upstream
+# sources remain unmodified under vendor/libsodium/upstream; the only Forge C
+# source is the narrow integration shim that prevents the full libsodium API
+# from entering the target graph.
+add_library(
+   forge_crypto_symmetric_xsalsa20_vendor OBJECT
+   vendor/libsodium/integration/xsalsa20_support.c
+   vendor/libsodium/upstream/src/libsodium/crypto_stream/xsalsa20/stream_xsalsa20.c
+   vendor/libsodium/upstream/src/libsodium/crypto_stream/salsa20/ref/salsa20_ref.c
+   vendor/libsodium/upstream/src/libsodium/crypto_core/salsa/ref/core_salsa_ref.c
+   vendor/libsodium/upstream/src/libsodium/crypto_core/hsalsa20/core_hsalsa20.c
+   vendor/libsodium/upstream/src/libsodium/crypto_core/hsalsa20/ref2/core_hsalsa20_ref2.c
+)
+set_target_properties(
+   forge_crypto_symmetric_xsalsa20_vendor PROPERTIES
+   C_STANDARD 11
+   C_STANDARD_REQUIRED ON
+   C_EXTENSIONS OFF
+   C_VISIBILITY_PRESET hidden
+   POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+   forge_crypto_symmetric_xsalsa20_vendor PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libsodium/upstream/src/libsodium/include/sodium"
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libsodium/upstream/src/libsodium/crypto_stream/salsa20"
+)
+target_compile_definitions(
+   forge_crypto_symmetric_xsalsa20_vendor PRIVATE
+      CONFIGURED=1
+      SODIUM_STATIC=1
+      crypto_core_hsalsa20=forge_xsalsa20_private_crypto_core_hsalsa20
+      crypto_core_hsalsa20_constbytes=forge_xsalsa20_private_crypto_core_hsalsa20_constbytes
+      crypto_core_hsalsa20_inputbytes=forge_xsalsa20_private_crypto_core_hsalsa20_inputbytes
+      crypto_core_hsalsa20_keybytes=forge_xsalsa20_private_crypto_core_hsalsa20_keybytes
+      crypto_core_hsalsa20_outputbytes=forge_xsalsa20_private_crypto_core_hsalsa20_outputbytes
+      crypto_core_salsa20=forge_xsalsa20_private_crypto_core_salsa20
+      crypto_core_salsa20_constbytes=forge_xsalsa20_private_crypto_core_salsa20_constbytes
+      crypto_core_salsa20_inputbytes=forge_xsalsa20_private_crypto_core_salsa20_inputbytes
+      crypto_core_salsa20_keybytes=forge_xsalsa20_private_crypto_core_salsa20_keybytes
+      crypto_core_salsa20_outputbytes=forge_xsalsa20_private_crypto_core_salsa20_outputbytes
+      crypto_core_salsa2012=forge_xsalsa20_private_crypto_core_salsa2012
+      crypto_core_salsa2012_constbytes=forge_xsalsa20_private_crypto_core_salsa2012_constbytes
+      crypto_core_salsa2012_inputbytes=forge_xsalsa20_private_crypto_core_salsa2012_inputbytes
+      crypto_core_salsa2012_keybytes=forge_xsalsa20_private_crypto_core_salsa2012_keybytes
+      crypto_core_salsa2012_outputbytes=forge_xsalsa20_private_crypto_core_salsa2012_outputbytes
+      crypto_core_salsa208=forge_xsalsa20_private_crypto_core_salsa208
+      crypto_core_salsa208_constbytes=forge_xsalsa20_private_crypto_core_salsa208_constbytes
+      crypto_core_salsa208_inputbytes=forge_xsalsa20_private_crypto_core_salsa208_inputbytes
+      crypto_core_salsa208_keybytes=forge_xsalsa20_private_crypto_core_salsa208_keybytes
+      crypto_core_salsa208_outputbytes=forge_xsalsa20_private_crypto_core_salsa208_outputbytes
+      crypto_stream_salsa20=forge_xsalsa20_private_crypto_stream_salsa20
+      crypto_stream_salsa20_ref_implementation=forge_xsalsa20_private_crypto_stream_salsa20_ref_implementation
+      crypto_stream_salsa20_xor_ic=forge_xsalsa20_private_crypto_stream_salsa20_xor_ic
+      crypto_stream_xsalsa20=forge_xsalsa20_private_crypto_stream_xsalsa20
+      crypto_stream_xsalsa20_keybytes=forge_xsalsa20_private_crypto_stream_xsalsa20_keybytes
+      crypto_stream_xsalsa20_keygen=forge_xsalsa20_private_crypto_stream_xsalsa20_keygen
+      crypto_stream_xsalsa20_messagebytes_max=forge_xsalsa20_private_crypto_stream_xsalsa20_messagebytes_max
+      crypto_stream_xsalsa20_noncebytes=forge_xsalsa20_private_crypto_stream_xsalsa20_noncebytes
+      crypto_stream_xsalsa20_xor=forge_xsalsa20_private_crypto_stream_xsalsa20_xor
+      crypto_stream_xsalsa20_xor_ic=forge_xsalsa20_private_crypto_stream_xsalsa20_xor_ic
+      randombytes_buf=forge_xsalsa20_private_randombytes_buf
+      sodium_memzero=forge_xsalsa20_private_sodium_memzero
+)
+
 if(FORGE_ENABLE_VENDOR_TESTS)
    add_executable(secp256k1-bench vendor/secp256k1/src/bench.c)
    target_link_libraries(secp256k1-bench secp256k1 secp256k1-internal)
@@ -451,7 +515,14 @@ set_property(
       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-set(FORGE_VENDORED_IMPLEMENTATION_TARGETS secp256k1 bn256 bls12-381 softfloat)
+set(
+   FORGE_VENDORED_IMPLEMENTATION_TARGETS
+   secp256k1
+   bn256
+   bls12-381
+   softfloat
+   forge_crypto_symmetric_xsalsa20_vendor
+)
 foreach(_forge_vendor_target IN LISTS FORGE_VENDORED_IMPLEMENTATION_TARGETS)
    forge_apply_vendored_implementation_policy(${_forge_vendor_target})
 endforeach()
@@ -1089,6 +1160,16 @@ if(TARGET mdbx-internal)
       EXCLUDE_FROM_ALL
    )
 endif()
+
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libsodium/upstream/LICENSE"
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libsodium/MANIFEST.md"
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libsodium/TREE.SHA256"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/libsodium"
+   COMPONENT dev
+   EXCLUDE_FROM_ALL
+)
 
 install(
    FILES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CLI11/LICENSE"
