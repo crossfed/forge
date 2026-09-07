@@ -1068,17 +1068,21 @@ upgrade_outbound_private_tcp(forge::net::tcp::connection connection, const node:
       rethrow_private_transport_as_p2p(error);
    }
    clear_cancel(deadline);
-   if (selected.value == "/tls/1.0.0") {
-      auto source = forge::net::transport::stream_connection{
-          .local_endpoint = std::move(local),
-          .remote_endpoint = std::move(remote),
-          .stream = std::move(*protected_stream).into_transport_stream(),
-      };
-      co_return co_await finish_tls_outbound(std::move(source), options, identity, std::move(expected_peer), deadline,
-                                              std::move(callbacks));
+   try {
+      if (selected.value == "/tls/1.0.0") {
+         auto source = forge::net::transport::stream_connection{
+             .local_endpoint = std::move(local),
+             .remote_endpoint = std::move(remote),
+             .stream = std::move(*protected_stream).into_transport_stream(),
+         };
+         co_return co_await finish_tls_outbound(std::move(source), options, identity, std::move(expected_peer), deadline,
+                                                std::move(callbacks));
+      }
+      co_return co_await finish_noise_outbound(std::move(*protected_stream), options, identity,
+                                               std::move(expected_peer), deadline, std::move(callbacks));
+   } catch (const forge::exceptions::base& error) {
+      rethrow_private_transport_as_p2p(error);
    }
-   co_return co_await finish_noise_outbound(std::move(*protected_stream), options, identity, std::move(expected_peer),
-                                            deadline, std::move(callbacks));
 }
 
 boost::asio::awaitable<upgraded_session>
@@ -1108,17 +1112,21 @@ upgrade_inbound_private_tcp(forge::net::tcp::connection connection, const node::
       rethrow_private_transport_as_p2p(error);
    }
    clear_cancel(deadline);
-   if (selected.value == "/tls/1.0.0") {
-      auto source = forge::net::transport::stream_connection{
-          .local_endpoint = std::move(local),
-          .remote_endpoint = std::move(remote),
-          .stream = std::move(*protected_stream).into_transport_stream(),
-      };
-      co_return co_await finish_tls_inbound(std::move(source), options, identity, std::move(expected_peer), deadline,
-                                             std::move(callbacks));
+   try {
+      if (selected.value == "/tls/1.0.0") {
+         auto source = forge::net::transport::stream_connection{
+             .local_endpoint = std::move(local),
+             .remote_endpoint = std::move(remote),
+             .stream = std::move(*protected_stream).into_transport_stream(),
+         };
+         co_return co_await finish_tls_inbound(std::move(source), options, identity, std::move(expected_peer), deadline,
+                                               std::move(callbacks));
+      }
+      co_return co_await finish_noise_inbound(std::move(*protected_stream), options, identity,
+                                              std::move(expected_peer), deadline, std::move(callbacks));
+   } catch (const forge::exceptions::base& error) {
+      rethrow_private_transport_as_p2p(error);
    }
-   co_return co_await finish_noise_inbound(std::move(*protected_stream), options, identity, std::move(expected_peer),
-                                           deadline, std::move(callbacks));
 }
 
 } // namespace
