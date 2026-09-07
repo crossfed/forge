@@ -81,6 +81,7 @@ import forge.net.yamux.session;
 #include "details/peer_failure.hxx"
 #include "details/resource_stream.hxx"
 #include "details/session_lifecycle.hxx"
+#include "details/session_retirement.hxx"
 
 namespace forge::net::p2p {
 
@@ -95,32 +96,87 @@ namespace asio = boost::asio;
    });
 }
 
-void node::impl::launch_pruned_session_teardown(const std::shared_ptr<session_state>& session) noexcept {
-   auto ticket = teardown.track([session] { detail::request_session_cancel(session->connection); });
-   if (!ticket.active()) {
+std::shared_ptr<node::impl::session_state>
+node::impl::retire_session_locked(const std::shared_ptr<session_state>& session, bool track_close) noexcept {
+   const auto active = sessions.find(session->id);
+   if (active == sessions.end()) {
+      return {};
+   }
+
+   // Both maps use the same node type. Extracting and inserting the node transfers
+   // node ownership without allocating after connection_manager has committed a prune.
+   auto node = sessions.extract(active);
+   auto transferred = retiring_sessions.insert(std::move(node));
+   if (!transferred.inserted) {
+      std::terminate();
+   }
+   auto retired = transferred.position->second;
+   if (track_close) {
+      try {
+         static_cast<void>(
+             retired->retirement.track(teardown.track([retired] { detail::request_session_cancel(retired->connection); })));
+      } catch (...) {
+         // The map owns the session before tracking is attempted, so a callback
+         // allocation failure becomes a quarantined retirement rather than a split registry.
+         retired->retirement.quarantine();
+      }
+   }
+   return retired;
+}
+
+boost::asio::awaitable<void> node::impl::async_retire_session(const std::shared_ptr<session_state>& session,
+                                                              bool allow_untracked) {
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   const auto start = session->retirement.begin_close(allow_untracked);
+   if (start == detail::session_retirement::close_start::untracked) {
       detail::request_session_cancel(session->connection);
+      session->retirement.quarantine();
+      co_return;
+   }
+   if (start != detail::session_retirement::close_start::started) {
+      co_return;
+   }
+
+   try {
+      co_await session->connection.async_close();
+   } catch (...) {
+      detail::request_session_cancel(session->connection);
+      session->retirement.quarantine();
+      co_return;
+   }
+
+   if (session->retirement.complete_terminal()) {
       session->native_lifetime.reset();
       session->resource.release();
+      forget_retired_session(session);
+   }
+}
+
+void node::impl::forget_retired_session(const std::shared_ptr<session_state>& session) noexcept {
+   const auto lock = std::scoped_lock{mutex};
+   const auto found = retiring_sessions.find(session->id);
+   if (found != retiring_sessions.end() && found->second == session) {
+      retiring_sessions.erase(found);
+   }
+}
+
+void node::impl::launch_pruned_session_teardown(const std::shared_ptr<session_state>& session) noexcept {
+   if (!session->retirement.tracked()) {
+      detail::request_session_cancel(session->connection);
+      session->retirement.quarantine();
       return;
    }
    try {
+      auto self = shared_from_this();
       boost::asio::co_spawn(
           runtime.context(),
-          [session, ticket = std::move(ticket)]() mutable -> boost::asio::awaitable<void> {
-             try {
-                co_await session->connection.async_close();
-             } catch (...) {
-                detail::request_session_cancel(session->connection);
-             }
-             session->native_lifetime.reset();
-             session->resource.release();
-             ticket.release();
+          [self = std::move(self), session]() mutable -> boost::asio::awaitable<void> {
+             co_await self->async_retire_session(session, false);
           },
           boost::asio::detached);
    } catch (...) {
       detail::request_session_cancel(session->connection);
-      session->native_lifetime.reset();
-      session->resource.release();
+      session->retirement.quarantine();
    }
 }
 
@@ -171,7 +227,6 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
    auto rejected = rejection::none;
    auto rejection_reason = std::string{};
    auto pruned_ids = std::vector<std::uint64_t>{};
-   auto pruned_sessions = std::map<std::uint64_t, std::shared_ptr<session_state>>{};
    auto staged_session_id = std::optional<std::uint64_t>{};
    try {
       refresh_connection_scores();
@@ -190,13 +245,16 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
             const auto generated_id = session->id == 0;
             const auto assigned_id = generated_id ? next_session_id : session->id;
             staged_session_id = assigned_id;
-            const auto [candidate, inserted] = sessions.emplace(assigned_id, session);
+            const auto id_is_retiring = retiring_sessions.contains(assigned_id);
+            const auto [candidate, inserted] = id_is_retiring
+                                                   ? std::pair{sessions.end(), false}
+                                                   : sessions.emplace(assigned_id, session);
             if (!inserted) {
                detail::mark_rejected_session(session);
                ++metrics_value.backpressure_rejections;
                ++metrics_value.connection_rejections;
                rejected = rejection::admission;
-               rejection_reason = "P2P duplicate session id";
+               rejection_reason = id_is_retiring ? "P2P session id is still retiring" : "P2P duplicate session id";
             }
             const auto now = std::chrono::steady_clock::now();
             if (rejected == rejection::none) {
@@ -219,7 +277,7 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
                   rejection_reason = std::move(admission.reason);
                } else {
                   // Both registries are now updated under one mutex. The manager
-                  // has already staged its allocations, so this commit only erases.
+                  // has already staged its allocations, so this commit only transfers nodes.
                   session->id = assigned_id;
                   session->direction = direction;
                   if (generated_id) {
@@ -232,8 +290,10 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
                         continue;
                      }
                      found->second->closed = true;
-                     auto pruned = sessions.extract(found);
-                     static_cast<void>(pruned_sessions.insert(std::move(pruned)));
+                     const auto retired = retire_session_locked(found->second, true);
+                     if (retired) {
+                        invalidate_pubsub_outbound_locked(retired->info.remote_peer, retired->id);
+                     }
                   }
                   ++metrics_value.sessions_opened;
                   ++metrics_value.handshakes_completed;
@@ -244,9 +304,6 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
          metrics_value.active_sessions = sessions.size();
          metrics_value.sessions_pruned += pruned_ids.size();
          metrics_value.sessions_closed += pruned_ids.size();
-         for (const auto& [_, pruned] : pruned_sessions) {
-            invalidate_pubsub_outbound_locked(pruned->info.remote_peer, pruned->id);
-         }
       }
    } catch (...) {
       {
@@ -275,21 +332,17 @@ boost::asio::awaitable<void> node::impl::remember_session(std::shared_ptr<node::
       identify_service.forget(id);
    }
 
-   if (!pruned_sessions.empty()) {
-      co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
-      for (const auto& [_, pruned] : pruned_sessions) {
-         detail::request_session_cancel(pruned->connection);
-      }
-      for (const auto& [_, pruned] : pruned_sessions) {
-         auto teardown_ticket = teardown.track([pruned] { detail::request_session_cancel(pruned->connection); });
-         try {
-            co_await pruned->connection.async_close();
-         } catch (...) {
-            detail::request_session_cancel(pruned->connection);
+   for (const auto id : pruned_ids) {
+      auto pruned = std::shared_ptr<session_state>{};
+      {
+         const auto lock = std::scoped_lock{mutex};
+         if (const auto found = retiring_sessions.find(id); found != retiring_sessions.end()) {
+            pruned = found->second;
          }
-         pruned->native_lifetime.reset();
-         pruned->resource.release();
-         teardown_ticket.release();
+      }
+      if (pruned) {
+         detail::request_session_cancel(pruned->connection);
+         launch_pruned_session_teardown(pruned);
       }
    }
 
@@ -314,10 +367,13 @@ void node::impl::forget_session(const peer_id& peer) {
             ++it;
             continue;
          }
-         it->second->closed = true;
-         removed_sessions.push_back(it->second);
-         connections.forget(it->second->id);
-         it = sessions.erase(it);
+         const auto session = it->second;
+         ++it;
+         session->closed = true;
+         if (const auto retired = retire_session_locked(session, true)) {
+            removed_sessions.push_back(retired);
+            connections.forget(retired->id);
+         }
          ++removed;
       }
       if (removed != 0) {
@@ -338,10 +394,14 @@ void node::impl::forget_session(const std::shared_ptr<node::impl::session_state>
    auto removed = false;
    {
       auto lock = std::scoped_lock{mutex};
-      if (!detail::erase_current_session(sessions, session)) {
+      const auto found = sessions.find(session->id);
+      if (found == sessions.end() || found->second != session) {
          return;
       }
       session->closed = true;
+      if (!retire_session_locked(session, true)) {
+         return;
+      }
       removed = true;
       connections.forget(session->id);
       metrics_value.active_sessions = sessions.size();

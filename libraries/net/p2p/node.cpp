@@ -314,30 +314,32 @@ void stop_owned(auto self) {
       if (self->stopped) {
          return;
       }
-      operations.reserve(self->sessions.size() + 1);
+      operations.reserve(self->sessions.size() + self->retiring_sessions.size() + 1);
       operations.push_back(self->direct_registry.teardown_operation());
       deadlines.reserve(self->protocol_open_deadlines.size());
       for (auto& [_, deadline] : self->protocol_open_deadlines) {
          deadlines.push_back(std::move(deadline));
       }
       self->protocol_open_deadlines.clear();
-      for (auto& [_, session] : self->sessions) {
-         operations.push_back(detail::session_teardown::operation{
-             .close = [session]() -> boost::asio::awaitable<void> {
-                co_await session->connection.async_close();
-                session->native_lifetime.reset();
-             },
-             .cancel =
-                 [session] { session->connection.request_cancel(); },
-         });
-      }
       self->stop_requested_at = std::chrono::steady_clock::now();
       self->stopped = true;
-      for (auto& [_, session] : self->sessions) {
+      while (!self->sessions.empty()) {
+         const auto session = self->sessions.begin()->second;
          session->closed = true;
+         static_cast<void>(self->retire_session_locked(session, false));
       }
       self->connections.clear();
-      self->sessions.clear();
+      for (const auto& [_, session] : self->retiring_sessions) {
+         if (session->retirement.terminal() || session->retirement.tracked()) {
+            continue;
+         }
+         operations.push_back(detail::session_teardown::operation{
+             .close = [self, session]() -> boost::asio::awaitable<void> {
+                co_await self->async_retire_session(session, true);
+             },
+             .cancel = [session] { detail::request_session_cancel(session->connection); },
+         });
+      }
       self->inbound_relay_reservations.clear();
       self->outbound_relay_reservations.clear();
       self->clear_pubsub_outbound_locked();

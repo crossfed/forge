@@ -22,6 +22,7 @@ module;
 #include <functional>
 #include <future>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -42,6 +43,7 @@ import forge.net.transport.session;
 #include "../../libraries/net/p2p/details/libp2p_identity_material.hxx"
 #include "../../libraries/net/p2p/details/operation_deadline.hxx"
 #include "../../libraries/net/p2p/details/session_lifecycle.hxx"
+#include "../../libraries/net/p2p/details/session_retirement.hxx"
 #include "../../libraries/net/p2p/details/session_teardown.hxx"
 
 namespace forge::net::p2p {
@@ -771,6 +773,115 @@ BOOST_AUTO_TEST_CASE(p2p_direct_listener_stop_wins_after_accept_begins) {
    operations.push_back(registry.teardown_operation());
    teardown.start(std::move(operations));
    forge::asio::blocking::run(runtime, teardown.wait());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_transfers_active_map_node_without_replacement) {
+   struct retained_session {
+      detail::session_retirement retirement;
+   };
+
+   auto active_sessions = std::map<std::uint64_t, std::shared_ptr<retained_session>>{};
+   auto retiring_sessions = std::map<std::uint64_t, std::shared_ptr<retained_session>>{};
+   const auto session = std::make_shared<retained_session>();
+   active_sessions.emplace(17, session);
+
+   auto node = active_sessions.extract(17);
+   const auto transferred = retiring_sessions.insert(std::move(node));
+
+   BOOST_TEST(active_sessions.empty());
+   BOOST_TEST(transferred.inserted);
+   BOOST_TEST(transferred.position->second == session);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_releases_terminal_tracking_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto retirement = detail::session_retirement{};
+
+   BOOST_REQUIRE(retirement.track(teardown.track()));
+   BOOST_TEST(!retirement.track(teardown.track()));
+   BOOST_TEST(retirement.tracked());
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::started));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::in_flight));
+   BOOST_TEST(retirement.complete_terminal());
+   BOOST_TEST(!retirement.complete_terminal());
+   BOOST_TEST(retirement.terminal());
+   BOOST_TEST(!retirement.tracked());
+
+   teardown.start({});
+   forge::asio::blocking::run(runtime, teardown.wait());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantines_untracked_close_without_duplicate_attempt) {
+   auto retirement = detail::session_retirement{};
+
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::untracked));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(true)) ==
+              static_cast<int>(detail::session_retirement::close_start::started));
+   BOOST_TEST(static_cast<int>(retirement.begin_close(true)) ==
+              static_cast<int>(detail::session_retirement::close_start::in_flight));
+   retirement.quarantine();
+   BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
+              static_cast<int>(detail::session_retirement::close_start::untracked));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_retains_authority_after_teardown_stop) {
+   struct retained_authority {
+      resource_manager::session_reservation reservation;
+      std::shared_ptr<void> native_lifetime;
+      detail::session_retirement retirement;
+   };
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto resources = resource_manager{resource_manager::limits{.system = {.max_connections = 1}}};
+   auto admission = resources.reserve_session(resource_manager::session_direction::outbound);
+   BOOST_REQUIRE(admission);
+   auto native_releases = std::atomic_size_t{0};
+   auto native_lifetime = std::shared_ptr<void>{new int{0}, [&native_releases](void* value) {
+                                                     delete static_cast<int*>(value);
+                                                     native_releases.fetch_add(1, std::memory_order_release);
+                                                  }};
+   auto authority = std::make_shared<retained_authority>();
+   authority->reservation = std::move(*admission);
+   authority->native_lifetime = std::move(native_lifetime);
+   auto retiring_sessions = std::map<std::uint64_t, std::shared_ptr<retained_authority>>{};
+   retiring_sessions.emplace(17, authority);
+   authority.reset();
+
+   auto retained = retiring_sessions.at(17);
+   auto close_calls = std::atomic_size_t{0};
+   auto operations = std::vector<detail::session_teardown::operation>{};
+   operations.push_back(detail::session_teardown::operation{
+       .close = [retained, &close_calls]() -> boost::asio::awaitable<void> {
+          if (retained->retirement.begin_close(true) != detail::session_retirement::close_start::started) {
+             co_return;
+          }
+          close_calls.fetch_add(1, std::memory_order_release);
+          try {
+             throw std::runtime_error{"expected terminal close failure"};
+          } catch (...) {
+             // A throwing async_close quarantines the session; only its node owner may release it later.
+             retained->retirement.quarantine();
+          }
+          co_return;
+       },
+   });
+   teardown.start(std::move(operations));
+   forge::asio::blocking::run(runtime, teardown.wait());
+
+   BOOST_TEST(close_calls.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 0U);
+   BOOST_TEST(!resources.reserve_session(resource_manager::session_direction::outbound));
+
+   retained.reset();
+   retiring_sessions.clear();
+
+   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 1U);
+   BOOST_REQUIRE(resources.reserve_session(resource_manager::session_direction::outbound));
 }
 
 } // namespace

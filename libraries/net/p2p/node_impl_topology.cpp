@@ -309,11 +309,11 @@ boost::asio::awaitable<void> node::impl::async_close_topology_sessions(std::vect
          }
          const auto session = found->second;
          session->closed = true;
-         const auto peer = session->info.remote_peer;
-         sessions.erase(found);
-         connections.forget(id);
-         invalidate_pubsub_outbound_locked(peer, id);
-         removed.push_back(session);
+         if (const auto retired = retire_session_locked(session, true)) {
+            connections.forget(id);
+            invalidate_pubsub_outbound_locked(retired->info.remote_peer, id);
+            removed.push_back(retired);
+         }
       }
       for (const auto& session : removed) {
          const auto peer = session->info.remote_peer;
@@ -335,15 +335,7 @@ boost::asio::awaitable<void> node::impl::async_close_topology_sessions(std::vect
    }
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
    for (const auto& session : removed) {
-      auto ticket = teardown.track([session] { detail::request_session_cancel(session->connection); });
-      try {
-         co_await session->connection.async_close();
-      } catch (...) {
-         detail::request_session_cancel(session->connection);
-      }
-      session->native_lifetime.reset();
-      session->resource.release();
-      ticket.release();
+      co_await async_retire_session(session, false);
    }
 }
 

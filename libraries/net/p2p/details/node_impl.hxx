@@ -22,6 +22,7 @@
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
 #include "resource_stream.hxx"
+#include "session_retirement.hxx"
 #include "session_teardown.hxx"
 #include "topology_manager.hxx"
 
@@ -79,6 +80,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       peer_authentication authentication = peer_authentication::unverified;
       forge::net::transport::session connection;
       resource_manager::session_reservation resource;
+      detail::session_retirement retirement;
       // Keeps the native socket descriptor reservation through security handoff.
       std::shared_ptr<void> native_lifetime;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
@@ -248,6 +250,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    mutable connection_manager connections{connection_policy_for(options.limits)};
    std::map<protocol_id, node::protocol_handler> handlers;
    std::map<std::uint64_t, std::shared_ptr<session_state>> sessions;
+   std::map<std::uint64_t, std::shared_ptr<session_state>> retiring_sessions;
    std::map<std::uint64_t, operation_deadline::stop_token> protocol_open_deadlines;
    std::map<peer_id, relay_reservation_state> inbound_relay_reservations;
    std::map<peer_id, relay_reservation_state> outbound_relay_reservations;
@@ -370,6 +373,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                         std::size_t max_parallel_queries);
 
    void launch_pruned_session_teardown(const std::shared_ptr<session_state>& session) noexcept;
+   [[nodiscard]] std::shared_ptr<session_state>
+   retire_session_locked(const std::shared_ptr<session_state>& session, bool track_close) noexcept;
+   boost::asio::awaitable<void> async_retire_session(const std::shared_ptr<session_state>& session,
+                                                      bool allow_untracked);
+   void forget_retired_session(const std::shared_ptr<session_state>& session) noexcept;
 
    void forget_session(const peer_id& peer);
 

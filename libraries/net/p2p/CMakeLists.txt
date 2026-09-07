@@ -164,6 +164,8 @@ add_library(
    details/protobuf.hxx
    details/protocol_capabilities.hxx
    details/session_lifecycle.hxx
+   session_retirement.cpp
+   details/session_retirement.hxx
    session_teardown.cpp
    details/session_teardown.hxx
    stream_upgrade.cpp
