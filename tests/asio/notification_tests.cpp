@@ -40,6 +40,11 @@ boost::asio::awaitable<bool> wait_for_cancellation(
    co_return canceled && before == after;
 }
 
+boost::asio::awaitable<void> notify(forge::asio::notification* signal) {
+   signal->notify();
+   co_return;
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(asio_async_waiter_keeps_sticky_wake_before_wait_arm) {
@@ -109,13 +114,9 @@ BOOST_AUTO_TEST_CASE(asio_notification_preserves_late_and_racing_wakes) {
    }
    // The serialized notifier runs after every waiter has subscribed. Terminal
    // delivery must wake these waiters without posting a new executor handler.
-   auto notify = boost::asio::co_spawn(
-       serial, [&signal]() -> boost::asio::awaitable<void> {
-          signal.notify();
-          co_return;
-       }(), boost::asio::use_future);
-   BOOST_REQUIRE(notify.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
-   BOOST_CHECK_NO_THROW(notify.get());
+   auto notifying = boost::asio::co_spawn(serial, notify(&signal), boost::asio::use_future);
+   BOOST_REQUIRE(notifying.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(notifying.get());
    for (auto& waiter : waiters) {
       BOOST_REQUIRE(waiter.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
       BOOST_CHECK_NE(waiter.get(), shared_epoch);
