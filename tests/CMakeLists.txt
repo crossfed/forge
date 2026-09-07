@@ -725,7 +725,14 @@ target_link_libraries(
    forge_raw
    Boost::included_unit_test_framework
 )
+target_include_directories(test_forge_crypto_symmetric PRIVATE ${CMAKE_SOURCE_DIR}/libraries/crypto/symmetric)
 add_test(NAME test_forge_crypto_symmetric COMMAND test_forge_crypto_symmetric WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(
+   NAME test_forge_crypto_symmetric_xsalsa20_structure
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/crypto/check_xsalsa20_structure.py
+      --source ${CMAKE_SOURCE_DIR}
+      --archive $<TARGET_FILE:forge_crypto_symmetric>
+)
 
 add_executable(test_forge_crypto_asymmetric_values unit/main.cpp crypto/test_asymmetric_values.cpp)
 target_link_libraries(
@@ -1761,7 +1768,9 @@ add_custom_target(
       ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_symmetric_component
       ${CMAKE_BINARY_DIR}/forge-package-crypto-symmetric-component
       --build-generator ${CMAKE_GENERATOR}
-      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_sodium=ON
       --test-command forge_package_crypto_symmetric_component
    DEPENDS test_forge_package_install
 )
@@ -2708,7 +2717,9 @@ add_test(
       ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_symmetric_component
       ${CMAKE_BINARY_DIR}/forge-package-crypto-symmetric-component
       --build-generator ${CMAKE_GENERATOR}
-      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_sodium=ON
       --test-command forge_package_crypto_symmetric_component
 )
 set_tests_properties(test_forge_package_crypto_symmetric_component PROPERTIES DEPENDS test_forge_package_install)

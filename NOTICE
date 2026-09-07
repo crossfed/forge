@@ -13,6 +13,11 @@ Additional embedded and vendored third-party notices are listed in
 THIRD_PARTY_LICENSES. File-level source lineage and compatibility-only donor
 boundaries are documented in PROVENANCE.md.
 
+`vendor/libsodium/upstream` is an unmodified extraction of the official
+libsodium 1.0.22 release archive. Forge compiles only its portable XSalsa20
+subset as a private backend for `forge_crypto_symmetric`; the exact archive and
+source-file hashes are recorded in `vendor/libsodium/MANIFEST.md`.
+
 `libraries/vm/wasm/interpret` is a derived native port of AntelopeIO/eos-vm and is
 distributed under EOS VM License V1.0. The complete license is preserved in
 `libraries/vm/wasm/interpret/LICENSE.eos-vm`.

@@ -2,9 +2,16 @@ add_library(
    forge_crypto_symmetric STATIC
    aes.cpp
    chacha20_poly1305.cpp
+   counter_state.cpp
    kdf.cpp
+   stream_impl.cpp
+   xsalsa20.cpp
 )
 forge_target_modules_at(forge_crypto_symmetric crypto/symmetric)
+target_sources(
+   forge_crypto_symmetric PRIVATE
+      $<TARGET_OBJECTS:forge_crypto_symmetric_xsalsa20_vendor>
+)
 
 target_include_directories(forge_crypto_symmetric PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_compile_definitions(
