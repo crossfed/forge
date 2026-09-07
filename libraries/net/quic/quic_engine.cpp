@@ -1327,8 +1327,11 @@ struct engine_connection::impl {
                          }
                       } guard{shared};
                       try {
+                         if (shared->test_failpoint && shared->test_failpoint("expiry_worker_failure")) {
+                            throw std::runtime_error{"QUIC test failpoint: expiry worker failure"};
+                         }
                          co_await shared->handle_expiry_event();
-                      } catch (const engine_failure&) {
+                      } catch (...) {
                          shared->fail_all();
                       }
                    },

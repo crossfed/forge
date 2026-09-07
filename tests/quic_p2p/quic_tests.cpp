@@ -2332,6 +2332,59 @@ BOOST_AUTO_TEST_CASE(quic_background_drain_exception_terminalizes_and_releases_l
    server.stop();
 }
 
+BOOST_AUTO_TEST_CASE(quic_expiry_worker_exception_terminalizes_and_releases_lifetime) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server_options = loopback_server_options();
+   server_options.idle_timeout = std::chrono::milliseconds{100};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, std::move(server_options)};
+   auto client = connector{runtime};
+   auto lifetime = std::make_shared<int>(1);
+   auto released = std::weak_ptr<void>{lifetime};
+   auto armed = std::make_shared<std::atomic_bool>(false);
+   auto injected = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.idle_timeout = std::chrono::milliseconds{100};
+   options.connection_lifetime = std::move(lifetime);
+   options.test_failpoint = [armed, injected](std::string_view name) {
+      return name == "expiry_worker_failure" && armed->load(std::memory_order_acquire) &&
+             !injected->exchange(true, std::memory_order_acq_rel);
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect expiry-failure QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept expiry-failure QUIC session");
+   armed->store(true, std::memory_order_release);
+
+   run_with_deadline(
+       runtime,
+       [&connection]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (!connection.metrics().closed) {
+             timer.expires_after(std::chrono::milliseconds{1});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{2'000}, "terminalize injected QUIC expiry failure");
+   BOOST_TEST(injected->load(std::memory_order_acquire));
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "join injected QUIC expiry failure");
+   run_with_deadline(
+       runtime,
+       [released]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (!released.expired()) {
+             timer.expires_after(std::chrono::milliseconds{1});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{2'000}, "release expiry-failure QUIC native lifetime");
+   BOOST_TEST(released.expired());
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close expiry-failure QUIC peer");
+   server.stop();
+}
+
 BOOST_AUTO_TEST_CASE(quic_concurrent_async_close_waits_for_terminal_cleanup_and_preserves_primary_error) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
