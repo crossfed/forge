@@ -1027,6 +1027,19 @@ target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:
 add_test(NAME test_forge_quic_p2p COMMAND test_forge_quic_p2p WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 set_tests_properties(test_forge_quic_p2p PROPERTIES TIMEOUT 300)
 
+add_executable(
+   test_forge_net_pnet
+   unit/main.cpp
+   net_pnet/pnet_tests.cpp
+)
+target_link_libraries(
+   test_forge_net_pnet
+   forge_asio
+   forge_net_pnet
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_net_pnet COMMAND test_forge_net_pnet WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 set(FORGE_INTEROP_PROVENANCE ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/provenance.py)
 set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)
 get_property(_forge_interop_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
@@ -1601,6 +1614,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_net_p2p_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_pnet_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_pnet_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-pnet-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_pnet_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2552,6 +2576,17 @@ add_test(
       --test-command forge_package_net_p2p_component
 )
 set_tests_properties(test_forge_package_net_p2p_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_pnet_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_pnet_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-pnet-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_pnet_component
+)
+set_tests_properties(test_forge_package_net_pnet_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_otlp_component
    COMMAND ${CMAKE_CTEST_COMMAND}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -29,6 +30,7 @@ LIVE_SCENARIO_PROFILES = {
     "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
     "tcp_noise": ("ping", "identify", "echo", "echo_large"),
     "tcp_tls": ("ping", "identify", "echo"),
+    "private_tcp_yamux_pnet": ("pnet",),
     "quic_dht": (
         "dht_find_peer",
         "dht_provide_find_provider",
@@ -57,10 +59,12 @@ CURRENT_ACCEPTANCE_SCENARIOS = {
     "tcp_noise/identify": ("multistream_select", "noise_identity", "identify_native_tcp_yamux"),
     "tcp_noise/echo": ("tcp_yamux",),
     "tcp_tls/identify": ("tls_identity",),
+    "private_tcp_yamux_pnet/pnet": ("pnet",),
     "quic_dht/dht_provide_find_provider": ("kademlia_amino",),
     "quic_rendezvous/rendezvous_register_discover": ("rendezvous_rust",),
 }
 DIAL_TIMEOUT_SECONDS = 90
+PNET_FINGERPRINT_DOMAIN = b"forge.net.pnet.operational-fingerprint.v1\0"
 NATIVE_TOPOLOGIES = (
     ("forge", "go", "go"),
     ("go", "forge", "forge"),
@@ -104,6 +108,40 @@ def effective_configuration(profile: str, transport_stack: tuple[str, ...], dial
         "dialer": launcher_execution_description(dial_command, dial_result),
         "listener": launcher_execution_description(listener_command, listener_result),
     }
+
+
+def canonical_pnet_fingerprint(key_file: Path) -> str:
+    """Parse canonical swarm-key input without retaining PSK bytes in artifacts."""
+    raw = key_file.read_bytes()
+    if raw.endswith(b"\r\n"):
+        raw = raw[:-2]
+    elif raw.endswith(b"\n"):
+        raw = raw[:-1]
+    lines = raw.split(b"\n")
+    if (
+        len(lines) != 3
+        or lines[0] != b"/key/swarm/psk/1.0.0/"
+        or lines[1] != b"/base16/"
+        or len(lines[2]) != 64
+        or any(byte not in b"0123456789abcdef" for byte in lines[2])
+    ):
+        raise RuntimeError(f"pnet fixture key is not canonical: {key_file}")
+    decoded = bytes.fromhex(lines[2].decode("ascii"))
+    return hashlib.sha256(PNET_FINGERPRINT_DOMAIN + decoded).hexdigest()
+
+
+def pnet_fixture_paths(source_dir: Path, artifact_root: Path) -> tuple[Path, Path, str]:
+    key = (source_dir / "fixtures" / "pnet" / "swarm.key").resolve()
+    mismatch = (source_dir / "fixtures" / "pnet" / "mismatched-swarm.key").resolve()
+    for path in (key, mismatch):
+        if not path.is_file():
+            raise RuntimeError(f"pnet fixture key is missing: {path}")
+        try:
+            path.relative_to(artifact_root.resolve())
+        except ValueError:
+            continue
+        raise RuntimeError("pnet fixture key must remain outside the runner artifact directory")
+    return key, mismatch, canonical_pnet_fingerprint(key)
 
 
 def run(command: list[str], cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None) -> None:
@@ -332,6 +370,8 @@ class Listener:
         self.terminal_status: dict[str, object] = {"exit_code": None, "termination": "running"}
 
     def close(self) -> None:
+        if self.terminal_status["termination"] != "running":
+            return
         try:
             self.stop_file.write_text("stop\n")
             self.terminal_status["exit_code"] = self.process.wait(timeout=5)
@@ -403,6 +443,32 @@ def run_command_with_attempts(command: list[str], log_file: Path, scenario: str,
     return attempts
 
 
+def run_command_once(command: list[str], log_file: Path, scenario: str, kind: str, timeout: float) -> list[dict]:
+    """Negative controls represent one deliberately observed connection attempt."""
+    attempt = command_attempt(command, log_file, scenario, 1, kind, timeout)
+    with log_file.open("w") as log:
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        attempt["pid"] = process.pid
+        try:
+            attempt["exit_code"] = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            attempt["timeout_class"] = "fixture_timeout"
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                process.kill()
+                process.wait(timeout=5)
+            attempt["exit_code"] = process.returncode
+            attempt["log_tail"] = tail_text(log_file)
+            raise RuntimeError(f"{kind} timed out after {error.timeout}s; log={log_file}; tail={attempt['log_tail']}") from error
+    attempt["log_tail"] = tail_text(log_file)
+    if attempt["exit_code"] != 0:
+        attempt["failure_class"] = "process_exit"
+        raise RuntimeError(f"{kind} exited with {attempt['exit_code']}; log={log_file}; tail={attempt['log_tail']}")
+    return [attempt]
+
+
 def attach_attempts(result: dict, attempts: list[dict]) -> dict:
     result["attempts"] = attempts
     return result
@@ -411,7 +477,9 @@ def attach_attempts(result: dict, attempts: list[dict]) -> dict:
 def start_listener(binary: Path, implementation: str, work: Path, scenario: Optional[str] = None,
                    result_file: Optional[Path] = None, seed_file: Optional[Path] = None,
                    expected_messages: Optional[int] = None, transport: str = "quic",
-                   seed_peer_id: Optional[str] = None, seed_addr: Optional[str] = None) -> Listener:
+                   seed_peer_id: Optional[str] = None, seed_addr: Optional[str] = None,
+                   pnet_key_file: Optional[Path] = None, pnet_fingerprint: Optional[str] = None,
+                   pnet_control: Optional[str] = None, pnet_correlation: Optional[str] = None) -> Listener:
     ready_file = work / f"{implementation}-ready.json"
     stop_file = work / f"{implementation}.stop"
     log_file = work / f"{implementation}.log"
@@ -426,7 +494,7 @@ def start_listener(binary: Path, implementation: str, work: Path, scenario: Opti
         "--store-dir",
         str(store_dir),
         "--features",
-        "ping,identify,autonatv2,relay,dcutr,dht,rendezvous,pubsub",
+        "ping,identify" if transport == "tcp-pnet" else "ping,identify,autonatv2,relay,dcutr,dht,rendezvous,pubsub",
         "--transport",
         transport,
     ]
@@ -442,6 +510,12 @@ def start_listener(binary: Path, implementation: str, work: Path, scenario: Opti
         command.extend(["--seed-peer-id", seed_peer_id, "--seed-addr", seed_addr])
     if expected_messages is not None:
         command.extend(["--expected-messages", str(expected_messages)])
+    if pnet_key_file is not None:
+        command.extend(["--pnet-key-file", str(pnet_key_file)])
+    if pnet_fingerprint is not None:
+        command.extend(["--pnet-fingerprint", pnet_fingerprint])
+    if pnet_control is not None and pnet_correlation is not None:
+        command.extend(["--pnet-control", pnet_control, "--pnet-correlation", pnet_correlation])
     log = log_file.open("w")
     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -487,7 +561,8 @@ def start_destination(binary: Path, implementation: str, relay_addr: str, relay_
 
 def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, addr: str, work: Path,
              payload: Optional[str] = None, transport: str = "quic", fresh_store_each_attempt: bool = False,
-             target_peer_id: Optional[str] = None) -> dict:
+             target_peer_id: Optional[str] = None, pnet_key_file: Optional[Path] = None,
+             pnet_fingerprint: Optional[str] = None) -> dict:
     payload_suffix = "" if payload is None else f"-{payload}"
     result_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.json"
     log_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.log"
@@ -512,6 +587,10 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
         command.extend(["--payload", payload])
     if target_peer_id is not None:
         command.extend(["--target-peer-id", target_peer_id])
+    if pnet_key_file is not None:
+        command.extend(["--pnet-key-file", str(pnet_key_file)])
+    if pnet_fingerprint is not None:
+        command.extend(["--pnet-fingerprint", pnet_fingerprint])
     try:
         reset_paths = (store_dir, result_file) if fresh_store_each_attempt else ()
         attempts = run_command_with_attempts(
@@ -525,6 +604,26 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
     result = json.loads(result_file.read_text())
     if result.get("status") != "ok":
         raise RuntimeError(f"{implementation} dial result did not report status=ok: {result}")
+    result["result_file"] = str(result_file)
+    return attach_attempts(result, attempts)
+
+
+def run_rejected_pnet_dial(binary: Path, implementation: str, peer_id: str, addr: str, work: Path,
+                           control: str, correlation: str, key_file: Optional[Path], fingerprint: str) -> dict:
+    result_file = work / f"{implementation}-dial-pnet-{control}.json"
+    log_file = work / f"{implementation}-dial-pnet-{control}.log"
+    command = [
+        str(binary), "dial", "--scenario", "pnet", "--peer-id", peer_id, "--addr", addr,
+        "--result-file", str(result_file), "--store-dir", str(work / f"{implementation}-dial-{control}-store"),
+        "--transport", "tcp-pnet", "--pnet-fingerprint", fingerprint,
+        "--pnet-control", control, "--pnet-correlation", correlation,
+    ]
+    if key_file is not None:
+        command.extend(["--pnet-key-file", str(key_file)])
+    attempts = run_command_once(command, log_file, "pnet", "pnet_control", DIAL_TIMEOUT_SECONDS)
+    result = json.loads(result_file.read_text())
+    if result.get("status") != "rejected":
+        raise RuntimeError(f"{implementation} pnet control did not reject: {result}")
     result["result_file"] = str(result_file)
     return attach_attempts(result, attempts)
 
@@ -989,17 +1088,86 @@ def run_dht_value_remote_get(binaries: dict[str, Path], writer: str, listener: s
         server.close()
 
 
+def run_pnet_control(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, root: Path,
+                     key_file: Path, dial_key_file: Optional[Path], fingerprint: str, control: str,
+                     correlation: str) -> dict:
+    work = root / f"tcp-pnet-{dialer}-to-{listener}-pnet-{control}"
+    work.mkdir(parents=True, exist_ok=True)
+    listener_result_file = work / f"{listener}-listen-pnet-{control}.json"
+    server = start_listener(
+        listener_binary, listener, work, "pnet", listener_result_file, transport="tcp-pnet",
+        pnet_key_file=key_file, pnet_fingerprint=fingerprint, pnet_control=control,
+        pnet_correlation=correlation,
+    )
+    try:
+        result = run_rejected_pnet_dial(
+            dialer_binary, dialer, server.ready["peer_id"], server.ready["listen_addrs"][0], work,
+            control, correlation, dial_key_file, fingerprint,
+        )
+    finally:
+        server.close()
+    listener_result = wait_json(listener_result_file, 20)
+    listener_result["result_file"] = str(listener_result_file)
+    expected_sources = {
+        "forge": "forge.node.metrics",
+        "go": "go-libp2p.connection-gater",
+        "rust": "rust-libp2p.swarm-events",
+    }
+    for endpoint, payload in (("dialer", result), ("listener", listener_result)):
+        counters = [
+            payload.get(name)
+            for name in ("attempted_connections", "established_connections", "identify_streams", "application_streams")
+        ]
+        implementation = payload.get("implementation")
+        if implementation not in expected_sources or payload.get("counter_source") != expected_sources[implementation]:
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} lacks runtime counter provenance")
+        if any(type(value) is not int or value < 0 for value in counters):
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} has invalid observed counters")
+        rejected_before_identify = counters[1:] == [0, 0, 0]
+        if payload.get("rejected_before_identify") is not rejected_before_identify or not rejected_before_identify:
+            raise RuntimeError(f"{dialer}->{listener} pnet {control} {endpoint} crossed the session boundary")
+    if result["attempted_connections"] < 1:
+        raise RuntimeError(f"{dialer}->{listener} pnet {control} did not observe its dial attempt")
+    if listener_result["attempted_connections"] < 1:
+        raise RuntimeError(f"{dialer}->{listener} pnet {control} did not observe listener ingress")
+    return {
+        "result": result,
+        "listener_process": listener_evidence(server),
+        "listener_result": listener_result,
+        "listener_result_file": str(listener_result_file),
+    }
+
+
+def require_pnet_dial_evidence(result: dict, implementation: str) -> None:
+    security = result.get("negotiated_security")
+    if security not in {"/noise", "/tls/1.0.0"}:
+        raise RuntimeError(f"{implementation} pnet dial lacks observed Noise/TLS negotiation: {result}")
+    if result.get("negotiated_muxer") != "/yamux/1.0.0":
+        raise RuntimeError(f"{implementation} pnet dial lacks observed Yamux negotiation: {result}")
+    if implementation == "rust":
+        for field in ("autonat_v2_active", "relay_service_active", "relay_client_active", "dcutr_active"):
+            if result.get(field) is not False:
+                raise RuntimeError(f"Rust pnet dial did not prove {field}=false: {result}")
+
+
 def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str,
                             root: Path, transport: str, acceptance_profile: str,
                             transport_stack: tuple[str, ...], runner_scenario_id: str,
-                            acceptance_scenario_id: str) -> dict:
+                            acceptance_scenario_id: str, pnet_key_file: Optional[Path] = None,
+                            pnet_mismatch_key_file: Optional[Path] = None,
+                            pnet_fingerprint: Optional[str] = None) -> dict:
     work = root / f"{transport}-{dialer}-to-{listener}-{acceptance_scenario_id}"
     work.mkdir(parents=True, exist_ok=True)
-    if acceptance_profile != "native":
-        raise RuntimeError("planned non-native acceptance scenarios have no runner implementation yet")
+    if acceptance_profile not in {"native", "private_network"}:
+        raise RuntimeError(f"unsupported acceptance profile: {acceptance_profile}")
+    pnet_profile = acceptance_profile == "private_network"
+    if pnet_profile and (
+        scenario != "pnet" or pnet_key_file is None or pnet_mismatch_key_file is None or pnet_fingerprint is None
+    ):
+        raise RuntimeError("private pnet profile requires its canonical and mismatched source key fixtures")
     listener_result = (
         work / f"{listener}-listen-{scenario}.json"
-        if scenario in PUBSUB_SCENARIOS or scenario in DHT_VALUE_SCENARIOS
+        if pnet_profile or scenario in PUBSUB_SCENARIOS or scenario in DHT_VALUE_SCENARIOS
         else None
     )
     server = start_listener(
@@ -1009,6 +1177,8 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         scenario,
         listener_result,
         transport=transport,
+        pnet_key_file=pnet_key_file,
+        pnet_fingerprint=pnet_fingerprint,
     )
     try:
         addr = server.ready["listen_addrs"][0]
@@ -1021,7 +1191,11 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
             addr,
             work,
             transport=transport,
+            pnet_key_file=pnet_key_file,
+            pnet_fingerprint=pnet_fingerprint,
         )
+        if pnet_profile:
+            require_pnet_dial_evidence(result, dialer)
         if scenario == "identify" and dialer == "go" and listener == "forge":
             if result.get("signed_peer_record") is not True:
                 raise RuntimeError("Go libp2p did not receive Forge's signed Identify peer record")
@@ -1034,6 +1208,22 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")
+        if pnet_profile and listener == "rust":
+            for field in ("autonat_v2_active", "relay_service_active", "relay_client_active", "dcutr_active"):
+                if delivered.get(field) is not False:
+                    raise RuntimeError(f"Rust pnet listener did not prove {field}=false: {delivered}")
+        controls = {}
+        if pnet_profile:
+            controls = {
+                "missing_key": run_pnet_control(
+                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, None,
+                    pnet_fingerprint, "missing_key", f"{dialer}-to-{listener}-missing-key",
+                ),
+                "mismatched_key": run_pnet_control(
+                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, pnet_mismatch_key_file,
+                    pnet_fingerprint, "mismatched_key", f"{dialer}-to-{listener}-mismatched-key",
+                ),
+            }
         out = {
             "dialer": dialer,
             "listener": listener,
@@ -1067,6 +1257,7 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
                 delivered,
             ),
         }
+        out.update(controls)
         if listener_result is not None:
             out["listener_result_file"] = str(listener_result)
         return out
@@ -1367,6 +1558,7 @@ def main() -> int:
             if root.exists():
                 shutil.rmtree(root)
             root.mkdir(parents=True)
+            pnet_key_file, pnet_mismatch_key_file, pnet_fingerprint = pnet_fixture_paths(source_dir, root)
             for listener in ("go", "rust", "forge"):
                 for dialer in ("forge", "go", "rust"):
                     if listener == dialer:
@@ -1447,6 +1639,22 @@ def main() -> int:
                                 failures.append(
                                     f"{dialer}->{listener} {transport} {acceptance_scenario_id}: {error}"
                                 )
+            for dialer, listener in (("forge", "go"), ("go", "forge"), ("forge", "rust"), ("rust", "forge")):
+                for scenario in LIVE_SCENARIO_PROFILES["private_tcp_yamux_pnet"]:
+                    for acceptance_scenario_id in CURRENT_ACCEPTANCE_SCENARIOS.get(
+                        f"private_tcp_yamux_pnet/{scenario}", (scenario,)
+                    ):
+                        try:
+                            artifacts.append(
+                                run_pair_with_transport(
+                                    binaries[dialer], dialer, binaries[listener], listener, scenario, root,
+                                    "tcp-pnet", "private_network", ("tcp", "pnet", "yamux"),
+                                    f"private_tcp_yamux_pnet/{scenario}", acceptance_scenario_id,
+                                    pnet_key_file, pnet_mismatch_key_file, pnet_fingerprint,
+                                )
+                            )
+                        except Exception as error:
+                            failures.append(f"{dialer}->{listener} tcp-pnet {acceptance_scenario_id}: {error}")
             try:
                 artifacts.append(run_pubsub_mixed_mesh_stress(binaries, root))
             except Exception as error:

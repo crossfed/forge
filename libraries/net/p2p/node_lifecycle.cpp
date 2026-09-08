@@ -119,6 +119,11 @@ boost::asio::awaitable<lifecycle_status> node::async_start() {
 boost::asio::awaitable<void> node::async_set_bootstrap(std::vector<bootstrap_peer> peers) {
    validate_bootstrap(peers, false);
    auto self = impl_;
+   if (self->private_network_enabled()) {
+      for (const auto& peer : peers) {
+         self->require_private_direct_tcp(peer.address, "bootstrap endpoint");
+      }
+   }
    co_await self->bootstrap->async_set_bootstrap(std::move(peers));
 }
 

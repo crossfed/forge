@@ -281,6 +281,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
    boost::asio::awaitable<void> async_hydrate_peer_state();
    void listen(forge::net::p2p::endpoint endpoint);
+   [[nodiscard]] bool private_network_enabled() const noexcept;
+   void require_private_protocol_allowed(const protocol_id& protocol) const;
+   void require_private_direct_tcp(const forge::net::p2p::endpoint& endpoint, std::string_view operation) const;
 
    void invalidate_pubsub_outbound_locked(const peer_id& peer,
                                           std::optional<std::uint64_t> owner_session_id = std::nullopt,

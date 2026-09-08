@@ -395,6 +395,7 @@ void node::impl::register_protocol_handler(protocol_id protocol, node::protocol_
    if (protocol.value.empty() || protocol.value.front() != '/' || !handler) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P protocol handler requires protocol id and handler");
    }
+   require_private_protocol_allowed(protocol);
    auto launch = false;
    {
       auto lock = std::scoped_lock{mutex};

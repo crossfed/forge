@@ -29,6 +29,7 @@ import forge.net.p2p.identify;
 import forge.net.p2p.ipns;
 import forge.net.p2p.lifecycle;
 import forge.net.p2p.peer_store;
+export import forge.net.p2p.private_network;
 import forge.net.p2p.protocol;
 import forge.net.p2p.provider_registration;
 import forge.net.p2p.pubsub;
@@ -76,6 +77,7 @@ class node {
       limits limits{};
       relay::policy relay_policy{.service_enabled = true, .client_enabled = true, .public_relay_allowed = false};
       path::policy path_policy{};
+      std::optional<forge::net::p2p::private_network::options> private_network;
       forge::net::transport::limits transport_limits{};
       std::vector<forge::net::p2p::endpoint> advertised_endpoints;
       std::vector<std::uint8_t> public_key;

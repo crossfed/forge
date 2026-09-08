@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cid "github.com/ipfs/go-cid"
@@ -23,11 +24,13 @@ import (
 	kad "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	corepnet "github.com/libp2p/go-libp2p/core/pnet"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
@@ -52,22 +55,26 @@ const pubsubTopic = "forge.pubsub.interop"
 const pubsubPayload = "forge-gossipsub-live"
 
 type options struct {
-	command      string
-	scenario     string
-	peerID       string
-	addr         string
-	relayAddr    string
-	relayPeerID  string
-	readyFile    string
-	stopFile     string
-	resultFile   string
-	seedFile     string
-	seedPeerID   string
-	seedAddr     string
-	targetPeerID string
-	payload      string
-	transport    string
-	expected     int
+	command         string
+	scenario        string
+	peerID          string
+	addr            string
+	relayAddr       string
+	relayPeerID     string
+	readyFile       string
+	stopFile        string
+	resultFile      string
+	seedFile        string
+	seedPeerID      string
+	seedAddr        string
+	targetPeerID    string
+	payload         string
+	transport       string
+	expected        int
+	pnetKeyFile     string
+	pnetFingerprint string
+	pnetControl     string
+	pnetCorrelation string
 }
 
 func parseArgs() (options, error) {
@@ -117,6 +124,14 @@ func parseArgs() (options, error) {
 				return options{}, err
 			}
 			out.expected = n
+		case "--pnet-key-file":
+			out.pnetKeyFile = value
+		case "--pnet-fingerprint":
+			out.pnetFingerprint = value
+		case "--pnet-control":
+			out.pnetControl = value
+		case "--pnet-correlation":
+			out.pnetCorrelation = value
 		case "--store-dir", "--features":
 			// Accepted for CLI parity with the FORGE fixture.
 		default:
@@ -168,8 +183,11 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 	return payload, nil
 }
 
-func installEchoHandler(h host.Host) {
+func installEchoHandler(h host.Host, pnetState *pnetConnectionState) {
 	h.SetStreamHandler(echoProtocol, func(s network.Stream) {
+		if pnetState != nil {
+			pnetState.applicationStreams.Add(1)
+		}
 		defer s.Close()
 		payload, err := readFrame(bufio.NewReader(s))
 		if err != nil {
@@ -188,9 +206,45 @@ type fixtureHost struct {
 	kad       *kad.IpfsDHT
 	dhtStore  ds.Batching
 	pubsub    *pubsub.PubSub
+	pnet      *pnetConnectionState
+}
+
+type pnetConnectionState struct {
+	attempted          atomic.Uint64
+	established        atomic.Uint64
+	identifyStreams    atomic.Uint64
+	applicationStreams atomic.Uint64
+	notifier           *network.NotifyBundle
+}
+
+type pnetConnectionGater struct {
+	state *pnetConnectionState
+}
+
+func (g *pnetConnectionGater) InterceptPeerDial(peer.ID) bool { return true }
+
+func (g *pnetConnectionGater) InterceptAddrDial(peer.ID, ma.Multiaddr) bool {
+	g.state.attempted.Add(1)
+	return true
+}
+
+func (g *pnetConnectionGater) InterceptAccept(network.ConnMultiaddrs) bool {
+	g.state.attempted.Add(1)
+	return true
+}
+
+func (g *pnetConnectionGater) InterceptSecured(network.Direction, peer.ID, network.ConnMultiaddrs) bool {
+	return true
+}
+
+func (g *pnetConnectionGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) {
+	return true, 0
 }
 
 func (h *fixtureHost) Close() error {
+	if h.pnet != nil {
+		h.Network().StopNotify(h.pnet.notifier)
+	}
 	if h.kad != nil {
 		_ = h.kad.Close()
 	}
@@ -200,12 +254,23 @@ func (h *fixtureHost) Close() error {
 	return h.Host.Close()
 }
 
-func newHost(transport string) (*fixtureHost, error) {
+func loadPnetKey(path string) (corepnet.PSK, error) {
+	input, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer input.Close()
+	return corepnet.DecodeV1PSK(input)
+}
+
+func newHost(transport string, pnetKeyFile string) (*fixtureHost, error) {
+	var pnetState *pnetConnectionState
 	options := []libp2p.Option{
 		libp2p.NoTransports,
 		libp2p.ForceReachabilityPublic(),
-		libp2p.EnableAutoNATv2(),
-		libp2p.EnableRelay(),
+	}
+	if transport != "tcp-pnet" {
+		options = append(options, libp2p.EnableAutoNATv2(), libp2p.EnableRelay())
 	}
 	switch transport {
 	case "quic", "":
@@ -227,6 +292,22 @@ func newHost(transport string) (*fixtureHost, error) {
 			libp2p.Muxer(yamux.ID, yamux.DefaultTransport),
 			libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"),
 		)
+	case "tcp-pnet":
+		pnetState = &pnetConnectionState{}
+		options = append(options,
+			libp2p.Transport(tcp.NewTCPTransport),
+			libp2p.Security(sectls.ID, sectls.New),
+			libp2p.Muxer(yamux.ID, yamux.DefaultTransport),
+			libp2p.ConnectionGater(&pnetConnectionGater{state: pnetState}),
+			libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"),
+		)
+		if pnetKeyFile != "" {
+			key, err := loadPnetKey(pnetKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("read pnet key: %w", err)
+			}
+			options = append(options, libp2p.PrivateNetwork(key))
+		}
 	default:
 		return nil, fmt.Errorf("unsupported transport %s", transport)
 	}
@@ -234,7 +315,17 @@ func newHost(transport string) (*fixtureHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	installEchoHandler(h)
+	if transport == "tcp-pnet" {
+		pnetState.notifier = &network.NotifyBundle{
+			ConnectedF: func(network.Network, network.Conn) {
+				pnetState.established.Add(1)
+			},
+		}
+		h.Network().Notify(pnetState.notifier)
+		installEchoHandler(h, pnetState)
+		return &fixtureHost{Host: h, pnet: pnetState}, nil
+	}
+	installEchoHandler(h, nil)
 	if _, err := relayv2.New(h); err != nil {
 		h.Close()
 		return nil, err
@@ -272,6 +363,42 @@ func newHost(transport string) (*fixtureHost, error) {
 		return nil, err
 	}
 	return &fixtureHost{Host: h, holePunch: holePunchService, kad: dht, dhtStore: dhtStore, pubsub: pubsubRouter}, nil
+}
+
+func pnetEvidence(opts options) map[string]any {
+	return map[string]any{
+		"pnet_enabled":     true,
+		"negotiated_pnet":  true,
+		"pnet_fingerprint": opts.pnetFingerprint,
+	}
+}
+
+func pnetRejection(opts options, role string, expectedPeer string, state *pnetConnectionState) map[string]any {
+	attempted := uint64(0)
+	established := uint64(0)
+	identifyStreams := uint64(0)
+	applicationStreams := uint64(0)
+	if state != nil {
+		attempted = state.attempted.Load()
+		established = state.established.Load()
+		identifyStreams = state.identifyStreams.Load()
+		applicationStreams = state.applicationStreams.Load()
+	}
+	return map[string]any{
+		"implementation":           "go",
+		"role":                     role,
+		"scenario":                 "pnet",
+		"status":                   "rejected",
+		"control_kind":             opts.pnetControl,
+		"correlation_token":        opts.pnetCorrelation,
+		"expected_peer_id":         expectedPeer,
+		"counter_source":           "go-libp2p.connection-gater",
+		"attempted_connections":    attempted,
+		"established_connections":  established,
+		"identify_streams":         identifyStreams,
+		"application_streams":      applicationStreams,
+		"rejected_before_identify": established == 0 && identifyStreams == 0 && applicationStreams == 0,
+	}
 }
 
 func providerCID() (cid.Cid, error) {
@@ -521,7 +648,7 @@ func writePubSubStressResult(opts options, state *pubsubStressState) error {
 }
 
 func listen(opts options) error {
-	h, err := newHost(opts.transport)
+	h, err := newHost(opts.transport, opts.pnetKeyFile)
 	if err != nil {
 		return err
 	}
@@ -566,7 +693,23 @@ func listen(opts options) error {
 	}
 	seeded := false
 	recordReported := false
+	pnetReported := false
 	for {
+		if !pnetReported && opts.scenario == "pnet" && h.pnet != nil && h.pnet.established.Load() > 0 {
+			result := map[string]any{
+				"implementation": "go",
+				"role":           "listener",
+				"scenario":       "pnet",
+				"status":         "ok",
+			}
+			for key, value := range pnetEvidence(opts) {
+				result[key] = value
+			}
+			if err := writeJSON(opts.resultFile, result); err != nil {
+				return err
+			}
+			pnetReported = true
+		}
 		if !recordReported && isDHTValueScenario(opts.scenario) {
 			found, err := hasDHTValue(context.Background(), h, expectedKey, expectedValue)
 			if err != nil {
@@ -618,6 +761,9 @@ func listen(opts options) error {
 			seeded = true
 		}
 		if _, err := os.Stat(opts.stopFile); err == nil {
+			if !pnetReported && opts.scenario == "pnet" && opts.pnetControl != "" {
+				return writeJSON(opts.resultFile, pnetRejection(opts, "listener", "", h.pnet))
+			}
 			if stress != nil {
 				return writePubSubStressResult(opts, stress)
 			}
@@ -628,7 +774,7 @@ func listen(opts options) error {
 }
 
 func destination(opts options) error {
-	h, err := newHost(opts.transport)
+	h, err := newHost(opts.transport, opts.pnetKeyFile)
 	if err != nil {
 		return err
 	}
@@ -772,13 +918,13 @@ func expectUnsupportedProtocol(ctx context.Context, h host.Host, peer peer.ID, i
 }
 
 func dial(opts options) error {
-	h, err := newHost(opts.transport)
+	h, err := newHost(opts.transport, opts.pnetKeyFile)
 	if err != nil {
 		return err
 	}
 	defer h.Close()
 	var identifyEvents event.Subscription
-	if opts.scenario == "identify" {
+	if opts.scenario == "identify" || opts.scenario == "pnet" {
 		identifyEvents, err = h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(4))
 		if err != nil {
 			return fmt.Errorf("subscribe to Identify completion: %w", err)
@@ -798,9 +944,17 @@ func dial(opts options) error {
 	defer cancel()
 
 	if err := h.Connect(ctx, *info); err != nil {
+		if opts.scenario == "pnet" && opts.pnetControl != "" {
+			return writeJSON(opts.resultFile, pnetRejection(opts, "dialer", info.ID.String(), h.pnet))
+		}
 		return fmt.Errorf("connect failed: %w", err)
 	}
-	addDHTPeer(h, info)
+	if opts.scenario == "pnet" && opts.pnetControl != "" {
+		return fmt.Errorf("pnet rejection control unexpectedly established an authenticated session")
+	}
+	if h.kad != nil {
+		addDHTPeer(h, info)
+	}
 
 	result := map[string]any{
 		"implementation": "go",
@@ -844,6 +998,33 @@ func dial(opts options) error {
 			}
 		}
 		result["payload_bytes"] = size
+	case "pnet":
+		identified := false
+		for !identified {
+			select {
+			case received := <-identifyEvents.Out():
+				event, ok := received.(event.EvtPeerIdentificationCompleted)
+				if ok && event.Peer == info.ID {
+					h.pnet.identifyStreams.Add(1)
+					result["signed_peer_record"] = event.SignedPeerRecord != nil
+					result["identify_observed"] = true
+					identified = true
+				}
+			case <-ctx.Done():
+				return fmt.Errorf("pnet Identify completion event timed out: %w", ctx.Err())
+			}
+		}
+		size, err := openEchoProtocol(ctx, h, info.ID, []byte(opts.payload))
+		if err != nil {
+			return err
+		}
+		h.pnet.applicationStreams.Add(1)
+		result["protocol"] = string(echoProtocol)
+		result["payload_bytes"] = size
+		result["echo_ok"] = true
+		for key, value := range pnetEvidence(opts) {
+			result[key] = value
+		}
 	case "echo", "echo_large":
 		payload := []byte(opts.payload)
 		if opts.scenario == "echo_large" {
@@ -1044,7 +1225,7 @@ func waitDirectConnection(ctx context.Context, h host.Host, target peer.ID) bool
 }
 
 func dialRelay(opts options) error {
-	h, err := newHost(opts.transport)
+	h, err := newHost(opts.transport, opts.pnetKeyFile)
 	if err != nil {
 		return err
 	}

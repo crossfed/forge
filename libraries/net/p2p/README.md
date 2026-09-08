@@ -14,6 +14,22 @@ scope binding returns an explicit result: only `policy_rejected` is backpressure
 P2P contracts remain Stable unless their owning section explicitly says
 otherwise.
 
+## Private-Network Profile
+
+`forge.net.p2p.private_network::options` composes the product-neutral
+`forge_net_pnet` protector into a direct TCP/Yamux node. The byte-stream order is
+TCP, pnet, security multistream negotiation, Noise or TLS, then Yamux. This
+profile accepts only direct TCP endpoints and disables QUIC, relay reservations,
+relay paths and DCUtR. `/pnet` is stream protection, not peer authentication: a
+wrong PSK normally becomes a later security-negotiation failure.
+
+The registered live interop contract covers the four direct Forge/Go/Rust
+TCP/Yamux directions and separately indexes missing-key and mismatched-key
+controls with an observed outbound dial boundary and listener ingress, followed
+by rejection before Identify or an application stream. It records PNET negotiation
+and the non-secret operational fingerprint on both endpoints. Registration is
+not a passing-run claim and does not extend to QUIC, Relay, or DCUtR.
+
 ## Current Support State
 
 This library contains substantial libp2p-compatible protocol substrate, but it
@@ -43,7 +59,7 @@ The following surfaces are not production claims yet:
   evidence remain separate Stage 6 host-local inputs to the managed topology
   score;
 - observed-address confidence/expiry, public mDNS, private fingerprinted mDNS,
-  DNSAddr, the private TCP/Yamux transport PSK layer, optional native UPnP
+  DNSAddr, optional native UPnP
   mapping, adaptive Happy Eyeballs, IPv6 black-hole detection for native/private
   profiles and UDP black-hole detection for the native profile are Stage 6 work;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
@@ -146,7 +162,7 @@ Exchange facts do not call it and remain capability-free until Identify.
 ## Public Modules
 
 - `forge.net.p2p.identity`, `forge.net.p2p.endpoint`, `forge.net.p2p.node`,
-  `forge.net.p2p.lifecycle`.
+  `forge.net.p2p.lifecycle`, `forge.net.p2p.private_network`.
 - `forge.net.p2p.protocol`, `forge.net.p2p.message`, `forge.net.p2p.negotiation`.
 - `forge.net.p2p.peer_store`, `forge.net.p2p.discovery`,
   `forge.net.p2p.topology`, `forge.net.p2p.dht`,
@@ -160,7 +176,7 @@ Exchange facts do not call it and remain capability-free until Identify.
 Target: `forge_net_p2p`.
 
 Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`,
-`forge_net_tcp`, `forge_net_quic`, `forge_net_yamux`, `forge_multiformats` and
+`forge_net_tcp`, `forge_net_quic`, `forge_net_pnet`, `forge_net_yamux`, `forge_multiformats` and
 Boost.Asio. The library has no database dependency; durable state is supplied
 through the asynchronous `peer_store::persistence` and
 `dht::record_store::persistence` ports.

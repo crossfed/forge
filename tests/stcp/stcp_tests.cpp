@@ -1,6 +1,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -18,8 +19,13 @@
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/async_result.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
@@ -29,6 +35,8 @@
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/compat/move_only_function.hpp>
+#include <boost/system/error_code.hpp>
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
@@ -54,7 +62,9 @@ import forge.net.tcp.exceptions;
 import forge.net.tcp.listener;
 import forge.net.transport.buffer;
 import forge.net.transport.endpoint;
+import forge.net.transport.exceptions;
 import forge.net.transport.stream;
+
 
 namespace {
 
@@ -299,6 +309,125 @@ void add_extension(X509* certificate, X509* issuer, int nid, std::string_view va
       out.private_key_pem = material.client.private_key;
    }
    return out;
+}
+
+struct observed_lower_state {
+   std::atomic_size_t cancel_requests = 0;
+   std::atomic_size_t close_calls = 0;
+   std::atomic_size_t read_calls = 0;
+};
+
+class observed_transport_stream final : public forge::net::transport::detail::stream_concept {
+ public:
+   observed_transport_stream(forge::net::transport::stream stream, std::shared_ptr<observed_lower_state> state,
+                             std::size_t read_fragment_size)
+       : stream_(std::move(stream)), state_(std::move(state)), read_fragment_size_(read_fragment_size) {}
+
+   [[nodiscard]] bool valid() const noexcept override {
+      return !cancel_requested_.load(std::memory_order_acquire) && stream_.valid();
+   }
+
+   [[nodiscard]] std::int64_t id() const noexcept override {
+      return stream_.id();
+   }
+
+   boost::asio::awaitable<void> async_write(std::span<const std::uint8_t> value) override {
+      co_await stream_.async_write(value);
+   }
+
+   boost::asio::awaitable<bytes> async_read() override {
+      state_->read_calls.fetch_add(1, std::memory_order_release);
+      while (pending_.empty()) {
+         pending_ = co_await stream_.async_read();
+      }
+      const auto size = read_fragment_size_ == 0 ? pending_.size() : std::min(read_fragment_size_, pending_.size());
+      auto result = bytes{pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(size)};
+      pending_.erase(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(size));
+      co_return result;
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      state_->close_calls.fetch_add(1, std::memory_order_relaxed);
+      co_await stream_.async_close();
+   }
+
+   void cancel() override {
+      request_cancel();
+   }
+
+   void request_cancel() noexcept {
+      if (!cancel_requested_.exchange(true, std::memory_order_acq_rel)) {
+         state_->cancel_requests.fetch_add(1, std::memory_order_relaxed);
+         stream_.request_cancel();
+      }
+   }
+
+ private:
+   forge::net::transport::stream stream_;
+   std::shared_ptr<observed_lower_state> state_;
+   bytes pending_;
+   std::size_t read_fragment_size_ = 0;
+   std::atomic_bool cancel_requested_ = false;
+};
+
+class failing_transport_stream final : public forge::net::transport::detail::stream_concept {
+ public:
+   [[nodiscard]] bool valid() const noexcept override {
+      return !canceled_;
+   }
+
+   [[nodiscard]] std::int64_t id() const noexcept override {
+      return 1;
+   }
+
+   boost::asio::awaitable<void> async_write(std::span<const std::uint8_t>) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<bytes> async_read() override {
+      throw forge::net::transport::exceptions::protocol_error{"synthetic non-terminal transport failure"};
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      canceled_ = true;
+      co_return;
+   }
+
+   void cancel() override {
+      canceled_ = true;
+   }
+
+ private:
+   bool canceled_ = false;
+};
+
+[[nodiscard]] forge::net::transport::stream_connection
+observe_lower(forge::net::transport::stream_connection connection, std::shared_ptr<observed_lower_state> state,
+              std::size_t read_fragment_size, std::weak_ptr<observed_transport_stream>* model = nullptr) {
+   auto value = std::make_shared<observed_transport_stream>(std::move(connection.stream), std::move(state),
+                                                             read_fragment_size);
+   if (model) {
+      *model = value;
+   }
+   auto weak = std::weak_ptr<observed_transport_stream>{value};
+   connection.stream = forge::net::transport::detail::stream_access::make_cancelable(
+       std::move(value),
+       [weak]() noexcept {
+          if (const auto locked = weak.lock()) {
+             locked->request_cancel();
+          }
+       },
+       [weak]() noexcept {
+          if (const auto locked = weak.lock()) {
+             locked->request_cancel();
+          }
+       });
+   return connection;
+}
+
+boost::asio::awaitable<std::size_t> write_bytes(forge::net::stcp::connection& connection, bytes value) {
+   co_await connection.async_write(value);
+   co_return value.size();
 }
 
 struct raw_tls_observation {
@@ -687,6 +816,162 @@ boost::asio::awaitable<void> stcp_upgrade_roundtrip() {
    BOOST_CHECK_EQUAL_COLLECTIONS(received.begin(), received.end(), encrypted.begin(), encrypted.end());
 
    co_await client.async_close();
+   co_await server.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_preserves_endpoints_lifetime_and_full_duplex() {
+   const auto material = make_tls_material();
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::tcp::connector{executor};
+   auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server_tcp = co_await take_result(accept);
+
+   auto client_state = std::make_shared<observed_lower_state>();
+   auto server_state = std::make_shared<observed_lower_state>();
+   auto client_model = std::weak_ptr<observed_transport_stream>{};
+   auto client_lower = observe_lower(std::move(client_tcp).into_transport_stream(), client_state, 3, &client_model);
+   auto server_lower = observe_lower(std::move(server_tcp).into_transport_stream(), server_state, 11);
+   client_lower.local_endpoint = {.host_type = forge::net::transport::endpoint::host_kind::dns,
+                                  .protocol = forge::net::transport::endpoint::protocol_kind::quic_v1,
+                                  .host = "client-lower.example",
+                                  .port = 4101};
+   client_lower.remote_endpoint = {.host_type = forge::net::transport::endpoint::host_kind::dns,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::quic_v1,
+                                   .host = "server-lower.example",
+                                   .port = 4102};
+   server_lower.local_endpoint = client_lower.remote_endpoint;
+   server_lower.remote_endpoint = client_lower.local_endpoint;
+
+   auto server_upgrade = spawn_result<forge::net::stcp::connection>(
+       executor, forge::net::stcp::async_upgrade_server(std::move(server_lower), server_options(material)));
+   auto client = co_await forge::net::stcp::async_upgrade_client(std::move(client_lower), client_options(material));
+   auto server = co_await take_result(server_upgrade);
+
+   BOOST_TEST(client.local_endpoint().host == "client-lower.example");
+   BOOST_CHECK(client.local_endpoint().protocol == forge::net::transport::endpoint::protocol_kind::quic_v1);
+   BOOST_TEST(client.remote_endpoint().host == "server-lower.example");
+   BOOST_TEST(server.local_endpoint().host == "server-lower.example");
+   BOOST_TEST(server.remote_endpoint().host == "client-lower.example");
+   BOOST_TEST(!client_model.expired());
+
+   const auto client_payload = text_bytes("transport client payload");
+   const auto server_payload = text_bytes("transport server payload");
+   auto client_read = spawn_result<bytes>(executor, read_exact(client, server_payload.size()));
+   auto server_read = spawn_result<bytes>(executor, read_exact(server, client_payload.size()));
+   auto client_write = spawn_result<std::size_t>(executor, write_bytes(client, client_payload));
+   auto server_write = spawn_result<std::size_t>(executor, write_bytes(server, server_payload));
+
+   BOOST_TEST(co_await take_result(client_write) == client_payload.size());
+   BOOST_TEST(co_await take_result(server_write) == server_payload.size());
+   const auto client_received = co_await take_result(client_read);
+   const auto server_received = co_await take_result(server_read);
+   BOOST_TEST(client_received == server_payload, boost::test_tools::per_element());
+   BOOST_TEST(server_received == client_payload, boost::test_tools::per_element());
+
+   {
+      auto handed_off = std::move(client).into_transport_stream();
+      const auto handoff_payload = text_bytes("transport handoff payload");
+      co_await handed_off.stream.async_write(handoff_payload);
+      const auto handoff_received = co_await read_exact(server, handoff_payload.size());
+      BOOST_TEST(handoff_received == handoff_payload, boost::test_tools::per_element());
+      co_await handed_off.stream.async_close();
+   }
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   BOOST_TEST(client_model.expired());
+   BOOST_TEST(client_state->cancel_requests.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(client_state->close_calls.load(std::memory_order_relaxed) == 1U);
+   co_await server.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_timeout_requests_one_lower_cancel() {
+   const auto material = make_tls_material();
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::tcp::connector{executor};
+   auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server_tcp = co_await take_result(accept);
+   auto state = std::make_shared<observed_lower_state>();
+   auto lower = observe_lower(std::move(client_tcp).into_transport_stream(), state, 0);
+
+   try {
+      static_cast<void>(co_await forge::net::stcp::async_upgrade_client(
+          std::move(lower), client_options(material), std::optional{std::chrono::milliseconds{25}}));
+      BOOST_FAIL("stalled generic transport peer should time out during TLS handshake");
+   } catch (const forge::net::stcp::exceptions::timeout&) {
+   }
+   BOOST_TEST(state->cancel_requests.load(std::memory_order_relaxed) == 1U);
+   co_await server_tcp.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_preserves_non_terminal_failure() {
+   const auto material = make_tls_material();
+   auto lower = forge::net::transport::stream_connection{
+       .local_endpoint = loopback(4101),
+       .remote_endpoint = loopback(4102),
+       .stream = forge::net::transport::detail::stream_access::make(
+           std::make_shared<failing_transport_stream>()),
+   };
+
+   BOOST_CHECK_THROW(
+       static_cast<void>(co_await forge::net::stcp::async_upgrade_client(
+           std::move(lower), client_options(material), std::optional{std::chrono::milliseconds{1000}})),
+       forge::net::stcp::exceptions::handshake_failed);
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_stop_requests_one_lower_cancel() {
+   const auto material = make_tls_material();
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::tcp::connector{executor};
+   auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server_tcp = co_await take_result(accept);
+   auto state = std::make_shared<observed_lower_state>();
+   auto lower = observe_lower(std::move(client_tcp).into_transport_stream(), state, 0);
+   auto stop = std::stop_source{};
+   auto upgrade = spawn_result<forge::net::stcp::connection>(
+       executor, forge::net::stcp::async_upgrade_client(std::move(lower), client_options(material),
+                                                         std::optional{std::chrono::milliseconds{2000}},
+                                                         stop.get_token()));
+
+   auto client_hello = bytes(1);
+   BOOST_REQUIRE(co_await server_tcp.async_read_some(client_hello) == client_hello.size());
+   BOOST_REQUIRE(stop.request_stop());
+   BOOST_CHECK_THROW((void)co_await take_result(upgrade), forge::net::stcp::exceptions::canceled);
+   BOOST_TEST(state->cancel_requests.load(std::memory_order_relaxed) == 1U);
+   co_await server_tcp.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_transport_upgrade_cancel_closes_lower_once() {
+   const auto material = make_tls_material();
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::tcp::connector{executor};
+   auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server_tcp = co_await take_result(accept);
+   auto client_state = std::make_shared<observed_lower_state>();
+   auto client_lower = observe_lower(std::move(client_tcp).into_transport_stream(), client_state, 0);
+   auto server_lower = std::move(server_tcp).into_transport_stream();
+
+   auto server_upgrade = spawn_result<forge::net::stcp::connection>(
+       executor, forge::net::stcp::async_upgrade_server(std::move(server_lower), server_options(material)));
+   auto client = co_await forge::net::stcp::async_upgrade_client(std::move(client_lower), client_options(material));
+   auto server = co_await take_result(server_upgrade);
+   auto pending_read = spawn_result<bytes>(executor, client.async_read());
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   client.cancel();
+   BOOST_CHECK_THROW((void)co_await take_result(pending_read), forge::net::stcp::exceptions::canceled);
+   co_await client.async_close();
+   BOOST_TEST(client_state->cancel_requests.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(client_state->close_calls.load(std::memory_order_relaxed) == 1U);
    co_await server.async_close();
    co_await listener.async_close();
 }
@@ -1215,6 +1500,35 @@ BOOST_AUTO_TEST_CASE(stcp_loopback_roundtrip_and_transport_stream) {
 BOOST_AUTO_TEST_CASE(stcp_upgrades_existing_tcp_connection) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, stcp_upgrade_roundtrip());
+}
+
+BOOST_AUTO_TEST_CASE(stcp_upgrades_generic_transport_streams_with_full_duplex_and_handoff_lifetime) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_transport_upgrade_preserves_endpoints_lifetime_and_full_duplex(), std::chrono::seconds{10}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_generic_transport_timeout_requests_one_lower_cancel) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_transport_upgrade_timeout_requests_one_lower_cancel(), std::chrono::seconds{2}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_generic_transport_preserves_non_terminal_lower_failure) {
+   auto runtime = forge::asio::runtime{};
+   forge::asio::blocking::run(runtime, stcp_transport_upgrade_preserves_non_terminal_failure());
+}
+
+BOOST_AUTO_TEST_CASE(stcp_generic_transport_stop_requests_one_lower_cancel) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_transport_upgrade_stop_requests_one_lower_cancel(), std::chrono::seconds{5}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_generic_transport_cancel_closes_lower_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_transport_upgrade_cancel_closes_lower_once(), std::chrono::seconds{5}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_handshake_deadline_has_one_deterministic_terminal_state) {

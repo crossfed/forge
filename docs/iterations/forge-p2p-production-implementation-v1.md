@@ -449,16 +449,17 @@ listener and use `--transport tcp-pnet`. The key bytes are neither serialized,
 logged nor added to the evidence index.
 Both endpoint result files must report `pnet_enabled=true`,
 `negotiated_pnet=true`, and one shared non-secret `pnet_fingerprint`. Its exact
-value is `SHA-256("forge-p2p-stage6-pnet-fingerprint-v1" || 0x00 || PSK-file-bytes)`;
+value is `SHA-256("forge.net.pnet.operational-fingerprint.v1" || 0x00 || decoded-PSK-bytes)`;
 the PR4 runner and its newly registered validator must independently recompute
 it from the configured file without serializing, logging or indexing the PSK
 bytes. PR0 does not install a PNET validator or synthetic control artifact.
 The root PNET scenario additionally needs one same-key positive run and two
 separately indexed control executions: missing key and mismatched key. Each
 control binds its launcher command, log and result to the expected peer and
-must show one attempted connection, zero established connections and zero
-Identify/application streams with rejection before Identify. The mismatched-key
-fixture key also remains outside the artifact directory and evidence index.
+must show an outbound dial boundary and actual listener ingress, zero
+established connections and zero Identify/application streams with rejection
+before Identify. The mismatched-key fixture key also remains outside the
+artifact directory and evidence index.
 If a future private AutoNAT scenario requires
 `reachability.private_internet_policy`, both commands must additionally pass
 `--private-egress-policy allow-internet`; both results must report that policy

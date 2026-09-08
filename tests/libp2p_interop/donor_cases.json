@@ -411,6 +411,36 @@
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
     {
+      "id": "interop.live_private_network_pnet",
+      "protocol": "Private TCP + PNET + Noise/TLS + Yamux",
+      "source": "libp2p private-network PSK specification and pinned Go/Rust PNET transport implementations",
+      "donor": "go-libp2p PNET protector and rust-libp2p PnetConfig stream handshake",
+      "donor_file": [
+        "donors/libp2p-specs/pnet/Private-Networks-PSK-V1.md",
+        "donors/go-libp2p/core/pnet/codec.go",
+        "donors/go-libp2p/p2p/net/pnet/psk_conn.go",
+        "donors/rust-libp2p/transports/pnet/src/lib.rs",
+        "donors/rust-libp2p/examples/ipfs-private/src/main.rs"
+      ],
+      "donor_case": [
+        "canonical swarm.key PSK parsing",
+        "eager local nonce",
+        "lazy peer nonce",
+        "XSalsa20 stream protection",
+        "post-PNET Noise or TLS negotiation",
+        "post-security Yamux negotiation"
+      ],
+      "mapping_state": "mapped",
+      "forge_tests": [ "test_forge_libp2p_interop pnet" ],
+      "forge_live_scenario": [
+        {
+          "profile": "private_tcp_yamux_pnet",
+          "scenario": "pnet"
+        }
+      ],
+      "known_gap": "The registered evidence covers only direct TCP plus Yamux and the existing Noise/TLS secure-channel compositions. It makes no QUIC, Relay or DCUtR claim."
+    },
+    {
       "id": "transport.tcp_tls_yamux_direct",
       "protocol": "TCP + TLS + Yamux",
       "source": "donors/libp2p-specs/tls/tls.md and connections/inlined-muxer-negotiation.md",

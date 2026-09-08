@@ -810,7 +810,7 @@ def main() -> int:
             {"private_network"}, "optional", "opt_in", "go_only_rust_limited", "stage_6"
         ),
         "security.private_network_psk": (
-            {"private_network"}, "required", "enabled", "go_and_rust", "stage_6"
+            {"private_network"}, "required", "enabled", "go_and_rust", "current"
         ),
         "connections.coordinated_dial_port_reuse": (
             {"native", "private_network"}, "required", "enabled", "go_and_rust", "stage_6"
@@ -1137,7 +1137,7 @@ def main() -> int:
     }
     allowed_profile_transport_stacks = {
         "native": {("quic",), ("tcp", "yamux")},
-        "private_network": {("tcp", "yamux", "pnet")},
+        "private_network": {("tcp", "pnet", "yamux")},
     }
     seen_scenario_ids: set[str] = set()
     seen_evidence_contracts: set[str] = set()
@@ -1291,7 +1291,13 @@ def main() -> int:
             elif registration == "planned":
                 if not isinstance(required_capabilities, list) or any(
                     not isinstance(required, str)
-                    or capabilities_by_id.get(required, {}).get("decision") != "stage_6"
+                    or (
+                        capabilities_by_id.get(required, {}).get("decision") != "stage_6"
+                        and not (
+                            required == "security.private_network_psk"
+                            and capabilities_by_id.get(required, {}).get("decision") == "current"
+                        )
+                    )
                     for required in required_capabilities
                 ) or len(set(required_capabilities)) != len(required_capabilities):
                     errors.append(
@@ -1456,7 +1462,7 @@ def main() -> int:
         scenario = matching[0]
         if (
             scenario.get("profile") != "private_network"
-            or scenario.get("transport_stack") != ["tcp", "yamux", "pnet"]
+            or scenario.get("transport_stack") != ["tcp", "pnet", "yamux"]
             or scenario.get("activation") != "enabled"
             or scenario.get("registration") != "planned"
             or scenario.get("requires_capabilities") != ["security.private_network_psk"]

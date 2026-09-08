@@ -36,6 +36,8 @@ EXPECTED_TOOLCHAINS = {
 }
 
 EXPECTED_FIXTURE_FILES = {
+    "fixtures/pnet/mismatched-swarm.key",
+    "fixtures/pnet/swarm.key",
     "go_fixture/go.mod",
     "go_fixture/go.sum",
     "go_fixture/main.go",
