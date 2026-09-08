@@ -13,6 +13,7 @@ struct address_resolution {
       std::size_t max_resolved_addresses = 100;
       std::size_t max_recursion_depth = 4;
       std::size_t max_multiaddr_size = 4096;
+      std::size_t max_roots = 100;
    };
 
    struct policy {

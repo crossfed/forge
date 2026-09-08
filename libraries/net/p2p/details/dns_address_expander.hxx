@@ -23,6 +23,7 @@ struct dns_address_expansion_state {
    std::vector<endpoint> results;
    std::set<std::string> result_keys;
    std::set<std::string> active;
+   std::set<std::string> completed;
    dns_address_branch_failure strongest_branch_failure = dns_address_branch_failure::none;
 };
 
@@ -44,12 +45,31 @@ class dns_address_expander final {
    static void validate_policy(const address_resolution::policy& value);
 
    [[nodiscard]] boost::asio::awaitable<std::vector<endpoint>>
-   async_expand(forge::multiformats::multiaddr value, std::optional<peer_id> expected_peer,
+   async_expand(std::vector<forge::multiformats::multiaddr> roots, std::optional<peer_id> expected_peer,
+                std::chrono::steady_clock::time_point deadline, std::stop_token stop = {});
+   [[nodiscard]] boost::asio::awaitable<std::vector<endpoint>>
+   async_expand(forge::multiformats::multiaddr root, std::optional<peer_id> expected_peer,
                 std::chrono::steady_clock::time_point deadline, std::stop_token stop = {});
 
  private:
+   [[nodiscard]] static boost::asio::awaitable<std::vector<endpoint>>
+   async_expand_owned(address_resolution::policy policy, resolver_callbacks callbacks,
+                      std::vector<forge::multiformats::multiaddr> roots, std::optional<peer_id> expected_peer,
+                      std::chrono::steady_clock::time_point deadline, std::stop_token stop);
+
    address_resolution::policy policy_;
    resolver_callbacks callbacks_;
+};
+
+struct dns_address_expansion_operation final {
+   dns_address_expansion_operation(address_resolution::policy policy_value,
+                                   dns_address_expander::resolver_callbacks callbacks_value,
+                                   std::optional<peer_id> expected_peer_value);
+
+   address_resolution::policy policy;
+   dns_address_expander::resolver_callbacks callbacks;
+   std::optional<peer_id> expected_peer;
+   dns_address_expansion_state state;
 };
 
 } // namespace forge::net::p2p::detail

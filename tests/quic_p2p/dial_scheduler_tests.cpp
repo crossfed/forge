@@ -458,19 +458,34 @@ class dial_script final {
    };
 }
 
+[[nodiscard]] p2p::detail::dial_scheduler::request request_for(std::vector<std::string> values,
+                                                                 std::chrono::milliseconds timeout,
+                                                                 std::optional<p2p::peer_id> expected_peer = {},
+                                                                 std::stop_token stop = {},
+                                                                 std::chrono::milliseconds attempt_timeout =
+                                                                     std::chrono::seconds{1}) {
+   auto roots = std::vector<forge::multiformats::multiaddr>{};
+   roots.reserve(values.size());
+   for (auto& value : values) {
+      roots.push_back(forge::multiformats::multiaddr::parse(std::move(value)));
+   }
+   return {
+       .roots = std::move(roots),
+       .expected_peer = std::move(expected_peer),
+       .logical_deadline = std::chrono::steady_clock::now() + timeout,
+       .attempt_timeout = attempt_timeout,
+       .stop = stop,
+   };
+}
+
 [[nodiscard]] p2p::detail::dial_scheduler::request request_for(std::string value,
                                                                  std::chrono::milliseconds timeout,
                                                                  std::optional<p2p::peer_id> expected_peer = {},
                                                                  std::stop_token stop = {},
                                                                  std::chrono::milliseconds attempt_timeout =
                                                                      std::chrono::seconds{1}) {
-   return {
-       .address = forge::multiformats::multiaddr::parse(value),
-       .expected_peer = std::move(expected_peer),
-       .logical_deadline = std::chrono::steady_clock::now() + timeout,
-       .attempt_timeout = attempt_timeout,
-       .stop = stop,
-   };
+   return request_for(std::vector<std::string>{std::move(value)}, timeout, std::move(expected_peer), stop,
+                      attempt_timeout);
 }
 
 } // namespace
@@ -506,6 +521,35 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_expands_ranks_and_records_attributable_feedb
    BOOST_TEST(detector.udp.successes == 1U);
    BOOST_TEST(detector.ipv6.outcomes == 1U);
    BOOST_TEST(detector.ipv6.successes == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_ranks_multiple_roots_under_one_deadline) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_responses.emplace("private-root.test", addresses({"192.168.1.20"}));
+   script->address_responses.emplace("public-root.test", addresses({"8.8.4.4"}));
+   script->behaviors.emplace("/ip4/192.168.1.20/tcp/4001", dial_script::behavior::wait_for_release_then_succeed);
+   script->behaviors.emplace("/ip4/8.8.4.4/tcp/4001", dial_script::behavior::wait_for_release_then_succeed);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 2}};
+   auto request = request_for(std::vector<std::string>{"/dns/private-root.test/tcp/4001",
+                                                       "/dns/public-root.test/tcp/4001"},
+                              std::chrono::seconds{1});
+   const auto logical_deadline = request.logical_deadline;
+
+   auto result = boost::asio::co_spawn(runtime.context().get_executor(),
+                                        scheduler.async_dial(std::move(request), callbacks_for(script)),
+                                        boost::asio::use_future);
+   BOOST_REQUIRE(script->wait_for_starts(2));
+   const auto starts = script->starts();
+   BOOST_REQUIRE_EQUAL(starts.size(), 2U);
+   BOOST_TEST(starts[0].endpoint == "/ip4/192.168.1.20/tcp/4001");
+   BOOST_TEST(starts[1].endpoint == "/ip4/8.8.4.4/tcp/4001");
+   BOOST_CHECK(starts[0].deadline == logical_deadline);
+   BOOST_CHECK(starts[1].deadline == logical_deadline);
+
+   script->release_starts();
+   static_cast<void>(result.get());
+   BOOST_TEST(script->finished_attempts() == 2U);
 }
 
 BOOST_AUTO_TEST_CASE(dial_scheduler_terminally_discards_late_loser_before_returning_winner) {

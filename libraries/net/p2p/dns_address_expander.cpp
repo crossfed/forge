@@ -9,6 +9,7 @@ module;
 #include <exception>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stop_token>
@@ -36,6 +37,13 @@ import forge.net.p2p.identity;
 #include "details/dns_address_expander.hxx"
 
 namespace forge::net::p2p::detail {
+
+dns_address_expansion_operation::dns_address_expansion_operation(
+    address_resolution::policy policy_value, dns_address_expander::resolver_callbacks callbacks_value,
+    std::optional<peer_id> expected_peer_value)
+    : policy(std::move(policy_value)), callbacks(std::move(callbacks_value)), expected_peer(std::move(expected_peer_value)),
+      state{.limits = policy.bounds} {}
+
 namespace {
 
 namespace dns = forge::net::dns;
@@ -45,7 +53,19 @@ using protocol_code = multiformats::protocol_code;
 using multiaddr = multiformats::multiaddr;
 using multiaddr_component = multiformats::multiaddr_component;
 
+[[nodiscard]] boost::asio::awaitable<dns::address_response>
+async_resolve_address_callback(dns::resolver* resolver, std::string name, dns::address_family family,
+                               dns::query_options options, std::stop_token stop) {
+   co_return co_await resolver->async_resolve_addresses(std::move(name), family, std::move(options), stop);
+}
+
+[[nodiscard]] boost::asio::awaitable<dns::text_response>
+async_resolve_txt_callback(dns::resolver* resolver, std::string name, dns::query_options options, std::stop_token stop) {
+   co_return co_await resolver->async_resolve_txt(std::move(name), std::move(options), stop);
+}
+
 constexpr auto dnsaddr_prefix_size = std::string_view{"dnsaddr="}.size();
+constexpr auto forge_max_address_roots = std::size_t{100};
 constexpr auto max_dns_lookups = std::size_t{32};
 constexpr auto max_dns_txt_answers = std::size_t{4096};
 constexpr auto max_dnsaddr_candidates_per_lookup = std::size_t{16};
@@ -73,12 +93,16 @@ constexpr auto max_multiaddr_size = std::size_t{4096};
 
 void validate_policy_value(const address_resolution::policy& value) {
    const auto& bounds = value.bounds;
-   if (bounds.max_dns_lookups == 0 || bounds.max_txt_records == 0 || bounds.max_resolved_addresses == 0 ||
+   if (bounds.max_roots == 0 || bounds.max_dns_lookups == 0 || bounds.max_txt_records == 0 ||
+       bounds.max_resolved_addresses == 0 ||
        bounds.max_recursion_depth == 0 || bounds.max_multiaddr_size == 0) {
       throw_invalid_options("P2P DNS address resolution limits must be greater than zero");
    }
    if (bounds.max_txt_records > max_dnsaddr_candidates_per_lookup) {
       throw_invalid_options("P2P DNS address resolution TXT candidate limit exceeds donor ceiling");
+   }
+   if (bounds.max_roots > forge_max_address_roots) {
+      throw_invalid_options("P2P DNS address resolution root limit exceeds the Forge operation ceiling");
    }
    if (bounds.max_dns_lookups > max_dns_lookups || bounds.max_resolved_addresses > max_resolved_addresses ||
        bounds.max_recursion_depth > max_recursion_depth || bounds.max_multiaddr_size > max_multiaddr_size) {
@@ -374,10 +398,10 @@ void record_branch_failure(dns_address_expansion_state& state, dns_address_branc
 }
 
 template <typename Response, typename Operation>
-[[nodiscard]] boost::asio::awaitable<std::optional<Response>> perform_lookup(dns_address_expansion_state& state,
-                                                                               Operation&& operation) {
+[[nodiscard]] boost::asio::awaitable<std::optional<Response>>
+perform_lookup(dns_address_expansion_state& state, Operation operation) {
    try {
-      co_return co_await std::forward<Operation>(operation)();
+      co_return co_await operation();
    } catch (const forge::exceptions::base& error) {
       if (dns::exceptions::is(error, dns::exceptions::code::timeout)) {
          throw_timeout();
@@ -411,6 +435,154 @@ template <typename Response, typename Operation>
    }
 }
 
+[[nodiscard]] std::optional<peer_id>
+consistent_expected_peer(const std::vector<multiaddr>& roots, std::optional<peer_id> expected_peer,
+                         std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
+   for (const auto& root : roots) {
+      check_cancellation(deadline, stop);
+      for (const auto& component : root.components()) {
+         if (component.code != protocol_code::p2p) {
+            continue;
+         }
+         auto embedded_peer = peer_id{};
+         try {
+            embedded_peer = peer_id::from_string(component.value);
+         } catch (const forge::exceptions::base&) {
+            throw_invalid_options("P2P DNS address resolution root contains an invalid peer id");
+         }
+         if (expected_peer && *expected_peer != embedded_peer) {
+            throw_invalid_options("P2P DNS address resolution roots disagree on the expected peer");
+         }
+         expected_peer = std::move(embedded_peer);
+      }
+   }
+   return expected_peer;
+}
+
+[[nodiscard]] boost::asio::awaitable<void>
+async_expand_candidate(const std::shared_ptr<dns_address_expansion_operation>& operation, multiaddr candidate,
+                       std::chrono::steady_clock::time_point deadline, std::stop_token stop, std::size_t depth,
+                       bool discovered) {
+   auto& state = operation->state;
+   check_cancellation(deadline, stop);
+   const auto active_key = candidate.to_string();
+   if (state.completed.contains(active_key) || !state.active.insert(active_key).second) {
+      co_return;
+   }
+   try {
+      const auto unresolved = first_unresolved_component(candidate);
+      if (!unresolved) {
+         append_endpoint(state, candidate, operation->expected_peer, discovered);
+      } else {
+         if (depth >= state.limits.max_recursion_depth) {
+            throw_invalid_options("P2P DNS address resolution exceeded configured recursion depth");
+         }
+
+         const auto [component_index, code] = *unresolved;
+         const auto& component = candidate.components()[component_index];
+         if (state.results.size() == state.limits.max_resolved_addresses) {
+            throw_invalid_options("P2P DNS address resolution exceeded configured result limit");
+         }
+         consume_lookup(state);
+         if (code != protocol_code::dnsaddr) {
+            const auto family = family_for(code);
+            const auto remaining = state.limits.max_resolved_addresses - state.results.size();
+            auto response = co_await perform_lookup<dns::address_response>(state, [operation, name = component.value,
+                                                                                   family,
+                                                                                   options = query_options(
+                                                                                       operation->policy.bounds,
+                                                                                       deadline, remaining),
+                                                                                   stop]() mutable {
+               return operation->callbacks.resolve_addresses(std::move(name), family, std::move(options), stop);
+            });
+            check_cancellation(deadline, stop);
+            if (response) {
+               if (response->answers.size() > remaining) {
+                  throw_invalid_options("P2P DNS address resolution exceeded configured result limit");
+               }
+               for (const auto& answer : response->answers) {
+                  if (!accepts_family(answer.value, family)) {
+                     continue;
+                  }
+                  const auto replacement = multiaddr_component{
+                      .code = answer.value.is_v4() ? protocol_code::ip4 : protocol_code::ip6,
+                      .value = answer.value.to_string(),
+                  };
+                  co_await async_expand_candidate(
+                      operation,
+                      replace_component(candidate, component_index, replacement, state.limits.max_multiaddr_size),
+                      deadline, stop, depth + 1, true);
+               }
+            }
+         } else {
+            const auto lookup_name = "_dnsaddr." + component.value;
+            const auto raw_answer_limit = raw_txt_answer_limit(operation->policy.bounds);
+            auto response = co_await perform_lookup<dns::text_response>(state, [operation, name = lookup_name,
+                                                                                options = query_options(
+                                                                                    operation->policy.bounds, deadline,
+                                                                                    raw_answer_limit),
+                                                                                stop]() mutable {
+               return operation->callbacks.resolve_txt(std::move(name), std::move(options), stop);
+            });
+            check_cancellation(deadline, stop);
+            if (response) {
+               if (response->answers.size() > raw_answer_limit) {
+                  throw_invalid_options("P2P DNS address resolution exceeded raw TXT answer limit");
+               }
+
+               const auto prefix = component_slice(candidate.components(), 0, component_index);
+               const auto suffix = component_slice(candidate.components(), component_index + 1,
+                                                   candidate.components().size());
+               auto matching_candidates = std::size_t{0};
+               for (const auto& answer : response->answers) {
+                  constexpr auto dnsaddr_prefix = std::string_view{"dnsaddr="};
+                  if (answer.value.size() >
+                      checked_add(state.limits.max_multiaddr_size, dnsaddr_prefix.size(), "sizing DNS TXT records")) {
+                     throw_invalid_options("P2P DNS address resolution TXT record exceeds configured size limit");
+                  }
+                  if (answer.value.size() <= dnsaddr_prefix.size() ||
+                      !std::equal(dnsaddr_prefix.begin(), dnsaddr_prefix.end(), answer.value.begin())) {
+                     continue;
+                  }
+                  auto text = std::string{answer.value.begin() + static_cast<std::ptrdiff_t>(dnsaddr_prefix.size()),
+                                          answer.value.end()};
+                  if (text.size() > state.limits.max_multiaddr_size) {
+                     throw_invalid_options("P2P DNS address resolution TXT candidate exceeds configured size limit");
+                  }
+                  auto parsed = multiaddr{};
+                  try {
+                     parsed = multiaddr::parse(text);
+                  } catch (const multiformats::exceptions::invalid_format&) {
+                     // DNSADDR records are independently supplied candidates; malformed
+                     // records must not poison other valid records in the same answer.
+                     continue;
+                  }
+                  ensure_size_at_most(parsed.components(), state.limits.max_multiaddr_size);
+                  if (!ends_with_components(parsed.components(), suffix) ||
+                      !candidate_peer_matches(parsed, operation->expected_peer)) {
+                     continue;
+                  }
+                  auto expanded = join_components(prefix, remove_suffix_components(parsed.components(), suffix), suffix,
+                                                  state.limits.max_multiaddr_size);
+                  const auto expanded_key = expanded.to_string();
+                  if (state.completed.contains(expanded_key) || state.active.contains(expanded_key) ||
+                      matching_candidates == state.limits.max_txt_records) {
+                     continue;
+                  }
+                  ++matching_candidates;
+                  co_await async_expand_candidate(operation, std::move(expanded), deadline, stop, depth + 1, true);
+               }
+            }
+         }
+      }
+   } catch (...) {
+      state.active.erase(active_key);
+      throw;
+   }
+   state.active.erase(active_key);
+   state.completed.insert(active_key);
+}
+
 } // namespace
 
 void dns_address_expander::validate_policy(const address_resolution::policy& value) {
@@ -430,148 +602,64 @@ dns_address_expander::dns_address_expander(dns::resolver& resolver, address_reso
           std::move(policy),
           resolver_callbacks{
               .resolve_addresses =
-                  [&resolver](std::string name, dns::address_family family, dns::query_options options,
-                              std::stop_token stop) -> boost::asio::awaitable<dns::address_response> {
-               co_return co_await resolver.async_resolve_addresses(std::move(name), family, std::move(options), stop);
+                  [resolver = &resolver](std::string name, dns::address_family family, dns::query_options options,
+                                         std::stop_token stop) {
+               return async_resolve_address_callback(resolver, std::move(name), family, std::move(options), stop);
             },
               .resolve_txt =
-                  [&resolver](std::string name, dns::query_options options,
-                              std::stop_token stop) -> boost::asio::awaitable<dns::text_response> {
-               co_return co_await resolver.async_resolve_txt(std::move(name), std::move(options), stop);
+                  [resolver = &resolver](std::string name, dns::query_options options, std::stop_token stop) {
+               return async_resolve_txt_callback(resolver, std::move(name), std::move(options), stop);
             },
           }) {}
 
 boost::asio::awaitable<std::vector<endpoint>>
-dns_address_expander::async_expand(multiaddr value, std::optional<peer_id> expected_peer,
+dns_address_expander::async_expand(std::vector<multiaddr> roots, std::optional<peer_id> expected_peer,
                                    std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
-   check_cancellation(deadline, stop);
-   ensure_size_at_most(value.components(), policy_.bounds.max_multiaddr_size);
+   auto policy = policy_;
+   auto callbacks = callbacks_;
+   return async_expand_owned(std::move(policy), std::move(callbacks), std::move(roots), std::move(expected_peer),
+                             deadline, stop);
+}
 
-   auto state = dns_address_expansion_state{.limits = policy_.bounds};
-   auto expand = std::function<boost::asio::awaitable<void>(multiaddr, std::size_t, bool)>{};
-   expand = [this, &state, &expand, &expected_peer, deadline, stop](multiaddr candidate, std::size_t depth,
-                                                                      bool discovered) -> boost::asio::awaitable<void> {
+boost::asio::awaitable<std::vector<endpoint>>
+dns_address_expander::async_expand(multiaddr root, std::optional<peer_id> expected_peer,
+                                   std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
+   return async_expand(std::vector<multiaddr>{std::move(root)}, std::move(expected_peer), deadline, stop);
+}
+
+boost::asio::awaitable<std::vector<endpoint>>
+dns_address_expander::async_expand_owned(address_resolution::policy policy, resolver_callbacks callbacks,
+                                         std::vector<multiaddr> roots, std::optional<peer_id> expected_peer,
+                                         std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
+   check_cancellation(deadline, stop);
+   if (roots.empty()) {
+      throw_invalid_options("P2P DNS address resolution requires at least one root");
+   }
+   if (roots.size() > policy.bounds.max_roots) {
+      throw_invalid_options("P2P DNS address resolution root count exceeds configured limit");
+   }
+   for (const auto& root : roots) {
       check_cancellation(deadline, stop);
-      const auto active_key = candidate.to_string();
-      if (!state.active.insert(active_key).second) {
-         co_return;
-      }
-      try {
-         const auto unresolved = first_unresolved_component(candidate);
-         if (!unresolved) {
-            append_endpoint(state, candidate, expected_peer, discovered);
-         } else {
-            if (depth >= state.limits.max_recursion_depth) {
-               throw_invalid_options("P2P DNS address resolution exceeded configured recursion depth");
-            }
+      ensure_size_at_most(root.components(), policy.bounds.max_multiaddr_size);
+   }
+   expected_peer = consistent_expected_peer(roots, std::move(expected_peer), deadline, stop);
 
-            const auto [component_index, code] = *unresolved;
-            const auto& component = candidate.components()[component_index];
-            if (state.results.size() == state.limits.max_resolved_addresses) {
-               throw_invalid_options("P2P DNS address resolution exceeded configured result limit");
-            }
-            consume_lookup(state);
-            if (code != protocol_code::dnsaddr) {
-               const auto family = family_for(code);
-               const auto remaining = state.limits.max_resolved_addresses - state.results.size();
-               auto response = co_await perform_lookup<dns::address_response>(state, [&] {
-                  return callbacks_.resolve_addresses(component.value, family,
-                                                      query_options(policy_.bounds, deadline, remaining), stop);
-               });
-               check_cancellation(deadline, stop);
-               if (response) {
-                  if (response->answers.size() > remaining) {
-                     throw_invalid_options("P2P DNS address resolution exceeded configured result limit");
-                  }
-                  for (const auto& answer : response->answers) {
-                     if (!accepts_family(answer.value, family)) {
-                        continue;
-                     }
-                     const auto replacement = multiaddr_component{
-                         .code = answer.value.is_v4() ? protocol_code::ip4 : protocol_code::ip6,
-                         .value = answer.value.to_string(),
-                     };
-                     co_await expand(
-                         replace_component(candidate, component_index, replacement, state.limits.max_multiaddr_size),
-                         depth + 1, true);
-                  }
-               }
-            } else {
-               const auto lookup_name = "_dnsaddr." + component.value;
-               const auto raw_answer_limit = raw_txt_answer_limit(policy_.bounds);
-               auto response = co_await perform_lookup<dns::text_response>(state, [&] {
-                  return callbacks_.resolve_txt(lookup_name, query_options(policy_.bounds, deadline, raw_answer_limit),
-                                                stop);
-               });
-               check_cancellation(deadline, stop);
-               if (response) {
-                  if (response->answers.size() > raw_answer_limit) {
-                     throw_invalid_options("P2P DNS address resolution exceeded raw TXT answer limit");
-                  }
-
-                  const auto prefix = component_slice(candidate.components(), 0, component_index);
-                  const auto suffix = component_slice(candidate.components(), component_index + 1,
-                                                      candidate.components().size());
-                  auto matching_candidates = std::size_t{0};
-                  for (const auto& answer : response->answers) {
-                     constexpr auto dnsaddr_prefix = std::string_view{"dnsaddr="};
-                     if (answer.value.size() >
-                         checked_add(state.limits.max_multiaddr_size, dnsaddr_prefix.size(),
-                                     "sizing DNS TXT records")) {
-                        throw_invalid_options("P2P DNS address resolution TXT record exceeds configured size limit");
-                     }
-                     if (answer.value.size() <= dnsaddr_prefix.size() ||
-                         !std::equal(dnsaddr_prefix.begin(), dnsaddr_prefix.end(), answer.value.begin())) {
-                        continue;
-                     }
-                     auto text = std::string{answer.value.begin() + static_cast<std::ptrdiff_t>(dnsaddr_prefix.size()),
-                                             answer.value.end()};
-                     if (text.size() > state.limits.max_multiaddr_size) {
-                        throw_invalid_options("P2P DNS address resolution TXT candidate exceeds configured size limit");
-                     }
-                     auto parsed = multiaddr{};
-                     try {
-                        parsed = multiaddr::parse(text);
-                     } catch (const multiformats::exceptions::invalid_format&) {
-                        // DNSADDR records are independently supplied candidates; malformed
-                        // records must not poison other valid records in the same answer.
-                        continue;
-                     }
-                     ensure_size_at_most(parsed.components(), state.limits.max_multiaddr_size);
-                     if (!ends_with_components(parsed.components(), suffix) ||
-                         !candidate_peer_matches(parsed, expected_peer)) {
-                        continue;
-                     }
-                     if (matching_candidates == state.limits.max_txt_records) {
-                        continue;
-                     }
-                     ++matching_candidates;
-                     auto middle = remove_suffix_components(parsed.components(), suffix);
-                     auto expanded = join_components(prefix, middle, suffix, state.limits.max_multiaddr_size);
-                     co_await expand(std::move(expanded), depth + 1, true);
-                  }
-               }
-            }
-         }
-      } catch (...) {
-         state.active.erase(active_key);
-         throw;
-      }
-      state.active.erase(active_key);
-   };
-
-   co_await expand(std::move(value), 0, false);
+   auto operation = std::make_shared<dns_address_expansion_operation>(std::move(policy), std::move(callbacks),
+                                                                       std::move(expected_peer));
+   for (auto& root : roots) {
+      co_await async_expand_candidate(operation, std::move(root), deadline, stop, 0, false);
+   }
    check_cancellation(deadline, stop);
-   if (state.results.empty()) {
-      if (state.strongest_branch_failure == dns_address_branch_failure::temporary_failure) {
+   if (operation->state.results.empty()) {
+      if (operation->state.strongest_branch_failure == dns_address_branch_failure::temporary_failure) {
          FORGE_THROW_EXCEPTION(exceptions::temporary_failure, "P2P DNS address resolution temporarily failed");
       }
-      if (state.strongest_branch_failure == dns_address_branch_failure::not_found) {
+      if (operation->state.strongest_branch_failure == dns_address_branch_failure::not_found) {
          FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "P2P DNS address resolution found no peer endpoint");
       }
       throw_invalid_options("P2P DNS address resolution produced no direct endpoint");
    }
-   co_return std::move(state.results);
+   co_return std::move(operation->state.results);
 }
 
 } // namespace forge::net::p2p::detail

@@ -42,7 +42,7 @@ class dial_scheduler final {
    };
 
    struct request {
-      forge::multiformats::multiaddr address;
+      std::vector<forge::multiformats::multiaddr> roots;
       std::optional<peer_id> expected_peer;
       clock::time_point logical_deadline = clock::time_point::max();
       std::chrono::milliseconds attempt_timeout{10'000};

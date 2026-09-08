@@ -118,7 +118,7 @@ start_at(const dial_scheduler::clock::time_point started, const dial_plan_item& 
 [[nodiscard]] boost::asio::awaitable<std::vector<endpoint>>
 async_expand_with_callbacks(const dial_scheduler::policy& policy,
                             const std::shared_ptr<dial_scheduler::operation_callbacks>& callbacks,
-                            forge::multiformats::multiaddr address, std::optional<peer_id> expected_peer,
+                            std::vector<forge::multiformats::multiaddr> roots, std::optional<peer_id> expected_peer,
                             dial_scheduler::clock::time_point deadline, std::stop_token stop) {
    auto expander = dns_address_expander{
        policy.resolution,
@@ -131,7 +131,7 @@ async_expand_with_callbacks(const dial_scheduler::policy& policy,
             [callbacks](std::string name, forge::net::dns::query_options options, std::stop_token lookup_stop) {
                return callbacks->resolve_txt(std::move(name), std::move(options), lookup_stop);
             }}};
-   co_return co_await expander.async_expand(std::move(address), std::move(expected_peer), deadline, stop);
+   co_return co_await expander.async_expand(std::move(roots), std::move(expected_peer), deadline, stop);
 }
 
 } // namespace
@@ -407,7 +407,8 @@ void dial_scheduler::validate_policy(const policy& value) {
 }
 
 void dial_scheduler::validate_request(const request& value) {
-   if (value.logical_deadline == clock::time_point::max() || value.attempt_timeout <= std::chrono::milliseconds::zero()) {
+   if (value.roots.empty() || value.logical_deadline == clock::time_point::max() ||
+       value.attempt_timeout <= std::chrono::milliseconds::zero()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                             "P2P direct dial scheduler requires finite positive operation time bounds");
    }
@@ -502,11 +503,11 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
 
    auto expanded = std::vector<endpoint>{};
    if (has_resolver_callbacks) {
-      expanded = co_await async_expand_with_callbacks(owner->policy_, callback_set, std::move(value.address),
+      expanded = co_await async_expand_with_callbacks(owner->policy_, callback_set, std::move(value.roots),
                                                        value.expected_peer, value.logical_deadline,
                                                        operation->stop_token());
    } else {
-      expanded = co_await owner->expander_.async_expand(std::move(value.address), value.expected_peer,
+      expanded = co_await owner->expander_.async_expand(std::move(value.roots), value.expected_peer,
                                                          value.logical_deadline, operation->stop_token());
    }
    if (is_canceled(value.stop)) {
