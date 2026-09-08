@@ -511,36 +511,7 @@ node::session_info node::impl::session_info_for(const std::shared_ptr<session_st
    return session->info;
 }
 
-node::impl::direct_attempt::direct_attempt(direct_attempt&& other) noexcept
-    : connection(std::move(other.connection)), resources(std::move(other.resources)), target(std::move(other.target)),
-      started_at(other.started_at) {}
-
-node::impl::direct_attempt& node::impl::direct_attempt::operator=(direct_attempt&& other) noexcept {
-   if (this != &other) {
-      reset();
-      connection = std::move(other.connection);
-      resources = std::move(other.resources);
-      target = std::move(other.target);
-      started_at = other.started_at;
-   }
-   return *this;
-}
-
-node::impl::direct_attempt::~direct_attempt() {
-   reset();
-}
-
-void node::impl::direct_attempt::reset() noexcept {
-   detail::request_session_cancel(connection.session);
-   // Dropping the session after its cancel request transfers the final native
-   // cleanup to the transport. Its shared resource state retains the teardown
-   // ticket until that terminal worker releases it.
-   connection.session = {};
-   connection.native_lifetime.reset();
-   resources.reset();
-}
-
-boost::asio::awaitable<node::impl::direct_attempt>
+boost::asio::awaitable<detail::direct_attempt>
 node::impl::connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
                                    std::shared_ptr<cancellation_latch> cancellation,
                                    direct::tcp_transport_progress_handler tcp_transport_progress) {
@@ -565,7 +536,7 @@ node::impl::connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::con
       ++metrics_value.connection_rejections;
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P outbound TCP/QUIC file descriptor limit reached");
    }
-   auto staged_resources = std::make_shared<direct_attempt_resources>();
+   auto staged_resources = std::make_shared<detail::direct_attempt_resources>();
    staged_resources->session = std::move(*reservation);
    staged_resources->file_descriptor = std::move(*descriptor);
    auto operation_cancellation = std::make_shared<cancellation_latch>();
@@ -600,7 +571,7 @@ node::impl::connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::con
                                                            std::move(operation_cancellation), staged_resources,
                                                            std::move(authenticated_admission),
                                                            std::move(tcp_transport_progress));
-      auto attempt = direct_attempt{};
+      auto attempt = detail::direct_attempt{};
       attempt.connection = std::move(result);
       attempt.resources = std::move(staged_resources);
       attempt.target = std::move(endpoint_copy);
@@ -626,7 +597,7 @@ node::impl::connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::con
    }
 }
 
-boost::asio::awaitable<void> node::impl::async_close_direct_attempt(direct_attempt& attempt) {
+boost::asio::awaitable<void> node::impl::async_close_direct_attempt(detail::direct_attempt& attempt) {
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
    auto transport = std::move(attempt.connection.session);
    attempt.connection.session = {};
@@ -647,7 +618,7 @@ boost::asio::awaitable<void> node::impl::async_discard_session(const std::shared
 }
 
 boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
-node::impl::commit_direct_attempt(direct_attempt attempt) {
+node::impl::commit_direct_attempt(detail::direct_attempt attempt) {
    auto session = std::shared_ptr<session_state>{};
    auto commit_failure = std::exception_ptr{};
    try {

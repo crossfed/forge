@@ -21,7 +21,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/address.hpp>
 
-module forge.net.p2p.address_resolution;
+module forge.net.p2p.node;
 
 import forge.asio.blocking;
 import forge.asio.runtime;
@@ -29,6 +29,7 @@ import forge.multiformats.multiaddr;
 import forge.net.dns.exceptions;
 import forge.net.dns.resolver;
 import forge.net.dns.types;
+import forge.net.p2p.address_resolution;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;

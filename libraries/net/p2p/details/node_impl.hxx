@@ -34,6 +34,8 @@
 #include <optional>
 #include <vector>
 
+#include "direct_attempt.hxx"
+
 namespace forge::net::p2p {
 
 class cancellation_latch;
@@ -95,32 +97,6 @@ struct node::impl : std::enable_shared_from_this<impl> {
       bool identify_push_supported = false;
       std::vector<protocol_id> remote_protocols;
       std::atomic_bool closed = false;
-   };
-
-   struct direct_attempt_resources {
-      // The transport retains this state until its native connection is gone.
-      // Keep the teardown ticket first so reservations are released before the
-      // node can observe this attempt as terminal.
-      detail::session_teardown::ticket teardown_ticket;
-      resource_manager::session_reservation session;
-      resource_manager::file_descriptor_reservation file_descriptor;
-   };
-
-   struct direct_attempt {
-      // Owns an authenticated transport until exactly one winner commit publishes it.
-      direct_attempt() = default;
-      direct_attempt(const direct_attempt&) = delete;
-      direct_attempt& operator=(const direct_attempt&) = delete;
-      direct_attempt(direct_attempt&& other) noexcept;
-      direct_attempt& operator=(direct_attempt&& other) noexcept;
-      ~direct_attempt();
-
-      void reset() noexcept;
-
-      direct::connection connection;
-      std::shared_ptr<direct_attempt_resources> resources;
-      forge::net::p2p::endpoint target;
-      std::chrono::steady_clock::time_point started_at{};
    };
 
    struct dht_exchange_result {
@@ -568,16 +544,16 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> pubsub_heartbeat_once();
 
-   boost::asio::awaitable<direct_attempt>
+   boost::asio::awaitable<detail::direct_attempt>
    connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
                           std::shared_ptr<cancellation_latch> cancellation = {},
                           direct::tcp_transport_progress_handler tcp_transport_progress = {});
 
-   boost::asio::awaitable<void> async_close_direct_attempt(direct_attempt& attempt);
+   boost::asio::awaitable<void> async_close_direct_attempt(detail::direct_attempt& attempt);
 
    boost::asio::awaitable<void> async_discard_session(const std::shared_ptr<session_state>& session);
 
-   boost::asio::awaitable<std::shared_ptr<session_state>> commit_direct_attempt(direct_attempt attempt);
+   boost::asio::awaitable<std::shared_ptr<session_state>> commit_direct_attempt(detail::direct_attempt attempt);
 
    boost::asio::awaitable<std::shared_ptr<session_state>>
    connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
