@@ -507,6 +507,34 @@ if(FORGE_ENABLE_MDBX)
    target_link_libraries(mdbx-internal PUBLIC Threads::Threads)
 endif()
 
+# c-ares remains a private, static implementation detail of forge_net_dns.
+# Disable every upstream install, tool, test and shared-library surface so the
+# Forge package never depends on a system c-ares package or exports its C API.
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   cmake_policy(PUSH)
+   if(POLICY CMP0077)
+      cmake_policy(SET CMP0077 NEW)
+   endif()
+
+   # c-ares 1.34.8 resets ordinary CARES_* variables under its legacy policy.
+   # Cache values make this private, static-only integration deterministic.
+   set(CARES_STATIC ON CACHE BOOL "Build Forge's private static c-ares target" FORCE)
+   set(CARES_SHARED OFF CACHE BOOL "Disable shared c-ares targets" FORCE)
+   set(CARES_INSTALL OFF CACHE BOOL "Disable c-ares installation rules" FORCE)
+   set(CARES_BUILD_TESTS OFF CACHE BOOL "Disable c-ares tests" FORCE)
+   set(CARES_BUILD_TOOLS OFF CACHE BOOL "Disable c-ares tools" FORCE)
+   set(CARES_SYMBOL_HIDING ON CACHE BOOL "Hide c-ares symbols" FORCE)
+   add_subdirectory(vendor/c-ares EXCLUDE_FROM_ALL)
+   cmake_policy(POP)
+   set_target_properties(
+      c-ares PROPERTIES
+      EXPORT_NAME net_dns_cares_internal
+      C_VISIBILITY_PRESET hidden
+      POSITION_INDEPENDENT_CODE ON
+      INTERFACE_INCLUDE_DIRECTORIES ""
+   )
+endif()
+
 # Keep the XSalsa20 subset private to forge_crypto_symmetric. The upstream
 # sources remain unmodified under vendor/libsodium/upstream; the only Forge C
 # source is the narrow integration shim that prevents the full libsodium API
@@ -607,6 +635,9 @@ set(
    softfloat
    forge_crypto_symmetric_xsalsa20_vendor
 )
+if(TARGET c-ares)
+   list(APPEND FORGE_VENDORED_IMPLEMENTATION_TARGETS c-ares)
+endif()
 foreach(_forge_vendor_target IN LISTS FORGE_VENDORED_IMPLEMENTATION_TARGETS)
    forge_apply_vendored_implementation_policy(${_forge_vendor_target})
 endforeach()
@@ -848,6 +879,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_websocket
       forge_net_transport
       forge_net_tcp
+      forge_net_dns
       forge_net_stcp
       forge_net_yamux
       forge_net_quic
@@ -983,6 +1015,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       multiformats
       net_transport
       net_tcp
+      net_dns
       net_tls
       net_stcp
       net_yamux
@@ -1084,6 +1117,9 @@ endif()
 if(TARGET mdbx-internal)
    list(APPEND FORGE_INTERNAL_TARGETS mdbx-internal)
 endif()
+if(TARGET c-ares)
+   list(APPEND FORGE_INTERNAL_TARGETS c-ares)
+endif()
 
 install(
    TARGETS ${FORGE_INTERNAL_TARGETS}
@@ -1154,6 +1190,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/websocket/include/forge
       libraries/net/transport/include/forge
       libraries/net/tcp/include/forge
+      libraries/net/dns/include/forge
       libraries/net/tls/include/forge
       libraries/net/yamux/include/forge
       libraries/net/quic/include/forge
@@ -1276,6 +1313,19 @@ if(TARGET mdbx-internal)
          "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx/NOTICE"
          "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx/COPYRIGHT"
       DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/libmdbx"
+      COMPONENT dev
+      EXCLUDE_FROM_ALL
+   )
+endif()
+
+if(TARGET c-ares)
+   install(
+      FILES
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/c-ares/LICENSE.md"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/c-ares/AUTHORS"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/c-ares/MANIFEST.md"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/c-ares/TREE.SHA256"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/c-ares"
       COMPONENT dev
       EXCLUDE_FROM_ALL
    )

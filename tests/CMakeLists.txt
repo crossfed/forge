@@ -1109,6 +1109,38 @@ target_link_libraries(
 )
 add_test(NAME test_forge_net_pnet COMMAND test_forge_net_pnet WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(
+   test_forge_net_dns
+   unit/main.cpp
+   net_dns/dns_tests.cpp
+   net_dns/resolver_socket_registry_tests.cpp
+)
+target_link_libraries(
+   test_forge_net_dns
+   forge_asio
+   forge_net_dns
+   Boost::included_unit_test_framework
+)
+target_include_directories(
+   test_forge_net_dns
+   PRIVATE
+      "${PROJECT_SOURCE_DIR}/libraries/net/dns"
+      "${PROJECT_SOURCE_DIR}/vendor/c-ares"
+      "${PROJECT_SOURCE_DIR}/vendor/c-ares/include"
+      "${CMAKE_BINARY_DIR}/vendor/c-ares"
+)
+add_test(NAME test_forge_net_dns COMMAND test_forge_net_dns WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+set(FORGE_CARES_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/net_dns/check_cares_structure.py)
+add_custom_target(
+   test_forge_net_dns_cares_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_CARES_STRUCTURE_CHECK} --source ${CMAKE_SOURCE_DIR}
+)
+add_test(
+   NAME test_forge_net_dns_cares_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_CARES_STRUCTURE_CHECK} --source ${CMAKE_SOURCE_DIR}
+)
+
 set(FORGE_INTEROP_PROVENANCE ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/provenance.py)
 set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)
 get_property(_forge_interop_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
@@ -1720,6 +1752,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_net_pnet_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_dns_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_dns_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-dns-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_dns_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2726,6 +2769,17 @@ add_test(
       --test-command forge_package_net_pnet_component
 )
 set_tests_properties(test_forge_package_net_pnet_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_dns_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_dns_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-dns-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_dns_component
+)
+set_tests_properties(test_forge_package_net_dns_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_otlp_component
    COMMAND ${CMAKE_CTEST_COMMAND}
