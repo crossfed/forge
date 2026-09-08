@@ -19,6 +19,7 @@ enum class protocol_code : std::uint64_t {
    dns = 0x35,
    dns4 = 0x36,
    dns6 = 0x37,
+   dnsaddr = 0x38,
    udp = 0x0111,
    p2p_circuit = 0x0122,
    p2p = 0x01a5,

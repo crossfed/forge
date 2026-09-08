@@ -4,6 +4,8 @@ add_library(
    identity_signature.cpp
    details/identity_signature.hxx
    endpoint.cpp
+   dns_address_expander.cpp
+   details/dns_address_expander.hxx
    private_network.cpp
    connection_gater.cpp
    connection_gate.cpp
@@ -198,4 +200,6 @@ target_link_libraries(
       forge_net_pnet
       forge_net_yamux
       Boost::asio
+   PRIVATE
+      forge_net_dns
 )

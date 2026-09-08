@@ -131,6 +131,8 @@ void append_big_endian_port(bytes& out, std::uint16_t port) {
       return protocol_code::dns4;
    case multicodec_code::dns6:
       return protocol_code::dns6;
+   case multicodec_code::dnsaddr:
+      return protocol_code::dnsaddr;
    case multicodec_code::udp:
       return protocol_code::udp;
    case multicodec_code::p2p_circuit:
@@ -182,8 +184,12 @@ void validate_component(const multiaddr_component& component) {
    case protocol_code::dns:
    case protocol_code::dns4:
    case protocol_code::dns6:
+   case protocol_code::dnsaddr:
       if (component.value.empty()) {
          throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      if (component.value.contains('/')) {
+         throw exceptions::invalid_format{"multiaddr DNS protocol value must not contain '/'"};
       }
       break;
    case protocol_code::p2p:
@@ -227,6 +233,7 @@ multiaddr multiaddr::parse(std::string_view value) {
       case protocol_code::dns:
       case protocol_code::dns4:
       case protocol_code::dns6:
+      case protocol_code::dnsaddr:
       case protocol_code::tcp:
       case protocol_code::udp:
       case protocol_code::p2p:
@@ -282,6 +289,7 @@ multiaddr multiaddr::from_bytes(std::span<const std::uint8_t> data) {
       case protocol_code::dns:
       case protocol_code::dns4:
       case protocol_code::dns6:
+      case protocol_code::dnsaddr:
          result.push({.code = code, .value = read_prefixed_string(data, offset)});
          break;
       case protocol_code::p2p: {
@@ -345,7 +353,8 @@ bytes multiaddr::to_bytes() const {
          break;
       case protocol_code::dns:
       case protocol_code::dns4:
-      case protocol_code::dns6: {
+      case protocol_code::dns6:
+      case protocol_code::dnsaddr: {
          auto payload = bytes{component.value.begin(), component.value.end()};
          append_prefixed(out, payload);
          break;
