@@ -17,6 +17,8 @@ class dial_ranker final {
  public:
    explicit dial_ranker(dialing::ranker_policy policy = {});
 
+   static void validate_policy(const dialing::ranker_policy& value);
+
    [[nodiscard]] std::vector<dial_plan_item> rank(std::vector<endpoint> values) const;
 
  private:

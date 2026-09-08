@@ -23,6 +23,7 @@ module;
 #include <ranges>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -55,6 +56,8 @@ import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
 import forge.crypto.digest.hmac;
 import forge.crypto.asymmetric;
+import forge.multiformats.multiaddr;
+import forge.net.dns.resolver;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
@@ -88,6 +91,7 @@ import forge.net.yamux.session;
 
 #include "details/lifecycle_wakeup.hxx"
 #include "details/cancellation_latch.hxx"
+#include "details/dial_scheduler.hxx"
 #include "details/node_impl.hxx"
 #include "details/owner_cancellation.hxx"
 #include "details/peer_exchange_learning.hxx"
@@ -358,7 +362,29 @@ void normalize_topology_capacity(node::options& options) noexcept {
    policy.peers.low = std::min(policy.peers.low, policy.peers.target);
 }
 
+[[nodiscard]] detail::dial_scheduler::policy dial_scheduler_policy(const node::options& options) {
+   auto black_holes = options.direct_dial.black_holes;
+   if (options.private_network) {
+      // Private networks are direct-TCP-only, but IPv6 reachability detection remains useful.
+      black_holes.udp_enabled = false;
+   }
+   return detail::dial_scheduler::policy{
+       .resolution = options.dns_resolution,
+       .ranker = options.direct_dial.ranker,
+       .black_holes = std::move(black_holes),
+       .max_concurrent_attempts = options.direct_dial.max_concurrent_attempts,
+   };
+}
+
 void validate(const node::options& options) {
+   detail::dns_address_expander::validate_policy(options.dns_resolution);
+   detail::dial_scheduler::validate_policy(dial_scheduler_policy(options));
+   try {
+      forge::net::dns::validate(options.dns_resolver);
+   } catch (const forge::net::dns::exceptions::invalid_options& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "invalid P2P DNS resolver options: " + std::string{error.what()});
+   }
    if (options.private_network) {
       private_network::validate(*options.private_network);
       if (options.capabilities.has(capabilities::direct_quic) || options.capabilities.has(capabilities::relay) ||
@@ -542,6 +568,8 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
                                      : make_peer_id(decode_public_key(identity.public_key))),
       resources(resource_limits_for(options.limits)),
       connection_gate(std::make_shared<detail::connection_gate>(options.connection_gater)),
+      dial_scheduler(std::make_shared<detail::dial_scheduler>(runtime_value.context().get_executor(),
+                                                              dial_scheduler_policy(options), options.dns_resolver)),
       direct_registry(runtime_value, options, identity, resources, connection_gate),
       teardown(runtime_value.context().get_executor()), lifecycle(runtime_value.context().get_executor()),
       lifecycle_wakeup(std::make_shared<detail::lifecycle_wakeup>()),
@@ -561,6 +589,14 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
                                "configured P2P certificate does not match the identity private key");
       }
    }
+}
+
+void node::impl::request_dial_scheduler_stop() noexcept {
+   dial_scheduler->request_stop();
+}
+
+boost::asio::awaitable<void> node::impl::async_close_dial_scheduler() {
+   co_await dial_scheduler->async_close();
 }
 
 bool node::impl::private_network_enabled() const noexcept {

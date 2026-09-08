@@ -43,6 +43,7 @@ class cancellation_latch;
 namespace detail {
 
 class bootstrap_service;
+class dial_scheduler;
 class lifecycle_wakeup;
 class resource_stream;
 class worker_terminal_owner;
@@ -237,6 +238,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    peer_id local;
    resource_manager resources;
    std::shared_ptr<detail::connection_gate> connection_gate;
+   std::shared_ptr<detail::dial_scheduler> dial_scheduler;
    direct::registry direct_registry;
    detail::session_teardown teardown;
    detail::lifecycle_tracker lifecycle;
@@ -284,6 +286,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    [[nodiscard]] bool launch_tracked(std::function<boost::asio::awaitable<void>()> operation) noexcept;
    [[nodiscard]] bool launch_tracked_cleanup(std::function<boost::asio::awaitable<void>()> operation) noexcept;
    void request_lifecycle_stop() noexcept;
+   void request_dial_scheduler_stop() noexcept;
+   boost::asio::awaitable<void> async_close_dial_scheduler();
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
    boost::asio::awaitable<void> async_hydrate_peer_state();
    void listen(forge::net::p2p::endpoint endpoint);

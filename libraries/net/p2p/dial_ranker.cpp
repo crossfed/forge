@@ -117,7 +117,7 @@ constexpr auto maximum_private_delay = std::chrono::milliseconds{30};
    return result;
 }
 
-void validate_policy(const dialing::ranker_policy& value) {
+void validate_policy_value(const dialing::ranker_policy& value) {
    if (value.public_delay <= std::chrono::milliseconds::zero() || value.private_delay <= std::chrono::milliseconds::zero() ||
        value.public_delay > maximum_public_delay || value.private_delay > maximum_private_delay) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P dial ranker delay exceeds its donor policy");
@@ -129,6 +129,10 @@ void validate_policy(const dialing::ranker_policy& value) {
 dial_ranker::dial_ranker(dialing::ranker_policy policy)
     : public_delay_(policy.public_delay), private_delay_(policy.private_delay) {
    validate_policy(policy);
+}
+
+void dial_ranker::validate_policy(const dialing::ranker_policy& value) {
+   validate_policy_value(value);
 }
 
 std::vector<dial_plan_item> dial_ranker::rank(std::vector<endpoint> values) const {

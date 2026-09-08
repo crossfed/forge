@@ -41,6 +41,8 @@ class dns_address_expander final {
    dns_address_expander(address_resolution::policy policy, resolver_callbacks callbacks);
    dns_address_expander(forge::net::dns::resolver& resolver, address_resolution::policy policy);
 
+   static void validate_policy(const address_resolution::policy& value);
+
    [[nodiscard]] boost::asio::awaitable<std::vector<endpoint>>
    async_expand(forge::multiformats::multiaddr value, std::optional<peer_id> expected_peer,
                 std::chrono::steady_clock::time_point deadline, std::stop_token stop = {});

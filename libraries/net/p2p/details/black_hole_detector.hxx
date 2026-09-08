@@ -15,6 +15,8 @@ class black_hole_detector final {
  public:
    explicit black_hole_detector(dialing::black_hole_policy policy = {});
 
+   static void validate_policy(const dialing::black_hole_policy& value);
+
    [[nodiscard]] black_hole_filter_result filter_peer_dial(std::vector<endpoint> values);
    void record_address_outcome(const endpoint& value, dialing::outcome outcome);
    [[nodiscard]] dialing::black_hole_status status() const;

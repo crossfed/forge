@@ -71,7 +71,7 @@ constexpr auto max_multiaddr_size = std::size_t{4096};
    FORGE_THROW_EXCEPTION(exceptions::canceled, "P2P DNS address resolution canceled");
 }
 
-void validate_policy(const address_resolution::policy& value) {
+void validate_policy_value(const address_resolution::policy& value) {
    const auto& bounds = value.bounds;
    if (bounds.max_dns_lookups == 0 || bounds.max_txt_records == 0 || bounds.max_resolved_addresses == 0 ||
        bounds.max_recursion_depth == 0 || bounds.max_multiaddr_size == 0) {
@@ -412,6 +412,10 @@ template <typename Response, typename Operation>
 }
 
 } // namespace
+
+void dns_address_expander::validate_policy(const address_resolution::policy& value) {
+   validate_policy_value(value);
+}
 
 dns_address_expander::dns_address_expander(address_resolution::policy policy, resolver_callbacks callbacks)
     : policy_(std::move(policy)), callbacks_(std::move(callbacks)) {

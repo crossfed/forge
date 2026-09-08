@@ -358,31 +358,42 @@ void stop_owned(auto self) {
 
 boost::asio::awaitable<void> async_stop_owned(auto self) {
    auto failure = std::exception_ptr{};
+   const auto capture_failure = [&failure] {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   };
    try {
       co_await self->provider_registry->async_drain();
    } catch (...) {
-      failure = std::current_exception();
+      capture_failure();
    }
-   co_await self->lifecycle.wait();
-   co_await self->teardown.wait();
+   try {
+      co_await self->lifecycle.wait();
+   } catch (...) {
+      capture_failure();
+   }
+   try {
+      co_await self->teardown.wait();
+   } catch (...) {
+      capture_failure();
+   }
    if (failure) {
+      // Provider removals are durable state transitions. Keep their backing
+      // stores open so a subsequent async_stop() can retry the failed drain.
       std::rethrow_exception(failure);
    }
    for (auto& [_, profile] : self->dht_profiles) {
       try {
          co_await profile->records.async_close();
       } catch (...) {
-         if (!failure) {
-            failure = std::current_exception();
-         }
+         capture_failure();
       }
    }
    try {
       co_await self->store.async_close();
    } catch (...) {
-      if (!failure) {
-         failure = std::current_exception();
-      }
+      capture_failure();
    }
    self->lifecycle.finish_stop();
    if (failure) {
@@ -397,10 +408,31 @@ boost::asio::awaitable<void> async_stop_after_topology_join(auto self) {
    co_await boost::asio::co_spawn(
        executor,
        [self = std::move(self)]() mutable -> boost::asio::awaitable<void> {
+          auto failure = std::exception_ptr{};
           self->request_lifecycle_stop();
-          co_await self->async_join_topology_manager();
-          stop_owned(self);
-          co_await async_stop_owned(std::move(self));
+          try {
+             co_await self->async_join_topology_manager();
+          } catch (...) {
+             failure = std::current_exception();
+          }
+          try {
+             co_await self->async_close_dial_scheduler();
+          } catch (...) {
+             if (!failure) {
+                failure = std::current_exception();
+             }
+          }
+          try {
+             stop_owned(self);
+             co_await async_stop_owned(self);
+          } catch (...) {
+             if (!failure) {
+                failure = std::current_exception();
+             }
+          }
+          if (failure) {
+             std::rethrow_exception(failure);
+          }
        },
        boost::asio::bind_cancellation_slot(boost::asio::cancellation_slot{}, boost::asio::use_awaitable));
 }

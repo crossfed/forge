@@ -83,6 +83,7 @@ class dial_scheduler final {
    void request_stop() noexcept;
    [[nodiscard]] boost::asio::awaitable<void> async_close();
    [[nodiscard]] dialing::black_hole_status black_hole_status() const;
+   static void validate_policy(const policy& value);
 
  private:
    struct completion {
@@ -188,7 +189,6 @@ class dial_scheduler final {
    [[nodiscard]] static clock::time_point candidate_deadline(clock::time_point logical_deadline,
                                                               std::chrono::milliseconds timeout,
                                                               clock::time_point launched) noexcept;
-   static void validate_policy(const policy& value);
    static void validate_request(const request& value);
 
    std::shared_ptr<owner> owner_;

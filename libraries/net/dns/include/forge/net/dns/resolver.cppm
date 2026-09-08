@@ -15,6 +15,8 @@ export import forge.net.dns.types;
 
 export namespace forge::net::dns {
 
+void validate(const resolver_options& options);
+
 class resolver {
  public:
    explicit resolver(boost::asio::any_io_executor executor, resolver_options options = {});

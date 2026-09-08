@@ -194,6 +194,7 @@ void node::impl::request_lifecycle_stop() noexcept {
       peer_exchange_value.close();
       active_peer_exchange_operations.swap(peer_exchange_operations);
    }
+   request_dial_scheduler_stop();
    for (const auto& [_, operation] : active_peer_exchange_operations) {
       operation->cancellation.request_stop();
    }

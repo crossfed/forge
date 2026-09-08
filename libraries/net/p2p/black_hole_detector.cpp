@@ -39,7 +39,7 @@ constexpr auto donor_min_successes = std::size_t{5};
    return (window_size * donor_min_successes + donor_window_size - 1) / donor_window_size;
 }
 
-void validate_policy(const dialing::black_hole_policy& value) {
+void validate_policy_value(const dialing::black_hole_policy& value) {
    if (value.window_size == 0 || value.window_size > donor_window_size || value.min_successes == 0 ||
        value.min_successes > value.window_size || value.min_successes < minimum_hardened_successes(value.window_size)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P black-hole policy exceeds its donor bounds");
@@ -52,6 +52,10 @@ black_hole_detector::black_hole_detector(dialing::black_hole_policy policy)
     : udp_{.enabled = policy.udp_enabled, .window_size = policy.window_size, .min_successes = policy.min_successes},
       ipv6_{.enabled = policy.ipv6_enabled, .window_size = policy.window_size, .min_successes = policy.min_successes} {
    validate_policy(policy);
+}
+
+void black_hole_detector::validate_policy(const dialing::black_hole_policy& value) {
+   validate_policy_value(value);
 }
 
 void black_hole_detector::reset(counter& value) noexcept {

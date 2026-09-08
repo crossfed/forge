@@ -17155,6 +17155,39 @@ BOOST_AUTO_TEST_CASE(p2p_node_options_reject_zero_global_dial_limit) {
    BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_node_options_fail_fast_on_invalid_address_resolution_and_dial_policies) {
+   {
+      auto options = options_for(peer(250));
+      options.dns_resolution.bounds.max_dns_lookups = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.dns_resolver.max_in_flight = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.max_concurrent_attempts = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.max_concurrent_attempts = 5;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.ranker.public_delay = std::chrono::milliseconds::zero();
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.black_holes.window_size = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+}
+
 BOOST_AUTO_TEST_CASE(p2p_production_options_use_peer_state_persistence) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto persistence = std::make_shared<tracking_peer_store_persistence>();

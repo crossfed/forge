@@ -35,6 +35,12 @@ struct dialing {
       bool ipv6_enabled = true;
    };
 
+   struct policy {
+      ranker_policy ranker{};
+      black_hole_policy black_holes{};
+      std::size_t max_concurrent_attempts = 4;
+   };
+
    struct black_hole_counter_status {
       bool enabled = false;
       black_hole_state state = black_hole_state::probing;

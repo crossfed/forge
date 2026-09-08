@@ -207,7 +207,6 @@ target_link_libraries(
       forge_net_stcp
       forge_net_pnet
       forge_net_yamux
-      Boost::asio
-   PRIVATE
       forge_net_dns
+      Boost::asio
 )

@@ -398,6 +398,8 @@ dial_scheduler::clock::time_point dial_scheduler::candidate_deadline(clock::time
 }
 
 void dial_scheduler::validate_policy(const policy& value) {
+   dial_ranker::validate_policy(value.ranker);
+   black_hole_detector::validate_policy(value.black_holes);
    if (value.max_concurrent_attempts == 0 || value.max_concurrent_attempts > max_concurrent_attempts) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                             "P2P direct dial scheduler concurrency exceeds its immutable bound");

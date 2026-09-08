@@ -17,9 +17,12 @@ module;
 export module forge.net.p2p.node;
 
 import forge.asio.runtime;
+import forge.net.dns.types;
+import forge.net.p2p.address_resolution;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.connection_gater;
+import forge.net.p2p.dialing;
 import forge.net.p2p.discovery;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
@@ -78,6 +81,9 @@ class node {
       relay::policy relay_policy{.service_enabled = true, .client_enabled = true, .public_relay_allowed = false};
       path::policy path_policy{};
       std::optional<forge::net::p2p::private_network::options> private_network;
+      address_resolution::policy dns_resolution{};
+      forge::net::dns::resolver_options dns_resolver{};
+      dialing::policy direct_dial{};
       forge::net::transport::limits transport_limits{};
       std::vector<forge::net::p2p::endpoint> advertised_endpoints;
       std::vector<std::uint8_t> public_key;
