@@ -51,6 +51,7 @@ module forge.net.p2p.node;
 
 import forge.asio.gate;
 import forge.asio.notification;
+import forge.exceptions;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -61,6 +62,7 @@ import forge.net.p2p.identify;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.topology;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -103,10 +105,10 @@ void append_topology_result(std::vector<discovery::result>& out, const peer_stor
    if (exists) {
       return;
    }
-   auto endpoints = std::vector<endpoint>{};
+   auto endpoints = std::vector<forge::multiformats::multiaddr>{};
    endpoints.reserve(record.endpoints.size());
    for (const auto& item : record.endpoints) {
-      endpoints.push_back(item.endpoint);
+      endpoints.push_back(item.address);
    }
    out.push_back(discovery::result{
        .peer = record.peer,
@@ -119,7 +121,8 @@ void append_topology_result(std::vector<discovery::result>& out, const peer_stor
    });
 }
 
-void append_topology_hint(std::vector<discovery::result>& out, const peer_id& peer, std::vector<endpoint> endpoints,
+void append_topology_hint(std::vector<discovery::result>& out, const peer_id& peer,
+                          std::vector<forge::multiformats::multiaddr> endpoints,
                           discovery::source source, std::chrono::system_clock::time_point expires_at,
                           std::size_t limit) {
    if (!valid_peer_id(peer) || endpoints.empty() || out.size() >= limit) {
@@ -352,8 +355,13 @@ node::impl::async_dial_topology_candidate(discovery::result candidate,
                                                                   .expires_at = candidate.expires_at,
                                                               }));
    };
-   for (auto endpoint : candidate.endpoints) {
-      endpoint.peer = candidate.peer;
+   for (const auto& address : candidate.endpoints) {
+      auto direct_endpoint = endpoint{};
+      try {
+         direct_endpoint = parse_endpoint(address.to_string());
+      } catch (const forge::exceptions::base&) {
+         continue;
+      }
       if (session_for_path(candidate.peer, path::kind::direct)) {
          apply_discovery_observation();
          co_return true;
@@ -362,7 +370,7 @@ node::impl::async_dial_topology_candidate(discovery::result candidate,
       try {
          {
             auto [direct_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
-            session = co_await connect_direct(endpoint,
+            session = co_await connect_direct(direct_endpoint,
                                               node::connect_options{
                                                   .expected_peer = candidate.peer,
                                                   .allow_relay = false,
@@ -552,7 +560,7 @@ node::impl::ensure_topology_rendezvous_session(std::size_t point_index, bool all
       if (!allow_dial) {
          co_return std::shared_ptr<session_state>{};
       }
-      store.learn_endpoint(rendezvous_peer, configured);
+      store.learn_address(rendezvous_peer, configured.to_multiaddr());
       {
          auto [direct_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
          session = co_await connect_direct(configured,

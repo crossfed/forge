@@ -11,6 +11,7 @@
 
 import forge.net.p2p.dht;
 
+import forge.multiformats.multiaddr;
 import forge.multiformats.multihash;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -101,6 +102,20 @@ BOOST_AUTO_TEST_CASE(dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k
    const auto decoded = dht::codec::decode(dht::codec::encode(message, sender_limits), amino);
    BOOST_TEST(decoded.closer_peers.size() == 21U);
    BOOST_TEST(decoded.provider_peers.size() == 25U);
+}
+
+BOOST_AUTO_TEST_CASE(dht_codec_preserves_dnsaddr_peer_address) {
+   const auto id = test_peer(47);
+   const auto address = forge::multiformats::multiaddr::parse("/dnsaddr/bootstrap.example/p2p/" + id.to_string());
+   const auto message = dht::message{
+       .type = dht::message_type::find_node,
+       .closer_peers = {dht::peer{.id = id, .endpoints = {address}}},
+   };
+
+   const auto decoded = dht::codec::decode(dht::codec::encode(message, amino_v1().limits), amino_v1());
+   BOOST_REQUIRE_EQUAL(decoded.closer_peers.size(), 1U);
+   BOOST_REQUIRE_EQUAL(decoded.closer_peers.front().endpoints.size(), 1U);
+   BOOST_TEST(decoded.closer_peers.front().endpoints.front().to_string() == address.to_string());
 }
 
 BOOST_AUTO_TEST_CASE(dht_custom_profile_keeps_protocol_limits_and_validators_isolated) {
@@ -349,7 +364,8 @@ BOOST_AUTO_TEST_CASE(dht_codec_checks_peer_count_and_peer_size_before_append) {
    oversized_peer.closer_peers.front().endpoints.reserve(16);
    for (auto index = 0; index < 16; ++index) {
       oversized_peer.closer_peers.front().endpoints.push_back(
-          parse_endpoint("/ip4/127.0.0.1/udp/4401/quic-v1/p2p/" + oversized_peer.closer_peers.front().id.to_string()));
+          parse_endpoint("/ip4/127.0.0.1/udp/4401/quic-v1/p2p/" + oversized_peer.closer_peers.front().id.to_string())
+              .to_multiaddr());
    }
    BOOST_CHECK_THROW((dht::codec::encode(oversized_peer, strict)), exceptions::invalid_options);
 }

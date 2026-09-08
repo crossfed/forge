@@ -40,7 +40,8 @@ namespace forge::net::p2p {
 
 namespace {
 
-[[nodiscard]] bool same_endpoint(const forge::net::p2p::endpoint& left, const forge::net::p2p::endpoint& right) {
+[[nodiscard]] bool same_address(const forge::multiformats::multiaddr& left,
+                                const forge::multiformats::multiaddr& right) {
    return left.to_string() == right.to_string();
 }
 
@@ -103,7 +104,7 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
       if (!has_endpoint_source(endpoint.sources)) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P endpoint record has no provenance");
       }
-      add(endpoint.endpoint.to_string().size());
+      add(endpoint.address.to_string().size());
    }
    if (value.observed_endpoint) {
       add(value.observed_endpoint->to_string().size());
@@ -122,21 +123,22 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
    }
 }
 
-void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint& endpoint, path::kind kind,
+void mutate_address(peer_store::record& record, const forge::multiformats::multiaddr& address, path::kind kind,
                      const std::function<void(peer_store::endpoint_record&)>& mutation) {
    auto iterator = std::ranges::find_if(record.endpoints,
-                                        [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
+                                        [&](const auto& current) { return same_address(current.address, address); });
    if (iterator == record.endpoints.end()) {
       iterator = record.endpoints.insert(record.endpoints.end(),
-                                         peer_store::endpoint_record{.endpoint = endpoint, .kind = kind});
+                                         peer_store::endpoint_record{.address = address, .kind = kind});
    }
    iterator->kind = kind;
    mutation(*iterator);
    refresh_endpoint_score(*iterator);
 }
 
-void replace_identify_endpoint_snapshot(peer_store::record& record,
-                                        const std::vector<forge::net::p2p::endpoint>& endpoints, bool signed_snapshot) {
+void replace_identify_address_snapshot(peer_store::record& record,
+                                       const std::vector<forge::multiformats::multiaddr>& addresses,
+                                       bool signed_snapshot) {
    for (auto& current : record.endpoints) {
       if (signed_snapshot) {
          current.sources.identify_signed = false;
@@ -146,15 +148,15 @@ void replace_identify_endpoint_snapshot(peer_store::record& record,
    }
    std::erase_if(record.endpoints, [](const auto& current) { return !has_endpoint_source(current.sources); });
 
-   for (const auto& endpoint : endpoints) {
+   for (const auto& address : addresses) {
       const auto existing = std::ranges::find_if(
-          record.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
+          record.endpoints, [&](const auto& current) { return same_address(current.address, address); });
       if (existing == record.endpoints.end()) {
          auto sources = peer_store::endpoint_sources{.learned = false};
          sources.identify_signed = signed_snapshot;
          sources.identify_unsigned = !signed_snapshot;
          record.endpoints.push_back(peer_store::endpoint_record{
-             .endpoint = endpoint,
+             .address = address,
              .kind = path::kind::direct,
              .sources = sources,
          });
@@ -323,9 +325,9 @@ peer_store::record peer_store::impl::apply_identify(const peer_id& peer, peer_st
       }
       if (update.signed_endpoints) {
          value.signed_peer_record = std::move(*update.signed_peer_record);
-         replace_identify_endpoint_snapshot(value, *update.signed_endpoints, true);
+         replace_identify_address_snapshot(value, *update.signed_endpoints, true);
       } else if (update.unsigned_endpoints) {
-         replace_identify_endpoint_snapshot(value, *update.unsigned_endpoints, false);
+         replace_identify_address_snapshot(value, *update.unsigned_endpoints, false);
       }
    });
 }
@@ -405,14 +407,15 @@ std::size_t peer_store::impl::prune_expired_relay_reservations(const peer_id& pe
    return removed;
 }
 
-void peer_store::impl::learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities) {
+void peer_store::impl::learn_address(peer_id peer, forge::multiformats::multiaddr address,
+                                     capability_set capabilities) {
    static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
       value.peer = peer;
       value.capabilities.bits |= capabilities.bits;
       const auto existing = std::ranges::find_if(
-          value.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
+          value.endpoints, [&](const auto& current) { return same_address(current.address, address); });
       if (existing == value.endpoints.end()) {
-         value.endpoints.push_back(peer_store::endpoint_record{.endpoint = std::move(endpoint)});
+         value.endpoints.push_back(peer_store::endpoint_record{.address = std::move(address)});
       } else {
          existing->sources.learned = true;
       }
@@ -445,10 +448,10 @@ void peer_store::impl::mark_failure(const peer_id& peer) {
    }));
 }
 
-void peer_store::impl::mark_endpoint_success(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
-                                             path::kind kind, std::chrono::milliseconds latency) {
+void peer_store::impl::mark_address_success(const peer_id& peer, const forge::multiformats::multiaddr& address,
+                                            path::kind kind, std::chrono::milliseconds latency) {
    static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
-      mutate_endpoint(value, endpoint, kind, [&](peer_store::endpoint_record& current) {
+      mutate_address(value, address, kind, [&](peer_store::endpoint_record& current) {
          current.sources.learned = true;
          current.last_latency = latency;
          current.backoff_until = {};
@@ -460,10 +463,10 @@ void peer_store::impl::mark_endpoint_success(const peer_id& peer, const forge::n
    }));
 }
 
-void peer_store::impl::mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint,
-                                             path::kind kind, std::chrono::system_clock::time_point backoff_until) {
+void peer_store::impl::mark_address_failure(const peer_id& peer, const forge::multiformats::multiaddr& address,
+                                            path::kind kind, std::chrono::system_clock::time_point backoff_until) {
    static_cast<void>(mutate_peer(peer, [&](peer_store::record& value) {
-      mutate_endpoint(value, endpoint, kind, [&](peer_store::endpoint_record& current) {
+      mutate_address(value, address, kind, [&](peer_store::endpoint_record& current) {
          current.backoff_until = backoff_until;
          ++current.failures;
       });
@@ -483,12 +486,11 @@ void peer_store::impl::upsert_routing_peer(protocol_id protocol, dht::peer value
       record.discovered_by = source;
       record.discovered_at = std::chrono::system_clock::now();
       record.discovery_expires_at = expires_at;
-      for (auto endpoint : value.endpoints) {
-         endpoint.peer = peer;
+      for (auto address : value.endpoints) {
          const auto existing = std::ranges::find_if(
-             record.endpoints, [&](const auto& current) { return same_endpoint(current.endpoint, endpoint); });
+             record.endpoints, [&](const auto& current) { return same_address(current.address, address); });
          if (existing == record.endpoints.end()) {
-            record.endpoints.push_back(peer_store::endpoint_record{.endpoint = std::move(endpoint)});
+            record.endpoints.push_back(peer_store::endpoint_record{.address = std::move(address)});
          } else {
             existing->sources.learned = true;
          }

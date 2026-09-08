@@ -29,9 +29,9 @@ import forge.db.object.object;
 import forge.db.object.snapshot;
 import forge.db.object.transaction;
 import forge.exceptions;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
-import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
@@ -127,10 +127,10 @@ void add_bounded_size(std::size_t& total, std::size_t value, std::size_t limit, 
    return peer;
 }
 
-[[nodiscard]] forge::net::p2p::endpoint parse_endpoint_strict(std::string_view value) {
-   auto endpoint = forge::net::p2p::parse_endpoint(value);
-   require_row(endpoint.to_string() == value, "provider endpoint is not canonical");
-   return endpoint;
+[[nodiscard]] forge::multiformats::multiaddr parse_address_strict(std::string_view value) {
+   auto address = forge::multiformats::multiaddr::parse(value);
+   require_row(address.to_string() == value, "provider address is not canonical");
+   return address;
 }
 
 void validate_value_row_bounds(const detail::p2p_state_schema::dht_value_row& value, std::string_view profile,
@@ -169,7 +169,7 @@ void validate_provider_row_bounds(const detail::p2p_state_schema::dht_provider_r
    add_bounded_size(bytes, value.peer.size(), max_record_bytes, "DHT provider row exceeds configured byte limit");
    for (const auto& endpoint : value.endpoints) {
       add_bounded_size(bytes, endpoint.size(), max_record_bytes, "DHT provider row exceeds configured byte limit");
-      (void)parse_endpoint_strict(endpoint);
+      (void)parse_address_strict(endpoint);
    }
 }
 
@@ -239,7 +239,7 @@ from_provider_row(const detail::p2p_state_schema::dht_provider_row& value, std::
    };
    record.endpoints.reserve(value.endpoints.size());
    for (const auto& endpoint : value.endpoints) {
-      record.endpoints.push_back(parse_endpoint_strict(endpoint));
+      record.endpoints.push_back(parse_address_strict(endpoint));
    }
    return record;
 }

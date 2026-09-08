@@ -4,10 +4,13 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -16,6 +19,7 @@ module;
 
 module forge.net.p2p.rendezvous;
 
+import forge.exceptions;
 import forge.multiformats.exceptions;
 import forge.multiformats.multiaddr;
 import forge.multiformats.varint;
@@ -389,18 +393,77 @@ void validate_namespace(std::string_view value, const rendezvous::options& opts)
    return out;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> encode_peer_record_address(const endpoint& value) {
-   auto address_value = value;
-   address_value.peer.reset();
-   const auto address = forge::multiformats::multiaddr::parse(address_value.to_string());
-   return address.to_bytes();
+enum class peer_suffix {
+   absent,
+   terminal,
+};
+
+[[nodiscard]] std::optional<peer_suffix>
+validate_peer_suffix(const forge::multiformats::multiaddr& value, const peer_id& peer) {
+   const auto& components = value.components();
+   auto circuit = std::optional<std::size_t>{};
+   auto terminal = false;
+   for (auto index = std::size_t{0}; index < components.size(); ++index) {
+      const auto& component = components[index];
+      if (component.code == forge::multiformats::protocol_code::p2p_circuit) {
+         if (circuit.has_value() || index + 2 != components.size() ||
+             components[index + 1].code != forge::multiformats::protocol_code::p2p) {
+            return std::nullopt;
+         }
+         circuit = index;
+         continue;
+      }
+      if (component.code != forge::multiformats::protocol_code::p2p) {
+         continue;
+      }
+      try {
+         const auto component_peer = peer_id::from_string(component.value);
+         if (index + 1 == components.size()) {
+            if (component_peer != peer) {
+               return std::nullopt;
+            }
+            terminal = true;
+         } else if (components[index + 1].code != forge::multiformats::protocol_code::p2p_circuit) {
+            return std::nullopt;
+         }
+      } catch (const forge::exceptions::base&) {
+         return std::nullopt;
+      }
+   }
+   return terminal ? peer_suffix::terminal : peer_suffix::absent;
 }
 
-[[nodiscard]] endpoint decode_peer_record_address(std::span<const std::uint8_t> bytes, const peer_id& peer) {
+[[nodiscard]] std::vector<std::uint8_t>
+encode_peer_record_address(forge::multiformats::multiaddr value, const peer_id& peer) {
+   const auto& components = value.components();
+   const auto suffix = validate_peer_suffix(value, peer);
+   if (!suffix) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "rendezvous peer record address peer id mismatch");
+   }
+   if (*suffix == peer_suffix::terminal && !components.empty() &&
+       components.back().code == forge::multiformats::protocol_code::p2p &&
+       std::ranges::none_of(components, [](const auto& component) {
+          return component.code == forge::multiformats::protocol_code::p2p_circuit;
+       })) {
+      auto bare = forge::multiformats::multiaddr{};
+      for (auto current = components.begin(); std::next(current) != components.end(); ++current) {
+         bare.push(*current);
+      }
+      value = std::move(bare);
+   }
+   return value.to_bytes();
+}
+
+[[nodiscard]] forge::multiformats::multiaddr decode_peer_record_address(std::span<const std::uint8_t> bytes,
+                                                                          const peer_id& peer) {
    try {
-      auto out = parse_endpoint(forge::multiformats::multiaddr::from_bytes(bytes).to_string());
-      if (!out.peer) {
-         out.peer = peer;
+      auto out = forge::multiformats::multiaddr::from_bytes(bytes);
+      const auto suffix = validate_peer_suffix(out, peer);
+      if (!suffix) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "rendezvous peer record address peer id mismatch");
+      }
+      if (*suffix == peer_suffix::absent) {
+         out.push({.code = forge::multiformats::protocol_code::p2p, .value = peer.to_string()});
       }
       return out;
    } catch (const forge::exceptions::base&) {
@@ -408,13 +471,15 @@ void validate_namespace(std::string_view value, const rendezvous::options& opts)
    }
 }
 
-[[nodiscard]] std::vector<std::uint8_t> encode_address_info(const endpoint& value) {
+[[nodiscard]] std::vector<std::uint8_t> encode_address_info(const forge::multiformats::multiaddr& value,
+                                                             const peer_id& peer) {
    auto out = std::vector<std::uint8_t>{};
-   detail::append_bytes(out, 1, encode_peer_record_address(value));
+   detail::append_bytes(out, 1, encode_peer_record_address(value, peer));
    return out;
 }
 
-[[nodiscard]] endpoint decode_address_info(std::span<const std::uint8_t> bytes, const peer_id& peer) {
+[[nodiscard]] forge::multiformats::multiaddr decode_address_info(std::span<const std::uint8_t> bytes,
+                                                                   const peer_id& peer) {
    auto in = detail::reader{bytes};
    while (!in.done()) {
       const auto [field, type] = in.key();
@@ -549,7 +614,7 @@ std::vector<std::uint8_t> rendezvous::codec::encode_peer_record(const rendezvous
    detail::append_bytes(out, 1, value.peer.to_bytes());
    detail::append_uint64(out, 2, value.sequence);
    for (const auto& address : value.endpoints) {
-      detail::append_bytes(out, 3, encode_address_info(address));
+      detail::append_bytes(out, 3, encode_address_info(address, value.peer));
    }
    return out;
 }

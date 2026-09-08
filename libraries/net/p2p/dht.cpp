@@ -33,12 +33,16 @@ namespace {
 
 constexpr auto amino_provider_key_limit = std::size_t{80};
 
-[[nodiscard]] std::vector<std::uint8_t> endpoint_bytes(const endpoint& value) {
-   return forge::multiformats::multiaddr::parse(value.to_string()).to_bytes();
+[[nodiscard]] std::vector<std::uint8_t> address_bytes(const forge::multiformats::multiaddr& value) {
+   return value.to_bytes();
 }
 
-[[nodiscard]] endpoint endpoint_from_bytes(std::span<const std::uint8_t> value) {
-   return parse_endpoint(forge::multiformats::multiaddr::from_bytes(value).to_string());
+[[nodiscard]] std::optional<forge::multiformats::multiaddr> address_from_bytes(std::span<const std::uint8_t> value) {
+   try {
+      return forge::multiformats::multiaddr::from_bytes(value);
+   } catch (const forge::multiformats::exceptions::invalid_format&) {
+      return std::nullopt;
+   }
 }
 
 void validate_codec_options(const dht::options& opts) {
@@ -209,8 +213,8 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
    if (value.endpoints.size() > opts.max_peer_endpoints) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT peer has too many endpoints");
    }
-   for (const auto& endpoint : value.endpoints) {
-      detail::append_bytes(encoded, 2, endpoint_bytes(endpoint));
+   for (const auto& address : value.endpoints) {
+      detail::append_bytes(encoded, 2, address_bytes(address));
    }
    detail::append_uint64(encoded, 3, static_cast<std::uint16_t>(value.connection));
    if (encoded.size() > opts.max_outbound_message_size) {
@@ -252,8 +256,9 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
             if (address.size() > opts.max_inbound_message_size) {
                FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer address exceeds max message size");
             }
-            auto decoded = endpoint_from_bytes(address);
-            out.endpoints.push_back(std::move(decoded));
+            if (auto decoded = address_from_bytes(address)) {
+               out.endpoints.push_back(std::move(*decoded));
+            }
          }
          break;
       case 3:

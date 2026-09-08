@@ -4,6 +4,7 @@ module;
 #include <algorithm>
 #include <boost/asio/ip/address.hpp>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <set>
@@ -14,6 +15,8 @@ module forge.net.p2p.node;
 
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
+import forge.exceptions;
+import forge.multiformats.multiaddr;
 
 #include "details/host_addresses.hxx"
 
@@ -133,6 +136,46 @@ namespace {
    return !value.peer.has_value() || value.peer->to_bytes() == peer.to_bytes();
 }
 
+enum class peer_suffix {
+   absent,
+   terminal,
+};
+
+[[nodiscard]] std::optional<peer_suffix>
+validate_peer_suffix(const forge::multiformats::multiaddr& value, const peer_id& peer) {
+   const auto& components = value.components();
+   auto circuit = std::optional<std::size_t>{};
+   auto terminal = false;
+   for (auto index = std::size_t{0}; index < components.size(); ++index) {
+      const auto& component = components[index];
+      if (component.code == forge::multiformats::protocol_code::p2p_circuit) {
+         if (circuit.has_value() || index + 2 != components.size() ||
+             components[index + 1].code != forge::multiformats::protocol_code::p2p) {
+            return std::nullopt;
+         }
+         circuit = index;
+         continue;
+      }
+      if (component.code != forge::multiformats::protocol_code::p2p) {
+         continue;
+      }
+      try {
+         const auto component_peer = peer_id::from_string(component.value);
+         if (index + 1 == components.size()) {
+            if (component_peer != peer) {
+               return std::nullopt;
+            }
+            terminal = true;
+         } else if (components[index + 1].code != forge::multiformats::protocol_code::p2p_circuit) {
+            return std::nullopt;
+         }
+      } catch (const forge::exceptions::base&) {
+         return std::nullopt;
+      }
+   }
+   return terminal ? peer_suffix::terminal : peer_suffix::absent;
+}
+
 [[nodiscard]] bool source_allows(endpoint_scope candidate, const learning_context& context) {
    if (candidate == endpoint_scope::link_local || candidate == endpoint_scope::unroutable) {
       return false;
@@ -205,6 +248,51 @@ std::optional<endpoint> learned(endpoint value, const peer_id& peer, learning_co
 std::vector<endpoint> sanitize_discovered_endpoints(std::vector<endpoint> values, const peer_id& peer,
                                                     learning_context context) {
    auto out = std::vector<endpoint>{};
+   auto seen = std::set<std::string>{};
+   out.reserve(values.size());
+   for (auto& value : values) {
+      auto item = learned(std::move(value), peer, context);
+      if (!item) {
+         continue;
+      }
+      const auto key = item->to_string();
+      if (seen.insert(key).second) {
+         out.push_back(std::move(*item));
+      }
+   }
+   return out;
+}
+
+std::optional<forge::multiformats::multiaddr>
+learned(forge::multiformats::multiaddr value, const peer_id& peer, learning_context context) {
+   const auto suffix = validate_peer_suffix(value, peer);
+   if (!suffix) {
+      return std::nullopt;
+   }
+   if (*suffix == peer_suffix::absent) {
+      value.push({.code = forge::multiformats::protocol_code::p2p, .value = peer.to_string()});
+   }
+   try {
+      if (auto concrete = learned(parse_endpoint(value.to_string()), peer, context)) {
+         return concrete->to_multiaddr();
+      }
+      return std::nullopt;
+   } catch (const forge::exceptions::base&) {
+      const auto& components = value.components();
+      if (components.empty() || std::ranges::none_of(components, [](const auto& component) {
+             return component.code == forge::multiformats::protocol_code::dnsaddr;
+          }) ||
+          !source_allows(endpoint_scope::dns, context)) {
+         return std::nullopt;
+      }
+      return value;
+   }
+}
+
+std::vector<forge::multiformats::multiaddr>
+sanitize_discovered_addresses(std::vector<forge::multiformats::multiaddr> values, const peer_id& peer,
+                             learning_context context) {
+   auto out = std::vector<forge::multiformats::multiaddr>{};
    auto seen = std::set<std::string>{};
    out.reserve(values.size());
    for (auto& value : values) {

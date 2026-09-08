@@ -14,7 +14,7 @@ struct peer_exchange_message {
 
    struct endpoint_record {
       peer_id peer;
-      forge::net::p2p::endpoint endpoint;
+      forge::multiformats::multiaddr address;
       capability_set capabilities{};
    };
 

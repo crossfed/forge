@@ -5,19 +5,32 @@ sessions, protocol stream negotiation, peer exchange, relay reservations,
 reachability probes, hole punching, path scoring, discovery protocol machinery
 and GossipSub/pubsub.
 
-API status: `forge.net.p2p.resource_manager` is Preview while P2P production
-hardening replaces manual counters with move-only reservations. The Stage 3
-migration intentionally removes `try_acquire_*`/`release_*`; callers retain the
-returned reservation for the complete operation lifetime instead. Staged stream
-scope binding returns an explicit result: only `policy_rejected` is backpressure;
-`invalid_transition` and `runtime_failure` are internal failures. Other public
-P2P contracts remain Stable unless their owning section explicitly says
-otherwise.
+API status: the `forge_net_p2p` P2P surface is Preview under the approved Stage
+6 assumption. `forge.net.p2p.resource_manager` remains Preview while P2P
+production hardening replaces manual counters with move-only reservations. The
+Stage 3 migration intentionally removes `try_acquire_*`/`release_*`; callers
+retain the returned reservation for the complete operation lifetime instead.
+Staged stream scope binding returns an explicit result: only `policy_rejected`
+is backpressure; `invalid_transition` and `runtime_failure` are internal
+failures.
 
 `forge.net.p2p.dialing` is Preview. Its pure Happy Eyeballs and black-hole
 mechanics are reserved for consumption only by the node-owned dial scheduler in
 this PR; this bounded mechanics slice does not wire that scheduler and makes no
 production dialing claim.
+
+## Stage 6 Carrier Migration
+
+| Previous surface | Current Preview surface |
+| --- | --- |
+| `endpoint_record.endpoint` | `endpoint_record.address` as `forge::multiformats::multiaddr` |
+| `identify::document.listen_endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
+| DHT peer/provider `endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
+| Discovery and Rendezvous `endpoints` as `vector<endpoint>` | the same fields as `vector<forge::multiformats::multiaddr>` |
+| Node diagnostics source and diagnostics plugin API major 1 | major 2; node plugin 6.0.0 and diagnostics plugin 2.0.0 |
+| Private ObjectDB P2P cache v2 | v3 marker; use `schema-policy: reset` rather than hydration |
+
+No compatibility aliases are provided for these carrier changes.
 
 ## Private-Network Profile
 
@@ -367,8 +380,10 @@ belong to the profile-scoped `dht::record_store` described below.
 
 Identify address provenance is operational metadata used to replace each live
 unsigned or certified snapshot without appending stale addresses. The existing
-ObjectDB cache schema v2 separates peer/Rendezvous rows from profile-scoped DHT
-value/provider rows while retaining one physical named store. Hydrated peer
+ObjectDB cache schema v3 separates peer/Rendezvous rows from profile-scoped DHT
+value/provider rows while retaining one physical named store. Schema v2 caches
+must be reset instead of hydrated because they cannot safely represent raw DNS
+address carriers. Hydrated peer
 endpoints conservatively re-enter as
 learned cache facts and age through the existing peer-health/expiry policy;
 the next verified Identify refresh establishes provenance for its live

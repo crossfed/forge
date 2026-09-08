@@ -49,6 +49,7 @@ import forge.exceptions;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identify;
 import forge.net.p2p.lifecycle;

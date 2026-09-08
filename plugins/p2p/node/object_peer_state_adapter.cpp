@@ -30,6 +30,7 @@ import forge.db.object.object;
 import forge.db.object.snapshot;
 import forge.db.object.transaction;
 import forge.exceptions;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
@@ -173,6 +174,12 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
    return endpoint;
 }
 
+[[nodiscard]] forge::multiformats::multiaddr parse_address_strict(std::string_view value) {
+   auto address = forge::multiformats::multiaddr::parse(value);
+   require_row(address.to_string() == value, "address is not canonical");
+   return address;
+}
+
 [[nodiscard]] p2p::path::kind parse_path_kind(std::uint16_t value) {
    switch (value) {
    case 0:
@@ -226,7 +233,7 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
    }
    (void)score_priority(value.score);
    return schema::endpoint_fact{
-       .endpoint = value.endpoint.to_string(),
+       .endpoint = value.address.to_string(),
        .kind = static_cast<std::uint16_t>(value.kind),
        .relay_peer = value.relay_peer ? std::optional<std::string>{value.relay_peer->value} : std::nullopt,
        .successes = value.successes,
@@ -241,7 +248,7 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
    require_row(value.last_latency_ms >= 0, "endpoint latency is negative");
    (void)score_priority(value.score);
    return p2p::peer_store::endpoint_record{
-       .endpoint = parse_endpoint_strict(value.endpoint),
+       .address = parse_address_strict(value.endpoint),
        .kind = parse_path_kind(value.kind),
        .relay_peer = value.relay_peer ? std::optional<p2p::peer_id>{parse_peer(*value.relay_peer)} : std::nullopt,
        .successes = value.successes,
@@ -409,7 +416,7 @@ void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p
    };
    registration.endpoints.reserve(value.endpoints.size());
    for (const auto& endpoint : value.endpoints) {
-      registration.endpoints.push_back(parse_endpoint_strict(endpoint));
+      registration.endpoints.push_back(parse_address_strict(endpoint));
    }
    return registration;
 }

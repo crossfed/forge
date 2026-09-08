@@ -39,6 +39,7 @@ module forge.net.p2p.node;
 import forge.asio.blocking;
 import forge.asio.notification;
 import forge.asio.runtime;
+import forge.multiformats.multiaddr;
 import forge.multiformats.multihash;
 import forge.multiformats.types;
 import forge.net.p2p.discovery;
@@ -72,6 +73,10 @@ namespace {
            },
        .peer = std::move(peer),
    };
+}
+
+[[nodiscard]] forge::multiformats::multiaddr discovered_rendezvous_address(peer_id peer, std::uint16_t port = 4001) {
+   return configured_rendezvous_endpoint(std::move(peer), port).to_multiaddr();
 }
 
 [[nodiscard]] connection_manager test_connection_manager() {
@@ -390,7 +395,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_coalesces_and_repeats_peer_exchange_ba
       }
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(71),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(71), 4071)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(71), 4071)},
                             .discovered_by = discovery::source::peer_exchange,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 1.0},
@@ -683,7 +688,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_saturates_dial_retry_deadline_near_ste
       co_return std::vector<discovery::result>{
           discovery::result{
               .peer = test_peer(98),
-              .endpoints = {configured_rendezvous_endpoint(test_peer(98), 4098)},
+              .endpoints = {discovered_rendezvous_address(test_peer(98), 4098)},
               .discovered_by = discovery::source::dht,
               .score = 1.0,
           },
@@ -742,11 +747,11 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_sources_and_prevents_peer_excha
       }
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(41),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(41), 4041)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(41), 4041)},
                             .discovered_by = discovery::source::dht,
                             .score = 1.0},
           discovery::result{.peer = test_peer(42),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(42), 4042)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(42), 4042)},
                             .discovered_by = discovery::source::dht,
                             .score = 2.0},
       };
@@ -774,11 +779,11 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_sources_and_prevents_peer_excha
           .results =
               {
                   discovery::result{.peer = test_peer(43),
-                                    .endpoints = {configured_rendezvous_endpoint(test_peer(43), 4043)},
+                                    .endpoints = {discovered_rendezvous_address(test_peer(43), 4043)},
                                     .discovered_by = discovery::source::rendezvous,
                                     .score = 1.0},
                   discovery::result{.peer = test_peer(44),
-                                    .endpoints = {configured_rendezvous_endpoint(test_peer(44), 4044)},
+                                    .endpoints = {discovered_rendezvous_address(test_peer(44), 4044)},
                                     .discovered_by = discovery::source::rendezvous,
                                     .score = 2.0},
               },
@@ -788,19 +793,19 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_sources_and_prevents_peer_excha
                                 std::size_t) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(45),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(45), 4045)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(45), 4045)},
                             .discovered_by = discovery::source::peer_exchange,
                             .score = 1.0},
           discovery::result{.peer = test_peer(46),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(46), 4046)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(46), 4046)},
                             .discovered_by = discovery::source::peer_exchange,
                             .score = 2.0},
           discovery::result{.peer = test_peer(47),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(47), 4047)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(47), 4047)},
                             .discovered_by = discovery::source::peer_exchange,
                             .score = 3.0},
           discovery::result{.peer = test_peer(48),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(48), 4048)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(48), 4048)},
                             .discovered_by = discovery::source::peer_exchange,
                             .score = 4.0},
       };
@@ -873,7 +878,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_source_failure_keeps_other_results_and
           .results =
               {
                   discovery::result{.peer = test_peer(51),
-                                    .endpoints = {configured_rendezvous_endpoint(test_peer(51), 4051)},
+                                    .endpoints = {discovered_rendezvous_address(test_peer(51), 4051)},
                                     .discovered_by = discovery::source::rendezvous,
                                     .score = 1.0},
               },
@@ -883,7 +888,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_source_failure_keeps_other_results_and
                                 std::size_t) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(52),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(52), 4052)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(52), 4052)},
                             .discovered_by = discovery::source::peer_exchange,
                             .score = 1.0},
       };
@@ -1052,12 +1057,12 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_observations_and_evicts_lowest_
          static_cast<void>(co_await release->async_wait(observed));
          co_return std::vector<discovery::result>{
              discovery::result{.peer = test_peer(81),
-                               .endpoints = {configured_rendezvous_endpoint(test_peer(81), 4081)},
+                               .endpoints = {discovered_rendezvous_address(test_peer(81), 4081)},
                                .discovered_by = discovery::source::dht,
                                .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                                .score = 1.0},
              discovery::result{.peer = test_peer(82),
-                               .endpoints = {configured_rendezvous_endpoint(test_peer(82), 4082)},
+                               .endpoints = {discovered_rendezvous_address(test_peer(82), 4082)},
                                .discovered_by = discovery::source::dht,
                                .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                                .score = 2.0},
@@ -1065,7 +1070,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_bounds_observations_and_evicts_lowest_
       }
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(83),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(83), 4083)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(83), 4083)},
                             .discovered_by = discovery::source::rendezvous,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 100.0},
@@ -1104,17 +1109,17 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_dials_to_target_and_prunes_to_target) 
        [](std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(41),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(41), 4041)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(41), 4041)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 10.0},
           discovery::result{.peer = test_peer(42),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(42), 4042)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(42), 4042)},
                             .discovered_by = discovery::source::rendezvous,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 5.0},
           discovery::result{.peer = test_peer(43),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(43), 4043)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(43), 4043)},
                             .discovered_by = discovery::source::rendezvous,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 4.0},
@@ -1186,15 +1191,15 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_reserves_target_slots_across_parallel_
        [](std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(61),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(61), 4061)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(61), 4061)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
           discovery::result{.peer = test_peer(62),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(62), 4062)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(62), 4062)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
           discovery::result{.peer = test_peer(63),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(63), 4063)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(63), 4063)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
       };
@@ -1254,15 +1259,15 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_closes_admission_after_synchronous_dia
        [](std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(64),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(64), 4064)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(64), 4064)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
           discovery::result{.peer = test_peer(65),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(65), 4065)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(65), 4065)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
           discovery::result{.peer = test_peer(66),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(66), 4066)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(66), 4066)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1}},
       };
@@ -1319,12 +1324,12 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_dial_join_failure_cancels_and_drains_b
        [](std::shared_ptr<cancellation_latch>) -> boost::asio::awaitable<std::vector<discovery::result>> {
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(44),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(44), 4144)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(44), 4144)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 2.0},
           discovery::result{.peer = test_peer(45),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(45), 4145)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(45), 4145)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                             .score = 1.0},
@@ -1422,17 +1427,17 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_deduplicates_sources_and_retries_after
       }
       co_return std::vector<discovery::result>{
           discovery::result{.peer = test_peer(61),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(61), 4061)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(61), 4061)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = system_now + std::chrono::hours{1},
                             .score = 1.0},
           discovery::result{.peer = test_peer(61),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(61), 4062)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(61), 4062)},
                             .discovered_by = discovery::source::dht,
                             .expires_at = system_now + std::chrono::hours{1},
                             .score = 2.0},
           discovery::result{.peer = test_peer(61),
-                            .endpoints = {configured_rendezvous_endpoint(test_peer(61), 4063)},
+                            .endpoints = {discovered_rendezvous_address(test_peer(61), 4063)},
                             .discovered_by = discovery::source::rendezvous,
                             .expires_at = system_now + std::chrono::hours{1},
                             .score = 1.0},
@@ -1668,7 +1673,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_manager_rendezvous_isolates_point_failure_and_
               {
                   discovery::result{
                       .peer = test_peer(84),
-                      .endpoints = {configured_rendezvous_endpoint(test_peer(84), 4084)},
+                      .endpoints = {discovered_rendezvous_address(test_peer(84), 4084)},
                   },
               },
       };

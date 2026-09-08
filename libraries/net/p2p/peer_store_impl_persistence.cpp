@@ -99,7 +99,7 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
       if (!has_endpoint_source(endpoint.sources)) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P endpoint record has no provenance");
       }
-      add(endpoint.endpoint.to_string().size());
+      add(endpoint.address.to_string().size());
    }
    if (value.observed_endpoint) {
       add(value.observed_endpoint->to_string().size());

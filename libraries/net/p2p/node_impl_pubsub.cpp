@@ -51,6 +51,7 @@ import forge.asio.gate;
 import forge.crypto.asymmetric;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.pubsub;
@@ -192,8 +193,8 @@ void node::impl::increment_pubsub_invalid(const peer_id& peer) {
    }
    if (offender) {
       if (endpoint) {
-         store.mark_endpoint_failure(peer, *endpoint, path::kind::direct,
-                                     endpoint_backoff_until(peer, *endpoint, path::kind::direct));
+         store.mark_address_failure(peer, endpoint->to_multiaddr(), path::kind::direct,
+                                    endpoint_backoff_until(peer, *endpoint, path::kind::direct));
       }
       forget_session(offender);
       detail::request_session_cancel(offender->connection);

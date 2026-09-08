@@ -1259,7 +1259,8 @@ discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::opt
 
 namespace {
 
-[[nodiscard]] std::vector<endpoint> endpoints_from_registration(const rendezvous::registration& registration) {
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+endpoints_from_registration(const rendezvous::registration& registration) {
    if (registration.signed_peer_record.empty()) {
       return registration.endpoints;
    }
@@ -1282,7 +1283,7 @@ sanitize_registration_for_session(rendezvous::registration registration, const a
       }
       return registration;
    }
-   auto sanitized = host_addresses::sanitize_discovered_endpoints(
+   auto sanitized = host_addresses::sanitize_discovered_addresses(
        original_endpoints, registration.peer,
        discovery_context_for_session_peer(session ? std::optional<peer_id>{session->info.remote_peer} : std::nullopt,
                                           session ? session->remote_endpoint : std::nullopt,
@@ -1326,7 +1327,7 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
          response.status_value = rendezvous::status::invalid_ttl;
          response.status_text = "rendezvous registration TTL outside allowed range";
       } else {
-         auto endpoints = std::vector<endpoint>{};
+         auto endpoints = std::vector<forge::multiformats::multiaddr>{};
          auto registered_peer = session->info.remote_peer;
          if (!request.register_value->signed_peer_record.empty()) {
             try {
@@ -1345,9 +1346,7 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
          if (response.status_value == rendezvous::status::ok && endpoints.empty()) {
             if (const auto record = store.find(registered_peer)) {
                for (const auto& endpoint : record->endpoints) {
-                  auto item = endpoint.endpoint;
-                  item.peer = registered_peer;
-                  endpoints.push_back(std::move(item));
+                  endpoints.push_back(endpoint.address);
                }
             }
          }
@@ -1481,7 +1480,7 @@ boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::s
    for (const auto& endpoint : local_endpoints_for_control()) {
       append_endpoint(peer_exchange_message::endpoint_record{
           .peer = local,
-          .endpoint = endpoint,
+          .address = endpoint.to_multiaddr(),
           .capabilities = options.capabilities,
       });
       if (response.endpoints.size() >= response_options.max_endpoint_records) {
@@ -1500,7 +1499,7 @@ boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::s
          }
          append_endpoint(peer_exchange_message::endpoint_record{
              .peer = record.peer,
-             .endpoint = endpoint.endpoint,
+             .address = endpoint.address,
              .capabilities = record.capabilities,
          });
          if (response.endpoints.size() >= response_options.max_endpoint_records) {

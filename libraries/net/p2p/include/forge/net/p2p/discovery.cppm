@@ -8,7 +8,7 @@ module;
 
 export module forge.net.p2p.discovery;
 
-import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 import forge.net.p2p.scoring;
@@ -39,7 +39,7 @@ struct discovery {
 
    struct result {
       peer_id peer;
-      std::vector<endpoint> endpoints;
+      std::vector<forge::multiformats::multiaddr> endpoints;
       capability_set capabilities{};
       source discovered_by = source::explicit_config;
       path::kind preferred_path = path::kind::direct;

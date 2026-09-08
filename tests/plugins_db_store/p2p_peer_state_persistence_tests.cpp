@@ -36,6 +36,7 @@ import forge.db.object.exceptions;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.transaction;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
@@ -259,7 +260,7 @@ template <typename DocumentFactory> void check_object_peer_state_persistence(Doc
           .peer = high,
           .protocol_version = "/forge/persisted/high/1",
           .endpoints = std::vector<p2p::peer_store::endpoint_record>{p2p::peer_store::endpoint_record{
-              .endpoint = p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4701/p2p/" + high.to_string()),
+              .address = p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4701/p2p/" + high.to_string()).to_multiaddr(),
               .sources =
                   p2p::peer_store::endpoint_sources{
                       .learned = false,
@@ -585,9 +586,10 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
    const auto future = now + std::chrono::hours{1};
    const auto past = now - std::chrono::seconds{1};
    const auto older_past = now - std::chrono::seconds{2};
-   const auto address = p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4781/p2p/" + address_provider.to_string());
+   const auto address = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/object-provider.example/p2p/" + address_provider.to_string());
    const auto fully_expired_address =
-       p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4782/p2p/" + fully_expired_provider.to_string());
+       p2p::parse_endpoint("/ip4/127.0.0.1/tcp/4782/p2p/" + fully_expired_provider.to_string()).to_multiaddr();
 
    {
       auto app = make_app(document_for(driver, path));
@@ -710,7 +712,8 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
          return value.provider == local_provider && value.local_owned;
       }));
       BOOST_TEST(std::ranges::any_of(providers.providers, [&](const auto& value) {
-         return value.provider == address_provider && value.endpoints.size() == 1U;
+         return value.provider == address_provider && value.endpoints.size() == 1U &&
+                value.endpoints.front().to_string() == address.to_string();
       }));
 
       const auto pruned = forge::asio::blocking::run(app->runtime(), persistence_a->async_prune_expired(now, 10));
@@ -787,7 +790,7 @@ void check_object_dht_record_persistence(std::string driver, const std::filesyst
    }
 }
 
-void check_object_p2p_state_v1_and_missing_marker_policy(std::string driver, const std::filesystem::path& path) {
+void check_object_p2p_state_incompatible_and_missing_marker_policy(std::string driver, const std::filesystem::path& path) {
    const auto peer = p2p::make_peer_id_from_certificate_pem(
        forge::tests::p2p::make_identity_fixture("p2p-v1-reset-peer").certificate_pem);
    const auto profile = p2p::protocol_id{.value = "/forge/test/dht/reset/1"};
@@ -880,6 +883,50 @@ void check_object_p2p_state_v1_and_missing_marker_policy(std::string driver, con
       };
       forge::asio::blocking::run(app->runtime(), verify_reset());
       forge::asio::blocking::run(app->runtime(), dht->async_close());
+      forge::asio::blocking::run(app->runtime(), reset->async_close());
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+   }
+
+   {
+      auto app = make_app(document_for(driver, path / "v2"));
+      auto stores = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), stores->store(std::string{peer_store_name}));
+      p2p_state_schema::register_objects(handle);
+      auto seed_v2 = [&]() -> boost::asio::awaitable<void> {
+         auto transaction = co_await handle.begin_transaction();
+         auto objects = co_await handle.objects().join(transaction);
+         auto state = p2p_state_schema::schema_state{};
+         state.id = p2p_state_schema::schema_state_id;
+         state.format_version = 2;
+         co_await objects.insert(state);
+         co_await objects.create<p2p_state_schema::peer_row>([&](p2p_state_schema::peer_row& row) {
+            row.peer = peer.value;
+            row.hydration_priority = std::uint64_t{1} << 63U;
+            row.endpoints.push_back({.endpoint = "/dnsaddr/v2-cache.example/p2p/" + peer.to_string()});
+         });
+         co_await transaction.commit();
+      };
+      forge::asio::blocking::run(app->runtime(), seed_v2());
+
+      BOOST_CHECK_THROW((forge::asio::blocking::run(app->runtime(), p2p_node::object_peer_state_adapter::async_open(
+                                                                        stores.operator->(), handle, {}, false))),
+                        forge::db::object::exceptions::incompatible_version);
+      auto reset = forge::asio::blocking::run(
+          app->runtime(), p2p_node::object_peer_state_adapter::async_open(stores.operator->(), handle, {}, true));
+      const auto peer_page =
+          forge::asio::blocking::run(app->runtime(), reset->async_hydrate(p2p::peer_store::hydration_request{
+                                                         .kind = p2p::peer_store::hydration_kind::peers,
+                                                         .limit = 10,
+                                                     }));
+      BOOST_TEST(peer_page.peers.empty());
+
+      auto verify_reset = [&]() -> boost::asio::awaitable<void> {
+         auto snapshot = co_await handle.begin_read();
+         auto objects = snapshot.objects();
+         const auto state = co_await objects.get(p2p_state_schema::schema_state_id);
+         BOOST_TEST(state.format_version == p2p_state_schema::format_version);
+      };
+      forge::asio::blocking::run(app->runtime(), verify_reset());
       forge::asio::blocking::run(app->runtime(), reset->async_close());
       forge::asio::blocking::run(app->runtime(), app->shutdown());
    }
@@ -990,9 +1037,9 @@ BOOST_AUTO_TEST_CASE(p2p_dht_record_state_mdbx_reopens_prunes_and_isolates_profi
    check_object_dht_record_persistence("mdbx", root.root / "mdbx-dht-records");
 }
 
-BOOST_AUTO_TEST_CASE(p2p_state_mdbx_rejects_or_resets_v1_and_missing_markers) {
+BOOST_AUTO_TEST_CASE(p2p_state_mdbx_rejects_or_resets_v1_v2_and_missing_markers) {
    auto root = root_guard{};
-   check_object_p2p_state_v1_and_missing_marker_policy("mdbx", root.root / "mdbx-schema-policy");
+   check_object_p2p_state_incompatible_and_missing_marker_policy("mdbx", root.root / "mdbx-schema-policy");
 }
 #endif
 
@@ -1048,9 +1095,9 @@ BOOST_AUTO_TEST_CASE(p2p_dht_record_state_rocksdb_reopens_prunes_and_isolates_pr
    check_object_dht_record_persistence("rocksdb", root.root / "rocksdb-dht-records");
 }
 
-BOOST_AUTO_TEST_CASE(p2p_state_rocksdb_rejects_or_resets_v1_and_missing_markers) {
+BOOST_AUTO_TEST_CASE(p2p_state_rocksdb_rejects_or_resets_v1_v2_and_missing_markers) {
    auto root = root_guard{};
-   check_object_p2p_state_v1_and_missing_marker_policy("rocksdb", root.root / "rocksdb-schema-policy");
+   check_object_p2p_state_incompatible_and_missing_marker_policy("rocksdb", root.root / "rocksdb-schema-policy");
 }
 #endif
 

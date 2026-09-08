@@ -13,6 +13,7 @@ module forge.net.p2p.node;
 import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.multiformats.multiaddr;
 
 #include "details/black_hole_detector.hxx"
 #include "details/host_addresses.hxx"

@@ -15,6 +15,7 @@ module forge.net.p2p.node;
 import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.multiformats.multiaddr;
 
 #include "details/dial_ranker.hxx"
 #include "details/host_addresses.hxx"

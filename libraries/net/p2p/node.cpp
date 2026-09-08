@@ -75,6 +75,7 @@ import forge.crypto.asymmetric.rsa;
 import forge.crypto.digest.sha256;
 import forge.crypto.asymmetric.x25519;
 import forge.multiformats.types;
+import forge.multiformats.multiaddr;
 import forge.multiformats.varint;
 import forge.multiformats.exceptions;
 import forge.net.transport.session;
@@ -116,7 +117,7 @@ void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) 
 }
 
 [[nodiscard]] dht::peer sanitize_discovered_peer(dht::peer value, host_addresses::learning_context context) {
-   value.endpoints = host_addresses::sanitize_discovered_endpoints(std::move(value.endpoints), value.id, context);
+   value.endpoints = host_addresses::sanitize_discovered_addresses(std::move(value.endpoints), value.id, context);
    return value;
 }
 
@@ -124,7 +125,8 @@ void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) 
    return !value.endpoints.empty();
 }
 
-[[nodiscard]] std::vector<endpoint> endpoints_from_registration(const rendezvous::registration& registration) {
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+endpoints_from_registration(const rendezvous::registration& registration) {
    if (registration.signed_peer_record.empty()) {
       return registration.endpoints;
    }
@@ -147,7 +149,7 @@ sanitize_discovered_registration(rendezvous::registration registration, host_add
       return registration;
    }
    auto sanitized =
-       host_addresses::sanitize_discovered_endpoints(original_endpoints, registration.peer, std::move(context));
+       host_addresses::sanitize_discovered_addresses(original_endpoints, registration.peer, std::move(context));
    if (sanitized.empty()) {
       return std::nullopt;
    }
@@ -189,7 +191,7 @@ diagnostics_endpoints(std::span<const peer_store::endpoint_record> records, std:
          break;
       }
       out.push_back(diagnostics::endpoint_record{
-          .endpoint = record.endpoint,
+          .address = record.address,
           .kind = record.kind,
           .relay_peer = record.relay_peer,
           .successes = record.successes,

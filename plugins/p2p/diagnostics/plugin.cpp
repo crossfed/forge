@@ -72,7 +72,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.0.0";
+   return "2.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -94,7 +94,7 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
    impl_->source = context.apis()
                       .get<forge::plugins::p2p::node::diagnostics_source>(
-                         {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 1, .min_revision = 0})
+                         {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 2, .min_revision = 0})
                       .shared();
    impl_->initialized = true;
    impl_->stopping = false;

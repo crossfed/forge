@@ -44,10 +44,10 @@ isolated codec and interop fixtures do not promote this plugin to production.
 - Package component: `plugins_p2p_node`
 - Plugin id: `forge.plugins.p2p.node`
 - Main API id: `forge.plugins.p2p.node`
-- Plugin version: `5.0.0`
+- Plugin version: `6.0.0`
 - Main API contract: `2.0`
 - Extra API ids:
-  - `forge.plugins.p2p.node.diagnostics_source`
+  - `forge.plugins.p2p.node.diagnostics_source` (contract `2.0`)
   - `forge.plugins.p2p.node.pubsub_source`
 - Config section: `plugins.p2p.node`
 - Public modules:
@@ -168,7 +168,7 @@ record state.
 One authoritative schema marker versions the complete private row family, so
 startup validates the format without scanning durable history. A missing marker
 in nonempty storage or a version mismatch fails startup. With
-`schema-policy: reset`, the v2 recovery path atomically removes the complete private P2P row
+`schema-policy: reset`, the v3 recovery path atomically removes the complete private P2P row
 family, including peer, Rendezvous, DHT value/provider and sequence records.
 Normal node startup hydrates peer candidates from configured bootstrap peers;
 it does not recover DHT values, local provider ownership or Rendezvous
@@ -202,6 +202,13 @@ its in-flight API sessions. Publishing the same API protocol replaces its
 generation behind one stable node handler; an older handle cannot unregister
 the replacement. Raw `publish_protocol(...)` remains a pre-start-only route
 contribution and cannot share a protocol id with an API publication.
+
+Plugin 6.0 upgrades `forge.plugins.p2p.node.diagnostics_source` to contract
+`2.0`: diagnostics endpoint records now carry raw `multiaddr` values in their
+`address` field so DNS address carriers survive. Consumers must request major
+`2`; no v1 alias is provided. The private ObjectDB P2P cache marker is v3;
+v2 caches must use the existing recoverable `schema-policy: reset` path rather
+than being hydrated.
 
 ## Dependencies
 

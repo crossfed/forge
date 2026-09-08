@@ -37,4 +37,10 @@ struct learning_context {
 [[nodiscard]] std::vector<forge::net::p2p::endpoint>
 sanitize_discovered_endpoints(std::vector<forge::net::p2p::endpoint> values, const peer_id& peer, learning_context context);
 
+[[nodiscard]] std::optional<forge::multiformats::multiaddr>
+learned(forge::multiformats::multiaddr value, const peer_id& peer, learning_context context);
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+sanitize_discovered_addresses(std::vector<forge::multiformats::multiaddr> values, const peer_id& peer,
+                             learning_context context);
+
 } // namespace forge::net::p2p::host_addresses

@@ -10,7 +10,7 @@ module;
 
 export module forge.net.p2p.rendezvous;
 
-import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.envelope;
 import forge.net.p2p.identity;
 import forge.crypto.asymmetric;
@@ -58,7 +58,7 @@ struct rendezvous {
    struct registration {
       std::string namespace_name;
       peer_id peer;
-      std::vector<endpoint> endpoints;
+      std::vector<forge::multiformats::multiaddr> endpoints;
       std::vector<std::uint8_t> signed_peer_record;
       std::chrono::seconds ttl{0};
       std::chrono::system_clock::time_point expires_at{};
@@ -67,7 +67,7 @@ struct rendezvous {
 
    struct peer_record {
       peer_id peer;
-      std::vector<endpoint> endpoints;
+      std::vector<forge::multiformats::multiaddr> endpoints;
       std::uint64_t sequence = 0;
    };
 

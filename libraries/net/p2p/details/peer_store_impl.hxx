@@ -37,14 +37,14 @@ struct peer_store::impl {
    [[nodiscard]] bool mark_discovery_failure(const peer_id& peer, std::chrono::system_clock::time_point backoff_until);
    [[nodiscard]] std::size_t prune_expired_relay_reservations(const peer_id& peer,
                                                               std::chrono::system_clock::time_point now);
-   void learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities);
+   void learn_address(peer_id peer, forge::multiformats::multiaddr address, capability_set capabilities);
    void mark_reachability(peer_id peer, reachability::state state, std::optional<forge::net::p2p::endpoint> observed);
    void mark_success(const peer_id& peer, path::kind kind, std::chrono::milliseconds latency);
    void mark_failure(const peer_id& peer);
-   void mark_endpoint_success(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
-                              std::chrono::milliseconds latency);
-   void mark_endpoint_failure(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind,
-                              std::chrono::system_clock::time_point backoff_until);
+   void mark_address_success(const peer_id& peer, const forge::multiformats::multiaddr& address, path::kind kind,
+                             std::chrono::milliseconds latency);
+   void mark_address_failure(const peer_id& peer, const forge::multiformats::multiaddr& address, path::kind kind,
+                             std::chrono::system_clock::time_point backoff_until);
    void upsert_routing_peer(protocol_id protocol, dht::peer value, discovery::source source,
                             std::chrono::system_clock::time_point expires_at);
 

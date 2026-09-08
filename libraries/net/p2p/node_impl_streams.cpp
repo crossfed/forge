@@ -49,6 +49,7 @@ import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.hole_punch;
 import forge.net.p2p.identify;
@@ -250,8 +251,8 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
    });
    const auto record_open_timeout = [&] {
       if (session->direct_endpoint) {
-         store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                     endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+         store.mark_address_failure(peer, session->direct_endpoint->to_multiaddr(), path::kind::direct,
+                                    endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
          increment_direct_failure();
       } else {
          record_direct_failure(peer);
@@ -320,8 +321,8 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
       forget_session(session);
       if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
          if (session->direct_endpoint) {
-            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            store.mark_address_failure(peer, session->direct_endpoint->to_multiaddr(), path::kind::direct,
+                                       endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
             increment_direct_failure();
          } else {
             record_direct_failure(peer);

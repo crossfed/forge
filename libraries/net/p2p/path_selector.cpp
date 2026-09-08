@@ -9,6 +9,7 @@ module forge.net.p2p.node;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.scoring;
+import forge.exceptions;
 
 #include "details/path_selector.hxx"
 
@@ -16,8 +17,15 @@ namespace forge::net::p2p::path_selector {
 namespace {
 
 [[nodiscard]] bool supported_direct(const peer_store::endpoint_record& value) {
-   return value.kind == path::kind::direct && !value.relay_peer &&
-          (value.endpoint.is_direct_quic() || value.endpoint.is_direct_tcp());
+   if (value.kind != path::kind::direct || value.relay_peer) {
+      return false;
+   }
+   try {
+      const auto endpoint = parse_endpoint(value.address.to_string());
+      return endpoint.is_direct_quic() || endpoint.is_direct_tcp();
+   } catch (const forge::exceptions::base&) {
+      return false;
+   }
 }
 
 } // namespace

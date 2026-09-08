@@ -58,6 +58,7 @@ import forge.net.p2p.peer_store;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.relay;
 import forge.net.p2p.resource_manager;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -75,12 +76,10 @@ namespace {
 }
 
 [[nodiscard]] dht::peer lifecycle_dht_peer(const peer_store::record& record) {
-   auto endpoints = std::vector<endpoint>{};
+   auto endpoints = std::vector<forge::multiformats::multiaddr>{};
    endpoints.reserve(record.endpoints.size());
    for (const auto& item : record.endpoints) {
-      auto endpoint = item.endpoint;
-      endpoint.peer = record.peer;
-      endpoints.push_back(std::move(endpoint));
+      endpoints.push_back(item.address);
    }
    return dht::peer{
        .id = record.peer, .endpoints = std::move(endpoints), .connection = dht::connection_type::can_connect};

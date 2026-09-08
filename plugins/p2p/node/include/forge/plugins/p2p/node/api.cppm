@@ -88,6 +88,6 @@ class pubsub_source : public forge::api::core::contract<pubsub_source> {
 
 FORGE_EXPORT_API(::forge::plugins::p2p::node::api, FORGE_API_CONTRACT("forge.plugins.p2p.node", 2, 0))
 FORGE_EXPORT_API(::forge::plugins::p2p::node::diagnostics_source,
-                 FORGE_API_CONTRACT("forge.plugins.p2p.node.diagnostics_source", 1, 0))
+                 FORGE_API_CONTRACT("forge.plugins.p2p.node.diagnostics_source", 2, 0))
 FORGE_EXPORT_API(::forge::plugins::p2p::node::pubsub_source,
                  FORGE_API_CONTRACT("forge.plugins.p2p.node.pubsub_source", 1, 0))

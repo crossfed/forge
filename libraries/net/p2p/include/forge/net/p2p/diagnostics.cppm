@@ -24,6 +24,7 @@ import forge.net.p2p.reachability;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.topology;
+import forge.multiformats.multiaddr;
 
 export namespace forge::net::p2p {
 
@@ -104,7 +105,7 @@ struct diagnostics {
    };
 
    struct endpoint_record {
-      forge::net::p2p::endpoint endpoint;
+      forge::multiformats::multiaddr address;
       path::kind kind = path::kind::direct;
       std::optional<peer_id> relay_peer;
       std::uint64_t successes = 0;
@@ -263,7 +264,7 @@ BOOST_DESCRIBE_STRUCT(
      backpressure_rejections, active_sessions, active_relays, active_relay_reservations, stopped))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::network_state, (), (local_peer, local_endpoints, stopped))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::endpoint_record, (),
-                      (endpoint, kind, relay_peer, successes, failures, last_latency, backoff_until, score))
+                      (address, kind, relay_peer, successes, failures, last_latency, backoff_until, score))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::relay_reservation, (),
                       (relay, reservation_id, expires_at, endpoints, successes, failures, last_latency, score))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::peer, (),

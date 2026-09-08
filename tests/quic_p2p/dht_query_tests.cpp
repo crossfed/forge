@@ -60,11 +60,12 @@ BOOST_AUTO_TEST_CASE(dht_query_merge_bounds_endpoints_across_repeated_peer_recor
    const auto id = query_test_peer(1);
    const auto first = dht::peer{
        .id = id,
-       .endpoints = {query_test_endpoint(4101), query_test_endpoint(4102)},
+       .endpoints = {query_test_endpoint(4101).to_multiaddr(), query_test_endpoint(4102).to_multiaddr()},
    };
    const auto second = dht::peer{
        .id = id,
-       .endpoints = {query_test_endpoint(4102), query_test_endpoint(4103), query_test_endpoint(4104)},
+       .endpoints = {query_test_endpoint(4102).to_multiaddr(), query_test_endpoint(4103).to_multiaddr(),
+                     query_test_endpoint(4104).to_multiaddr()},
    };
 
    auto known = std::map<peer_id, dht::peer>{};

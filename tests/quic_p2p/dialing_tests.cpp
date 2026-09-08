@@ -19,6 +19,8 @@ module forge.net.p2p.node;
 import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.net.p2p.identity;
+import forge.multiformats.multiaddr;
 
 #include "../../libraries/net/p2p/details/black_hole_detector.hxx"
 #include "../../libraries/net/p2p/details/dial_ranker.hxx"
@@ -89,6 +91,50 @@ BOOST_AUTO_TEST_CASE(host_address_scope_matches_go_multiaddr_donor_vectors) {
    check_scope("/ip6/fe80::1/tcp/1", host_addresses::endpoint_scope::link_local);
    check_scope("/ip6/fd00::1/tcp/1", host_addresses::endpoint_scope::private_address);
    check_scope("/ip6/::/tcp/1", host_addresses::endpoint_scope::unroutable);
+}
+
+BOOST_AUTO_TEST_CASE(host_addresses_preserve_dnsaddr_carriers_and_canonical_peer_suffixes) {
+   const auto target = peer_id::from_string("QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC");
+   const auto relay = peer_id::from_string("QmNLfbof5rLekrACjeuLk9JmGZD2HDBHCU4z16iYKmx5SE");
+   const auto context = host_addresses::learning_context{.source = host_addresses::source_kind::third_party};
+
+   const auto nonleading_dnsaddr = forge::multiformats::multiaddr::parse("/ip4/8.8.8.8/dnsaddr/relay.example");
+   const auto learned_dnsaddr = host_addresses::learned(nonleading_dnsaddr, target, context);
+   BOOST_REQUIRE(learned_dnsaddr.has_value());
+   BOOST_TEST(learned_dnsaddr->to_string() == nonleading_dnsaddr.to_string() + "/p2p/" + target.to_string());
+
+   const auto relay_carrier = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p/" + relay.to_string() + "/p2p-circuit/p2p/" + target.to_string());
+   const auto learned_relay = host_addresses::learned(relay_carrier, target, context);
+   BOOST_REQUIRE(learned_relay.has_value());
+   BOOST_TEST(learned_relay->to_string() == relay_carrier.to_string());
+
+   const auto anonymous_relay_carrier = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p-circuit/p2p/" + target.to_string());
+   const auto learned_anonymous_relay = host_addresses::learned(anonymous_relay_carrier, target, context);
+   BOOST_REQUIRE(learned_anonymous_relay.has_value());
+   BOOST_TEST(learned_anonymous_relay->to_string() == anonymous_relay_carrier.to_string());
+
+   const auto terminal = forge::multiformats::multiaddr::parse("/dnsaddr/target.example/p2p/" + target.to_string());
+   const auto learned_terminal = host_addresses::learned(terminal, target, context);
+   BOOST_REQUIRE(learned_terminal.has_value());
+   BOOST_TEST(learned_terminal->to_string() == terminal.to_string());
+
+   const auto malformed_relay = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p/1/p2p-circuit/p2p/" + target.to_string());
+   BOOST_TEST(!host_addresses::learned(malformed_relay, target, context).has_value());
+
+   const auto unrelated_after_circuit = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p-circuit/tcp/4001/p2p/" + target.to_string());
+   BOOST_TEST(!host_addresses::learned(unrelated_after_circuit, target, context).has_value());
+
+   const auto nonterminal_target = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/target.example/p2p/" + target.to_string() + "/tcp/4001");
+   BOOST_TEST(!host_addresses::learned(nonterminal_target, target, context).has_value());
+
+   const auto conflicting_terminal =
+       forge::multiformats::multiaddr::parse("/dnsaddr/target.example/p2p/" + relay.to_string());
+   BOOST_TEST(!host_addresses::learned(conflicting_terminal, target, context).has_value());
 }
 
 BOOST_AUTO_TEST_CASE(dial_ranker_matches_direct_quic_happy_eyeballs) {

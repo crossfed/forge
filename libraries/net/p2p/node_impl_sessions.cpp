@@ -69,6 +69,7 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -647,8 +648,8 @@ node::impl::commit_direct_attempt(detail::direct_attempt attempt) {
    }
 
    co_await remember_session(session, connection_manager::direction::outbound);
-   store.mark_endpoint_success(
-       session->info.remote_peer, attempt.target, path::kind::direct,
+   store.mark_address_success(
+       session->info.remote_peer, attempt.target.to_multiaddr(), path::kind::direct,
        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - attempt.started_at));
    launch_session_accept_loop(session);
    launch_identify(session);
@@ -767,7 +768,8 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
       }
       const auto remaining = remaining_timeout(started, timeout, "P2P direct path");
       const auto per_attempt = attempt_timeout(remaining, direct_attempt_timeout, "P2P direct path attempt");
-      const auto endpoint = preferred[index].endpoint;
+      const auto address = preferred[index].address;
+      const auto endpoint = parse_endpoint(address.to_string());
       record_path_attempt(path::kind::direct);
       try {
          co_return co_await connect_direct(
@@ -785,7 +787,7 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
          if (!detail::remote_peer_attributable_failure(kind, node_stopped)) {
             FORGE_THROW_CODE(kind, error.what());
          }
-         store.mark_endpoint_failure(peer, endpoint, path::kind::direct,
+         store.mark_address_failure(peer, address, path::kind::direct,
                                      endpoint_backoff_until(peer, endpoint, path::kind::direct));
          increment_direct_failure();
       }

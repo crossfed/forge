@@ -40,6 +40,7 @@ import forge.net.p2p.dht.record_store;
 import forge.net.p2p.diagnostics;
 import forge.multiformats.exceptions;
 import forge.multiformats.multihash;
+import forge.multiformats.multiaddr;
 import forge.multiformats.types;
 import forge.multiformats.varint;
 import forge.net.p2p.endpoint;
@@ -562,7 +563,7 @@ std::vector<std::uint8_t> signed_rendezvous_record(const libp2p_identity& identi
    return forge::net::p2p::rendezvous::codec::seal_peer_record(
               forge::net::p2p::rendezvous::peer_record{
                   .peer = identity.peer,
-                  .endpoints = std::vector<forge::net::p2p::endpoint>{endpoint},
+                  .endpoints = {endpoint.to_multiaddr()},
                   .sequence = sequence,
               },
               key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem))
@@ -1104,8 +1105,11 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
                                                       {.requested_count = 1, .quorum = 1, .timeout = 1s}));
             const auto found = std::ranges::find(providers, provider_peer, &forge::net::p2p::dht::peer::id);
             if (found != providers.end()) {
-               if (found->endpoints.empty() || !std::ranges::all_of(found->endpoints, [&](const auto& endpoint) {
-                      return endpoint.peer && *endpoint.peer == provider_peer;
+               if (found->endpoints.empty() || !std::ranges::all_of(found->endpoints, [&](const auto& address) {
+                      const auto& components = address.components();
+                      return !components.empty() &&
+                             components.back().code == forge::multiformats::protocol_code::p2p &&
+                             components.back().value == provider_peer.to_string();
                    })) {
                   throw std::runtime_error{"FORGE DHT provider query did not preserve provider-bound endpoints"};
                }
