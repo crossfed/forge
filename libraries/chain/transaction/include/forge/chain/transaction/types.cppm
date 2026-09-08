@@ -1,5 +1,8 @@
 module;
 
+#include <boost/describe.hpp>
+#include <forge/raw/serialization.hpp>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -10,6 +13,12 @@ export module forge.chain.transaction.types;
 
 export import forge.chain.protocol.transaction;
 export import forge.crypto.signer.types;
+
+import forge.crypto.digest.sha256;
+import forge.raw.datastream;
+import forge.raw.raw;
+import forge.variant.described;
+import forge.variant.value;
 
 export namespace forge::chain::transaction {
 
@@ -49,9 +58,15 @@ struct signing_key {
 };
 
 struct prepared_transaction {
-   chain::protocol::signed_transaction signed_value;
    chain::protocol::packed_transaction packed;
-   chain::protocol::transaction_id id;
+
+   bool operator==(const prepared_transaction&) const = default;
 };
 
+BOOST_DESCRIBE_STRUCT(unsigned_transaction, (), (chain, value, context_free_data, compression))
+BOOST_DESCRIBE_STRUCT(prepared_transaction, (), (packed))
+
 } // namespace forge::chain::transaction
+
+FORGE_DECLARE_SERIALIZATION(forge::chain::transaction::unsigned_transaction)
+FORGE_DECLARE_SERIALIZATION(forge::chain::transaction::prepared_transaction)

@@ -4,12 +4,9 @@ namespace forge::api::http::detail {
 
 class server_stream_state final : public std::enable_shared_from_this<server_stream_state> {
  public:
-   server_stream_state(boost::asio::any_io_executor executor,
-                       forge::api::core::pinned_binding_plan plan,
-                       forge::api::core::frame request,
-                       std::uint32_t max_frame_bytes,
-                       std::uint32_t max_item_bytes,
-                       std::uint32_t max_buffered_items,
+   server_stream_state(boost::asio::any_io_executor executor, forge::api::core::pinned_binding_plan plan,
+                       forge::api::core::frame request, forge::api::core::trusted_invocation trusted,
+                       std::uint32_t max_frame_bytes, std::uint32_t max_item_bytes, std::uint32_t max_buffered_items,
                        std::uint64_t max_buffered_bytes);
 
    void start();
@@ -26,6 +23,7 @@ class server_stream_state final : public std::enable_shared_from_this<server_str
    boost::asio::cancellation_signal cancellation_;
    forge::api::core::pinned_binding_plan plan_;
    forge::api::core::frame request_;
+   forge::api::core::trusted_invocation trusted_;
    forge::api::core::detail::local_stream_pair stream_;
    std::uint32_t max_frame_bytes_ = 0;
    std::mutex mutex_;

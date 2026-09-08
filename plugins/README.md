@@ -6,7 +6,7 @@ publishes narrow typed APIs that application plugins can use without reaching
 into low-level transports directly.
 
 Plugins are useful when an application needs one shared service, such as an
-HTTP server, a P2P node, a crypto signer or a crypto secrets service, and many
+HTTP server, a P2P node, a Chain signer or a crypto secrets service, and many
 application plugins need to contribute behavior to it.
 
 ## When To Use
@@ -39,7 +39,7 @@ application plugins need to contribute behavior to it.
 ```cpp
 registry.register_plugin(forge::plugins::http::server::descriptor());
 registry.register_plugin(forge::plugins::p2p::node::descriptor());
-registry.register_plugin(forge::plugins::crypto::signer::descriptor());
+registry.register_plugin(forge::plugins::chain::signer::descriptor());
 registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 registry.register_plugin(forge::plugins::log::otlp::descriptor());
 registry.register_plugin(forge::plugins::db::store::descriptor());
@@ -55,11 +55,11 @@ co_await http->publish<catalog_api>();
 Use focused plugin components in small consumers:
 
 ```cmake
-find_package(Forge REQUIRED COMPONENTS plugins_http_server plugins_crypto_signer)
+find_package(Forge REQUIRED COMPONENTS plugins_http_server plugins_chain_signer)
 
 target_link_libraries(app PRIVATE
    Forge::forge_plugins_http_server
-   Forge::forge_plugins_crypto_signer)
+   Forge::forge_plugins_chain_signer)
 ```
 
 ## Available Plugins
@@ -71,7 +71,7 @@ target_link_libraries(app PRIVATE
 | [`forge::plugins::p2p::resolver`](p2p/resolver/README.md) | `forge_plugins_p2p_resolver` | `plugins.p2p.resolver` | Publishes and resolves peer API metadata over the P2P node. |
 | [`forge::plugins::p2p::diagnostics`](p2p/diagnostics/README.md) | `forge_plugins_p2p_diagnostics` | `plugins.p2p.diagnostics` | Exposes read-only P2P network/resource/pubsub diagnostics. |
 | [`forge::plugins::p2p::pubsub`](p2p/pubsub/README.md) | `forge_plugins_p2p_pubsub` | `plugins.p2p.pubsub` | Exposes topic publish/subscribe over the shared P2P node. |
-| [`forge::plugins::crypto::signer`](crypto/signer/README.md) | `forge_plugins_crypto_signer` | `plugins.crypto.signer` | Signs digests and BLS messages with purpose-scoped local keys and returns typed binary crypto values. |
+| [`forge::plugins::chain::signer`](chain/signer/README.md) | `forge_plugins_chain_signer` | `plugins.chain.signer` | Composes named transaction and finality providers behind typed Chain signer APIs and exact caller/action policy. |
 | [`forge::plugins::crypto::secrets`](crypto/secrets/README.md) | `forge_plugins_crypto_secrets` | `plugins.crypto.secrets` | Provides bounded secret retrieval, derivation and symmetric encryption operations. |
 | [`forge::plugins::log::otlp`](log/otlp/README.md) | `forge_plugins_log_otlp` | `plugins.log.otlp` | Exports configured FORGE logger routes to OTLP/HTTP JSON. |
 | [`forge::plugins::db::store`](db/store/README.md) | `forge_plugins_db_store` | `plugins.db.store` | Owns configured named DB stores and exposes optional Object, Blob and Revision layers over one Core driver. |
@@ -91,8 +91,8 @@ target_link_libraries(app PRIVATE Forge::forge_plugins_http_server)
 Each official plugin follows the same public module layout:
 
 - `forge.plugins.<family>.<name>.plugin` provides `plugin` and `descriptor()`.
-- `forge.plugins.<family>.<name>.api` provides typed contracts exposed through
-  `forge_api_core`.
+- Plugin contracts may be owned by a domain library when they are consumed
+  outside the plugin; Chain signer implements `forge.chain.api` contracts.
 - `forge.plugins.<family>.<name>.types` provides config and DTO types.
 - `forge.plugins.<family>.<name>.exceptions` provides typed exceptions.
 
@@ -115,8 +115,8 @@ transport mutation APIs. Their public APIs are typed contribution surfaces:
 
 ## Security And Redaction
 
-- Plugins that load secrets or keys must schema-mark those fields as secret and
-  avoid raw values in diagnostics.
+- Plugins that receive provider references must keep private-key material out of
+  config and diagnostics.
 - Local plugin APIs are not product authorization boundaries by themselves.
   Consumers decide which product code may call them.
 - Network-facing plugins must keep limits, deadlines and contribution windows
@@ -138,7 +138,8 @@ transport mutation APIs. Their public APIs are typed contribution surfaces:
 
 - `test_forge_plugins`
 - Focused package tests such as `test_forge_package_plugins_http_server`,
-  `test_forge_package_plugins_crypto_signer`,
+  `test_forge_package_plugins_chain_signer`,
+  `test_forge_package_plugins_crypto_signer_removed`,
   `test_forge_package_plugins_crypto_secrets`,
   `test_forge_package_plugins_log_otlp`,
   `test_forge_package_plugins_p2p_node` and

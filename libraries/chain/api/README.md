@@ -55,6 +55,26 @@ transports carry the same bytes without a transport-specific cursor DTO.
 Concrete controllers, state schemas, persistence, protocol publication and
 network policy remain in downstream products.
 
+## Signing APIs
+
+`forge.chain.api.transaction_signer` is a transport-neutral `1.0` API with
+`local | remote` surface. It accepts the canonical
+`forge::chain::transaction::unsigned_transaction`, receives an
+`forge::api::auth::authenticated_caller` only through trusted server-side
+transport injection, and returns the canonical `prepared_transaction`. The API
+does not accept caller-provided digests, key identifiers or algorithms and does
+not submit the transaction.
+
+`forge.chain.api.finality_signer` is a local-only `1.0` API. `identity()`
+returns the configured BLS public key and proof of possession, while
+`sign_vote()` accepts a canonical Savanna block reference and vote kind and
+returns a canonical finalizer vote. Durable safety-state and vote planning stay
+with the consensus controller; this API never signs arbitrary bytes.
+
+The implementation owner is `forge.plugins.chain.signer`. Transport plugins
+may publish the transaction API, but the signer plugin opens no sockets and
+does not own HTTP or P2P routes.
+
 Each `method_capability` advertises its own HTTP and P2P publication state;
 the service never implies that every enabled method is available on every
 transport. Typed change methods use the existing `state_changes` audit class;

@@ -5,12 +5,14 @@ module;
 #include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
+#include <compare>
 #include <cstdint>
 #include <span>
 
 module forge.crypto.bls;
 
 import forge.crypto.core.random;
+import forge.crypto.core.secret_bytes;
 import forge.exceptions;
 
 namespace forge::crypto::bls {
@@ -21,8 +23,7 @@ namespace {
    if (std::all_of(secret.begin(), secret.end(), [](auto word) { return word == 0U; })) {
       return false;
    }
-   const auto encoded = bls12_381::sk_to_bytes(secret);
-   return bls12_381::sk_from_bytes(encoded) == secret;
+   return bls12_381::scalar::cmp(secret, bls12_381::fp::Q) == std::strong_ordering::less;
 }
 
 void require_valid_private_secret(const std::array<std::uint64_t, 4>& secret) {
@@ -39,6 +40,27 @@ private_key::private_key(std::span<const std::uint8_t> seed) {
    }
    _secret = bls12_381::secret_key(seed);
    require_valid_private_secret(_secret);
+}
+
+private_key::~private_key() {
+   forge::crypto::core::secure_erase(
+       std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(_secret.data()), sizeof(_secret)});
+}
+
+private_key::private_key(private_key&& other) noexcept : _secret{other._secret} {
+   forge::crypto::core::secure_erase(
+       std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(other._secret.data()), sizeof(other._secret)});
+}
+
+private_key& private_key::operator=(private_key&& other) noexcept {
+   if (this != &other) {
+      forge::crypto::core::secure_erase(
+          std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(_secret.data()), sizeof(_secret)});
+      _secret = other._secret;
+      forge::crypto::core::secure_erase(
+          std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(other._secret.data()), sizeof(other._secret)});
+   }
+   return *this;
 }
 
 public_key private_key::get_public_key() const {
@@ -60,7 +82,8 @@ signature private_key::sign(std::span<const std::uint8_t> message) const {
 }
 
 private_key private_key::generate() {
-   return private_key{forge::crypto::core::random_bytes(32U)};
+   auto seed = forge::crypto::core::secret_bytes{forge::crypto::core::random_bytes(32U)};
+   return private_key{seed.span()};
 }
 
 } // namespace forge::crypto::bls

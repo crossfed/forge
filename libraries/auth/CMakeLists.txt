@@ -1,3 +1,7 @@
+add_subdirectory(oauth2)
+add_subdirectory(workload)
+add_subdirectory(appauth)
+add_subdirectory(oidc_agent)
 add_subdirectory(pairing)
 add_subdirectory(session)
 add_subdirectory(http)

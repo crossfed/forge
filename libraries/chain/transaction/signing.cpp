@@ -35,11 +35,8 @@ bool signature_matches(const chain::protocol::public_key& key, const chain::prot
 
 prepared_transaction pack(chain::protocol::signed_transaction value, compression_type compression) {
    auto packed = chain::protocol::packed_transaction{value, compression};
-   auto id = packed.id();
    return prepared_transaction{
-       .signed_value = std::move(value),
        .packed = std::move(packed),
-       .id = id,
    };
 }
 

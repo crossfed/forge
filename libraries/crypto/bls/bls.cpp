@@ -5,6 +5,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,7 @@ module;
 module forge.crypto.bls;
 
 import forge.codec.base64;
+import forge.crypto.core.secret_bytes;
 import forge.crypto.digest.ripemd160;
 import forge.exceptions;
 import forge.variant.value;
@@ -32,16 +34,16 @@ constexpr auto private_key_prefix = std::string_view{"PVT_BLS_"};
 constexpr auto checksum_size = std::size_t{4};
 
 template <std::size_t Size>
-[[nodiscard]] std::array<std::uint8_t, Size> decode_checked(std::string_view text, std::string_view prefix) {
+[[nodiscard]] forge::crypto::core::secret_bytes decode_checked(std::string_view text, std::string_view prefix) {
    if (!text.starts_with(prefix)) {
       FORGE_THROW_EXCEPTION(exceptions::parse_error, "BLS text has an invalid prefix");
    }
 
-   auto decoded = std::vector<std::uint8_t>{};
+   auto decoded = forge::crypto::core::secret_bytes{};
    try {
-      decoded = forge::codec::base64::decode(
+      decoded.assign(forge::codec::base64::decode(
           text.substr(prefix.size()),
-          {.characters = forge::codec::base64::alphabet::url, .pad = forge::codec::base64::padding_policy::allow});
+          {.characters = forge::codec::base64::alphabet::url, .pad = forge::codec::base64::padding_policy::allow}));
    } catch (const std::exception&) {
       FORGE_THROW_EXCEPTION(exceptions::parse_error, "BLS text has an invalid base64url payload");
    }
@@ -50,13 +52,12 @@ template <std::size_t Size>
       FORGE_THROW_EXCEPTION(exceptions::parse_error, "BLS text has an invalid payload length");
    }
 
-   auto result = std::array<std::uint8_t, Size>{};
-   std::copy_n(decoded.begin(), Size, result.begin());
+   auto result = forge::crypto::core::secret_bytes{decoded.span().first(Size)};
 
    auto encoder = forge::crypto::digest::ripemd160::encoder{};
-   encoder.write(reinterpret_cast<const char*>(result.data()), static_cast<std::uint32_t>(result.size()));
+   encoder.write(reinterpret_cast<const char*>(result.span().data()), static_cast<std::uint32_t>(result.size()));
    const auto checksum = encoder.result().extract_as_byte_array();
-   if (!std::equal(checksum.begin(), checksum.begin() + checksum_size, decoded.begin() + Size)) {
+   if (!std::equal(checksum.begin(), checksum.begin() + checksum_size, decoded.span().begin() + Size)) {
       FORGE_THROW_EXCEPTION(exceptions::parse_error, "BLS text checksum mismatch");
    }
 
@@ -107,8 +108,7 @@ template <typename Signature>
    if (std::all_of(secret.begin(), secret.end(), [](auto word) { return word == 0U; })) {
       return false;
    }
-   const auto encoded = bls12_381::sk_to_bytes(secret);
-   return bls12_381::sk_from_bytes(encoded) == secret;
+   return bls12_381::scalar::cmp(secret, bls12_381::fp::Q) == std::strong_ordering::less;
 }
 
 } // namespace
@@ -297,9 +297,9 @@ bool verify_grouped(std::span<const aggregate_verification_group> groups, const 
 namespace encoding {
 
 private_key parse_private_key(std::string_view text) {
-   const auto bytes = decode_checked<sizeof(private_key::_secret)>(text, private_key_prefix);
+   auto bytes = decode_checked<sizeof(private_key::_secret)>(text, private_key_prefix);
    auto value = private_key{};
-   std::memcpy(value._secret.data(), bytes.data(), bytes.size());
+   std::memcpy(value._secret.data(), bytes.span().data(), bytes.size());
    if (!valid_private_secret(value._secret)) {
       FORGE_THROW_EXCEPTION(exceptions::parse_error, "BLS private key is invalid");
    }

@@ -105,8 +105,8 @@ if (!decoded.ok()) {
 than C++ member names. Format adapters use it for schema-bound typed writes.
 
 Nested object lists are decoded through `forge_schema` rules too. Diagnostics use
-indexed paths such as `plugins.crypto.signer.keys[0].private-key`, while the config
-registry still sees `plugins.crypto.signer.keys` as one object-list field for
+indexed paths such as `plugins.db.store.stores[0].path`, while the config
+registry still sees `plugins.db.store.stores` as one object-list field for
 redaction and source-adapter policy.
 
 ### Redact Secrets Before Output

@@ -2,6 +2,7 @@ add_library(
    forge_chain_transaction STATIC
    builder.cpp
    signing.cpp
+   types.cpp
 )
 forge_target_modules_at(forge_chain_transaction chain/transaction)
 
@@ -13,4 +14,6 @@ target_link_libraries(
       forge_chain_protocol
       forge_crypto_signer
       forge_exceptions
+      forge_raw
+      forge_variant
 )

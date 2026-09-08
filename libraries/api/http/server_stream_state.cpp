@@ -39,21 +39,17 @@ import forge.raw.raw;
 
 namespace forge::api::http::detail {
 
-server_stream_state::server_stream_state(
-   boost::asio::any_io_executor executor,
-   forge::api::core::pinned_binding_plan plan,
-   forge::api::core::frame request,
-   std::uint32_t max_frame_bytes,
-   std::uint32_t max_item_bytes,
-   std::uint32_t max_buffered_items,
-   std::uint64_t max_buffered_bytes)
+server_stream_state::server_stream_state(boost::asio::any_io_executor executor,
+                                         forge::api::core::pinned_binding_plan plan, forge::api::core::frame request,
+                                         forge::api::core::trusted_invocation trusted, std::uint32_t max_frame_bytes,
+                                         std::uint32_t max_item_bytes, std::uint32_t max_buffered_items,
+                                         std::uint64_t max_buffered_bytes)
     : executor_{std::move(executor)}, plan_{std::move(plan)}, request_{std::move(request)},
-      stream_{forge::api::core::detail::make_local_stream_pair(
-         executor_, max_item_bytes, max_buffered_items,
-         static_cast<std::size_t>(max_buffered_bytes))},
-      max_frame_bytes_{max_frame_bytes},
-      terminal_ready_{std::make_shared<boost::asio::steady_timer>(
-         executor_, boost::asio::steady_timer::time_point::max())} {}
+      trusted_{std::move(trusted)},
+      stream_{forge::api::core::detail::make_local_stream_pair(executor_, max_item_bytes, max_buffered_items,
+                                                               static_cast<std::size_t>(max_buffered_bytes))},
+      max_frame_bytes_{max_frame_bytes}, terminal_ready_{std::make_shared<boost::asio::steady_timer>(
+                                             executor_, boost::asio::steady_timer::time_point::max())} {}
 
 void server_stream_state::start() {
    boost::asio::co_spawn(
@@ -124,8 +120,7 @@ server_stream_state::async_next() {
 
 boost::asio::awaitable<void> server_stream_state::run() {
    try {
-      auto terminal = co_await plan_.dispatch_stream(
-         request_, {}, stream_.writer);
+      auto terminal = co_await plan_.dispatch_stream_contextual(request_, {}, stream_.writer, trusted_);
       publish_terminal(std::move(terminal));
    } catch (...) {
       const auto error = std::current_exception();

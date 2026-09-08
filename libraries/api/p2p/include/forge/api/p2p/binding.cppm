@@ -20,9 +20,11 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.auth.authenticated_caller;
 import forge.api.p2p.authenticated_peer;
 import forge.api.stream.options;
 import forge.api.stream.server;
+import forge.crypto.digest.sha256;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.node;
 import forge.net.p2p.protocol;
@@ -74,11 +76,17 @@ class api_binding {
       switch (stream.stream.authentication()) {
       case forge::net::p2p::peer_authentication::quic_tls:
       case forge::net::p2p::peer_authentication::libp2p_tls:
-      case forge::net::p2p::peer_authentication::noise:
-         invocation = forge::api::core::trusted_invocation_builder{}
-                          .set(authenticated_peer{.id = stream.session.remote_peer})
-                          .build();
+      case forge::net::p2p::peer_authentication::noise: {
+         const auto peer_bytes = stream.session.remote_peer.to_bytes();
+         auto trusted = forge::api::core::trusted_invocation_builder{};
+         trusted.set(authenticated_peer{.id = stream.session.remote_peer});
+         trusted.set(forge::api::auth::authenticated_caller{
+             forge::api::auth::caller_source::p2p_peer,
+             forge::crypto::digest::sha256::hash(peer_bytes),
+         });
+         invocation = std::move(trusted).build();
          break;
+      }
       case forge::net::p2p::peer_authentication::unverified:
          break;
       }

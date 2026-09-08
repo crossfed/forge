@@ -2254,6 +2254,33 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
          errors.append(f"{path.relative_to(root)}: removed monolithic Crypto path is forbidden")
 
 
+def check_auth_chain_signer_boundaries(root: Path, errors: list[str]) -> None:
+   removed_plugin = root / "plugins" / "crypto" / "signer"
+   if removed_plugin.exists():
+      errors.append("plugins/crypto/signer: removed signer plugin must not return")
+
+   auth_root = root / "libraries" / "auth"
+   for path in source_files(root, (str(auth_root.relative_to(root)),)):
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         if re.search(r"^\s*(?:export\s+)?import\s+forge\.chain\.", line):
+            errors.append(f"{path.relative_to(root)}:{line_number}: client auth must not import Chain")
+         if re.search(r"^\s*(?:export\s+)?import\s+forge\.plugins\.", line):
+            errors.append(f"{path.relative_to(root)}:{line_number}: client auth must not import plugins")
+
+   signer_root = root / "plugins" / "chain" / "signer"
+   forbidden_signer_imports = re.compile(
+      r"^\s*(?:export\s+)?import\s+forge\.(?:net\.|api\.(?:http|p2p)\.|plugins\.(?:http|p2p)\.)"
+   )
+   for path in source_files(root, (str(signer_root.relative_to(root)),)):
+      source = path.read_text(errors="ignore")
+      for line_number, line in enumerate(source.splitlines(), 1):
+         if forbidden_signer_imports.search(line):
+            errors.append(
+               f"{path.relative_to(root)}:{line_number}: Chain signer must not import transport plugins"
+            )
+
+
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)
    imports: list[tuple[str, Path, int]] = []
@@ -2364,6 +2391,7 @@ def main() -> int:
    check_eosio_veneer(root, errors)
    check_contract_sdk_architecture(root, errors)
    check_crypto_family(root, files, errors)
+   check_auth_chain_signer_boundaries(root, errors)
    check_modules(root, files, errors)
 
    if errors:

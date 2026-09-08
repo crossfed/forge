@@ -82,6 +82,7 @@ import forge.api.core.registry;
 import forge.api.core.server_supplied;
 import forge.api.core.trusted_invocation;
 import forge.api.core.types;
+import forge.api.auth.authenticated_caller;
 import forge.api.p2p.authenticated_peer;
 import forge.api.p2p.binding;
 import forge.api.transport.connection;
@@ -186,14 +187,14 @@ class live_api : public forge::api::core::contract<live_api, forge::api::core::s
  public:
    virtual ~live_api() = default;
 
-   virtual boost::asio::awaitable<void> exchange(caller_peer,
+   virtual boost::asio::awaitable<void> exchange(caller_peer, forge::api::auth::authenticated_caller,
                                                  forge::api::core::duplex_stream<std::uint32_t, std::uint32_t>) = 0;
 };
 
 } // namespace p2p_live_types
 
 FORGE_API(::p2p_live_types::live_api, FORGE_API_CONTRACT("test.p2p.live", 1, 0),
-          FORGE_API_METHOD(exchange, authenticated))
+          FORGE_API_METHOD(exchange, authenticated, caller))
 
 #include "../../libraries/net/p2p/details/session_lifecycle.hxx"
 #include "../../libraries/net/p2p/details/libp2p_tls.hxx"
@@ -243,10 +244,11 @@ void cancel_timer_noexcept(const std::shared_ptr<boost::asio::steady_timer>& tim
 class live_impl final : public live_api {
  public:
    boost::asio::awaitable<void>
-   exchange(p2p_live_types::caller_peer authenticated,
+   exchange(p2p_live_types::caller_peer authenticated, forge::api::auth::authenticated_caller authenticated_caller,
             forge::api::core::duplex_stream<std::uint32_t, std::uint32_t> stream) override {
       calls.fetch_add(1U, std::memory_order_release);
       caller = std::move(authenticated.id);
+      transport_caller = std::move(authenticated_caller);
       while (const auto value = co_await stream.async_read()) {
          co_await stream.async_write(*value * 2U);
       }
@@ -254,6 +256,7 @@ class live_impl final : public live_api {
    }
 
    peer_id caller;
+   forge::api::auth::authenticated_caller transport_caller;
    std::atomic_size_t calls{0};
 };
 
@@ -1140,7 +1143,12 @@ void verify_dht_server(forge::asio::runtime& runtime, node& client, const node& 
 
 boost::asio::awaitable<void> exercise_live_api(forge::api::transport::connection& connection) {
    auto remote = co_await connection.get_remote_api<live_api>();
-   auto call = co_await remote.async_open<&live_api::exchange>(p2p_live_types::caller_peer{.id = peer(244)});
+   auto call = co_await remote.async_open<&live_api::exchange>(
+       p2p_live_types::caller_peer{.id = peer(244)},
+       forge::api::auth::authenticated_caller{
+           forge::api::auth::caller_source::tls_certificate,
+           forge::crypto::digest::sha256::hash(std::string{"spoofed-p2p-caller"}),
+       });
    co_await call.async_write(3U);
    auto first = co_await call.async_read();
    BOOST_REQUIRE(first.has_value());
@@ -1157,7 +1165,12 @@ boost::asio::awaitable<void> exercise_live_api(forge::api::transport::connection
 
 boost::asio::awaitable<void> exercise_unverified_live_api(forge::api::transport::connection& connection) {
    auto remote = co_await connection.get_remote_api<live_api>();
-   auto call = co_await remote.async_open<&live_api::exchange>(p2p_live_types::caller_peer{.id = peer(244)});
+   auto call = co_await remote.async_open<&live_api::exchange>(
+       p2p_live_types::caller_peer{.id = peer(244)},
+       forge::api::auth::authenticated_caller{
+           forge::api::auth::caller_source::tls_certificate,
+           forge::crypto::digest::sha256::hash(std::string{"spoofed-unverified-caller"}),
+       });
    auto rejected = false;
    try {
       co_await call.async_finish();
@@ -1208,6 +1221,10 @@ void run_live_api_over(endpoint::protocol_kind transport) {
    auto connection = forge::api::transport::connection{std::move(stream).into_transport_stream(), binding.options()};
    forge::asio::blocking::run(runtime, exercise_live_api(connection));
    BOOST_TEST(implementation->caller.value == client.local_peer().value);
+   BOOST_TEST(implementation->transport_caller.transport_authenticated());
+   BOOST_CHECK(implementation->transport_caller.source == forge::api::auth::caller_source::p2p_peer);
+   BOOST_TEST(implementation->transport_caller.fingerprint ==
+              forge::crypto::digest::sha256::hash(client.local_peer().to_bytes()));
 
    const auto diagnostics = client.diagnostics();
    const auto found = std::ranges::find_if(diagnostics.sessions, [&](const auto& value) {
@@ -10149,8 +10166,13 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
            .value = spoofed.to_string(),
        },
    };
+   const auto authenticated_fingerprint = forge::crypto::digest::sha256::hash(authenticated.to_bytes());
    const auto trusted = forge::api::core::trusted_invocation_builder{}
                             .set(forge::api::p2p::authenticated_peer{.id = authenticated})
+                            .set(forge::api::auth::authenticated_caller{
+                                forge::api::auth::caller_source::p2p_peer,
+                                authenticated_fingerprint,
+                            })
                             .build();
    auto value = p2p_live_types::caller_peer{.id = spoofed};
 
@@ -10160,7 +10182,13 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
    forge::api::core::apply_server_supplied(traversed, trusted);
    BOOST_TEST(std::get<0>(traversed).id.value == authenticated.value);
 
-   auto api_fields = std::tuple{value};
+   auto api_fields = std::tuple{
+       value,
+       forge::api::auth::authenticated_caller{
+           forge::api::auth::caller_source::tls_certificate,
+           forge::crypto::digest::sha256::hash(spoofed.to_bytes()),
+       },
+   };
    const auto descriptor = p2p_live_types::live_api::describe();
    const auto* method = forge::api::core::find_method(descriptor, "exchange");
    BOOST_REQUIRE(method != nullptr);
@@ -10168,8 +10196,13 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_ignores_spoofed_legacy_metadata) {
    BOOST_REQUIRE(fields != nullptr);
    fields->reset_fixed(&api_fields);
    BOOST_TEST(std::get<0>(api_fields).id.value.empty());
+   BOOST_TEST(std::get<1>(api_fields).fingerprint.empty());
    fields->apply_fixed(&api_fields, trusted);
    BOOST_TEST(std::get<0>(api_fields).id.value == authenticated.value);
+   BOOST_TEST(static_cast<std::uint8_t>(std::get<1>(api_fields).source) ==
+              static_cast<std::uint8_t>(forge::api::auth::caller_source::p2p_peer));
+   BOOST_TEST(std::get<1>(api_fields).fingerprint == authenticated_fingerprint);
+   BOOST_TEST(std::get<1>(api_fields).transport_authenticated());
 
    forge::api::core::server_supplied<p2p_live_types::caller_peer>::reset(value);
    BOOST_REQUIRE(forge::api::core::server_supplied<p2p_live_types::caller_peer>::apply(value, trusted));

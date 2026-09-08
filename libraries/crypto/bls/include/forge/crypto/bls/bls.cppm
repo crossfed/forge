@@ -37,10 +37,12 @@ namespace encoding {
 class private_key {
  public:
    private_key() = default;
-   private_key(private_key&&) = default;
-   private_key(const private_key&) = default;
-   private_key& operator=(private_key&&) = default;
-   private_key& operator=(const private_key&) = default;
+   ~private_key();
+
+   private_key(const private_key&) = delete;
+   private_key& operator=(const private_key&) = delete;
+   private_key(private_key&& other) noexcept;
+   private_key& operator=(private_key&& other) noexcept;
 
    explicit private_key(std::span<const std::uint8_t> seed);
 

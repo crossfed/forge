@@ -35,6 +35,7 @@ import forge.api.core.handle;
 import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
+import forge.api.auth.authenticated_caller;
 import forge.net.http.exceptions;
 import forge.net.http.body;
 import forge.net.http.client;
@@ -63,21 +64,22 @@ using namespace forge::net::http;
 
 namespace detail {
 
+[[nodiscard]] forge::api::core::trusted_invocation
+trusted_invocation_for(const forge::net::http::route_context& context);
+
 void validate_live_stream_headers(const forge::net::http::request& request,
                                   forge::api::core::method_kind kind);
 
 boost::asio::awaitable<forge::net::http::stream_response>
-make_live_server_stream_response(forge::api::core::pinned_binding_plan plan,
-                                 forge::api::core::frame request,
+make_live_server_stream_response(forge::api::core::pinned_binding_plan plan, forge::api::core::frame request,
                                  forge::net::http::stream_request& http_request,
-                                 forge::net::http::status success_status);
+                                 forge::net::http::status success_status, forge::api::core::trusted_invocation trusted);
 
 boost::asio::awaitable<forge::api::core::frame>
-dispatch_live_client_stream(forge::api::core::pinned_binding_plan plan,
-                            forge::api::core::frame request,
+dispatch_live_client_stream(forge::api::core::pinned_binding_plan plan, forge::api::core::frame request,
                             forge::net::http::body_reader body,
-                            std::function<void(const forge::api::core::bytes&,
-                                               forge::raw::unpack_limits)> decoder);
+                            std::function<void(const forge::api::core::bytes&, forge::raw::unpack_limits)> decoder,
+                            forge::api::core::trusted_invocation trusted);
 
 [[nodiscard]] forge::net::http::response
 make_live_terminal_response(const forge::net::http::request& request,
@@ -1753,10 +1755,10 @@ class binding_builder {
    }
 
    template <auto Method, typename Interface, typename Request, typename Response>
-   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::pinned_binding_plan& plan,
-                                                        std::string_view name,
-                                                        const forge::api::core::method_descriptor& canonical_method,
-                                                        Request request) {
+   static boost::asio::awaitable<Response>
+   invoke_local(const forge::api::core::pinned_binding_plan& plan, std::string_view name,
+                const forge::api::core::method_descriptor& canonical_method, Request request,
+                const forge::api::core::trusted_invocation& trusted = {}) {
       const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
       if (method == nullptr) {
@@ -1764,8 +1766,7 @@ class binding_builder {
                                "HTTP API method is not installed in the local registry");
       }
       validate_route_method_descriptor<Method, Request, Response>(*method, name);
-      forge::api::core::detail::apply_wire_request(
-         canonical_method, &request, forge::api::core::trusted_invocation{});
+      forge::api::core::detail::apply_wire_request(canonical_method, &request, trusted);
       auto request_payload = validate_local_request<Interface>(plan, name, request);
       auto implementation = plan.get<Interface>(Interface::ref());
       auto response = co_await std::invoke(Method, *implementation.shared(), std::move(request));
@@ -1774,10 +1775,10 @@ class binding_builder {
    }
 
    template <auto Method, typename Interface, typename Request, typename Tuple, typename Response>
-   static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::pinned_binding_plan& plan,
-                                                                  std::string_view name,
-                                                                  const forge::api::core::method_descriptor& canonical_method,
-                                                                  Tuple arguments) {
+   static boost::asio::awaitable<Response>
+   invoke_local_arguments(const forge::api::core::pinned_binding_plan& plan, std::string_view name,
+                          const forge::api::core::method_descriptor& canonical_method, Tuple arguments,
+                          const forge::api::core::trusted_invocation& trusted = {}) {
       const auto* descriptor = plan.describe(Interface::ref());
       const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
       if (method == nullptr) {
@@ -1785,8 +1786,7 @@ class binding_builder {
                                "HTTP API method is not installed in the local registry");
       }
       validate_route_method_descriptor<Method, Request, Response>(*method, name);
-      forge::api::core::detail::apply_fixed_request(
-         canonical_method, &arguments, forge::api::core::trusted_invocation{});
+      forge::api::core::detail::apply_fixed_request(canonical_method, &arguments, trusted);
       auto request_payload = [&] {
          if constexpr (std::tuple_size_v<Tuple> == 1U) {
             return validate_local_request<Interface>(plan, name, std::get<0>(arguments));
@@ -1901,6 +1901,7 @@ class binding_builder {
                }
                auto pinned = plan.pin(interface_type::ref());
                const auto& method_descriptor = canonical_method_descriptor;
+               auto trusted = detail::trusted_invocation_for(request_value.context);
                try {
                   const auto& installed_method_descriptor = require_route_method_descriptor(
                      pinned.describe(interface_type::ref()), name);
@@ -1920,16 +1921,14 @@ class binding_builder {
                                    forge::api::core::method_kind::server_stream) {
                         auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
                            request_value, options, method_descriptor);
-                        forge::api::core::detail::apply_fixed_request(
-                           method_descriptor, &arguments, forge::api::core::trusted_invocation{});
+                        forge::api::core::detail::apply_fixed_request(method_descriptor, &arguments, trusted);
                         payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
                            method_descriptor, arguments,
                            std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
                      } else {
                         auto arguments = make_positional_arguments_from_http<argument_tuple>(
                            request_value.context, options, method_descriptor);
-                        forge::api::core::detail::apply_fixed_request(
-                           method_descriptor, &arguments, forge::api::core::trusted_invocation{});
+                        forge::api::core::detail::apply_fixed_request(method_descriptor, &arguments, trusted);
                         payload = forge::api::core::detail::encode_fixed_proxy_arguments<Method>(
                            method_descriptor, arguments,
                            std::make_index_sequence<std::tuple_size_v<argument_tuple>>{});
@@ -1938,13 +1937,11 @@ class binding_builder {
                      if constexpr (forge::api::core::method_kind_v<Method> ==
                                    forge::api::core::method_kind::server_stream) {
                         auto request = co_await make_request_from_stream<Request>(request_value, options);
-                        forge::api::core::detail::apply_wire_request(
-                           method_descriptor, &request, forge::api::core::trusted_invocation{});
+                        forge::api::core::detail::apply_wire_request(method_descriptor, &request, trusted);
                         payload = forge::api::core::detail::encode_owned_request(method_descriptor, request);
                      } else {
                         auto request = make_request_from_http<Request>(request_value.context, options);
-                        forge::api::core::detail::apply_wire_request(
-                           method_descriptor, &request, forge::api::core::trusted_invocation{});
+                        forge::api::core::detail::apply_wire_request(method_descriptor, &request, trusted);
                         payload = forge::api::core::detail::encode_owned_request(method_descriptor, request);
                      }
                   }
@@ -1953,13 +1950,14 @@ class binding_builder {
                   if constexpr (forge::api::core::method_kind_v<Method> ==
                                 forge::api::core::method_kind::server_stream) {
                      auto output = co_await detail::make_live_server_stream_response(
-                        std::move(pinned), std::move(request), request_value, options.success_status);
+                         std::move(pinned), std::move(request), request_value, options.success_status,
+                         std::move(trusted));
                      apply_cache_policy(output.head, options);
                      co_return output;
                   } else {
                      auto terminal = co_await detail::dispatch_live_client_stream(
-                        std::move(pinned), std::move(request), std::move(request_value.body),
-                        method_descriptor.input_decoder);
+                         std::move(pinned), std::move(request), std::move(request_value.body),
+                         method_descriptor.input_decoder, std::move(trusted));
                      if (terminal.kind == forge::api::core::frame_kind::error) {
                         auto payload = forge::raw::unpack_exact<forge::api::core::error_payload>(terminal.payload);
                         co_return buffered(make_error_response(request_value.context.request, payload, options));
@@ -2017,6 +2015,7 @@ class binding_builder {
                }
                auto pinned = plan.pin(interface_type::ref());
                const auto& method_descriptor = canonical_method_descriptor;
+               auto trusted = detail::trusted_invocation_for(request_value.context);
                try {
                   const auto& installed_method_descriptor = require_route_method_descriptor(
                      pinned.describe(interface_type::ref()), name);
@@ -2029,9 +2028,9 @@ class binding_builder {
                      }
                      auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
                          request_value, options, method_descriptor);
-                     auto value = co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple,
-                                                                  Response>(pinned, name, canonical_method_descriptor,
-                                                                            std::move(arguments));
+                     auto value =
+                         co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple, Response>(
+                             pinned, name, canonical_method_descriptor, std::move(arguments), trusted);
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      {}, &request_value);
@@ -2041,7 +2040,7 @@ class binding_builder {
                          make_endpoint_state<Request>(request_value.context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
                      auto value = co_await invoke_local<Method, interface_type, Request, Response>(
-                        pinned, name, canonical_method_descriptor, std::move(request));
+                         pinned, name, canonical_method_descriptor, std::move(request), trusted);
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      endpoint, &request_value);
@@ -2097,6 +2096,7 @@ class binding_builder {
                      pinned.describe(interface_type::ref()), name);
                   validate_route_method_descriptor<Method, Request, Response>(installed_method_descriptor, name);
                   require_response_accept_before_handler<Response>(context.request, options);
+                  auto trusted = detail::trusted_invocation_for(context);
                   if constexpr (is_positional_http_method_v<Method, Request>) {
                      if (method_descriptor.argument_names.empty()) {
                         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
@@ -2104,16 +2104,16 @@ class binding_builder {
                      }
                      auto arguments =
                          make_positional_arguments_from_http<argument_tuple>(context, options, method_descriptor);
-                     auto value = co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple,
-                                                                  Response>(pinned, name, canonical_method_descriptor,
-                                                                            std::move(arguments));
+                     auto value =
+                         co_await invoke_local_arguments<Method, interface_type, Request, argument_tuple, Response>(
+                             pinned, name, canonical_method_descriptor, std::move(arguments), trusted);
                      co_return make_success_response(context.request, options.success_status, value, options);
                   } else {
                      auto request = make_request_from_http<Request>(context, options);
                      auto endpoint = make_endpoint_state<Request>(context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
                      auto value = co_await invoke_local<Method, interface_type, Request, Response>(
-                        pinned, name, canonical_method_descriptor, std::move(request));
+                         pinned, name, canonical_method_descriptor, std::move(request), trusted);
                      co_return make_success_response(context.request, options.success_status, value, options, endpoint);
                   }
                } catch (const forge::net::http::exceptions::unsupported_media_type& error) {

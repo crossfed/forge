@@ -57,8 +57,10 @@ import forge.api.core.handle;
 import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.server_supplied;
+import forge.api.core.trusted_invocation;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
+import forge.api.auth.authenticated_caller;
 import forge.asio.blocking;
 import forge.asio.compute;
 import forge.asio.exceptions;
@@ -112,6 +114,30 @@ static_assert(!std::is_constructible_v<forge::api::http::binding_plan, std::vect
 static_assert(!std::is_same_v<forge::net::http::request, boost::beast::http::request<boost::beast::http::string_body>>);
 static_assert(
     !std::is_same_v<forge::net::http::response, boost::beast::http::response<boost::beast::http::string_body>>);
+
+BOOST_AUTO_TEST_CASE(http_api_trusts_only_verified_client_certificate_identity) {
+   const auto spoofed = forge::crypto::digest::sha256::hash(std::string{"spoofed-certificate"});
+   const auto verified = forge::crypto::digest::sha256::hash(std::string{"verified-certificate"});
+   const auto request = forge::net::http::request{method::get, std::string{"/authenticated-caller"}, 11};
+   auto context = make_route_context(request);
+   auto caller = forge::api::auth::authenticated_caller{
+       forge::api::auth::caller_source::tls_certificate,
+       spoofed,
+   };
+
+   forge::api::core::server_supplied<forge::api::auth::authenticated_caller>::reset(caller);
+   BOOST_TEST(!caller.transport_authenticated());
+   BOOST_TEST(!forge::api::core::server_supplied<forge::api::auth::authenticated_caller>::apply(
+       caller, forge::api::http::detail::trusted_invocation_for(context)));
+
+   context.client_certificate_fingerprint = verified;
+   const auto trusted = forge::api::http::detail::trusted_invocation_for(context);
+   BOOST_REQUIRE(forge::api::core::server_supplied<forge::api::auth::authenticated_caller>::apply(caller, trusted));
+   BOOST_TEST(caller.transport_authenticated());
+   BOOST_CHECK(caller.source == forge::api::auth::caller_source::tls_certificate);
+   BOOST_TEST(caller.fingerprint == verified);
+   BOOST_TEST(caller.fingerprint != spoofed);
+}
 
 BOOST_AUTO_TEST_CASE(http_negotiation_matches_media_types_suffixes_and_accept_quality) {
    constexpr auto json = std::array{media_type_match{.type = "application/json", .structured_suffix = "+json"}};
@@ -301,6 +327,16 @@ struct http_required_authority {
 struct http_trusted_request {
    std::string value;
    http_required_authority authority;
+};
+
+struct authenticated_http_request {
+   forge::api::auth::authenticated_caller caller;
+};
+
+struct authenticated_http_response {
+   forge::api::auth::caller_source source = forge::api::auth::caller_source::p2p_peer;
+   forge::crypto::digest::sha256 fingerprint;
+   bool authenticated = false;
 };
 
 struct macro_read_request {
@@ -510,6 +546,8 @@ BOOST_DESCRIBE_STRUCT(api_routed_read_chunk, (), (ref, offset, limit))
 BOOST_DESCRIBE_STRUCT(api_chunk, (), (bytes))
 BOOST_DESCRIBE_STRUCT(http_required_authority, (), (value))
 BOOST_DESCRIBE_STRUCT(http_trusted_request, (), (value, authority))
+BOOST_DESCRIBE_STRUCT(authenticated_http_request, (), (caller))
+BOOST_DESCRIBE_STRUCT(authenticated_http_response, (), (source, fingerprint, authenticated))
 BOOST_DESCRIBE_STRUCT(macro_read_request, (), (ref, offset, limit))
 BOOST_DESCRIBE_STRUCT(macro_write_request, (), (ref, bytes))
 BOOST_DESCRIBE_STRUCT(optional_query_request, (), (ref, limit))
@@ -569,6 +607,15 @@ class trusted_http_api : public forge::api::core::contract<trusted_http_api, for
    virtual ~trusted_http_api() = default;
 
    virtual boost::asio::awaitable<api_chunk> read(http_trusted_request request) = 0;
+};
+
+class authenticated_http_api
+    : public forge::api::core::contract<authenticated_http_api,
+                                        forge::api::core::surface::local | forge::api::core::surface::remote> {
+ public:
+   virtual ~authenticated_http_api() = default;
+
+   virtual boost::asio::awaitable<authenticated_http_response> inspect(authenticated_http_request request) = 0;
 };
 
 class websocket_positional_api
@@ -922,6 +969,9 @@ template <> struct server_supplied<::forge::net::http::test_api::http_required_a
 
 FORGE_API(::forge::net::http::test_api::trusted_http_api, FORGE_API_CONTRACT("trusted.http", 1, 0),
           FORGE_API_METHOD(read))
+
+FORGE_API(::forge::net::http::test_api::authenticated_http_api, FORGE_API_CONTRACT("authenticated.http", 1, 0),
+          FORGE_API_METHOD(inspect))
 
 FORGE_API(::forge::net::http::test_api::macro_cache, FORGE_API_CONTRACT("cache.macro", 1, 0), FORGE_API_METHOD(read),
           FORGE_API_METHOD(write))
@@ -1349,6 +1399,9 @@ using test_api::api_cache;
 using test_api::api_chunk;
 using test_api::api_read_chunk;
 using test_api::api_routed_read_chunk;
+using test_api::authenticated_http_api;
+using test_api::authenticated_http_request;
+using test_api::authenticated_http_response;
 using test_api::colliding_headers_api;
 using test_api::colliding_parameters_api;
 using test_api::control_api;
@@ -1559,6 +1612,17 @@ class trusted_http_api_impl final : public trusted_http_api {
 
  private:
    std::shared_ptr<std::size_t> calls_;
+};
+
+class authenticated_http_api_impl final : public authenticated_http_api {
+ public:
+   boost::asio::awaitable<authenticated_http_response> inspect(authenticated_http_request request) override {
+      co_return authenticated_http_response{
+          .source = request.caller.source,
+          .fingerprint = request.caller.fingerprint,
+          .authenticated = request.caller.transport_authenticated(),
+      };
+   }
 };
 
 class websocket_positional_impl final : public websocket_positional_api {
@@ -2830,6 +2894,48 @@ BOOST_AUTO_TEST_CASE(router_rejects_duplicate_buffered_and_stream_routes) {
                                      co_return make_text_response(context.request, status::ok, "buffered");
                                   }),
                      forge::net::http::exceptions::conflict);
+}
+
+BOOST_AUTO_TEST_CASE(http_unary_binding_injects_verified_client_certificate_identity) {
+   const auto spoofed = forge::crypto::digest::sha256::hash(std::string{"spoofed-certificate"});
+   const auto verified = forge::crypto::digest::sha256::hash(std::string{"verified-certificate"});
+   auto runtime = forge::asio::runtime{};
+   auto apis = forge::api::core::registry{};
+   apis.install<authenticated_http_api>(authenticated_http_api::describe(),
+                                        std::make_shared<authenticated_http_api_impl>());
+
+   auto router = forge::net::http::router{};
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .post<&authenticated_http_api::inspect, authenticated_http_request, authenticated_http_response>(
+                        "/authenticated-caller")
+                    .build());
+
+   auto request = make_request(method::post, "/authenticated-caller");
+   request.set(field::content_type, "application/json");
+   const auto encoded = forge::codec::json::write(authenticated_http_request{
+       .caller =
+           forge::api::auth::authenticated_caller{
+               forge::api::auth::caller_source::p2p_peer,
+               spoofed,
+           },
+   });
+   BOOST_REQUIRE(encoded.ok());
+   request.body() = encoded.text;
+   request.prepare_payload();
+
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+   context.client_certificate_fingerprint = verified;
+   const auto response = handle(router, context);
+   const auto decoded = forge::codec::json::read<authenticated_http_response>(response.body());
+
+   BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(decoded.value.authenticated);
+   BOOST_CHECK(decoded.value.source == forge::api::auth::caller_source::tls_certificate);
+   BOOST_TEST(decoded.value.fingerprint == verified);
+   BOOST_TEST(decoded.value.fingerprint != spoofed);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_plan_maps_custom_exception_to_native_status) {
@@ -9413,6 +9519,7 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
    auto response = std::make_shared<std::string>();
    auto response_ready = std::make_shared<bool>(false);
    auto connection_closed = std::make_shared<bool>(false);
+   auto server_error = std::make_shared<std::string>();
    auto observed_peer = std::make_shared<std::string>();
    auto observed_public = std::make_shared<std::string>();
    auto plan =
@@ -9436,10 +9543,23 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
 
    auto binding = forge::api::websocket::api().use(std::move(plan)).build();
    auto router = forge::net::http::router{};
-   router.websocket(
-       "/api", [&runtime, binding = std::move(binding)](forge::net::websocket::connection::ptr connection) mutable {
-          boost::asio::co_spawn(runtime.context(), binding.accept(std::move(connection)), boost::asio::detached);
-       });
+   router.websocket("/api", [&runtime, binding = std::move(binding), response_mutex, response_cv,
+                             server_error](forge::net::websocket::connection::ptr connection) mutable {
+      boost::asio::co_spawn(runtime.context(), binding.accept(std::move(connection)),
+                            [response_mutex, response_cv, server_error](std::exception_ptr error) {
+                               if (error) {
+                                  const auto lock = std::scoped_lock{*response_mutex};
+                                  try {
+                                     std::rethrow_exception(error);
+                                  } catch (const std::exception& value) {
+                                     *server_error = value.what();
+                                  } catch (...) {
+                                     *server_error = "unknown server error";
+                                  }
+                                  response_cv->notify_all();
+                               }
+                            });
+   });
 
    auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
    server.start();
@@ -9502,7 +9622,7 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
       BOOST_REQUIRE(response_cv->wait_for(lock, std::chrono::seconds{5}, [response_ready, connection_closed] {
          return *response_ready || *connection_closed;
       }));
-      BOOST_REQUIRE_MESSAGE(*response_ready, "WebSocket closed before API response");
+      BOOST_REQUIRE_MESSAGE(*response_ready, "WebSocket closed before API response: " << *server_error);
       response_snapshot = *response;
    }
 

@@ -6,6 +6,21 @@ permissively licensed code used by FORGE. See PROVENANCE.md for source-lineage
 classification and compatibility-only donor boundaries.
 
 
+AppAuth For iOS And macOS
+-------------------------
+
+Vendored under `vendor/appauth` from release `3.0.0`, commit
+`a972daac82d449d58ab119e91c68153e29ddac33`, as the private native OAuth 2.0
+and OpenID Connect backend for `forge_auth_appauth` on macOS.
+
+Copyright 2015 Google Inc. All Rights Reserved.
+Copyright 2016-2026 The AppAuth Authors.
+
+Distributed under the Apache License 2.0. The complete upstream license is
+preserved at `vendor/appauth/LICENSE` and installed under
+`share/doc/Forge/AppAuth` when the backend is built.
+
+
 CLI11
 -----
 

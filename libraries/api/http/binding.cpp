@@ -112,6 +112,18 @@ make_core_response(const forge::api::core::request& request,
 
 } // namespace
 
+forge::api::core::trusted_invocation trusted_invocation_for(const forge::net::http::route_context& context) {
+   if (!context.client_certificate_fingerprint) {
+      return {};
+   }
+   return forge::api::core::trusted_invocation_builder{}
+       .set(forge::api::auth::authenticated_caller{
+           forge::api::auth::caller_source::tls_certificate,
+           *context.client_certificate_fingerprint,
+       })
+       .build();
+}
+
 void validate_live_stream_headers(const forge::net::http::request& request,
                                   forge::api::core::method_kind kind) {
    if (kind == forge::api::core::method_kind::bidirectional_stream) {
@@ -130,16 +142,14 @@ void validate_live_stream_headers(const forge::net::http::request& request,
 }
 
 boost::asio::awaitable<forge::net::http::stream_response>
-make_live_server_stream_response(
-   forge::api::core::pinned_binding_plan plan,
-   forge::api::core::frame request,
-   forge::net::http::stream_request& http_request,
-   forge::net::http::status success_status) {
+make_live_server_stream_response(forge::api::core::pinned_binding_plan plan, forge::api::core::frame request,
+                                 forge::net::http::stream_request& http_request,
+                                 forge::net::http::status success_status,
+                                 forge::api::core::trusted_invocation trusted) {
    const auto executor = co_await boost::asio::this_coro::executor;
    auto state = std::make_shared<server_stream_state>(
-      executor, std::move(plan), std::move(request), stream_limits.max_frame_bytes,
-      stream_limits.max_item_bytes, stream_limits.initial_window_items,
-      stream_limits.initial_window_bytes);
+       executor, std::move(plan), std::move(request), std::move(trusted), stream_limits.max_frame_bytes,
+       stream_limits.max_item_bytes, stream_limits.initial_window_items, stream_limits.initial_window_bytes);
    state->start();
    auto lifetime = std::shared_ptr<void>{
       state.get(),
@@ -160,15 +170,14 @@ make_live_server_stream_response(
 }
 
 boost::asio::awaitable<forge::api::core::frame>
-dispatch_live_client_stream(
-   forge::api::core::pinned_binding_plan plan,
-   forge::api::core::frame request,
-   forge::net::http::body_reader body,
-   std::function<void(const forge::api::core::bytes&, forge::raw::unpack_limits)> decoder) {
+dispatch_live_client_stream(forge::api::core::pinned_binding_plan plan, forge::api::core::frame request,
+                            forge::net::http::body_reader body,
+                            std::function<void(const forge::api::core::bytes&, forge::raw::unpack_limits)> decoder,
+                            forge::api::core::trusted_invocation trusted) {
    auto input = std::make_shared<body_stream_endpoint>(
       std::move(body), forge::api::core::stream_direction::input, std::move(decoder),
       stream_limits.max_frame_bytes, stream_limits.max_item_bytes, false);
-   co_return co_await plan.dispatch_stream(std::move(request), std::move(input), {});
+   co_return co_await plan.dispatch_stream_contextual(std::move(request), std::move(input), {}, std::move(trusted));
 }
 
 forge::net::http::response

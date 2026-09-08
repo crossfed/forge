@@ -28,6 +28,7 @@ target_link_libraries(
       forge_api_core
       forge_asio
       forge_codec_json
+      forge_crypto_digest
       forge_schema
       forge_net_tls
       forge_net_websocket

@@ -219,6 +219,11 @@ items include:
   resolves to commit `37bb6edc5317e99af72ef48405e65d9ca5218861`; the archive hash and imported
   file boundary are recorded in `vendor/CLI11/MANIFEST.md`. CLI11 is the
   private parser backend for `forge_cli` and its C++ types are not exported.
+- `vendor/appauth`: unmodified AppAuth for iOS and macOS `3.0.0`, Apache-2.0.
+  The release resolves to commit `a972daac82d449d58ab119e91c68153e29ddac33`.
+  Forge compiles the AppAuthCore and macOS source sets as the private native
+  backend for `forge_auth_appauth`; Objective-C types are not exported by the
+  Forge API.
 
 Submodules may contain their own third-party dependency notices, such as
 Catch2 under `vendor/bn256/third-party`. Those notices remain with the vendored

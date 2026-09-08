@@ -8,6 +8,7 @@ module;
 export module forge.net.http.route_context;
 
 import forge.asio.runtime;
+import forge.crypto.digest.sha256;
 import forge.net.http.target;
 import forge.net.http.types;
 
@@ -18,6 +19,7 @@ struct route_context {
    target parsed_target;
    std::unordered_map<std::string, std::string> route_params;
    forge::asio::runtime* runtime = nullptr;
+   std::optional<forge::crypto::digest::sha256> client_certificate_fingerprint;
 
    [[nodiscard]] std::optional<std::string_view> route_param(std::string_view name) const;
 };

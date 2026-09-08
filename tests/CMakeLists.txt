@@ -379,7 +379,7 @@ add_executable(
 target_link_libraries(
    test_forge_plugins_descriptor_surfaces PRIVATE
       forge_plugins_crypto_secrets
-      forge_plugins_crypto_signer
+      forge_plugins_chain_signer
       forge_plugins_db_store
       forge_plugins_http_server
       forge_plugins_p2p_node
@@ -699,6 +699,75 @@ add_test(NAME test_forge_auth_session COMMAND test_forge_auth_session WORKING_DI
 add_executable(test_forge_auth_http unit/main.cpp auth/http_auth_tests.cpp)
 target_link_libraries(test_forge_auth_http forge_auth_http Boost::included_unit_test_framework)
 add_test(NAME test_forge_auth_http COMMAND test_forge_auth_http WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_client_auth unit/main.cpp auth/client_auth_tests.cpp)
+target_link_libraries(
+   test_forge_client_auth
+   forge_auth_oauth2
+   forge_auth_workload
+   Boost::included_unit_test_framework
+)
+if(TARGET forge_auth_appauth)
+   target_sources(test_forge_client_auth PRIVATE auth/appauth_request_tests.mm)
+   set_source_files_properties(
+      auth/appauth_request_tests.mm PROPERTIES
+      COMPILE_OPTIONS "-fobjc-arc"
+   )
+   target_link_libraries(test_forge_client_auth forge_auth_appauth AppAuth::AppAuth)
+endif()
+add_test(NAME test_forge_client_auth COMMAND test_forge_client_auth WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+if(APPLE)
+   add_test(
+      NAME test_forge_auth_oidc_agent_rejects_explicit_on
+      COMMAND
+         ${CMAKE_COMMAND}
+         -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+         -DFORGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/oidc-agent-explicit-on
+         -DFORGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+         -DFORGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
+         -DFORGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+         -DFORGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/auth/oidc_agent_platform_config_test.cmake
+   )
+endif()
+
+add_test(
+   NAME test_forge_auth_oidc_agent_rejects_non_linux_unix
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+      -DFORGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/oidc-agent-freebsd-explicit-on
+      -DFORGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+      -DFORGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
+      -DFORGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DFORGE_TEST_SYSTEM_NAME=FreeBSD
+      -DFORGE_TEST_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/auth/oidc_agent_platform_config_test.cmake
+)
+
+if(TARGET forge_auth_oidc_agent)
+   add_executable(test_forge_auth_oidc_agent unit/main.cpp auth/oidc_agent_tests.cpp)
+   target_link_libraries(
+      test_forge_auth_oidc_agent
+      forge_auth_oidc_agent
+      OIDCAgent::client
+      Boost::included_unit_test_framework
+   )
+   add_test(
+      NAME test_forge_auth_oidc_agent
+      COMMAND test_forge_auth_oidc_agent
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+   )
+endif()
+
+add_executable(test_forge_chain_signer unit/main.cpp chain_signer/signer_tests.cpp)
+target_link_libraries(
+   test_forge_chain_signer
+   forge_plugins_chain_signer
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_chain_signer COMMAND test_forge_chain_signer WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
 target_link_libraries(
@@ -1233,7 +1302,6 @@ target_link_libraries(
    forge_config_program_options
    forge_crypto_bls
    forge_plugins_crypto_secrets
-   forge_plugins_crypto_signer
    forge_plugins_http_server
    forge_plugins_log_otlp
    forge_plugins_p2p_diagnostics
@@ -1370,6 +1438,33 @@ set(
    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
    -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
 )
+
+if(TARGET forge_auth_oidc_agent)
+   add_library(
+      forge_test_oidc_agent_package_stub STATIC
+      package_auth_oidc_agent/oidc_agent_stub.cpp
+   )
+   target_link_libraries(forge_test_oidc_agent_package_stub PRIVATE OIDCAgent::client)
+   set_target_properties(
+      forge_test_oidc_agent_package_stub
+      PROPERTIES
+         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/oidc-agent-package-lib"
+   )
+   get_target_property(
+      FORGE_OIDC_AGENT_PACKAGE_INCLUDE_DIRS
+      OIDCAgent::client
+      INTERFACE_INCLUDE_DIRECTORIES
+   )
+   list(GET FORGE_OIDC_AGENT_PACKAGE_INCLUDE_DIRS 0 FORGE_OIDC_AGENT_PACKAGE_INCLUDE_DIR)
+   set(FORGE_OIDC_AGENT_PACKAGE_CONFIG_DIR "${CMAKE_BINARY_DIR}/tests/oidc-agent-pkgconfig")
+   file(MAKE_DIRECTORY "${FORGE_OIDC_AGENT_PACKAGE_CONFIG_DIR}")
+   file(
+      GENERATE
+      OUTPUT "${FORGE_OIDC_AGENT_PACKAGE_CONFIG_DIR}/liboidc-agent.pc"
+      CONTENT
+         "Name: liboidc-agent\nDescription: Forge package-test oidc-agent ABI\nVersion: 5.3.8\nLibs: $<TARGET_FILE:forge_test_oidc_agent_package_stub>\nCflags: -I${FORGE_OIDC_AGENT_PACKAGE_INCLUDE_DIR}\n"
+   )
+endif()
 
 add_test(
    NAME test_forge_package_explicit_glaze_dir
@@ -2198,16 +2293,45 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_plugins_crypto_signer
+   test_forge_package_plugins_chain_signer
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer
-      ${CMAKE_BINARY_DIR}/forge-package-plugins-crypto-signer
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_chain_signer
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-chain-signer
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_plugins_crypto_signer
+      --test-command forge_package_plugins_chain_signer
    DEPENDS test_forge_package_install
 )
+if(TARGET forge_auth_appauth)
+   add_custom_target(
+      test_forge_package_auth_clients
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_clients
+         ${CMAKE_BINARY_DIR}/forge-package-auth-clients
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_auth_clients
+      DEPENDS test_forge_package_install
+   )
+endif()
+if(TARGET forge_auth_oidc_agent)
+   add_custom_target(
+      test_forge_package_auth_oidc_agent
+      COMMAND
+         ${CMAKE_COMMAND} -E env
+         "PKG_CONFIG_PATH=${FORGE_OIDC_AGENT_PACKAGE_CONFIG_DIR}"
+         ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_oidc_agent
+         ${CMAKE_BINARY_DIR}/forge-package-auth-oidc-agent
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_auth_oidc_agent
+      DEPENDS test_forge_package_install forge_test_oidc_agent_package_stub
+   )
+endif()
 add_custom_target(
    test_forge_package_plugins_crypto_secrets
    COMMAND ${CMAKE_CTEST_COMMAND}
@@ -2347,6 +2471,21 @@ add_custom_target(
       -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
       -DFORGE_PACKAGE_TEST_BUILT_WITH_TUI=${FORGE_HAS_TUI}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_plugins_crypto_signer_removed
+   COMMAND ${CMAKE_COMMAND}
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer_removed
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-plugins-crypto-signer-removed
+      -DFORGE_PACKAGE_TEST_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
+      -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+      -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
+      -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer_removed/expect_configure_failure.cmake
    DEPENDS test_forge_package_install
 )
 
@@ -3211,16 +3350,45 @@ add_test(
 )
 set_tests_properties(test_forge_package_plugins_p2p_resolver PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_plugins_crypto_signer
+   NAME test_forge_package_plugins_chain_signer
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer
-      ${CMAKE_BINARY_DIR}/forge-package-plugins-crypto-signer
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_chain_signer
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-chain-signer
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_plugins_crypto_signer
+      --test-command forge_package_plugins_chain_signer
 )
-set_tests_properties(test_forge_package_plugins_crypto_signer PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_plugins_chain_signer PROPERTIES DEPENDS test_forge_package_install)
+if(TARGET forge_auth_appauth)
+   add_test(
+      NAME test_forge_package_auth_clients
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_clients
+         ${CMAKE_BINARY_DIR}/forge-package-auth-clients
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_auth_clients
+   )
+   set_tests_properties(test_forge_package_auth_clients PROPERTIES DEPENDS test_forge_package_install)
+endif()
+if(TARGET forge_auth_oidc_agent)
+   add_test(
+      NAME test_forge_package_auth_oidc_agent
+      COMMAND
+         ${CMAKE_COMMAND} -E env
+         "PKG_CONFIG_PATH=${FORGE_OIDC_AGENT_PACKAGE_CONFIG_DIR}"
+         ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_auth_oidc_agent
+         ${CMAKE_BINARY_DIR}/forge-package-auth-oidc-agent
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_auth_oidc_agent
+   )
+   set_tests_properties(test_forge_package_auth_oidc_agent PROPERTIES DEPENDS test_forge_package_install)
+endif()
 add_test(
    NAME test_forge_package_plugins_crypto_secrets
    COMMAND ${CMAKE_CTEST_COMMAND}
@@ -3365,3 +3533,18 @@ add_test(
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
 )
 set_tests_properties(test_forge_package_all_missing_dependency PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_crypto_signer_removed
+   COMMAND ${CMAKE_COMMAND}
+      -DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer_removed
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-plugins-crypto-signer-removed
+      -DFORGE_PACKAGE_TEST_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
+      -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+      -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
+      -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_crypto_signer_removed/expect_configure_failure.cmake
+)
+set_tests_properties(test_forge_package_plugins_crypto_signer_removed PROPERTIES DEPENDS test_forge_package_install)

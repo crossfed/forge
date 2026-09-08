@@ -165,14 +165,16 @@ BOOST_AUTO_TEST_CASE(signing_uses_provider_and_canonical_digest) {
            .add_action(spring_setabi_action())
            .build();
    const auto info = signer.info();
+   const auto expected_id = value.value.id();
 
    const auto prepared = forge::asio::blocking::run(
        runtime, chain_transaction::sign(std::move(value), {{.id = info.id, .public_key = info.public_key}}, signer));
 
-   BOOST_TEST(prepared.id == prepared.packed.id());
-   BOOST_TEST(prepared.signed_value.signatures.size() == 1U);
+   BOOST_TEST(prepared.packed.id() == expected_id);
+   const auto signed_value = prepared.packed.get_signed_transaction();
+   BOOST_TEST(signed_value.signatures.size() == 1U);
    const auto digest = protocol::digest{"76e3d6831284af5d4056feb88dc8fa9319ff52d37383652ef5165c9913e0384a"};
-   BOOST_TEST(forge::crypto::asymmetric::recover(prepared.signed_value.signatures.front(), digest) == info.public_key);
+   BOOST_TEST(forge::crypto::asymmetric::recover(signed_value.signatures.front(), digest) == info.public_key);
    BOOST_TEST(signer.sign_calls() == 1U);
 }
 

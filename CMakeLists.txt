@@ -24,11 +24,21 @@ option(FORGE_ENABLE_LIBP2P_INTEROP "Run live go-libp2p/rust-libp2p interoperabil
 option(FORGE_ENABLE_ROCKSDB "Build RocksDB-backed optional FORGE features when RocksDB is available" ON)
 option(FORGE_ENABLE_MDBX "Build the vendored MDBX-backed FORGE database driver" ON)
 option(FORGE_ENABLE_TOOLING "Build optional Forge Contract Tooling host libraries" OFF)
+set(FORGE_ENABLE_OIDC_AGENT "AUTO" CACHE STRING "Build the oidc-agent authentication backend: AUTO, ON or OFF")
+set_property(CACHE FORGE_ENABLE_OIDC_AGENT PROPERTY STRINGS AUTO ON OFF)
+if(NOT FORGE_ENABLE_OIDC_AGENT MATCHES "^(AUTO|ON|OFF)$")
+   message(FATAL_ERROR "FORGE_ENABLE_OIDC_AGENT must be AUTO, ON or OFF")
+endif()
 
 set(FORGE_BUILD_PROFILE "full" CACHE STRING "Forge build profile")
 set_property(CACHE FORGE_BUILD_PROFILE PROPERTY STRINGS full contract-sdk-host)
 if(NOT FORGE_BUILD_PROFILE STREQUAL "full" AND NOT FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
    message(FATAL_ERROR "Unknown FORGE_BUILD_PROFILE: ${FORGE_BUILD_PROFILE}")
+endif()
+
+if(FORGE_ENABLE_OIDC_AGENT STREQUAL "ON" AND
+   (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host"))
+   message(FATAL_ERROR "FORGE_ENABLE_OIDC_AGENT=ON is supported only on the Linux full profile")
 endif()
 
 set(FORGE_CONTRACT_SDK_HOST_PROFILE OFF)
@@ -39,6 +49,7 @@ if(FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
    set(FORGE_ENABLE_MDBX OFF CACHE BOOL "Build the vendored MDBX-backed Forge database driver" FORCE)
    set(FORGE_ENABLE_TUI OFF CACHE BOOL "Build Forge terminal UI library" FORCE)
    set(FORGE_ENABLE_LIBP2P_INTEROP OFF CACHE BOOL "Run libp2p interoperability tests" FORCE)
+   set(FORGE_ENABLE_OIDC_AGENT OFF CACHE STRING "Build the oidc-agent authentication backend" FORCE)
 endif()
 
 if(FORGE_CONTRACT_SDK_HOST_PROFILE)
@@ -116,6 +127,72 @@ else()
    find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
    find_package(Ngtcp2 REQUIRED)
 endif()
+
+if(APPLE AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   enable_language(OBJC OBJCXX)
+   find_library(FORGE_APPAUTH_APPKIT_FRAMEWORK AppKit REQUIRED)
+   find_library(FORGE_APPAUTH_AUTHENTICATION_SERVICES_FRAMEWORK AuthenticationServices REQUIRED)
+   find_library(FORGE_APPAUTH_CORE_SERVICES_FRAMEWORK CoreServices REQUIRED)
+   find_library(FORGE_APPAUTH_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+   file(
+      GLOB FORGE_APPAUTH_CORE_SOURCES CONFIGURE_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources/AppAuthCore/*.m"
+   )
+   file(
+      GLOB_RECURSE FORGE_APPAUTH_MACOS_SOURCES CONFIGURE_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources/AppAuth/macOS/*.m"
+   )
+   add_library(
+      appauth-internal STATIC
+      ${FORGE_APPAUTH_CORE_SOURCES}
+      ${FORGE_APPAUTH_MACOS_SOURCES}
+   )
+   add_library(AppAuth::AppAuth ALIAS appauth-internal)
+   set(AppAuth_VERSION 3.0.0)
+   set_target_properties(
+      appauth-internal PROPERTIES
+      EXPORT_NAME appauth_internal
+      MACOSX_DEPLOYMENT_TARGET "12.0"
+      POSITION_INDEPENDENT_CODE ON
+   )
+   target_include_directories(
+      appauth-internal SYSTEM PUBLIC
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources/AppAuthCore>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources/AppAuth/macOS>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/Sources/AppAuth/macOS/LoopbackHTTPServer>"
+   )
+   target_compile_options(appauth-internal PRIVATE -fobjc-arc)
+   target_link_libraries(
+      appauth-internal PUBLIC
+      ${FORGE_APPAUTH_APPKIT_FRAMEWORK}
+      ${FORGE_APPAUTH_AUTHENTICATION_SERVICES_FRAMEWORK}
+      ${FORGE_APPAUTH_CORE_SERVICES_FRAMEWORK}
+      ${FORGE_APPAUTH_FOUNDATION_FRAMEWORK}
+   )
+   forge_apply_vendored_implementation_policy(appauth-internal)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE AND
+   NOT FORGE_ENABLE_OIDC_AGENT STREQUAL "OFF")
+   find_package(PkgConfig QUIET)
+   if(PkgConfig_FOUND)
+      pkg_check_modules(OIDC_AGENT QUIET IMPORTED_TARGET GLOBAL liboidc-agent)
+      if(NOT TARGET PkgConfig::OIDC_AGENT)
+         pkg_check_modules(OIDC_AGENT QUIET IMPORTED_TARGET GLOBAL oidc-agent)
+      endif()
+   endif()
+   if(TARGET PkgConfig::OIDC_AGENT AND OIDC_AGENT_VERSION VERSION_EQUAL "5.3.8")
+      add_library(OIDCAgent::client ALIAS PkgConfig::OIDC_AGENT)
+      set(OIDCAgent_VERSION "${OIDC_AGENT_VERSION}")
+      message(STATUS "Forge oidc-agent backend: ${OIDC_AGENT_VERSION}")
+   elseif(FORGE_ENABLE_OIDC_AGENT STREQUAL "ON")
+      message(FATAL_ERROR "FORGE_ENABLE_OIDC_AGENT=ON requires liboidc-agent 5.3.8")
+   else()
+      message(STATUS "Skipping Forge oidc-agent backend: exact liboidc-agent 5.3.8 not found")
+   endif()
+endif()
+
 set(FORGE_HAS_ROCKSDB OFF)
 if(FORGE_ENABLE_ROCKSDB AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    find_package(RocksDB QUIET)
@@ -266,6 +343,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/program_options/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/env/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/auth/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/stream/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/transport/include"
@@ -284,6 +362,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/pki/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/math/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bls/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bls/signer/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bn256/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
@@ -298,6 +377,10 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/stcp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/p2p/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/pnet/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/oauth2/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/workload/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/appauth/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/oidc_agent/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/pairing/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/session/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/auth/http/include"
@@ -316,7 +399,7 @@ if(FORGE_ENABLE_TOOLING)
    )
 endif()
 
-set(FORGE_PLUGINS_CRYPTO_SIGNER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/crypto/signer/include")
+set(FORGE_PLUGINS_CHAIN_SIGNER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/chain/signer/include")
 set(FORGE_PLUGINS_CRYPTO_SECRETS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/crypto/secrets/include")
 set(FORGE_PLUGINS_P2P_NODE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/node/include")
 set(FORGE_PLUGINS_P2P_RESOLVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/resolver/include")
@@ -745,6 +828,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_config_program_options
       forge_config_env
       forge_api_core
+      forge_api_auth
       forge_api_stream
       forge_api_transport
       forge_api_quic
@@ -756,6 +840,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_tls
       forge_net_http
       forge_auth_pairing
+      forge_auth_oauth2
+      forge_auth_workload
       forge_auth_session
       forge_auth_http
       forge_api_http
@@ -769,7 +855,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_p2p
       forge_cli
       forge_app
-      forge_plugins_crypto_signer
+      forge_crypto_bls_signer
+      forge_plugins_chain_signer
       forge_plugins_crypto_secrets
       forge_plugins_p2p_node
       forge_plugins_p2p_resolver
@@ -780,6 +867,12 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_plugins_db_store
       forge_plugins
    )
+   if(TARGET forge_auth_appauth)
+      list(APPEND FORGE_LEAF_TARGETS forge_auth_appauth)
+   endif()
+   if(TARGET forge_auth_oidc_agent)
+      list(APPEND FORGE_LEAF_TARGETS forge_auth_oidc_agent)
+   endif()
 endif()
 
 if(FORGE_ENABLE_TOOLING)
@@ -879,6 +972,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       config_program_options
       config_env
       api_core
+      api_auth
       api_stream
       api_transport
       api_quic
@@ -892,6 +986,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_tls
       net_stcp
       net_yamux
+      auth_oauth2
+      auth_workload
       auth_pairing
       auth_session
       auth_http
@@ -903,7 +999,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_pnet
       net_p2p
       cli
-      plugins_crypto_signer
+      crypto_bls_signer
+      plugins_chain_signer
       plugins_crypto_secrets
       plugins_p2p_node
       plugins_p2p_resolver
@@ -914,6 +1011,12 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       plugins_db_store
       plugins
    )
+   if(TARGET forge_auth_appauth)
+      list(APPEND FORGE_BUILT_COMPONENTS auth_appauth)
+   endif()
+   if(TARGET forge_auth_oidc_agent)
+      list(APPEND FORGE_BUILT_COMPONENTS auth_oidc_agent)
+   endif()
 endif()
 if(TARGET forge_rocksdb)
    list(APPEND FORGE_BUILT_COMPONENTS rocksdb)
@@ -975,6 +1078,9 @@ install(
 )
 
 set(FORGE_INTERNAL_TARGETS secp256k1-internal secp256k1 bn256 bls12-381 softfloat)
+if(TARGET appauth-internal)
+   list(APPEND FORGE_INTERNAL_TARGETS appauth-internal)
+endif()
 if(TARGET mdbx-internal)
    list(APPEND FORGE_INTERNAL_TARGETS mdbx-internal)
 endif()
@@ -1034,6 +1140,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/config/program_options/include/forge
       libraries/config/env/include/forge
       libraries/api/core/include/forge
+      libraries/api/auth/include/forge
       libraries/api/http/include/forge
       libraries/api/stream/include/forge
       libraries/api/transport/include/forge
@@ -1052,13 +1159,16 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/quic/include/forge
       libraries/net/stcp/include/forge
       libraries/net/pnet/include/forge
+      libraries/crypto/bls/signer/include/forge
+      libraries/auth/oauth2/include/forge
+      libraries/auth/workload/include/forge
       libraries/auth/pairing/include/forge
       libraries/auth/session/include/forge
       libraries/auth/http/include/forge
       libraries/net/p2p/include/forge
       libraries/cli/include/forge
       libraries/app/include/forge
-      plugins/crypto/signer/include/forge
+      plugins/chain/signer/include/forge
       plugins/crypto/secrets/include/forge
       plugins/p2p/node/include/forge
       plugins/p2p/resolver/include/forge
@@ -1068,6 +1178,12 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       plugins/log/otlp/include/forge
       plugins/db/store/include/forge
    )
+   if(TARGET forge_auth_appauth)
+      list(APPEND FORGE_INSTALL_INCLUDE_DIRS libraries/auth/appauth/include/forge)
+   endif()
+   if(TARGET forge_auth_oidc_agent)
+      list(APPEND FORGE_INSTALL_INCLUDE_DIRS libraries/auth/oidc_agent/include/forge)
+   endif()
 endif()
 install(
    DIRECTORY ${FORGE_INSTALL_INCLUDE_DIRS}
@@ -1181,6 +1297,15 @@ install(
    COMPONENT dev
    EXCLUDE_FROM_ALL
 )
+
+if(TARGET appauth-internal)
+   install(
+      FILES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/appauth/LICENSE"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/AppAuth"
+      COMPONENT dev
+      EXCLUDE_FROM_ALL
+   )
+endif()
 
 install(
    EXPORT ForgeTargets

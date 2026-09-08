@@ -132,7 +132,7 @@ service or an OTLP exporter.
 
 ```cpp
 registry.register_plugin(forge::plugins::http::server::descriptor());
-registry.register_plugin(forge::plugins::crypto::signer::descriptor());
+registry.register_plugin(forge::plugins::chain::signer::descriptor());
 registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 ```
 
@@ -166,6 +166,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [program_options](libraries/config/program_options/README.md) | `forge_config_program_options` | CLI adapter from Boost.Program_options into config documents. | Boost.Program_options privately. |
 | [env](libraries/config/env/README.md) | `forge_config_env` | Process env and explicit `.env` adapter into config documents. | `forge_config_core`, `forge_schema`. |
 | [api/core](libraries/api/core/README.md) | `forge_api_core` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
+| [api/auth](libraries/api/auth/README.md) | `forge_api_auth` | Trusted transport caller identity and required server-supplied injection. | `forge_api_core`, `forge_crypto_digest`, `forge_raw`. |
 | [api/stream](libraries/api/stream/README.md) | `forge_api_stream` | Server-side API frame loop over reusable transport streams. | `forge_api_core`, `forge_raw`, `forge_net_transport`. |
 | [api/transport](libraries/api/transport/README.md) | `forge_api_transport` | Generic API transport client, connection and session serving. | `forge_api_stream`, `forge_net_transport`. |
 | [api/http](libraries/api/http/README.md) | `forge_api_http` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_net_http`, `forge_api_core`, `forge_codec_json`, `forge_codec_xml`. |
@@ -176,14 +177,20 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [crypto/digest](libraries/crypto/digest/README.md) | `forge_crypto_digest` | Digests, HMAC and Raw pack hashing. | `forge_crypto_core`, `forge_raw`, `forge_variant`, OpenSSL::Crypto. |
 | [crypto/symmetric](libraries/crypto/symmetric/README.md) | `forge_crypto_symmetric` | AES, ChaCha20-Poly1305, HKDF and scrypt. | `forge_crypto_core`, `forge_exceptions`, OpenSSL::Crypto. |
 | [crypto/asymmetric](libraries/crypto/asymmetric/README.md) | `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric` | Binary key/signature values and host signing algorithms. | `forge_raw`; host algorithms add OpenSSL and secp256k1. |
+| [crypto/signer](libraries/crypto/signer/README.md) | `forge_crypto_signer` | Low-level named asymmetric signing-provider contract and configured provider. | `forge_crypto_asymmetric`. |
 | [crypto/pki](libraries/crypto/pki/README.md) | `forge_crypto_pki` | DER, PEM and X.509 boundaries. | `forge_crypto_asymmetric`, `forge_crypto_digest`, OpenSSL::Crypto. |
 | [crypto/math](libraries/crypto/math/README.md) | `forge_crypto_math` | Big integers and modular arithmetic. | `forge_crypto_core`, OpenSSL::Crypto, GMP. |
 | [crypto/bls](libraries/crypto/bls/README.md) | `forge_crypto_bls` | BLS values, signatures and contract primitives. | `forge_crypto_digest`, BLS12-381, OpenSSL::Crypto. |
+| [crypto/bls/signer](libraries/crypto/bls/signer/README.md) | `forge_crypto_bls_signer` | Low-level BLS provider contract and configured provider. | `forge_crypto_bls`, `forge_exceptions`. |
 | [crypto/bn256](libraries/crypto/bn256/README.md) | `forge_crypto_bn256` | BN254 operations. | Internal BN256 backend. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_chrono`, `forge_variant`, Boost.DLL privately. |
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config_core`. |
+| [auth/oauth2](libraries/auth/oauth2/README.md) | `forge_auth_oauth2` | Client-side access-token contracts, interactive authorization and typed OAuth errors. | `forge_crypto_core`, `forge_exceptions`. |
+| [auth/appauth](libraries/auth/appauth/README.md) | `forge_auth_appauth` | Apple Authorization Code + PKCE backend using AppAuth, the system browser and Keychain. | `forge_auth_oauth2`, AppAuth 3.0.0 privately. |
+| [auth/oidc_agent](libraries/auth/oidc_agent/README.md) | `forge_auth_oidc_agent` | Linux/headless token acquisition through the public oidc-agent C API. | `forge_auth_oauth2`, `forge_asio`, oidc-agent 5.3.8 privately. |
+| [auth/workload](libraries/auth/workload/README.md) | `forge_auth_workload` | Bounded workload subject-token acquisition and hardened projected-token files. | `forge_asio`, `forge_crypto_core`, `forge_exceptions`. |
 | [auth/pairing](libraries/auth/pairing/README.md) | `forge_auth_pairing` | Product-neutral bootstrap, pairing and credential state transitions with canonical persisted Raw serialization. | `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
 | [auth/session](libraries/auth/session/README.md) | `forge_auth_session` | Product-neutral digest-only session, CSRF and credential-binding transitions with canonical persisted Raw serialization. | `forge_auth_pairing`, `forge_codec_base64`, `forge_crypto_core`, `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
 | [auth/http](libraries/auth/http/README.md) | `forge_auth_http` | Browser session evidence, exact Origin/CSRF policy, cookie emission and security headers. | `forge_auth_session`, `forge_net_http`. |
@@ -206,7 +213,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [db/mdbx](libraries/db/mdbx/README.md) | `forge_db_mdbx` | Vendored libmdbx implementation of the shared DB driver contract. | `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx privately. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
 | [db/rocksdb](libraries/db/rocksdb/README.md) | `forge_db_rocksdb` | RocksDB implementation of the shared DB driver contract. | `forge_db_core`, `forge_rocksdb`. |
-| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer/secrets, named DB Store and RocksDB services. | `forge_app`, `forge_api_core`, focused plugin targets. |
+| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: Chain signer, crypto secrets, P2P node/resolver/diagnostics/PubSub, HTTP server, logging and named DB Store. | `forge_app`, `forge_api_core`, focused plugin targets. |
 | [tui](libraries/tui/README.md) | `forge_tui` | Terminal UI value models, render helpers, runner. | Notcurses core privately and optionally. |
 
 `find_package(Forge CONFIG REQUIRED)` is intentionally lightweight and discovers

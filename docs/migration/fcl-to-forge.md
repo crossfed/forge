@@ -19,7 +19,7 @@ rename with no compatibility aliases.
 | `fcl_core` | `forge_core` |
 | `fcl_api_http` | `forge_api_http` |
 | `fcl_api_transport` | `forge_api_transport` |
-| `fcl_plugins_crypto_signer` | `forge_plugins_crypto_signer` |
+| `fcl_plugins_crypto_signer` | Removed; adopt `forge_plugins_chain_signer` and its Chain signer API/configuration. |
 | `FCL::fcl_core` | `Forge::forge_core` |
 | `find_package(FCL CONFIG REQUIRED)` | `find_package(Forge CONFIG REQUIRED)` |
 | `fcl.raw` | `forge.raw` |
@@ -31,17 +31,21 @@ rename with no compatibility aliases.
 
 ## What Did Not Change
 
-Plugin config sections that were already product-neutral keep their names:
+Plugin config sections that remain active and were already product-neutral keep
+their names:
 
 ```yaml
 plugins:
   crypto:
-    signer:
+    secrets:
       # ...
 ```
 
-Examples include `plugins.crypto.signer`, `plugins.crypto.secrets`,
-`plugins.http.server`, and `plugins.p2p.node`.
+Examples include `plugins.crypto.secrets`, `plugins.http.server`, and
+`plugins.p2p.node`. The removed `plugins.crypto.signer` section is not accepted;
+transaction signing moves to the deny-by-default `plugins.chain.signer` policy.
+The replacement intentionally accepts canonical K1 Chain transaction keys only;
+generic R1, WebAuthn and raw-digest signing remain low-level provider concerns.
 
 ## No Compatibility Aliases
 

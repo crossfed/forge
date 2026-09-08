@@ -84,7 +84,7 @@ The client foundation requires separate Forge work after command routing:
 3. composition with existing Chain API `raw_client`, `verified_client` and
    `submission_client`.
 
-The existing `forge.plugins.crypto.signer` remains a node runtime signing
+The `forge.plugins.chain.signer` plugin remains a node runtime signing
 provider. It is not a wallet, vault or encrypted user keystore.
 
 ## Acceptance
@@ -99,4 +99,3 @@ provider. It is not a wallet, vault or encrypted user keystore.
 - no CLI11 or Boost.Program_options types in public module interfaces;
 - installed package consumer defining and dispatching a nested command tree;
 - structure, formatting and `git diff --check` gates.
-

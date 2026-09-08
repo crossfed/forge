@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(
    Forge CONFIG REQUIRED COMPONENTS
       plugins_crypto_secrets
-      plugins_crypto_signer
+      plugins_chain_signer
       plugins_db_store
       plugins_http_server
       plugins_p2p_node
@@ -21,7 +21,7 @@ add_executable(forge_package_plugins_descriptor_surfaces main.cpp)
 target_link_libraries(
    forge_package_plugins_descriptor_surfaces PRIVATE
       Forge::forge_plugins_crypto_secrets
-      Forge::forge_plugins_crypto_signer
+      Forge::forge_plugins_chain_signer
       Forge::forge_plugins_db_store
       Forge::forge_plugins_http_server
       Forge::forge_plugins_p2p_node

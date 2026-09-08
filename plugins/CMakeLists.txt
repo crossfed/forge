@@ -1,4 +1,4 @@
-add_subdirectory(crypto/signer)
+add_subdirectory(chain/signer)
 add_subdirectory(crypto/secrets)
 add_subdirectory(db/store)
 add_subdirectory(p2p/node)
@@ -14,7 +14,7 @@ target_include_directories(forge_plugins INTERFACE ${FORGE_PUBLIC_INCLUDE_DIRS})
 
 target_link_libraries(
    forge_plugins INTERFACE
-      forge_plugins_crypto_signer
+      forge_plugins_chain_signer
       forge_plugins_crypto_secrets
       forge_plugins_p2p_node
       forge_plugins_p2p_resolver

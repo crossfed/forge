@@ -11,8 +11,10 @@ target_include_directories(forge_api_p2p PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_api_p2p PUBLIC
       forge_exceptions
+      forge_api_auth
       forge_api_core
       forge_api_stream
+      forge_crypto_digest
       forge_net_p2p
       Boost::asio
    PRIVATE

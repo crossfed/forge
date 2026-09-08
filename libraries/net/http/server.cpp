@@ -6,11 +6,13 @@ module;
 #include <cctype>
 #include <condition_variable>
 #include <concepts>
+#include <cstdint>
 #include <exception>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,6 +48,7 @@ module forge.net.http.server;
 
 import forge.asio.exceptions;
 import forge.asio.runtime;
+import forge.crypto.digest.sha256;
 import forge.net.http.body;
 import forge.net.http.exceptions;
 import forge.net.http.negotiation;
@@ -980,10 +983,20 @@ class server_session final : public server_session_base, public std::enable_shar
       disarm_stream_expiry(stream_);
    }
 
-   route_context make_context(const request& request_value) const {
+   route_context make_context(const request& request_value) {
       try {
          auto context = make_route_context(request_value);
          context.runtime = &runtime_;
+         if constexpr (std::same_as<Stream, forge::net::tls::beast_tls_stream>) {
+            if (tls_snapshot_ &&
+                tls_snapshot_->verification() == forge::net::tls::peer_verification::require_peer_certificate) {
+               const auto certificate = forge::net::tls::extract_peer_certificate(stream_.native_handle());
+               if (certificate) {
+                  context.client_certificate_fingerprint =
+                      forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{certificate->der});
+               }
+            }
+         }
          return context;
       } catch (const exceptions::bad_request&) {
          throw;

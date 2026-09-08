@@ -385,4 +385,18 @@ BOOST_AUTO_TEST_CASE(bls_random_key_generation) try {
 }
 FORGE_LOG_AND_RETHROW();
 
+BOOST_AUTO_TEST_CASE(bls_private_keys_are_move_only_and_clear_the_source) try {
+   static_assert(!std::copy_constructible<private_key>);
+   static_assert(!std::is_copy_assignable_v<private_key>);
+   static_assert(std::movable<private_key>);
+
+   auto source = private_key{seed_1};
+   const auto public_key = source.get_public_key();
+   auto moved = std::move(source);
+
+   BOOST_CHECK(moved.get_public_key() == public_key);
+   BOOST_CHECK_THROW((void)source.get_public_key(), exceptions::invalid_private_key);
+}
+FORGE_LOG_AND_RETHROW();
+
 BOOST_AUTO_TEST_SUITE_END()

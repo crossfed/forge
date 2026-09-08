@@ -462,14 +462,15 @@ BOOST_AUTO_TEST_CASE(server_stream_synchronous_dispatch_failure_terminates_local
    auto scenario = [pinned = std::move(pinned)]() mutable -> boost::asio::awaitable<void> {
       const auto executor = co_await boost::asio::this_coro::executor;
       auto state = std::make_shared<forge::api::http::detail::server_stream_state>(
-         executor, std::move(pinned), forge::api::core::frame{
-                                           .kind = forge::api::core::frame_kind::request,
-                                           .id = forge::api::core::call_id{.value = 1},
-                                           .api = live_api::ref(),
-                                           .method = "download",
-                                           .codec = forge::api::core::codec_id{.value = "forge.raw"},
-                                        },
-         64U * 1024U, 64U * 1024U, 1U, 64U * 1024U);
+          executor, std::move(pinned),
+          forge::api::core::frame{
+              .kind = forge::api::core::frame_kind::request,
+              .id = forge::api::core::call_id{.value = 1},
+              .api = live_api::ref(),
+              .method = "download",
+              .codec = forge::api::core::codec_id{.value = "forge.raw"},
+          },
+          forge::api::core::trusted_invocation{}, 64U * 1024U, 64U * 1024U, 1U, 64U * 1024U);
       auto first = std::make_shared<std::optional<forge::net::http::body_chunk>>();
       auto read_completed = std::make_shared<std::atomic_bool>(false);
       auto read_failed = std::make_shared<std::atomic_bool>(false);

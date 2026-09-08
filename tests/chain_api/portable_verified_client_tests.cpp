@@ -297,10 +297,16 @@ finalizer_material make_finalizer(std::uint8_t base = 1U) {
       seed[index] = static_cast<std::uint8_t>(base + index);
    }
    auto key = bls::private_key{std::span<const std::uint8_t>{seed}};
+   auto authority = savanna::finalizer{
+       .description = "portable",
+       .weight = 1U,
+       .public_key = key.get_public_key(),
+   };
+   auto proof = key.proof_of_possession();
    return {
-       .key = key,
-       .authority = {.description = "portable", .weight = 1U, .public_key = key.get_public_key()},
-       .proof = key.proof_of_possession(),
+       .key = std::move(key),
+       .authority = std::move(authority),
+       .proof = std::move(proof),
    };
 }
 

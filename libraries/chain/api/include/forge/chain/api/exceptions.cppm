@@ -30,6 +30,8 @@ enum class code : std::uint16_t {
    history_unavailable = 15,
    not_found = 16,
    snapshot_lost = 17,
+   authorization_denied = 18,
+   signing_failed = 19,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -50,6 +52,8 @@ using admission_rejected = forge::exceptions::coded_exception<code, code::admiss
 using history_unavailable = forge::exceptions::coded_exception<code, code::history_unavailable>;
 using not_found = forge::exceptions::coded_exception<code, code::not_found>;
 using snapshot_lost = forge::exceptions::coded_exception<code, code::snapshot_lost>;
+using authorization_denied = forge::exceptions::coded_exception<code, code::authorization_denied>;
+using signing_failed = forge::exceptions::coded_exception<code, code::signing_failed>;
 
 namespace descriptor {
 
@@ -100,6 +104,14 @@ template <typename Builder> void declare_mutation(Builder& method) {
    method.template error<conflict>("conflict", {.status_code = forge::api::core::status::conflict, .retryable = true});
    method.template error<admission_rejected>(
        "admission_rejected", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
+}
+
+template <typename Builder> void declare_signing(Builder& method) {
+   declare_common(method);
+   method.template error<authorization_denied>(
+       "authorization_denied", {.status_code = forge::api::core::status::permission_denied, .retryable = false});
+   method.template error<signing_failed>("signing_failed",
+                                         {.status_code = forge::api::core::status::internal, .retryable = false});
 }
 
 } // namespace descriptor
