@@ -629,6 +629,25 @@ bool node::impl::launch_tracked(std::function<boost::asio::awaitable<void>()> ta
    }
 }
 
+bool node::impl::launch_tracked_cleanup(std::function<boost::asio::awaitable<void>()> task) noexcept {
+   auto operation = lifecycle.track();
+   if (!operation.active()) {
+      return false;
+   }
+   const auto executor = operation.executor();
+   try {
+      asio::co_spawn(
+          executor, [task = std::move(task)]() mutable -> asio::awaitable<void> { co_await task(); },
+          [operation = std::move(operation)](std::exception_ptr error) mutable {
+             static_cast<void>(error);
+             operation.release();
+          });
+      return true;
+   } catch (...) {
+      return false;
+   }
+}
+
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
    auto lock = std::scoped_lock{mutex};
    return local_endpoints_for_control_locked();

@@ -1251,7 +1251,8 @@ void run_live_api_over(endpoint::protocol_kind transport) {
 
 endpoint start_stalling_tcp_peer(forge::asio::runtime& runtime,
                                  std::chrono::milliseconds hold = std::chrono::seconds{2},
-                                 std::shared_ptr<std::promise<void>> accepted = {}) {
+                                 std::shared_ptr<std::promise<void>> accepted = {},
+                                 std::shared_ptr<std::atomic_size_t> accepted_count = {}) {
    namespace asio = boost::asio;
    using asio_tcp = asio::ip::tcp;
    auto acceptor = std::make_shared<asio_tcp::acceptor>(runtime.context(), asio_tcp::endpoint{asio_tcp::v4(), 0});
@@ -1260,16 +1261,49 @@ endpoint start_stalling_tcp_peer(forge::asio::runtime& runtime,
 
    asio::co_spawn(
        runtime.context(),
-       [acceptor, socket, hold, accepted = std::move(accepted)]() -> asio::awaitable<void> {
+       [acceptor, socket, hold, accepted = std::move(accepted), accepted_count = std::move(accepted_count)]()
+           -> asio::awaitable<void> {
           auto error = boost::system::error_code{};
           co_await acceptor->async_accept(*socket, asio::redirect_error(asio::use_awaitable, error));
           if (!error) {
+             if (accepted_count) {
+                accepted_count->fetch_add(1U, std::memory_order_relaxed);
+             }
              if (accepted) {
                 accepted->set_value();
              }
-             auto timer = asio::steady_timer{co_await asio::this_coro::executor};
-             timer.expires_after(hold);
-             co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+             const auto executor = co_await asio::this_coro::executor;
+             if (accepted_count) {
+                auto stop_accepting = std::make_shared<asio::steady_timer>(executor);
+                stop_accepting->expires_after(hold);
+                asio::co_spawn(
+                    executor,
+                    [acceptor, stop_accepting]() -> asio::awaitable<void> {
+                       auto wait_error = boost::system::error_code{};
+                       co_await stop_accepting->async_wait(asio::redirect_error(asio::use_awaitable, wait_error));
+                       auto ignored = boost::system::error_code{};
+                       acceptor->cancel(ignored);
+                    },
+                    asio::detached);
+                auto retained = std::vector<std::shared_ptr<asio_tcp::socket>>{socket};
+                while (true) {
+                   auto additional = std::make_shared<asio_tcp::socket>(acceptor->get_executor());
+                   co_await acceptor->async_accept(*additional, asio::redirect_error(asio::use_awaitable, error));
+                   if (error) {
+                      break;
+                   }
+                   accepted_count->fetch_add(1U, std::memory_order_relaxed);
+                   retained.push_back(std::move(additional));
+                }
+                for (const auto& value : retained) {
+                   auto ignored = boost::system::error_code{};
+                   value->close(ignored);
+                }
+             } else {
+                auto timer = asio::steady_timer{executor};
+                timer.expires_after(hold);
+                co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+             }
           }
           auto ignored = boost::system::error_code{};
           socket->close(ignored);
@@ -2661,6 +2695,70 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_limit_rejects_direct_outbound_before
       forge::asio::blocking::run(runtime, client.async_stop());
       forge::asio::blocking::run(runtime, server.async_stop());
    }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_known_peer_dial_limit_rejects_second_tcp_attempt_before_transport_effects) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto target_peer = peer(248);
+   auto client_gater = std::make_shared<recording_connection_gater>();
+   auto client_options = options_for(peer(247));
+   client_options.connection_gater = client_gater;
+   client_options.limits.resources.max_dial_attempts_per_peer = 1;
+   auto client = node{runtime, std::move(client_options)};
+   auto first_accepted = std::make_shared<std::promise<void>>();
+   auto first_accepted_future = first_accepted->get_future();
+   auto accepted_count = std::make_shared<std::atomic_size_t>(0U);
+   const auto endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{2}, first_accepted, accepted_count);
+   const auto options = node::connect_options{
+       .expected_peer = target_peer,
+       .allow_relay = false,
+       .timeout = std::chrono::seconds{5},
+   };
+
+   auto first = boost::asio::co_spawn(runtime.context(), client.async_connect(endpoint, options), boost::asio::use_future);
+   BOOST_REQUIRE(first_accepted_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   const auto staged = client.diagnostics().resources;
+   BOOST_TEST(staged.active_dials == 1U);
+   BOOST_TEST(staged.transient.outbound_connections == 1U);
+   BOOST_TEST(staged.system.outbound_connections == 1U);
+   BOOST_TEST(staged.system.file_descriptors == 1U);
+
+   auto rejected = false;
+   try {
+      static_cast<void>(forge::asio::blocking::run(runtime, client.async_connect(endpoint, options)));
+   } catch (const forge::exceptions::base& error) {
+      rejected = exceptions::code_of(error) == exceptions::code::backpressure_rejected;
+   }
+
+   wait_on_runtime(runtime, std::chrono::milliseconds{20}, "second TCP accept observation");
+   BOOST_TEST(rejected);
+   BOOST_TEST(accepted_count->load(std::memory_order_relaxed) == 1U);
+   check_gater_stages(client_gater->stages_for(target_peer),
+                      {recorded_gater_stage::peer_dial, recorded_gater_stage::address_dial,
+                       recorded_gater_stage::peer_dial, recorded_gater_stage::address_dial});
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   BOOST_REQUIRE(first.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   auto first_stopped = false;
+   try {
+      static_cast<void>(first.get());
+   } catch (...) {
+      first_stopped = true;
+   }
+   BOOST_TEST(first_stopped);
+
+   const auto released_by = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while ((client.diagnostics().resources.active_dials != 0U ||
+           client.diagnostics().resources.transient.outbound_connections != 0U ||
+           client.diagnostics().resources.system.file_descriptors != 0U) &&
+          std::chrono::steady_clock::now() < released_by) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{1}, "staged direct attempt resource release");
+   }
+   const auto resources = client.diagnostics().resources;
+   BOOST_TEST(resources.active_dials == 0U);
+   BOOST_TEST(resources.transient.outbound_connections == 0U);
+   BOOST_TEST(resources.system.outbound_connections == 0U);
+   BOOST_TEST(resources.system.file_descriptors == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_tcp_session_fd_reservation_survives_tls_handoff_until_transport_close) {
@@ -7340,6 +7438,7 @@ BOOST_AUTO_TEST_CASE(p2p_resource_stream_close_forwards_cancel_without_releasing
    auto backend = std::make_shared<queued_transport_stream>(507);
    backend->close_entered = &close_entered;
    backend->close_release = &close_release;
+   backend->throw_on_close = true;
    auto resource = std::make_shared<detail::resource_stream>(std::move(*reservation));
    resource->attach(forge::net::transport::detail::stream_access::make(backend));
 
@@ -7351,7 +7450,8 @@ BOOST_AUTO_TEST_CASE(p2p_resource_stream_close_forwards_cancel_without_releasing
    BOOST_TEST(active_stream_count(manager.current()) == 1U);
    BOOST_TEST(backend->cancel_calls == 1U);
    close_release.arrive_and_wait();
-   BOOST_CHECK_NO_THROW(closed.get());
+   BOOST_CHECK_THROW(closed.get(), std::runtime_error);
+   BOOST_TEST(backend->closed);
    BOOST_TEST(active_stream_count(manager.current()) == 0U);
    BOOST_TEST(backend->close_calls == 1U);
    BOOST_TEST(backend->cancel_calls == 1U);
@@ -8458,6 +8558,8 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_prepare_failure_preserves_sessions_a
    BOOST_TEST(after_failure.sessions_pruned == before.sessions_pruned);
    BOOST_TEST(after_failure.sessions_opened == before.sessions_opened);
    BOOST_TEST(client.diagnostics().resources.system.outbound_connections == 1U);
+   BOOST_TEST(client.diagnostics().resources.transient.outbound_connections == 0U);
+   BOOST_TEST(client.diagnostics().resources.system.file_descriptors == 1U);
 
    auto retained =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(first.local_peer(), builtins::echo,

@@ -325,7 +325,9 @@ class quic_profile final {
                                                     const node::connect_options& options,
                                                     std::shared_ptr<cancellation_latch> cancellation,
                                                     std::shared_ptr<void> native_lifetime,
-                                                    authenticated_admission_handler authenticated) {
+                                                    authenticated_admission_handler authenticated,
+                                                    tcp_transport_progress_handler) {
+      // QUIC owns a different handshake path and never emits TCP progress.
       auto cancel_current = std::make_shared<cancellation_latch>();
       auto parent_subscription =
           cancellation_latch::subscribe(cancellation, [cancel_current] noexcept { cancel_current->request_stop(); });
@@ -550,9 +552,10 @@ void register_quic_profile(registry& value, forge::asio::runtime& runtime, const
        .async_connect =
            [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options,
                    std::shared_ptr<cancellation_latch> cancellation, std::shared_ptr<void> native_lifetime,
-                   authenticated_admission_handler authenticated) {
+                   authenticated_admission_handler authenticated, tcp_transport_progress_handler tcp_transport_progress) {
               return owned->async_connect(std::move(endpoint), options, std::move(cancellation),
-                                          std::move(native_lifetime), std::move(authenticated));
+                                          std::move(native_lifetime), std::move(authenticated),
+                                          std::move(tcp_transport_progress));
            },
        .async_accept = [owned](forge::net::p2p::endpoint endpoint) { return owned->async_accept(std::move(endpoint)); },
    });

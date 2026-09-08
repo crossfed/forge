@@ -86,6 +86,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    boost::asio::awaitable<bool> wait_for_read_loop_until(std::chrono::steady_clock::time_point deadline);
    void finish_read_loop() noexcept;
    boost::asio::awaitable<void> stream_cancel_loop();
+   boost::asio::awaitable<void> wait_for_stream_terminal_reset(const std::shared_ptr<stream_state>& state);
    boost::asio::awaitable<void> wait_for_stream_cancel_loop();
    boost::asio::awaitable<bool>
    wait_for_stream_cancel_loop_until(std::chrono::steady_clock::time_point deadline);

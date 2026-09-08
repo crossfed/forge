@@ -13,6 +13,7 @@ module;
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -32,6 +33,7 @@ import forge.asio.gate;
 import forge.asio.notification;
 
 #include "details/session_impl.hxx"
+#include "details/stream_close_failure.hxx"
 #include "details/session_impl_stream_state.hxx"
 
 namespace forge::net::yamux {
@@ -221,19 +223,39 @@ boost::asio::awaitable<detail::bytes> session::impl::read_stream(const std::shar
 }
 
 boost::asio::awaitable<void> session::impl::close_stream(const std::shared_ptr<stream_state>& state) {
-   co_await ensure_started();
-   co_await write_prepared(
-       [this, state]() -> std::optional<detail::bytes> {
-          auto lock = std::scoped_lock{mutex_};
-          require_stream_owned_locked(state);
-          if (state->local_fin || state->reset) {
-             return std::nullopt;
-          }
-          auto encoded = detail::encode_frame(detail::frame_type::data, detail::fin, state->id, 0);
-          state->local_fin = true;
-          return encoded;
-       },
-       false, {}, state);
+   auto error = std::exception_ptr{};
+   auto reset_required = false;
+   try {
+      co_await ensure_started();
+      co_await write_prepared(
+          [this, state]() -> std::optional<detail::bytes> {
+             auto lock = std::scoped_lock{mutex_};
+             require_stream_owned_locked(state);
+             if (state->local_fin || state->reset) {
+                return std::nullopt;
+             }
+             if (detail::consume_stream_close_failure_for_test()) {
+                throw std::bad_alloc{};
+             }
+             auto encoded = detail::encode_frame(detail::frame_type::data, detail::fin, state->id, 0);
+             state->local_fin = true;
+             return encoded;
+          },
+          false, {}, state);
+   } catch (...) {
+      error = std::current_exception();
+      auto lock = std::scoped_lock{mutex_};
+      // An exception before local FIN leaves the logical stream live. Its
+      // terminal reset must complete before the facade publishes this error.
+      reset_required = !state->local_fin && !state->reset && !terminal_error_ && !canceled_ && !closed_;
+   }
+   if (reset_required) {
+      request_cancel_stream(state);
+      co_await wait_for_stream_terminal_reset(state);
+   }
+   if (error) {
+      std::rethrow_exception(error);
+   }
 }
 
 bool session::impl::is_reclaimable_stream_locked(const stream_state& state) const noexcept {
@@ -316,6 +338,7 @@ boost::asio::awaitable<void> session::impl::stream_cancel_loop() {
          target->read_notification.notify();
          target->window_notification.notify();
          target->receive_credit_notification.notify();
+         target->terminal_notification.notify();
          continue;
       }
 
@@ -326,6 +349,20 @@ boost::asio::awaitable<void> session::impl::stream_cancel_loop() {
          co_return;
       }
       (void)co_await stream_cancel_notification_.async_wait(observed);
+   }
+}
+
+boost::asio::awaitable<void> session::impl::wait_for_stream_terminal_reset(
+    const std::shared_ptr<stream_state>& state) {
+   while (true) {
+      const auto observed = state->terminal_notification.epoch();
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (state->reset || state->local_reset_sent || terminal_error_ || canceled_ || closed_) {
+            co_return;
+         }
+      }
+      (void)co_await state->terminal_notification.async_wait(observed);
    }
 }
 
@@ -417,6 +454,7 @@ void session::impl::notify_stream_waiters_locked(const std::shared_ptr<stream_st
    state->read_notification.notify();
    state->window_notification.notify();
    state->receive_credit_notification.notify();
+   state->terminal_notification.notify();
 }
 
 } // namespace forge::net::yamux

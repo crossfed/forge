@@ -68,6 +68,9 @@ boost::asio::awaitable<void> session::impl::read_loop() {
       message = "yamux read loop stopped";
    }
    fail_session(terminal, message);
+   // Publish the non-normal close classification before reset-writer drain so
+   // a competing graceful close cannot encode GO_AWAY(normal).
+   const auto owns_close = go_away && start_close(*go_away);
    request_stream_cancel_loop_stop();
    const auto cancel_deadline = deadline_after(options_.close_timeout);
    auto reset_writer_drained = false;
@@ -85,13 +88,21 @@ boost::asio::awaitable<void> session::impl::read_loop() {
          // publishes done. Transport cancellation still guarantees progress.
       }
    }
-   const auto owns_close = reset_writer_drained && go_away && start_close(*go_away);
    if (owns_close) {
+      auto close_lower_after_send_failure = false;
       try {
          co_await async_send_terminal_go_away(*go_away);
       } catch (...) {
          (void)cancel_transport_noexcept();
+         close_lower_after_send_failure = true;
       }
+      if (close_lower_after_send_failure) {
+         try {
+            co_await stream_.async_close();
+         } catch (...) {
+         }
+      }
+      co_await wait_for_stream_cancel_loop();
    }
    finish_read_loop();
    if (owns_close) {
@@ -103,39 +114,42 @@ boost::asio::awaitable<void> session::impl::async_send_terminal_go_away(std::uin
    auto executor = co_await boost::asio::this_coro::executor;
    const auto deadline = deadline_after(options_.close_timeout);
    transport_writes_.seal();
-   if (!co_await transport_writes_.async_wait_until(deadline)) {
-      (void)cancel_transport_noexcept();
-      try {
-         co_await stream_.async_close();
-      } catch (...) {
-      }
-      co_return;
-   }
+   auto deadline_timer = std::shared_ptr<boost::asio::steady_timer>{};
+   try {
+      if (!co_await transport_writes_.async_wait_until(deadline)) {
+         (void)cancel_transport_noexcept();
+      } else {
+         deadline_timer = std::make_shared<boost::asio::steady_timer>(executor, deadline);
+         auto weak = weak_from_this();
+         deadline_timer->async_wait([weak](const boost::system::error_code& error) {
+            if (!error) {
+               if (auto self = weak.lock()) {
+                  (void)self->cancel_transport_noexcept();
+               }
+            }
+         });
 
-   auto deadline_timer = boost::asio::steady_timer{executor, deadline};
-   auto weak = weak_from_this();
-   deadline_timer.async_wait([weak](const boost::system::error_code& error) {
-      if (!error) {
-         if (auto self = weak.lock()) {
-            (void)self->cancel_transport_noexcept();
+         try {
+            auto outbound = transport::chunk{detail::encode_frame(detail::frame_type::go_away, 0, 0, code)};
+            co_await stream_.async_write(std::move(outbound));
+         } catch (...) {
+            // The original typed protocol/resource failure is already terminal.
          }
       }
-   });
-
-   try {
-      auto outbound = transport::chunk{detail::encode_frame(detail::frame_type::go_away, 0, 0, code)};
-      co_await stream_.async_write(std::move(outbound));
    } catch (...) {
-      // The original typed protocol/resource failure is already terminal.
+      // A failed drain cannot bypass lower terminal cleanup.
+      (void)cancel_transport_noexcept();
    }
    try {
       co_await stream_.async_close();
    } catch (...) {
       // Transport teardown is best-effort and never replaces the protocol cause.
    }
-   try {
-      deadline_timer.cancel();
-   } catch (...) {
+   if (deadline_timer) {
+      try {
+         deadline_timer->cancel();
+      } catch (...) {
+      }
    }
 }
 

@@ -7,6 +7,9 @@ add_library(
    session_impl_stream.cpp
    session_impl_stream_state.cpp
    session_impl_stream_model.cpp
+   session_close_failure.cpp
+   session_start_failure.cpp
+   stream_close_failure.cpp
    session_model.cpp
    transport_write_tracker.cpp
 )

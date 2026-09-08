@@ -30,6 +30,10 @@ class session {
 
    boost::asio::awaitable<stream> async_open_stream();
    boost::asio::awaitable<stream> async_accept_stream();
+   // Completion, including an exception, is a terminal cleanup barrier. Once
+   // it resumes, callers may release native lifetime and resource ownership.
+   // It still delegates after request_cancel() made the session operationally
+   // invalid; only a default or moved-from session is a no-op.
    boost::asio::awaitable<void> async_close();
    void cancel();
    void request_cancel() noexcept;
@@ -52,6 +56,8 @@ class session_concept {
    [[nodiscard]] virtual bool valid() const noexcept = 0;
    virtual boost::asio::awaitable<stream> async_open_stream() = 0;
    virtual boost::asio::awaitable<stream> async_accept_stream() = 0;
+   // Implementations must complete all terminal native cleanup before this
+   // operation resumes, even when reporting the terminal cause by exception.
    virtual boost::asio::awaitable<void> async_close() = 0;
    virtual void cancel() = 0;
    virtual void request_cancel() noexcept;

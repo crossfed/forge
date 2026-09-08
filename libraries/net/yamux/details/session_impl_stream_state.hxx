@@ -23,6 +23,9 @@ struct session::impl::stream_state {
    forge::asio::notification read_notification;
    forge::asio::notification window_notification;
    forge::asio::notification receive_credit_notification;
+   // Completes a local/remote reset without coupling a stream close to the
+   // session-wide reset writer's lifetime.
+   forge::asio::notification terminal_notification;
 };
 
 } // namespace forge::net::yamux

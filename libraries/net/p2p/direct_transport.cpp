@@ -14,6 +14,8 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/this_coro.hpp>
 
 module forge.net.p2p.node;
 
@@ -58,6 +60,38 @@ registry::registry(forge::asio::runtime& runtime, const node::options& options,
 }
 
 registry::~registry() = default;
+
+void notify_tcp_transport_progress(const tcp_transport_progress_handler& handler) noexcept {
+   if (!handler) {
+      return;
+   }
+   try {
+      handler();
+   } catch (...) {
+      // Progress is observational. A scheduler callback cannot take ownership
+      // of, cancel, or strand a transport already committed to cleanup.
+   }
+}
+
+boost::asio::awaitable<void> async_discard_unpublished(connection& value) {
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+
+   value.session.request_cancel();
+   auto transport = std::move(value.session);
+   value.session = {};
+   try {
+      co_await transport.async_close();
+   } catch (...) {
+      // transport::session reports terminal failures only after lower cleanup.
+   }
+   transport = {};
+
+   if (value.admission) {
+      value.admission->release();
+      value.admission.reset();
+   }
+   value.native_lifetime.reset();
+}
 
 bool registry::listening() const noexcept {
    return state_ && std::ranges::any_of(state_->profiles, [](const profile& value) { return value.listening(); });
@@ -143,10 +177,12 @@ boost::asio::awaitable<connection> registry::async_connect(forge::net::p2p::endp
                                                            const node::connect_options& options,
                                                            std::shared_ptr<cancellation_latch> cancellation,
                                                            std::shared_ptr<void> native_lifetime,
-                                                           authenticated_admission_handler authenticated) {
+                                                           authenticated_admission_handler authenticated,
+                                                           tcp_transport_progress_handler tcp_transport_progress) {
    auto& selected = profile_for(state_->profiles, endpoint);
    co_return co_await selected.async_connect(std::move(endpoint), options, std::move(cancellation),
-                                             std::move(native_lifetime), std::move(authenticated));
+                                             std::move(native_lifetime), std::move(authenticated),
+                                             std::move(tcp_transport_progress));
 }
 
 boost::asio::awaitable<connection> registry::async_accept(forge::net::p2p::endpoint endpoint) {

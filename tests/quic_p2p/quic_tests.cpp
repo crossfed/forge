@@ -12,6 +12,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -2448,6 +2449,360 @@ BOOST_AUTO_TEST_CASE(quic_concurrent_async_close_waits_for_terminal_cleanup_and_
    BOOST_TEST(released.expired());
    run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
                      "close concurrent-close QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_preterminal_stream_close_failure_resets_before_cached_error) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto barrier_mutex = std::make_shared<std::mutex>();
+   auto entered_changed = std::make_shared<std::condition_variable>();
+   auto release_changed = std::make_shared<std::condition_variable>();
+   auto entered = std::make_shared<std::atomic_bool>(false);
+   auto released = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.test_failpoint = [barrier_mutex, entered_changed, release_changed, entered, released](std::string_view name) {
+      if (name != "stream_close_before_fin") {
+         return false;
+      }
+      auto lock = std::unique_lock{*barrier_mutex};
+      entered->store(true, std::memory_order_release);
+      entered_changed->notify_all();
+      release_changed->wait(lock, [&] { return released->load(std::memory_order_acquire); });
+      return true;
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect stream-close failure QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept stream-close failure QUIC session");
+   auto stream = as_transport_stream(run_with_deadline(runtime, connection.async_open_stream(),
+                                                        std::chrono::milliseconds{5'000},
+                                                        "open stream-close failure QUIC stream"));
+
+   auto first_close = boost::asio::co_spawn(runtime.context(), stream.async_close(), boost::asio::use_future);
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(entered_changed->wait_for(lock, std::chrono::seconds{2},
+                                               [&] { return entered->load(std::memory_order_acquire); }));
+   }
+   auto second_close = boost::asio::co_spawn(runtime.context(), stream.async_close(), boost::asio::use_future);
+   BOOST_TEST(static_cast<int>(second_close.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   released->store(true, std::memory_order_release);
+   release_changed->notify_all();
+   BOOST_REQUIRE(first_close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_REQUIRE(second_close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(first_close.get(), std::bad_alloc);
+   BOOST_CHECK_THROW(second_close.get(), std::bad_alloc);
+   const auto metrics = connection.metrics();
+   BOOST_TEST(metrics.streams_reset == 1U);
+   BOOST_TEST(metrics.active_streams == 0U);
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "close reset stream QUIC session");
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close reset stream QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_stream_close_owner_start_failure_hands_off_to_cancel_worker) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto options = loopback_client_options();
+   options.test_failpoint = [](std::string_view name) { return name == "stream_close_before_owner_spawn"; };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect owner-start failure QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept owner-start failure QUIC session");
+   auto stream = run_with_deadline(runtime, connection.async_open_stream(), std::chrono::milliseconds{5'000},
+                                   "open owner-start failure QUIC stream");
+
+   BOOST_CHECK_THROW(run_with_deadline(runtime, stream.async_close(), std::chrono::milliseconds{2'000},
+                                       "join cancel-worker stream reset"),
+                     std::bad_alloc);
+   const auto metrics = connection.metrics();
+   BOOST_TEST(metrics.streams_reset == 1U);
+   BOOST_TEST(metrics.active_streams == 0U);
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "close owner-start failure QUIC session");
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close owner-start failure QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_close_failure_joins_cancel_worker_terminal_drain) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto barrier_mutex = std::make_shared<std::mutex>();
+   auto reset_changed = std::make_shared<std::condition_variable>();
+   auto close_changed = std::make_shared<std::condition_variable>();
+   auto arm_local_reset_count = std::make_shared<std::atomic_bool>(false);
+   auto arm_close_reset_join = std::make_shared<std::atomic_bool>(false);
+   auto local_reset_publications = std::make_shared<std::atomic_uint>(0);
+   auto close_failure_entered = std::make_shared<std::atomic_bool>(false);
+   auto terminal_join_entered = std::make_shared<std::atomic_bool>(false);
+   auto release_reset_drain = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.test_failpoint = [reset_changed, close_changed, arm_local_reset_count, arm_close_reset_join,
+                             local_reset_publications, close_failure_entered, terminal_join_entered,
+                             release_reset_drain](std::string_view name) {
+      if (name == "stream_reset_published") {
+         if (arm_local_reset_count->load(std::memory_order_acquire)) {
+            local_reset_publications->fetch_add(1, std::memory_order_acq_rel);
+            reset_changed->notify_all();
+         }
+         return false;
+      }
+      if (name == "stream_reset_after_publish_before_drain") {
+         return arm_local_reset_count->load(std::memory_order_acquire) &&
+                local_reset_publications->load(std::memory_order_acquire) == 1U;
+      }
+      if (name == "stream_reset_after_publish_before_drain_wait") {
+         return !release_reset_drain->load(std::memory_order_acquire);
+      }
+      if (name == "stream_close_before_state_check") {
+         close_failure_entered->store(true, std::memory_order_release);
+         close_changed->notify_all();
+         return true;
+      }
+      if (name == "stream_reset_before_terminal_join") {
+         if (!arm_close_reset_join->load(std::memory_order_acquire) ||
+             !close_failure_entered->load(std::memory_order_acquire) ||
+             local_reset_publications->load(std::memory_order_acquire) != 1U) {
+            return false;
+         }
+         terminal_join_entered->store(true, std::memory_order_release);
+         close_changed->notify_all();
+         return false;
+      }
+      return false;
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect reset-race QUIC session");
+   auto inbound = get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept reset-race QUIC session");
+   auto stream = as_transport_stream(run_with_deadline(runtime, connection.async_open_stream(),
+                                                        std::chrono::milliseconds{5'000},
+                                                        "open reset-race QUIC stream"));
+
+   arm_local_reset_count->store(true, std::memory_order_release);
+   stream.request_cancel();
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(reset_changed->wait_for(lock, std::chrono::seconds{2},
+                                             [&] { return local_reset_publications->load(std::memory_order_acquire) == 1U; }));
+   }
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   arm_close_reset_join->store(true, std::memory_order_release);
+   auto close = boost::asio::co_spawn(runtime.context(), stream.async_close(), boost::asio::use_future);
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(close_changed->wait_for(lock, std::chrono::seconds{2},
+                                             [&] { return close_failure_entered->load(std::memory_order_acquire) &&
+                                                          terminal_join_entered->load(std::memory_order_acquire); }));
+   }
+   BOOST_TEST(static_cast<int>(close.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   release_reset_drain->store(true, std::memory_order_release);
+   BOOST_REQUIRE(close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(close.get(), std::bad_alloc);
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(connection.metrics().active_streams == 0U);
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "close reset-race QUIC session");
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close reset-race QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_close_after_cancel_joins_reset_terminal_drain) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto barrier_mutex = std::make_shared<std::mutex>();
+   auto reset_changed = std::make_shared<std::condition_variable>();
+   auto close_changed = std::make_shared<std::condition_variable>();
+   auto arm_local_reset_count = std::make_shared<std::atomic_bool>(false);
+   auto arm_success_terminal_join = std::make_shared<std::atomic_bool>(false);
+   auto local_reset_publications = std::make_shared<std::atomic_uint>(0);
+   auto success_terminal_join_entered = std::make_shared<std::atomic_bool>(false);
+   auto release_reset_drain = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.test_failpoint = [reset_changed, close_changed, arm_local_reset_count, arm_success_terminal_join,
+                             local_reset_publications, success_terminal_join_entered,
+                             release_reset_drain](std::string_view name) {
+      if (name == "stream_reset_published") {
+         if (arm_local_reset_count->load(std::memory_order_acquire)) {
+            local_reset_publications->fetch_add(1, std::memory_order_acq_rel);
+            reset_changed->notify_all();
+         }
+         return false;
+      }
+      if (name == "stream_reset_after_publish_before_drain") {
+         return arm_local_reset_count->load(std::memory_order_acquire) &&
+                local_reset_publications->load(std::memory_order_acquire) == 1U;
+      }
+      if (name == "stream_reset_after_publish_before_drain_wait") {
+         return !release_reset_drain->load(std::memory_order_acquire);
+      }
+      if (name == "stream_close_before_terminal_join") {
+         if (!arm_success_terminal_join->load(std::memory_order_acquire) ||
+             local_reset_publications->load(std::memory_order_acquire) != 1U) {
+            return false;
+         }
+         success_terminal_join_entered->store(true, std::memory_order_release);
+         close_changed->notify_all();
+         return false;
+      }
+      return false;
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect successful reset-race QUIC session");
+   auto inbound =
+       get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept successful reset-race QUIC session");
+   auto stream = as_transport_stream(run_with_deadline(runtime, connection.async_open_stream(),
+                                                        std::chrono::milliseconds{5'000},
+                                                        "open successful reset-race QUIC stream"));
+
+   arm_local_reset_count->store(true, std::memory_order_release);
+   stream.request_cancel();
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(reset_changed->wait_for(lock, std::chrono::seconds{2},
+                                             [&] { return local_reset_publications->load(std::memory_order_acquire) == 1U; }));
+   }
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   arm_success_terminal_join->store(true, std::memory_order_release);
+   auto close = boost::asio::co_spawn(runtime.context(), stream.async_close(), boost::asio::use_future);
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(close_changed->wait_for(lock, std::chrono::seconds{2}, [&] {
+         return success_terminal_join_entered->load(std::memory_order_acquire);
+      }));
+   }
+   BOOST_TEST(static_cast<int>(close.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   release_reset_drain->store(true, std::memory_order_release);
+   BOOST_REQUIRE(close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(close.get());
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(connection.metrics().active_streams == 0U);
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "close successful reset-race QUIC session");
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close successful reset-race QUIC peer");
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(quic_close_failure_first_reset_owner_joins_active_native_drain) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+   auto client = connector{runtime};
+   auto barrier_mutex = std::make_shared<std::mutex>();
+   auto drain_changed = std::make_shared<std::condition_variable>();
+   auto close_changed = std::make_shared<std::condition_variable>();
+   auto arm_drain_pause = std::make_shared<std::atomic_bool>(false);
+   auto drain_pause_consumed = std::make_shared<std::atomic_bool>(false);
+   auto drain_owner_entered = std::make_shared<std::atomic_bool>(false);
+   auto arm_local_reset_count = std::make_shared<std::atomic_bool>(false);
+   auto arm_close_reset_join = std::make_shared<std::atomic_bool>(false);
+   auto local_reset_publications = std::make_shared<std::atomic_uint>(0);
+   auto close_failure_entered = std::make_shared<std::atomic_bool>(false);
+   auto drain_join_entered = std::make_shared<std::atomic_bool>(false);
+   auto release_drain = std::make_shared<std::atomic_bool>(false);
+   auto options = loopback_client_options();
+   options.test_failpoint = [drain_changed, close_changed, arm_drain_pause, drain_pause_consumed, drain_owner_entered,
+                             arm_local_reset_count, arm_close_reset_join, local_reset_publications,
+                             close_failure_entered, drain_join_entered, release_drain](std::string_view name) {
+      if (name == "drain_after_owner_claim_before_native_write") {
+         if (!arm_drain_pause->load(std::memory_order_acquire) ||
+             drain_pause_consumed->exchange(true, std::memory_order_acq_rel)) {
+            return false;
+         }
+         drain_owner_entered->store(true, std::memory_order_release);
+         drain_changed->notify_all();
+         return true;
+      }
+      if (name == "drain_after_owner_claim_before_native_write_wait") {
+         return !release_drain->load(std::memory_order_acquire);
+      }
+      if (name == "stream_reset_published") {
+         if (arm_local_reset_count->load(std::memory_order_acquire)) {
+            local_reset_publications->fetch_add(1, std::memory_order_acq_rel);
+            close_changed->notify_all();
+         }
+         return false;
+      }
+      if (name == "stream_close_before_state_check") {
+         close_failure_entered->store(true, std::memory_order_release);
+         close_changed->notify_all();
+         return true;
+      }
+      if (name == "drain_request_before_completion_wait") {
+         if (!arm_close_reset_join->load(std::memory_order_acquire) ||
+             !close_failure_entered->load(std::memory_order_acquire) ||
+             local_reset_publications->load(std::memory_order_acquire) != 1U) {
+            return false;
+         }
+         drain_join_entered->store(true, std::memory_order_release);
+         close_changed->notify_all();
+         return false;
+      }
+      return false;
+   };
+   auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto connection = run_with_deadline(runtime, client.async_connect(server.local_endpoint(), std::move(options)),
+                                       std::chrono::milliseconds{5'000}, "connect first-owner drain-race QUIC session");
+   auto inbound =
+       get_with_deadline(accepted, std::chrono::milliseconds{5'000}, "accept first-owner drain-race QUIC session");
+   auto stream = as_transport_stream(run_with_deadline(runtime, connection.async_open_stream(),
+                                                        std::chrono::milliseconds{5'000},
+                                                        "open first-owner drain-race QUIC stream"));
+
+   arm_drain_pause->store(true, std::memory_order_release);
+   const auto payload = std::array<std::uint8_t, 1>{0x42};
+   run_with_deadline(runtime, stream.async_write(payload), std::chrono::milliseconds{2'000},
+                     "queue first-owner drain-race QUIC write");
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(drain_changed->wait_for(lock, std::chrono::seconds{2},
+                                             [&] { return drain_owner_entered->load(std::memory_order_acquire); }));
+   }
+
+   arm_local_reset_count->store(true, std::memory_order_release);
+   arm_close_reset_join->store(true, std::memory_order_release);
+   auto close = boost::asio::co_spawn(runtime.context(), stream.async_close(), boost::asio::use_future);
+   {
+      auto lock = std::unique_lock{*barrier_mutex};
+      BOOST_REQUIRE(close_changed->wait_for(lock, std::chrono::seconds{2},
+                                             [&] { return close_failure_entered->load(std::memory_order_acquire) &&
+                                                          drain_join_entered->load(std::memory_order_acquire) &&
+                                                          local_reset_publications->load(std::memory_order_acquire) == 1U; }));
+   }
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(static_cast<int>(close.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+
+   release_drain->store(true, std::memory_order_release);
+   BOOST_REQUIRE(close.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(close.get(), std::bad_alloc);
+   BOOST_TEST(local_reset_publications->load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(connection.metrics().active_streams == 0U);
+
+   run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{2'000},
+                     "close first-owner drain-race QUIC session");
+   run_with_deadline(runtime, inbound.async_close(), std::chrono::milliseconds{2'000},
+                     "close first-owner drain-race QUIC peer");
    server.stop();
 }
 
