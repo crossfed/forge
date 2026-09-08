@@ -612,7 +612,7 @@ dns_address_expander::dns_address_expander(dns::resolver& resolver, address_reso
             },
           }) {}
 
-boost::asio::awaitable<std::vector<endpoint>>
+boost::asio::awaitable<dns_address_expansion_result>
 dns_address_expander::async_expand(std::vector<multiaddr> roots, std::optional<peer_id> expected_peer,
                                    std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
    auto policy = policy_;
@@ -621,13 +621,13 @@ dns_address_expander::async_expand(std::vector<multiaddr> roots, std::optional<p
                              deadline, stop);
 }
 
-boost::asio::awaitable<std::vector<endpoint>>
+boost::asio::awaitable<dns_address_expansion_result>
 dns_address_expander::async_expand(multiaddr root, std::optional<peer_id> expected_peer,
                                    std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
    return async_expand(std::vector<multiaddr>{std::move(root)}, std::move(expected_peer), deadline, stop);
 }
 
-boost::asio::awaitable<std::vector<endpoint>>
+boost::asio::awaitable<dns_address_expansion_result>
 dns_address_expander::async_expand_owned(address_resolution::policy policy, resolver_callbacks callbacks,
                                          std::vector<multiaddr> roots, std::optional<peer_id> expected_peer,
                                          std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
@@ -659,7 +659,10 @@ dns_address_expander::async_expand_owned(address_resolution::policy policy, reso
       }
       throw_invalid_options("P2P DNS address resolution produced no direct endpoint");
    }
-   co_return std::move(operation->state.results);
+   co_return dns_address_expansion_result{
+       .endpoints = std::move(operation->state.results),
+       .expected_peer = std::move(operation->expected_peer),
+   };
 }
 
 } // namespace forge::net::p2p::detail

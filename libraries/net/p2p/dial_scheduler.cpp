@@ -115,7 +115,7 @@ start_at(const dial_scheduler::clock::time_point started, const dial_plan_item& 
    return started + delay;
 }
 
-[[nodiscard]] boost::asio::awaitable<std::vector<endpoint>>
+[[nodiscard]] boost::asio::awaitable<dns_address_expansion_result>
 async_expand_with_callbacks(const dial_scheduler::policy& policy,
                             const std::shared_ptr<dial_scheduler::operation_callbacks>& callbacks,
                             std::vector<forge::multiformats::multiaddr> roots, std::optional<peer_id> expected_peer,
@@ -501,14 +501,14 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       throw_closed();
    }
 
-   auto expanded = std::vector<endpoint>{};
+   auto expansion = dns_address_expansion_result{};
    if (has_resolver_callbacks) {
-      expanded = co_await async_expand_with_callbacks(owner->policy_, callback_set, std::move(value.roots),
-                                                       value.expected_peer, value.logical_deadline,
-                                                       operation->stop_token());
+      expansion = co_await async_expand_with_callbacks(owner->policy_, callback_set, std::move(value.roots),
+                                                        value.expected_peer, value.logical_deadline,
+                                                        operation->stop_token());
    } else {
-      expanded = co_await owner->expander_.async_expand(std::move(value.roots), value.expected_peer,
-                                                         value.logical_deadline, operation->stop_token());
+      expansion = co_await owner->expander_.async_expand(std::move(value.roots), value.expected_peer,
+                                                          value.logical_deadline, operation->stop_token());
    }
    if (is_canceled(value.stop)) {
       throw_canceled();
@@ -520,7 +520,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       throw_closed();
    }
 
-   auto filtered = owner->black_holes_.filter_peer_dial(std::move(expanded));
+   auto filtered = owner->black_holes_.filter_peer_dial(std::move(expansion.endpoints));
    auto plan = owner->ranker_.rank(std::move(filtered.allowed));
    if (plan.empty()) {
       throw_no_endpoint();
@@ -548,7 +548,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       const auto deadline = candidate_deadline(value.logical_deadline, value.attempt_timeout, clock::now());
       // Build every potentially-throwing worker and fallback object before
       // active_ changes. A worker cannot run until co_spawn below.
-      auto worker = async_attempt_worker(callback_set, operation, value.expected_peer, deadline, item, index);
+      auto worker = async_attempt_worker(callback_set, operation, expansion.expected_peer, deadline, item, index);
       auto launch_failure = std::make_shared<dial_scheduler::launch_failure>();
       launch_failure->value = completion{.plan_index = index, .target = item.value};
       const auto publish_launch_failure = [operation, launch_failure](std::exception_ptr error) noexcept {

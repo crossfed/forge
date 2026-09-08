@@ -552,6 +552,37 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_ranks_multiple_roots_under_one_deadline) {
    BOOST_TEST(script->finished_attempts() == 2U);
 }
 
+BOOST_AUTO_TEST_CASE(dial_scheduler_applies_peer_inferred_from_one_root_to_all_attempts) {
+   const auto expected = p2p::peer_id::from_string("QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC");
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->behaviors.emplace("/ip4/8.8.8.8/tcp/4001/p2p/" + expected.to_string(),
+                             dial_script::behavior::wait_for_release_then_succeed);
+   script->behaviors.emplace("/ip4/8.8.4.4/tcp/4001",
+                             dial_script::behavior::wait_for_release_then_succeed);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 2}};
+
+   auto result = boost::asio::co_spawn(
+       runtime.context().get_executor(),
+       scheduler.async_dial(
+           request_for(std::vector<std::string>{
+                           "/ip4/8.8.8.8/tcp/4001/p2p/" + expected.to_string(),
+                           "/ip4/8.8.4.4/tcp/4001"},
+                       std::chrono::seconds{1}),
+           callbacks_for(script)),
+       boost::asio::use_future);
+   BOOST_REQUIRE(script->wait_for_starts(2));
+   const auto starts = script->starts();
+   BOOST_REQUIRE_EQUAL(starts.size(), 2U);
+   BOOST_REQUIRE(starts[0].expected_peer.has_value());
+   BOOST_REQUIRE(starts[1].expected_peer.has_value());
+   BOOST_TEST(starts[0].expected_peer->to_string() == expected.to_string());
+   BOOST_TEST(starts[1].expected_peer->to_string() == expected.to_string());
+
+   script->release_starts();
+   static_cast<void>(result.get());
+}
+
 BOOST_AUTO_TEST_CASE(dial_scheduler_terminally_discards_late_loser_before_returning_winner) {
    auto runtime = forge::asio::runtime{};
    auto script = std::make_shared<dial_script>();

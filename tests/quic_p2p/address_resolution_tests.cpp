@@ -129,7 +129,8 @@ expand_roots(forge::asio::runtime& runtime, p2p::detail::dns_address_expander& v
       roots.push_back(forge::multiformats::multiaddr::parse(std::move(source)));
    }
    return forge::asio::blocking::run(runtime,
-                                     value.async_expand(std::move(roots), std::move(expected_peer), deadline, stop));
+                                     value.async_expand(std::move(roots), std::move(expected_peer), deadline, stop))
+       .endpoints;
 }
 
 std::vector<p2p::endpoint>
