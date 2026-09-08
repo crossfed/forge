@@ -1,2 +1,3 @@
 guest/tests/corpus/spring/** linguist-vendored whitespace=-trailing-space,-blank-at-eof
 guest/tests/corpus/eosio/** linguist-vendored whitespace=-trailing-space,-blank-at-eof
+vendor/c-ares/** linguist-vendored whitespace=-trailing-space,-blank-at-eof,-space-before-tab
