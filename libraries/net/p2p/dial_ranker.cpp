@@ -64,12 +64,13 @@ constexpr auto maximum_private_delay = std::chrono::milliseconds{30};
    return left.to_string() < right.to_string();
 }
 
-[[nodiscard]] bool move_first_ipv4_second(std::vector<endpoint>& values, std::size_t begin, std::size_t end) {
-   if (end - begin < 2 || !is_ipv6(values[begin])) {
+[[nodiscard]] bool move_first_ipv4_second(std::vector<resolved_dial_target>& values, std::size_t begin,
+                                           std::size_t end) {
+   if (end - begin < 2 || !is_ipv6(values[begin].concrete)) {
       return false;
    }
    for (auto index = begin + 1; index < end; ++index) {
-      if (!is_ipv4(values[index])) {
+      if (!is_ipv4(values[index].concrete)) {
          continue;
       }
       std::rotate(values.begin() + static_cast<std::ptrdiff_t>(begin + 1),
@@ -80,12 +81,15 @@ constexpr auto maximum_private_delay = std::chrono::milliseconds{30};
    return false;
 }
 
-[[nodiscard]] std::vector<dial_plan_item> rank_group(std::vector<endpoint> values, std::chrono::milliseconds delay,
+[[nodiscard]] std::vector<dial_plan_item> rank_group(std::vector<resolved_dial_target> values,
+                                                      std::chrono::milliseconds delay,
                                                       std::chrono::milliseconds tcp_handshake_progress_hold) {
-   std::sort(values.begin(), values.end(), endpoint_rank_less);
+   std::sort(values.begin(), values.end(), [](const auto& left, const auto& right) {
+      return endpoint_rank_less(left.concrete, right.concrete);
+   });
    const auto first_tcp = static_cast<std::size_t>(
        std::distance(values.begin(), std::find_if(values.begin(), values.end(),
-                                                  [](const endpoint& value) { return !is_quic(value); })));
+                                                  [](const auto& value) { return !is_quic(value.concrete); })));
    const auto quic_happy_eyeballs = move_first_ipv4_second(values, 0, first_tcp);
    const auto tcp_happy_eyeballs = move_first_ipv4_second(values, first_tcp, values.size());
 
@@ -100,7 +104,9 @@ constexpr auto maximum_private_delay = std::chrono::milliseconds{30};
          scheduled = quic_happy_eyeballs ? delay * 2 : delay;
       }
       tcp_first_delay = scheduled + delay;
-      result.push_back({.value = std::move(values[index]), .delay = scheduled});
+      result.push_back({.value = std::move(values[index].concrete),
+                        .root_indices = std::move(values[index].root_indices),
+                        .delay = scheduled});
    }
    for (auto index = first_tcp; index < values.size(); ++index) {
       const auto tcp_index = index - first_tcp;
@@ -110,7 +116,8 @@ constexpr auto maximum_private_delay = std::chrono::milliseconds{30};
       } else if (tcp_index > 1) {
          scheduled += tcp_happy_eyeballs ? delay * 2 : delay;
       }
-      result.push_back({.value = std::move(values[index]),
+      result.push_back({.value = std::move(values[index].concrete),
+                        .root_indices = std::move(values[index].root_indices),
                         .delay = scheduled,
                         .tcp = true,
                         .tcp_handshake_progress_hold = tcp_handshake_progress_hold});
@@ -136,16 +143,16 @@ void dial_ranker::validate_policy(const dialing::ranker_policy& value) {
    validate_policy_value(value);
 }
 
-std::vector<dial_plan_item> dial_ranker::rank(std::vector<endpoint> values) const {
-   auto private_values = std::vector<endpoint>{};
-   auto public_values = std::vector<endpoint>{};
+std::vector<dial_plan_item> dial_ranker::rank(std::vector<resolved_dial_target> values) const {
+   auto private_values = std::vector<resolved_dial_target>{};
+   auto public_values = std::vector<resolved_dial_target>{};
    private_values.reserve(values.size());
    public_values.reserve(values.size());
    for (auto& value : values) {
-      if (!is_supported_direct(value)) {
+      if (!is_supported_direct(value.concrete)) {
          continue;
       }
-      const auto scope = host_addresses::classify_endpoint_scope(value);
+      const auto scope = host_addresses::classify_endpoint_scope(value.concrete);
       if (scope == host_addresses::endpoint_scope::public_address) {
          public_values.push_back(std::move(value));
       } else if (is_private_scope(scope)) {

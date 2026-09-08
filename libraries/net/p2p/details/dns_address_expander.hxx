@@ -3,11 +3,13 @@
 #include <chrono>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <optional>
-#include <set>
 #include <stop_token>
 #include <string>
 #include <vector>
+
+#include "dial_ranker.hxx"
 
 namespace forge::net::p2p::detail {
 
@@ -17,18 +19,30 @@ enum class dns_address_branch_failure {
    temporary_failure,
 };
 
+struct source_root {
+   forge::multiformats::multiaddr canonical;
+   std::vector<std::size_t> input_indices;
+};
+
+struct dns_address_candidate_state {
+   std::vector<endpoint> endpoints;
+   std::vector<std::size_t> root_indices;
+   bool active = false;
+   bool completed = false;
+};
+
 struct dns_address_expansion_state {
    const address_resolution::limits& limits;
    std::size_t dns_lookups = 0;
-   std::vector<endpoint> results;
-   std::set<std::string> result_keys;
-   std::set<std::string> active;
-   std::set<std::string> completed;
+   std::vector<resolved_dial_target> targets;
+   std::map<std::string, std::size_t> target_indices;
+   std::map<std::string, dns_address_candidate_state> candidates;
    dns_address_branch_failure strongest_branch_failure = dns_address_branch_failure::none;
 };
 
 struct dns_address_expansion_result {
-   std::vector<endpoint> endpoints;
+   std::vector<source_root> roots;
+   std::vector<resolved_dial_target> targets;
    std::optional<peer_id> expected_peer;
 };
 

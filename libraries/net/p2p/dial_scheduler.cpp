@@ -7,13 +7,16 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <stop_token>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -132,6 +135,73 @@ async_expand_with_callbacks(const dial_scheduler::policy& policy,
                return callbacks->resolve_txt(std::move(name), std::move(options), lookup_stop);
             }}};
    co_return co_await expander.async_expand(std::move(roots), std::move(expected_peer), deadline, stop);
+}
+
+[[nodiscard]] std::vector<resolved_dial_target>
+allowed_targets(std::vector<resolved_dial_target> targets, std::vector<endpoint> allowed) {
+   auto result = std::vector<resolved_dial_target>{};
+   result.reserve(allowed.size());
+   auto target_indices = std::map<std::string, std::size_t>{};
+   for (auto index = std::size_t{}; index < targets.size(); ++index) {
+      target_indices.emplace(targets[index].concrete.to_string(), index);
+   }
+   for (const auto& value : allowed) {
+      const auto key = value.to_string();
+      if (const auto found = target_indices.find(key); found != target_indices.end()) {
+         result.push_back(std::move(targets[found->second]));
+         target_indices.erase(found);
+      }
+   }
+   return result;
+}
+
+[[nodiscard]] bool has_root_index(const std::vector<std::size_t>& root_indices, std::size_t index) noexcept {
+   return std::binary_search(root_indices.begin(), root_indices.end(), index);
+}
+
+[[nodiscard]] std::vector<dial_root_outcome>
+root_outcomes_for(const std::vector<source_root>& roots, const std::vector<dial_plan_item>& plan,
+                  const std::vector<bool>& launched, const std::vector<bool>& attributable_failures,
+                  std::optional<std::size_t> winner_plan_index) {
+   auto result = std::vector<dial_root_outcome>{};
+   result.reserve(roots.size());
+   const auto* winner_root_indices = winner_plan_index ? &plan[*winner_plan_index].root_indices : nullptr;
+   for (auto root_index = std::size_t{}; root_index < roots.size(); ++root_index) {
+      auto outcome = dialing::outcome::neutral;
+      if (winner_root_indices && has_root_index(*winner_root_indices, root_index)) {
+         outcome = dialing::outcome::success;
+      } else {
+         auto has_planned_target = false;
+         auto all_planned_targets_failed = true;
+         for (auto plan_index = std::size_t{}; plan_index < plan.size(); ++plan_index) {
+            if (!has_root_index(plan[plan_index].root_indices, root_index)) {
+               continue;
+            }
+            has_planned_target = true;
+            all_planned_targets_failed =
+                all_planned_targets_failed && launched[plan_index] && attributable_failures[plan_index];
+         }
+         if (has_planned_target && all_planned_targets_failed) {
+            outcome = dialing::outcome::failure;
+         }
+      }
+      result.push_back({.root = roots[root_index], .outcome = outcome});
+   }
+   return result;
+}
+
+[[nodiscard]] bool has_complete_attributable_exhaustion(const std::vector<dial_plan_item>& plan,
+                                                        const std::vector<bool>& launched,
+                                                        const std::vector<bool>& attributable_failures) noexcept {
+   if (plan.empty()) {
+      return false;
+   }
+   for (auto index = std::size_t{}; index < plan.size(); ++index) {
+      if (!launched[index] || !attributable_failures[index]) {
+         return false;
+      }
+   }
+   return true;
 }
 
 } // namespace
@@ -414,7 +484,7 @@ void dial_scheduler::validate_request(const request& value) {
    }
 }
 
-boost::asio::awaitable<direct_attempt> dial_scheduler::async_dial(request value, operation_callbacks callbacks) {
+boost::asio::awaitable<dial_result> dial_scheduler::async_dial(request value, operation_callbacks callbacks) {
    auto owner = owner_;
    return async_dial_owned(std::move(owner), std::move(value), std::move(callbacks));
 }
@@ -468,7 +538,7 @@ dial_scheduler::async_drain_pending_discards(std::shared_ptr<operation_callbacks
    co_return first_error;
 }
 
-boost::asio::awaitable<direct_attempt>
+boost::asio::awaitable<dial_result>
 dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, operation_callbacks callbacks) {
    if (!owner) {
       throw_closed();
@@ -477,7 +547,8 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    auto callback_set = std::make_shared<operation_callbacks>(std::move(callbacks));
    const auto has_resolver_callbacks = static_cast<bool>(callback_set->resolve_addresses) ||
                                        static_cast<bool>(callback_set->resolve_txt);
-   if ((!callback_set->start_attempt || !callback_set->discard_attempt || !callback_set->is_owner_stopping) ||
+   if ((!callback_set->start_attempt || !callback_set->discard_attempt || !callback_set->is_owner_stopping ||
+        !callback_set->observe_terminal_root_outcomes) ||
        (has_resolver_callbacks && (!callback_set->resolve_addresses || !callback_set->resolve_txt))) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P direct dial operation callbacks must be complete");
    }
@@ -520,8 +591,13 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       throw_closed();
    }
 
-   auto filtered = owner->black_holes_.filter_peer_dial(std::move(expansion.endpoints));
-   auto plan = owner->ranker_.rank(std::move(filtered.allowed));
+   auto concrete = std::vector<endpoint>{};
+   concrete.reserve(expansion.targets.size());
+   for (const auto& target : expansion.targets) {
+      concrete.push_back(target.concrete);
+   }
+   auto filtered = owner->black_holes_.filter_peer_dial(std::move(concrete));
+   auto plan = owner->ranker_.rank(allowed_targets(std::move(expansion.targets), std::move(filtered.allowed)));
    if (plan.empty()) {
       throw_no_endpoint();
    }
@@ -531,9 +607,11 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    auto wakeup = operation->wakeup();
    const auto started = clock::now();
    auto launched = std::vector<bool>(plan.size(), false);
+   auto attributable_failures = std::vector<bool>(plan.size(), false);
    auto launched_count = std::size_t{};
    auto launch_early = false;
    auto winner = std::optional<direct_attempt>{};
+   auto winner_plan_index = std::optional<std::size_t>{};
    auto terminal_error = std::exception_ptr{};
    auto best_error = std::exception_ptr{};
    auto best_error_index = (std::numeric_limits<std::size_t>::max)();
@@ -624,11 +702,15 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
                if (!winner && !terminal_error && !stopping) {
                   completion->attempt->target = completion->target;
                   winner.emplace(std::move(*completion->attempt));
+                  winner_plan_index = completion->plan_index;
                   operation->request_stop();
                } else {
                   co_await async_discard_preserving(callback_set, pending_discards, std::move(*completion->attempt));
                }
                continue;
+            }
+            if (completion->attributable) {
+               attributable_failures[completion->plan_index] = true;
             }
             if (completion->attributable && !stopping) {
                owner->black_holes_.record_address_outcome(completion->target, dialing::outcome::failure);
@@ -705,6 +787,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       while (auto completion = operation->take_completion()) {
          if (!completion->attempt) {
             if (completion->attributable) {
+               attributable_failures[completion->plan_index] = true;
                try {
                   owner->black_holes_.record_address_outcome(completion->target, dialing::outcome::failure);
                } catch (...) {
@@ -807,11 +890,51 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       }
    }
 
+   const auto terminal_attributable_exhaustion =
+       !winner && !first_error && !canceled && !timed_out && !closed && static_cast<bool>(best_error) &&
+       has_complete_attributable_exhaustion(plan, launched, attributable_failures);
+   if (terminal_attributable_exhaustion) {
+      try {
+         callback_set->observe_terminal_root_outcomes(
+             root_outcomes_for(expansion.roots, plan, launched, attributable_failures, std::nullopt));
+      } catch (...) {
+         // A terminal observer is attribution-only and must not replace the dial error.
+      }
+   }
+
    if (first_error) {
       std::rethrow_exception(first_error);
    }
    if (winner) {
-      co_return std::move(*winner);
+      auto result = dial_result{};
+      try {
+         if (!winner_plan_index) {
+            FORGE_THROW_EXCEPTION(exceptions::internal, "P2P direct dial winner has no plan attribution");
+         }
+         result.winner = winner->target;
+         const auto& winner_indices = plan[*winner_plan_index].root_indices;
+         result.winner_roots.reserve(winner_indices.size());
+         for (const auto index : winner_indices) {
+            result.winner_roots.push_back(expansion.roots[index]);
+         }
+         result.root_outcomes =
+             root_outcomes_for(expansion.roots, plan, launched, attributable_failures, winner_plan_index);
+      } catch (...) {
+         first_error = std::current_exception();
+      }
+      if (first_error) {
+         pending_discards.emplace_back(std::move(*winner));
+         winner.reset();
+         try {
+            static_cast<void>(co_await async_drain_pending_discards(callback_set, pending_discards));
+         } catch (...) {
+            // Preserve the result-materialization failure after terminal drain.
+         }
+         std::rethrow_exception(first_error);
+      }
+      static_assert(std::is_nothrow_move_assignable_v<direct_attempt>);
+      result.attempt = std::move(*winner);
+      co_return result;
    }
    if (canceled) {
       throw_canceled();

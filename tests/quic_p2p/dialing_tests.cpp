@@ -8,6 +8,7 @@ module;
 #include <cstdint>
 #include <mutex>
 #include <initializer_list>
+#include <map>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -35,12 +36,12 @@ namespace {
 
 [[nodiscard]] std::vector<detail::dial_plan_item> rank(std::initializer_list<std::string_view> values,
                                                         dialing::ranker_policy policy = {}) {
-   auto endpoints = std::vector<endpoint>{};
-   endpoints.reserve(values.size());
-   for (const auto value : values) {
-      endpoints.push_back(endpoint_from(value));
+   auto targets = std::vector<detail::resolved_dial_target>{};
+   targets.reserve(values.size());
+   for (auto index = std::size_t{}; const auto value : values) {
+      targets.push_back({.concrete = endpoint_from(value), .root_indices = {index++}});
    }
-   return detail::dial_ranker{policy}.rank(std::move(endpoints));
+   return detail::dial_ranker{policy}.rank(std::move(targets));
 }
 
 void check_plan_item(const detail::dial_plan_item& value, std::string_view expected, std::int64_t delay) {

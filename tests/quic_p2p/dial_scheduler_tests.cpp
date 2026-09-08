@@ -35,6 +35,7 @@ import forge.asio.blocking;
 import forge.asio.notification;
 import forge.asio.runtime;
 import forge.multiformats.multiaddr;
+import forge.net.dns.exceptions;
 import forge.net.dns.resolver;
 import forge.net.dns.types;
 import forge.net.p2p.address_resolution;
@@ -74,6 +75,7 @@ class dial_script final {
    };
 
    std::map<std::string, dns::address_response> address_responses;
+   std::set<std::string> address_not_found;
    std::map<std::string, behavior> behaviors;
    bool block_discards = false;
    bool block_dns_until_stop = false;
@@ -86,17 +88,22 @@ class dial_script final {
    resolve_addresses(std::string name, dns::address_family, dns::query_options, std::stop_token stop) {
       auto response = dns::address_response{};
       auto block = false;
+      auto not_found = false;
       {
          const auto lock = std::scoped_lock{mutex_};
          if (const auto found = address_responses.find(name); found != address_responses.end()) {
             response = found->second;
          }
+         not_found = address_not_found.contains(name);
          block = block_dns_until_stop;
          if (block) {
             ++address_lookups_;
          }
       }
       if (!block) {
+         if (not_found) {
+            FORGE_THROW_EXCEPTION(dns::exceptions::not_found, "scripted DNS name not found");
+         }
          co_return response;
       }
       address_lookup_started_.notify_all();
@@ -237,6 +244,22 @@ class dial_script final {
    [[nodiscard]] std::size_t discards() const {
       const auto lock = std::scoped_lock{mutex_};
       return discards_;
+   }
+
+   void observe_terminal_root_outcomes(std::vector<p2p::detail::dial_root_outcome> value) noexcept {
+      const auto lock = std::scoped_lock{mutex_};
+      ++terminal_root_observations_;
+      terminal_root_outcomes_.emplace(std::move(value));
+   }
+
+   [[nodiscard]] std::size_t terminal_root_observations() const {
+      const auto lock = std::scoped_lock{mutex_};
+      return terminal_root_observations_;
+   }
+
+   [[nodiscard]] std::vector<p2p::detail::dial_root_outcome> terminal_root_outcomes() const {
+      const auto lock = std::scoped_lock{mutex_};
+      return terminal_root_outcomes_.value_or(std::vector<p2p::detail::dial_root_outcome>{});
    }
 
    [[nodiscard]] std::size_t active_attempts() const {
@@ -411,11 +434,13 @@ class dial_script final {
    std::size_t active_attempts_ = 0;
    std::size_t peak_attempts_ = 0;
    std::size_t finished_attempts_ = 0;
+   std::size_t terminal_root_observations_ = 0;
    bool starts_released_ = false;
    bool dns_terminal_released_ = false;
    bool attempt_terminal_released_ = false;
    bool dns_terminal_waiting_ = false;
    bool attempt_terminal_waiting_ = false;
+   std::optional<std::vector<p2p::detail::dial_root_outcome>> terminal_root_outcomes_;
    std::shared_ptr<forge::asio::notification> cancel_wakeup_ = std::make_shared<forge::asio::notification>();
    std::shared_ptr<forge::asio::notification> discard_release_ = std::make_shared<forge::asio::notification>();
    std::shared_ptr<forge::asio::notification> start_release_ = std::make_shared<forge::asio::notification>();
@@ -455,6 +480,9 @@ class dial_script final {
            },
        .discard_attempt = [script](p2p::detail::direct_attempt& value) { return script->discard(value); },
        .is_owner_stopping = [script] noexcept { return script->owner_stopping.load(std::memory_order_acquire); },
+       .observe_terminal_root_outcomes = [script](std::vector<p2p::detail::dial_root_outcome> value) noexcept {
+          script->observe_terminal_root_outcomes(std::move(value));
+       },
    };
 }
 
@@ -521,6 +549,143 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_expands_ranks_and_records_attributable_feedb
    BOOST_TEST(detector.udp.successes == 1U);
    BOOST_TEST(detector.ipv6.outcomes == 1U);
    BOOST_TEST(detector.ipv6.successes == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_launches_a_shared_concrete_target_once_and_credits_all_winner_roots) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_responses.emplace("first-winner-root.test", addresses({"8.8.8.8"}));
+   script->address_responses.emplace("second-winner-root.test", addresses({"8.8.8.8"}));
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+
+   auto result = forge::asio::blocking::run(
+       runtime,
+       scheduler.async_dial(
+           request_for(std::vector<std::string>{"/dns/first-winner-root.test/udp/4001/quic-v1",
+                                                "/dns/second-winner-root.test/udp/4001/quic-v1"},
+                       std::chrono::seconds{1}),
+           callbacks_for(script)));
+
+   const auto starts = script->starts();
+   BOOST_REQUIRE_EQUAL(starts.size(), 1U);
+   BOOST_TEST(starts.front().endpoint == "/ip4/8.8.8.8/udp/4001/quic-v1");
+   BOOST_TEST(result.winner.to_string() == "/ip4/8.8.8.8/udp/4001/quic-v1");
+   BOOST_REQUIRE_EQUAL(result.winner_roots.size(), 2U);
+   BOOST_TEST(result.winner_roots[0].canonical.to_string() == "/dns/first-winner-root.test/udp/4001/quic-v1");
+   BOOST_TEST(result.winner_roots[1].canonical.to_string() == "/dns/second-winner-root.test/udp/4001/quic-v1");
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 2U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::success);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::success);
+   const auto detector = scheduler.black_hole_status();
+   BOOST_TEST(detector.udp.outcomes == 1U);
+   BOOST_TEST(detector.udp.successes == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_keeps_a_dns_failed_sibling_neutral_for_root_attribution) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_not_found.insert("failed-root-attribution.test");
+   script->address_responses.emplace("winner-root-attribution.test", addresses({"8.8.4.4"}));
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+
+   auto result = forge::asio::blocking::run(
+       runtime,
+       scheduler.async_dial(
+           request_for(std::vector<std::string>{"/dns/failed-root-attribution.test/udp/4001/quic-v1",
+                                                "/dns/winner-root-attribution.test/udp/4001/quic-v1"},
+                       std::chrono::seconds{1}),
+           callbacks_for(script)));
+
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 1U);
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 2U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::neutral);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::success);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_marks_each_exhausted_attributable_root_once) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_responses.emplace("first-failed-root.test", addresses({"8.8.8.1"}));
+   script->address_responses.emplace("second-failed-root.test", addresses({"8.8.8.2"}));
+   script->address_responses.emplace("winner-after-failures.test", addresses({"8.8.8.3"}));
+   script->behaviors.emplace("/ip4/8.8.8.1/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   script->behaviors.emplace("/ip4/8.8.8.2/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+
+   auto result = forge::asio::blocking::run(
+       runtime,
+       scheduler.async_dial(
+           request_for(std::vector<std::string>{"/dns/first-failed-root.test/udp/4001/quic-v1",
+                                                "/dns/second-failed-root.test/udp/4001/quic-v1",
+                                                "/dns/winner-after-failures.test/udp/4001/quic-v1"},
+                       std::chrono::seconds{1}),
+           callbacks_for(script)));
+
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 3U);
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 3U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::failure);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::failure);
+   BOOST_CHECK(result.root_outcomes[2].outcome == p2p::dialing::outcome::success);
+   BOOST_TEST(scheduler.black_hole_status().udp.outcomes == 3U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_keeps_a_root_neutral_when_a_planned_sibling_never_launches) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_responses.emplace("partially-launched-root.test", addresses({"2400::1", "8.8.8.9"}));
+   script->address_responses.emplace("winner-before-sibling.test", addresses({"8.8.8.8"}));
+   script->behaviors.emplace("/ip6/2400::1/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+
+   auto result = forge::asio::blocking::run(
+       runtime,
+       scheduler.async_dial(
+           request_for(std::vector<std::string>{"/dns/partially-launched-root.test/udp/4001/quic-v1",
+                                                "/dns/winner-before-sibling.test/udp/4001/quic-v1"},
+                       std::chrono::seconds{1}),
+           callbacks_for(script)));
+
+   const auto starts = script->starts();
+   BOOST_REQUIRE_EQUAL(starts.size(), 2U);
+   BOOST_TEST(starts[0].endpoint == "/ip6/2400::1/udp/4001/quic-v1");
+   BOOST_TEST(starts[1].endpoint == "/ip4/8.8.8.8/udp/4001/quic-v1");
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 2U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::neutral);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::success);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_observes_terminal_attributable_root_outcomes_before_rethrowing) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_not_found.insert("dns-neutral-terminal-root.test");
+   script->address_responses.emplace("first-terminal-root.test", addresses({"8.8.8.1"}));
+   script->address_responses.emplace("second-terminal-root.test", addresses({"8.8.8.2"}));
+   script->behaviors.emplace("/ip4/8.8.8.1/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   script->behaviors.emplace("/ip4/8.8.8.2/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(
+           runtime,
+           scheduler.async_dial(
+               request_for(std::vector<std::string>{"/dns/dns-neutral-terminal-root.test/udp/4001/quic-v1",
+                                                    "/dns/first-terminal-root.test/udp/4001/quic-v1",
+                                                    "/dns/second-terminal-root.test/udp/4001/quic-v1"},
+                           std::chrono::seconds{1}),
+               callbacks_for(script))),
+       forge::exceptions::base, [](const auto& error) {
+          return p2p::exceptions::code_of(error) == p2p::exceptions::code::peer_not_found;
+       });
+
+   BOOST_TEST(script->terminal_root_observations() == 1U);
+   const auto outcomes = script->terminal_root_outcomes();
+   BOOST_REQUIRE_EQUAL(outcomes.size(), 3U);
+   BOOST_TEST(outcomes[0].root.canonical.to_string() == "/dns/dns-neutral-terminal-root.test/udp/4001/quic-v1");
+   BOOST_CHECK(outcomes[0].outcome == p2p::dialing::outcome::neutral);
+   BOOST_TEST(outcomes[1].root.canonical.to_string() == "/dns/first-terminal-root.test/udp/4001/quic-v1");
+   BOOST_CHECK(outcomes[1].outcome == p2p::dialing::outcome::failure);
+   BOOST_TEST(outcomes[2].root.canonical.to_string() == "/dns/second-terminal-root.test/udp/4001/quic-v1");
+   BOOST_CHECK(outcomes[2].outcome == p2p::dialing::outcome::failure);
 }
 
 BOOST_AUTO_TEST_CASE(dial_scheduler_ranks_multiple_roots_under_one_deadline) {
@@ -988,7 +1153,7 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_discards_an_authenticated_winner_when_its_ow
 BOOST_AUTO_TEST_CASE(dial_scheduler_owned_awaitables_survive_scheduler_destruction_before_they_start) {
    auto runtime = forge::asio::runtime{};
    auto script = std::make_shared<dial_script>();
-   auto dial = std::optional<boost::asio::awaitable<p2p::detail::direct_attempt>>{};
+   auto dial = std::optional<boost::asio::awaitable<p2p::detail::dial_result>>{};
    auto close = std::optional<boost::asio::awaitable<void>>{};
 
    {

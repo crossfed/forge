@@ -119,18 +119,31 @@ struct lookup_script {
             }}};
 }
 
-std::vector<p2p::endpoint>
-expand_roots(forge::asio::runtime& runtime, p2p::detail::dns_address_expander& value, std::vector<std::string> sources,
-             std::optional<p2p::peer_id> expected_peer = {}, std::stop_token stop = {},
-             std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max()) {
+[[nodiscard]] p2p::detail::dns_address_expansion_result
+expand_roots_result(forge::asio::runtime& runtime, p2p::detail::dns_address_expander& value,
+                    std::vector<std::string> sources, std::optional<p2p::peer_id> expected_peer = {},
+                    std::stop_token stop = {},
+                    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max()) {
    auto roots = std::vector<forge::multiformats::multiaddr>{};
    roots.reserve(sources.size());
    for (auto& source : sources) {
       roots.push_back(forge::multiformats::multiaddr::parse(std::move(source)));
    }
    return forge::asio::blocking::run(runtime,
-                                     value.async_expand(std::move(roots), std::move(expected_peer), deadline, stop))
-       .endpoints;
+                                     value.async_expand(std::move(roots), std::move(expected_peer), deadline, stop));
+}
+
+std::vector<p2p::endpoint>
+expand_roots(forge::asio::runtime& runtime, p2p::detail::dns_address_expander& value, std::vector<std::string> sources,
+             std::optional<p2p::peer_id> expected_peer = {}, std::stop_token stop = {},
+             std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max()) {
+   auto result = expand_roots_result(runtime, value, std::move(sources), std::move(expected_peer), stop, deadline);
+   auto endpoints = std::vector<p2p::endpoint>{};
+   endpoints.reserve(result.targets.size());
+   for (auto& target : result.targets) {
+      endpoints.push_back(std::move(target.concrete));
+   }
+   return endpoints;
 }
 
 std::vector<p2p::endpoint>
@@ -180,15 +193,96 @@ BOOST_AUTO_TEST_CASE(p2p_dns_address_expansion_combines_and_deduplicates_roots_d
                                      addresses({"192.0.2.101", "2001:db8::101"}));
    auto resolver = make_expander(script);
 
-   const auto values = expand_roots(runtime, resolver,
-                                    {"/dns/first-root.test/tcp/4001", "/dns/second-root.test/tcp/4001",
-                                     "/dns/first-root.test/tcp/4001"});
-   BOOST_REQUIRE_EQUAL(values.size(), 2U);
-   BOOST_TEST(values[0].to_string() == "/ip4/192.0.2.101/tcp/4001");
-   BOOST_TEST(values[1].to_string() == "/ip6/2001:db8::101/tcp/4001");
+   const auto result = expand_roots_result(runtime, resolver,
+                                           {"/dns/first-root.test/tcp/4001", "/dns/second-root.test/tcp/4001",
+                                            "/dns/first-root.test/tcp/4001"});
+   BOOST_REQUIRE_EQUAL(result.roots.size(), 2U);
+   BOOST_REQUIRE_EQUAL(result.roots[0].input_indices.size(), 2U);
+   BOOST_TEST(result.roots[0].input_indices[0] == 0U);
+   BOOST_TEST(result.roots[0].input_indices[1] == 2U);
+   BOOST_REQUIRE_EQUAL(result.roots[1].input_indices.size(), 1U);
+   BOOST_TEST(result.roots[1].input_indices[0] == 1U);
+   BOOST_REQUIRE_EQUAL(result.targets.size(), 2U);
+   BOOST_TEST(result.targets[0].concrete.to_string() == "/ip4/192.0.2.101/tcp/4001");
+   BOOST_TEST(result.targets[1].concrete.to_string() == "/ip6/2001:db8::101/tcp/4001");
    BOOST_REQUIRE_EQUAL(script->address_requests.size(), 2U);
    BOOST_TEST(script->address_requests[0].first == "first-root.test");
    BOOST_TEST(script->address_requests[1].first == "second-root.test");
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dns_address_expansion_merges_shared_child_root_provenance_per_operation) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<lookup_script>();
+   script->text_responses.emplace("_dnsaddr.first-provenance.test",
+                                  dns::text_response{.answers = {text_record("dnsaddr=/dns/shared-provenance.test/tcp/4001")}});
+   script->text_responses.emplace("_dnsaddr.second-provenance.test",
+                                  dns::text_response{.answers = {text_record("dnsaddr=/dns/shared-provenance.test/tcp/4001")}});
+   script->address_responses.emplace(address_key{"shared-provenance.test", dns::address_family::any},
+                                     addresses({"192.0.2.110"}));
+   auto resolver = make_expander(script);
+
+   const auto first = expand_roots_result(runtime, resolver,
+                                          {"/dnsaddr/first-provenance.test", "/dnsaddr/second-provenance.test"});
+   BOOST_REQUIRE_EQUAL(first.roots.size(), 2U);
+   BOOST_TEST(first.roots[0].canonical.to_string() == "/dnsaddr/first-provenance.test");
+   BOOST_TEST(first.roots[1].canonical.to_string() == "/dnsaddr/second-provenance.test");
+   BOOST_REQUIRE_EQUAL(first.targets.size(), 1U);
+   BOOST_TEST(first.targets.front().concrete.to_string() == "/ip4/192.0.2.110/tcp/4001");
+   BOOST_REQUIRE_EQUAL(first.targets.front().root_indices.size(), 2U);
+   BOOST_TEST(first.targets.front().root_indices[0] == 0U);
+   BOOST_TEST(first.targets.front().root_indices[1] == 1U);
+   BOOST_REQUIRE_EQUAL(script->address_requests.size(), 1U);
+
+   const auto second = expand_roots_result(runtime, resolver,
+                                           {"/dnsaddr/first-provenance.test", "/dnsaddr/second-provenance.test"});
+   BOOST_REQUIRE_EQUAL(second.targets.size(), 1U);
+   BOOST_REQUIRE_EQUAL(script->address_requests.size(), 2U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dns_address_expansion_merges_shared_targets_at_the_global_result_limit) {
+   auto runtime = forge::asio::runtime{};
+
+   {
+      auto script = std::make_shared<lookup_script>();
+      script->address_responses.emplace(address_key{"first-limited-provenance.test", dns::address_family::any},
+                                        addresses({"192.0.2.111"}));
+      script->address_responses.emplace(address_key{"second-limited-provenance.test", dns::address_family::any},
+                                        addresses({"192.0.2.111"}));
+      auto policy = p2p::address_resolution::policy{};
+      policy.bounds.max_resolved_addresses = 1;
+      auto resolver = make_expander(script, policy);
+
+      const auto result = expand_roots_result(
+          runtime, resolver,
+          {"/dns/first-limited-provenance.test/tcp/4001", "/dns/second-limited-provenance.test/tcp/4001"});
+      BOOST_REQUIRE_EQUAL(result.targets.size(), 1U);
+      BOOST_REQUIRE_EQUAL(result.targets.front().root_indices.size(), 2U);
+      BOOST_TEST(result.targets.front().root_indices[0] == 0U);
+      BOOST_TEST(result.targets.front().root_indices[1] == 1U);
+      BOOST_REQUIRE_EQUAL(script->address_requests.size(), 2U);
+   }
+
+   {
+      auto script = std::make_shared<lookup_script>();
+      script->text_responses.emplace(
+          "_dnsaddr.first-limited-provenance.test",
+          dns::text_response{.answers = {text_record("dnsaddr=/ip4/192.0.2.112/tcp/4001")}});
+      script->text_responses.emplace(
+          "_dnsaddr.second-limited-provenance.test",
+          dns::text_response{.answers = {text_record("dnsaddr=/ip4/192.0.2.112/tcp/4001")}});
+      auto policy = p2p::address_resolution::policy{};
+      policy.bounds.max_resolved_addresses = 1;
+      auto resolver = make_expander(script, policy);
+
+      const auto result = expand_roots_result(
+          runtime, resolver,
+          {"/dnsaddr/first-limited-provenance.test", "/dnsaddr/second-limited-provenance.test"});
+      BOOST_REQUIRE_EQUAL(result.targets.size(), 1U);
+      BOOST_REQUIRE_EQUAL(result.targets.front().root_indices.size(), 2U);
+      BOOST_TEST(result.targets.front().root_indices[0] == 0U);
+      BOOST_TEST(result.targets.front().root_indices[1] == 1U);
+      BOOST_REQUIRE_EQUAL(script->text_requests.size(), 2U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_dns_address_expansion_shares_root_budgets) {
@@ -241,7 +335,25 @@ BOOST_AUTO_TEST_CASE(p2p_dns_address_expansion_shares_root_budgets) {
       BOOST_CHECK_THROW(expand_roots(runtime, resolver,
                                      {"/dns/first-result.test/tcp/4001", "/dns/second-result.test/tcp/4001"}),
                         p2p::exceptions::invalid_options);
-      BOOST_REQUIRE_EQUAL(script->address_requests.size(), 1U);
+      BOOST_REQUIRE_EQUAL(script->address_requests.size(), 2U);
+   }
+
+   {
+      auto script = std::make_shared<lookup_script>();
+      script->text_responses.emplace(
+          "_dnsaddr.first-result.test",
+          dns::text_response{.answers = {text_record("dnsaddr=/ip4/192.0.2.108/tcp/4001")}});
+      script->text_responses.emplace(
+          "_dnsaddr.second-result.test",
+          dns::text_response{.answers = {text_record("dnsaddr=/ip4/192.0.2.109/tcp/4001")}});
+      auto policy = p2p::address_resolution::policy{};
+      policy.bounds.max_resolved_addresses = 1;
+      auto resolver = make_expander(script, policy);
+
+      BOOST_CHECK_THROW(expand_roots(runtime, resolver,
+                                     {"/dnsaddr/first-result.test", "/dnsaddr/second-result.test"}),
+                        p2p::exceptions::invalid_options);
+      BOOST_REQUIRE_EQUAL(script->text_requests.size(), 2U);
    }
 }
 

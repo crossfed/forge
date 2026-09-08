@@ -28,6 +28,18 @@ class cancellation_latch;
 
 namespace forge::net::p2p::detail {
 
+struct dial_root_outcome {
+   source_root root;
+   dialing::outcome outcome = dialing::outcome::neutral;
+};
+
+struct dial_result {
+   direct_attempt attempt;
+   endpoint winner;
+   std::vector<source_root> winner_roots;
+   std::vector<dial_root_outcome> root_outcomes;
+};
+
 // Coordinates one unpublished direct dial. The caller owns winner publication
 // through node::impl::commit_direct_attempt after this operation returns.
 class dial_scheduler final {
@@ -58,6 +70,8 @@ class dial_scheduler final {
        direct::tcp_transport_progress_handler)>;
    using attempt_discard = boost::compat::move_only_function<boost::asio::awaitable<void>(direct_attempt&)>;
    using owner_stopping = boost::compat::move_only_function<bool() noexcept>;
+   using terminal_root_observer =
+       boost::compat::move_only_function<void(std::vector<dial_root_outcome>) noexcept>;
 
    // This bundle is consumed by exactly one async_dial operation. Resolver
    // callbacks are an internal deterministic-test seam; normal operations use
@@ -68,6 +82,7 @@ class dial_scheduler final {
       attempt_start start_attempt;
       attempt_discard discard_attempt;
       owner_stopping is_owner_stopping;
+      terminal_root_observer observe_terminal_root_outcomes;
    };
 
    dial_scheduler(boost::asio::any_io_executor executor, policy policy_value,
@@ -79,7 +94,7 @@ class dial_scheduler final {
    dial_scheduler(dial_scheduler&&) = delete;
    dial_scheduler& operator=(dial_scheduler&&) = delete;
 
-   [[nodiscard]] boost::asio::awaitable<direct_attempt> async_dial(request value, operation_callbacks callbacks);
+   [[nodiscard]] boost::asio::awaitable<dial_result> async_dial(request value, operation_callbacks callbacks);
    void request_stop() noexcept;
    [[nodiscard]] boost::asio::awaitable<void> async_close();
    [[nodiscard]] dialing::black_hole_status black_hole_status() const;
@@ -171,7 +186,7 @@ class dial_scheduler final {
       std::shared_ptr<operation_registry> operations_;
    };
 
-   [[nodiscard]] static boost::asio::awaitable<direct_attempt>
+   [[nodiscard]] static boost::asio::awaitable<dial_result>
    async_dial_owned(std::shared_ptr<owner> owner, request value, operation_callbacks callbacks);
    [[nodiscard]] static boost::asio::awaitable<void> async_close_owned(std::shared_ptr<owner> owner);
    [[nodiscard]] static boost::asio::awaitable<void>
