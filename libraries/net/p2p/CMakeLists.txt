@@ -6,6 +6,10 @@ add_library(
    endpoint.cpp
    dns_address_expander.cpp
    details/dns_address_expander.hxx
+   dial_ranker.cpp
+   details/dial_ranker.hxx
+   black_hole_detector.cpp
+   details/black_hole_detector.hxx
    private_network.cpp
    connection_gater.cpp
    connection_gate.cpp

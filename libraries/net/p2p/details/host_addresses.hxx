@@ -5,6 +5,15 @@
 
 namespace forge::net::p2p::host_addresses {
 
+enum class endpoint_scope {
+   public_address,
+   private_address,
+   loopback,
+   link_local,
+   unroutable,
+   dns,
+};
+
 enum class source_kind {
    authenticated,
    routed,
@@ -15,6 +24,8 @@ struct learning_context {
    source_kind source = source_kind::third_party;
    std::optional<forge::net::p2p::endpoint> remote_endpoint;
 };
+
+[[nodiscard]] endpoint_scope classify_endpoint_scope(const forge::net::p2p::endpoint& value);
 
 [[nodiscard]] std::vector<forge::net::p2p::endpoint> merge_advertised(const std::vector<forge::net::p2p::endpoint>& configured,
                                                                const std::vector<forge::net::p2p::endpoint>& listened,

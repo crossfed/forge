@@ -14,6 +14,11 @@ scope binding returns an explicit result: only `policy_rejected` is backpressure
 P2P contracts remain Stable unless their owning section explicitly says
 otherwise.
 
+`forge.net.p2p.dialing` is Preview. Its pure Happy Eyeballs and black-hole
+mechanics are reserved for consumption only by the node-owned dial scheduler in
+this PR; this bounded mechanics slice does not wire that scheduler and makes no
+production dialing claim.
+
 ## Private-Network Profile
 
 `forge.net.p2p.private_network::options` composes the product-neutral

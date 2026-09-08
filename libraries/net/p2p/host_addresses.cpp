@@ -20,15 +20,6 @@ import forge.net.p2p.identity;
 namespace forge::net::p2p::host_addresses {
 namespace {
 
-enum class scope {
-   public_address,
-   private_address,
-   loopback,
-   link_local,
-   unroutable,
-   dns,
-};
-
 [[nodiscard]] std::string lower_host(std::string value) {
    std::ranges::transform(value, value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
    while (!value.empty() && value.back() == '.') {
@@ -52,18 +43,41 @@ enum class scope {
    return (address.to_uint() & 0xffff'0000U) == 0xa9fe'0000U;
 }
 
+[[nodiscard]] bool is_unroutable_v4(const boost::asio::ip::address_v4& address) noexcept {
+   const auto value = address.to_uint();
+   return (value & 0xff00'0000U) == 0x0000'0000U || (value & 0xffff'ffc0U) == 0xc000'0000U ||
+          (value & 0xffff'ff00U) == 0xc000'0200U || (value & 0xffff'ff00U) == 0xc058'6300U ||
+          (value & 0xfffe'0000U) == 0xc612'0000U || (value & 0xffff'ff00U) == 0xc633'6400U ||
+          (value & 0xffff'ff00U) == 0xcb00'7100U || (value & 0xf000'0000U) == 0xe000'0000U ||
+          (value & 0xf000'0000U) == 0xf000'0000U;
+}
+
 [[nodiscard]] bool is_private_v6(const boost::asio::ip::address_v6& address) noexcept {
    const auto bytes = address.to_bytes();
    return (bytes[0] & 0xfeU) == 0xfcU;
 }
 
-[[nodiscard]] scope endpoint_scope(const endpoint& value) {
+[[nodiscard]] bool is_public_v6(const boost::asio::ip::address_v6& address) noexcept {
+   const auto bytes = address.to_bytes();
+   const auto documentation = bytes[0] == 0x20U && bytes[1] == 0x01U && bytes[2] == 0x0dU && bytes[3] == 0xb8U;
+   const auto global_unicast = (bytes[0] & 0xe0U) == 0x20U && !documentation;
+   const auto well_known_nat64 = bytes[0] == 0 && bytes[1] == 0x64U && bytes[2] == 0xffU && bytes[3] == 0x9bU &&
+                                 bytes[4] == 0 && bytes[5] == 0 && bytes[6] == 0 && bytes[7] == 0 &&
+                                 bytes[8] == 0 && bytes[9] == 0 && bytes[10] == 0 && bytes[11] == 0;
+   const auto local_nat64 = bytes[0] == 0 && bytes[1] == 0x64U && bytes[2] == 0xffU && bytes[3] == 0x9bU &&
+                            bytes[4] == 0 && bytes[5] == 1;
+   return global_unicast || well_known_nat64 || local_nat64;
+}
+
+} // namespace
+
+endpoint_scope classify_endpoint_scope(const endpoint& value) {
    using host_kind = endpoint::host_kind;
    switch (value.transport.host_type) {
    case host_kind::dns:
    case host_kind::dns4:
    case host_kind::dns6:
-      return is_localhost_name(value.transport.host) ? scope::loopback : scope::dns;
+      return is_localhost_name(value.transport.host) ? endpoint_scope::loopback : endpoint_scope::dns;
    case host_kind::ip4:
    case host_kind::ip6:
       break;
@@ -72,40 +86,45 @@ enum class scope {
    auto error = boost::system::error_code{};
    const auto parsed = boost::asio::ip::make_address(value.transport.host, error);
    if (error) {
-      return scope::unroutable;
+      return endpoint_scope::unroutable;
    }
    if (parsed.is_v4()) {
       const auto address = parsed.to_v4();
       if (address.is_loopback()) {
-         return scope::loopback;
+         return endpoint_scope::loopback;
       }
       if (address.is_unspecified() || address.is_multicast()) {
-         return scope::unroutable;
+         return endpoint_scope::unroutable;
       }
       if (is_link_local_v4(address)) {
-         return scope::link_local;
+         return endpoint_scope::link_local;
       }
       if (is_private_v4(address)) {
-         return scope::private_address;
+         return endpoint_scope::private_address;
       }
-      return scope::public_address;
+      if (is_unroutable_v4(address)) {
+         return endpoint_scope::unroutable;
+      }
+      return endpoint_scope::public_address;
    }
 
    const auto address = parsed.to_v6();
    if (address.is_loopback()) {
-      return scope::loopback;
+      return endpoint_scope::loopback;
    }
    if (address.is_unspecified() || address.is_multicast()) {
-      return scope::unroutable;
+      return endpoint_scope::unroutable;
    }
    if (address.is_link_local()) {
-      return scope::link_local;
+      return endpoint_scope::link_local;
    }
    if (is_private_v6(address)) {
-      return scope::private_address;
+      return endpoint_scope::private_address;
    }
-   return scope::public_address;
+   return is_public_v6(address) ? endpoint_scope::public_address : endpoint_scope::unroutable;
 }
+
+namespace {
 
 [[nodiscard]] bool peer_suffix_matches(const endpoint& value, const peer_id& peer) {
    if (value.relayed.has_value()) {
@@ -114,30 +133,30 @@ enum class scope {
    return !value.peer.has_value() || value.peer->to_bytes() == peer.to_bytes();
 }
 
-[[nodiscard]] bool source_allows(scope candidate, const learning_context& context) {
-   if (candidate == scope::link_local || candidate == scope::unroutable) {
+[[nodiscard]] bool source_allows(endpoint_scope candidate, const learning_context& context) {
+   if (candidate == endpoint_scope::link_local || candidate == endpoint_scope::unroutable) {
       return false;
    }
    if (context.source == source_kind::routed && !context.remote_endpoint.has_value()) {
       return false;
    }
-   if (candidate == scope::dns || candidate == scope::public_address) {
+   if (candidate == endpoint_scope::dns || candidate == endpoint_scope::public_address) {
       return true;
    }
    if (context.source == source_kind::third_party || !context.remote_endpoint.has_value()) {
       return false;
    }
 
-   const auto remote = endpoint_scope(*context.remote_endpoint);
+   const auto remote = classify_endpoint_scope(*context.remote_endpoint);
    switch (context.source) {
    case source_kind::authenticated:
-      if (remote == scope::loopback) {
-         return candidate == scope::loopback || candidate == scope::private_address;
+      if (remote == endpoint_scope::loopback) {
+         return candidate == endpoint_scope::loopback || candidate == endpoint_scope::private_address;
       }
-      return remote == scope::private_address && candidate == scope::private_address;
+      return remote == endpoint_scope::private_address && candidate == endpoint_scope::private_address;
    case source_kind::routed:
-      return (remote == scope::loopback && candidate == scope::loopback) ||
-             (remote == scope::private_address && candidate == scope::private_address);
+      return (remote == endpoint_scope::loopback && candidate == endpoint_scope::loopback) ||
+             (remote == endpoint_scope::private_address && candidate == endpoint_scope::private_address);
    case source_kind::third_party:
       return false;
    }
@@ -174,7 +193,7 @@ std::optional<endpoint> learned(endpoint value, const peer_id& peer, learning_co
    if (!peer_suffix_matches(value, peer)) {
       return std::nullopt;
    }
-   if (!source_allows(endpoint_scope(value), context)) {
+   if (!source_allows(classify_endpoint_scope(value), context)) {
       return std::nullopt;
    }
    if (!value.relayed.has_value()) {
