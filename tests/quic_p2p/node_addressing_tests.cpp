@@ -40,6 +40,7 @@ import forge.net.p2p.connection_gater;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
+import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
 import forge.net.p2p.peer_store;
@@ -56,6 +57,50 @@ namespace p2p = forge::net::p2p;
 namespace dns_fixture = forge::tests::dns;
 using tcp = asio::ip::tcp;
 using namespace std::chrono_literals;
+
+class dns_candidate_gate final : public p2p::connection_gater {
+ public:
+   explicit dns_candidate_gate(std::optional<p2p::peer_id> forbidden = {}, bool reject_peer = true)
+       : forbidden_(std::move(forbidden)), reject_peer_(reject_peer) {}
+
+   bool intercept_peer_dial(const p2p::peer_id& peer) noexcept override {
+      if (forbidden_ == peer) {
+         ++forbidden_peer_calls;
+         return !reject_peer_;
+      }
+      ++allowed_peer_calls;
+      return true;
+   }
+
+   bool intercept_address_dial(const p2p::peer_id& peer, const p2p::endpoint& address) noexcept override {
+      if (address.peer != peer || address.transport.host_type != p2p::endpoint::host_kind::ip4 ||
+          address.transport.host != "127.0.0.1") {
+         unexpected_address = true;
+      }
+      if (forbidden_ == peer) {
+         ++forbidden_address_calls;
+         return false;
+      }
+      ++allowed_address_calls;
+      return true;
+   }
+
+   bool intercept_accept(const p2p::connection_endpoints&) noexcept override {
+      ++accept_calls;
+      return true;
+   }
+
+   std::atomic_size_t forbidden_peer_calls{0};
+   std::atomic_size_t forbidden_address_calls{0};
+   std::atomic_size_t allowed_peer_calls{0};
+   std::atomic_size_t allowed_address_calls{0};
+   std::atomic_size_t accept_calls{0};
+   std::atomic_bool unexpected_address{false};
+
+ private:
+   const std::optional<p2p::peer_id> forbidden_;
+   const bool reject_peer_;
+};
 
 class ipv4_dial_gate final : public p2p::connection_gater {
  public:
@@ -199,9 +244,141 @@ asio::awaitable<void> echo_once(p2p::node::incoming_protocol_stream incoming) {
    co_await incoming.stream.async_write_frame(frame);
 }
 
+void check_dnsaddr_candidate_gating(bool with_sibling) {
+   for (const auto private_profile : {false, true}) {
+      for (const auto reject_peer : {true, false}) {
+         BOOST_TEST_CONTEXT("private=" << private_profile << " peer denial=" << reject_peer
+                                       << " allowed sibling=" << with_sibling) {
+            auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+            auto first_gate = std::make_shared<dns_candidate_gate>();
+            auto second_gate = std::make_shared<dns_candidate_gate>();
+            auto first_options = addressing_options("candidate-gating-first", private_profile);
+            auto second_options = addressing_options("candidate-gating-second", private_profile);
+            first_options.connection_gater = first_gate;
+            second_options.connection_gater = second_gate;
+            auto first = p2p::node{runtime, std::move(first_options)};
+            auto second = p2p::node{runtime, std::move(second_options)};
+            for (auto* server : {&first, &second}) {
+               forge::asio::blocking::run(runtime, server->async_listen(p2p::parse_endpoint("/ip4/127.0.0.1/tcp/0")));
+               BOOST_REQUIRE(server->local_endpoint());
+               BOOST_REQUIRE((server->local_endpoint()->peer == server->local_peer()));
+            }
+            BOOST_REQUIRE(first.local_endpoint());
+            BOOST_REQUIRE(second.local_endpoint());
+            // Equal-family TCP targets rank by port. Reject the first candidate
+            // so success cannot hide a missing gate on the forbidden peer.
+            auto* forbidden = &first;
+            auto* allowed = &second;
+            auto forbidden_gate = first_gate;
+            if (first.local_endpoint()->transport.port > second.local_endpoint()->transport.port) {
+               std::swap(forbidden, allowed);
+               forbidden_gate = second_gate;
+            }
+            BOOST_REQUIRE((forbidden->local_peer() != allowed->local_peer()));
+            auto records = std::vector<std::string>{forbidden->local_endpoint()->to_string()};
+            if (with_sibling) {
+               records.push_back(allowed->local_endpoint()->to_string());
+            }
+            auto questions = std::make_shared<std::atomic_size_t>(0);
+            auto dns = dns_fixture::local_dns_server{
+                [records = std::move(records), questions](const std::uint8_t* data, std::size_t size)
+                    -> std::optional<dns_fixture::bytes> {
+                   const auto question = dns_fixture::parse_question(data, size);
+                   if (!question) {
+                      return std::nullopt;
+                   }
+                   if (question->name != "_dnsaddr.candidate-gating.test" || question->type != 16) {
+                      return dns_fixture::make_failure_response(data, *question, 3);
+                   }
+                   ++*questions;
+                   auto answers = std::vector<dns_fixture::response_answer>{};
+                   for (const auto& address : records) {
+                      const auto text = "dnsaddr=" + address;
+                      auto value = dns_fixture::bytes{};
+                      for (auto offset = std::size_t{}; offset < text.size();) {
+                         const auto remaining = text.size() - offset;
+                         const auto count = remaining < 255 ? remaining : std::size_t{255};
+                         value.push_back(static_cast<std::uint8_t>(count));
+                         value.insert(value.end(), text.begin() + offset, text.begin() + offset + count);
+                         offset += count;
+                      }
+                      answers.push_back({.type = 16, .value = std::move(value)});
+                   }
+                   return dns_fixture::make_response(data, *question, answers);
+                }};
+            auto gate = std::make_shared<dns_candidate_gate>(forbidden->local_peer(), reject_peer);
+            auto options = addressing_options("candidate-gating-client", private_profile);
+            options.connection_gater = gate;
+            options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns.port()}};
+            options.direct_dial.max_concurrent_attempts = 1;
+            options.limits.resources.max_dial_attempts = 1;
+            auto client = p2p::node{runtime, std::move(options)};
+            auto cleanup = std::unique_ptr<void, std::function<void(void*)>>{&client, [&](void*) noexcept {
+               for (auto* owner : {&client, &first, &second}) {
+                  owner->request_stop();
+               }
+               for (auto* owner : {&client, &first, &second}) {
+                  try {
+                     forge::asio::blocking::run(runtime, owner->async_stop());
+                  } catch (...) {
+                     BOOST_ERROR("DNS candidate gating fixture failed to join node shutdown");
+                  }
+               }
+            }};
+            const auto root = forge::multiformats::multiaddr::parse("/dnsaddr/candidate-gating.test");
+            auto connecting = asio::co_spawn(
+                runtime.context(), client.async_connect(root, p2p::node::connect_options{
+                    .allow_relay = false, .timeout = 2s, .direct_attempt_timeout = 1s,
+                    .max_direct_endpoints = 2, .allow_hole_punch = false}), asio::use_future);
+            BOOST_REQUIRE(connecting.wait_for(4s) == std::future_status::ready);
+            if (with_sibling) {
+               const auto session = connecting.get();
+               BOOST_TEST(session.remote_peer.to_string() == allowed->local_peer().to_string());
+               const auto record = client.peers().find(allowed->local_peer());
+               BOOST_REQUIRE(record);
+               BOOST_TEST(std::ranges::any_of(record->endpoints, [&](const auto& entry) {
+                  return entry.address.to_string() == root.to_string() && entry.sources.learned && entry.successes > 0;
+               }));
+            } else {
+               BOOST_CHECK_THROW(static_cast<void>(connecting.get()), p2p::exceptions::connection_rejected);
+               const auto snapshot = client.diagnostics();
+               BOOST_TEST(snapshot.sessions.empty());
+               BOOST_TEST(snapshot.resources.system.outbound_connections == 0U);
+               BOOST_TEST(snapshot.resources.system.file_descriptors == 0U);
+            }
+            BOOST_TEST(questions->load() == 1U);
+            BOOST_TEST(gate->forbidden_peer_calls.load() == 1U);
+            BOOST_TEST(gate->forbidden_address_calls.load() == (reject_peer ? 0U : 1U));
+            BOOST_TEST(gate->allowed_peer_calls.load() == (with_sibling ? 1U : 0U));
+            BOOST_TEST(gate->allowed_address_calls.load() == (with_sibling ? 1U : 0U));
+            BOOST_TEST(!gate->unexpected_address.load());
+            BOOST_TEST(forbidden_gate->accept_calls.load() == 0U);
+            BOOST_TEST(client.metrics().path_direct_attempts == (with_sibling ? 1U : 0U));
+            BOOST_TEST(client.metrics().gater_peer_dial_rejections == (reject_peer ? 1U : 0U));
+            BOOST_TEST(client.metrics().gater_address_dial_rejections == (reject_peer ? 0U : 1U));
+            BOOST_TEST(!client.peers().find(forbidden->local_peer()).has_value());
+            const auto snapshot = client.diagnostics();
+            BOOST_TEST(snapshot.resources.active_dials == 0U);
+            BOOST_TEST(snapshot.resources.transient.outbound_connections == 0U);
+            BOOST_TEST(snapshot.black_holes.udp.outcomes == 0U);
+            BOOST_TEST(snapshot.black_holes.ipv6.outcomes == 0U);
+            dns.close();
+         }
+      }
+   }
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(node_addressing_tests)
+
+BOOST_AUTO_TEST_CASE(p2p_suffixless_dnsaddr_candidate_peer_and_address_denials_precede_transport) {
+   check_dnsaddr_candidate_gating(false);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_suffixless_dnsaddr_candidate_denial_does_not_pin_sibling_peer) {
+   check_dnsaddr_candidate_gating(true);
+}
 
 BOOST_AUTO_TEST_CASE(p2p_dual_stack_dns_tcp_race_preserves_logical_ownership_and_drains_loser) {
    for (const auto private_profile : {false, true}) {

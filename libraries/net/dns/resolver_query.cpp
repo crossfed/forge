@@ -56,6 +56,7 @@ import forge.asio.notification;
 #include "details/resolver_impl.hxx"
 #include "details/resolver_query.hxx"
 #include "details/resolver_socket_watch.hxx"
+#include "details/resolver_wait_failure.hxx"
 
 namespace forge::net::dns {
 namespace {
@@ -365,9 +366,12 @@ void resolver_query::release_owner() noexcept {
 }
 
 void resolver_query::socket_state_callback(void* opaque, ares_socket_t fd, int readable, int writable) noexcept {
+   auto* operation = static_cast<resolver_query*>(opaque);
    try {
-      static_cast<resolver_query*>(opaque)->on_socket_state(fd, readable != 0, writable != 0);
+      operation->on_socket_state(fd, readable != 0, writable != 0);
    } catch (...) {
+      // Do not re-enter c-ares from its socket callback. Drain after it returns.
+      operation->finish_error(std::current_exception());
    }
 }
 
@@ -763,17 +767,31 @@ void resolver_query::on_socket_state(ares_socket_t fd, bool readable, bool writa
 void resolver_query::arm_watch(const std::shared_ptr<resolver_socket_watch>& watch) {
    if (const auto generation = watch->begin_read_wait()) {
       ++pending_handlers;
-      auto self = shared_from_this();
-      watch->async_wait_read([self = std::move(self), watch, generation = *generation](const boost::system::error_code& error) {
-         self->on_socket_ready(watch, true, generation, error);
-      });
+      try {
+         resolver_wait_failure::check(resolver_wait_failure::point::read);
+         auto self = shared_from_this();
+         watch->async_wait_read([self = std::move(self), watch, generation = *generation](const boost::system::error_code& error) {
+            self->on_socket_ready(watch, true, generation, error);
+         });
+      } catch (...) {
+         --pending_handlers;
+         static_cast<void>(watch->complete_read_wait(*generation));
+         throw;
+      }
    }
    if (const auto generation = watch->begin_write_wait()) {
       ++pending_handlers;
-      auto self = shared_from_this();
-      watch->async_wait_write([self = std::move(self), watch, generation = *generation](const boost::system::error_code& error) {
-         self->on_socket_ready(watch, false, generation, error);
-      });
+      try {
+         resolver_wait_failure::check(resolver_wait_failure::point::write);
+         auto self = shared_from_this();
+         watch->async_wait_write([self = std::move(self), watch, generation = *generation](const boost::system::error_code& error) {
+            self->on_socket_ready(watch, false, generation, error);
+         });
+      } catch (...) {
+         --pending_handlers;
+         static_cast<void>(watch->complete_write_wait(*generation));
+         throw;
+      }
    }
 }
 
@@ -799,8 +817,12 @@ void resolver_query::on_socket_ready(const std::shared_ptr<resolver_socket_watch
       }
    }
    if (!completed && !draining) {
-      arm_all_watches();
-      arm_timer();
+      try {
+         arm_all_watches();
+         arm_timer();
+      } catch (...) {
+         finish_error(std::current_exception());
+      }
    }
    try_retire();
 }
@@ -837,10 +859,16 @@ void resolver_query::arm_timer() {
    const auto generation = ++timer_generation;
    timer.expires_at(deadline);
    ++pending_handlers;
-   auto self = shared_from_this();
-   timer.async_wait([self = std::move(self), generation](const boost::system::error_code& timer_error) {
-      self->on_timer(generation, timer_error);
-   });
+   try {
+      resolver_wait_failure::check(resolver_wait_failure::point::timer);
+      auto self = shared_from_this();
+      timer.async_wait([self = std::move(self), generation](const boost::system::error_code& timer_error) {
+         self->on_timer(generation, timer_error);
+      });
+   } catch (...) {
+      --pending_handlers;
+      throw;
+   }
 }
 
 void resolver_query::on_timer(std::uint64_t generation, const boost::system::error_code& timer_error) noexcept {
@@ -861,8 +889,12 @@ void resolver_query::on_timer(std::uint64_t generation, const boost::system::err
    if (status != ARES_SUCCESS) {
       finish_error(make_status_exception(status));
    } else if (!completed) {
-      arm_all_watches();
-      arm_timer();
+      try {
+         arm_all_watches();
+         arm_timer();
+      } catch (...) {
+         finish_error(std::current_exception());
+      }
    }
    try_retire();
 }

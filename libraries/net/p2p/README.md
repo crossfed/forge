@@ -14,16 +14,22 @@ Staged stream scope binding returns an explicit result: only `policy_rejected`
 is backpressure; `invalid_transition` and `runtime_failure` are internal
 failures.
 
-`forge.net.p2p.dialing` is Preview. Its pure Happy Eyeballs and black-hole
-mechanics are reserved for consumption only by the node-owned dial scheduler in
-this PR; this bounded mechanics slice does not wire that scheduler and makes no
-production dialing claim.
+`forge.net.p2p.dialing` is Preview. The node-owned dial scheduler integrates
+bounded DNS expansion, Happy Eyeballs and black-hole detection for direct dials,
+including raw multiaddr, peer-store and bootstrap roots. One logical dial owns
+the deadline and bounded concrete attempts; shutdown drains those attempts.
+Native/private IPv6 detection remains enabled by default; the TCP-only private
+profile disables UDP detection. Local dual-stack node tests and deterministic
+detector/scheduler recovery tests are distinct from Go/Rust DNSADDR wire
+evidence. Final-head acceptance remains pending; integration is not a
+production-readiness claim.
 
 ## Stage 6 Carrier Migration
 
 | Previous surface | Current Preview surface |
 | --- | --- |
 | `endpoint_record.endpoint` | `endpoint_record.address` as `forge::multiformats::multiaddr` |
+| `bootstrap_peer.address` as `endpoint` | `forge::multiformats::multiaddr`; convert with `endpoint.to_multiaddr()` |
 | `identify::document.listen_endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
 | DHT peer/provider `endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
 | Discovery and Rendezvous `endpoints` as `vector<endpoint>` | the same fields as `vector<forge::multiformats::multiaddr>` |
@@ -31,6 +37,17 @@ production dialing claim.
 | Private ObjectDB P2P cache v2 | v3 marker; use `schema-policy: reset` rather than hydration |
 
 No compatibility aliases are provided for these carrier changes.
+
+Bootstrap roots use the node-owned DNS expander and dial scheduler, including
+recursive `/dnsaddr` resolution. `lifecycle.listen` remains concrete `endpoint`.
+A suffixless root learns a peer for connected-session checks and protection,
+but does not pin that identity for later resolutions after disconnect. A
+terminal `/p2p/<peer>` remains an explicit identity constraint. Bootstrap
+updates validate the complete list (at most 4096 roots) before replacement.
+Private nodes accept unresolved `/dnsaddr` roots but reject explicit QUIC and
+circuit routes; resolved candidates pass through the existing TCP-only filter.
+Plugin YAML endpoint syntax is unchanged: its existing parsed endpoints are
+converted with `to_multiaddr()`. Raw DNSADDR YAML configuration is Stage 7 work.
 
 ## Private-Network Profile
 
@@ -76,10 +93,11 @@ The following surfaces are not production claims yet:
   sampling, AutoNAT v1 node-level reachability and AutoNAT v2 address-level
   evidence remain separate Stage 6 host-local inputs to the managed topology
   score;
-- observed-address confidence/expiry, public mDNS, private fingerprinted mDNS,
-  DNSAddr, optional native UPnP
-  mapping, adaptive Happy Eyeballs, IPv6 black-hole detection for native/private
-  profiles and UDP black-hole detection for the native profile are Stage 6 work;
+- DNSAddr, Happy Eyeballs, native/private IPv6 black-hole detection and native
+  UDP black-hole detection are integrated into node-owned dialing; their
+  inventory readiness remains `unverified` pending final-head acceptance;
+- observed-address confidence/expiry, public mDNS, private fingerprinted mDNS
+  and optional native UPnP mapping remain separate Stage 6 work;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
   reachability feed;
 - `node::options::connection_gater` is a synchronous, concurrent-callable
@@ -307,7 +325,7 @@ boost::asio::awaitable<void> start_node(forge::asio::runtime& runtime) {
          .listen = {forge::net::p2p::parse_endpoint(
             "/ip4/127.0.0.1/udp/9443/quic-v1")},
          .bootstrap = {forge::net::p2p::bootstrap_peer{
-            .address = forge::net::p2p::parse_endpoint(bootstrap_endpoint)}},
+            .address = forge::net::p2p::parse_endpoint(bootstrap_endpoint).to_multiaddr()}},
       },
    };
 
@@ -508,7 +526,7 @@ auto node = forge::net::p2p::node{runtime, {
    .peer_state = {.persistence = persistence},
    .lifecycle = {
       .listen = {listen_endpoint},
-      .bootstrap = {{.address = bootstrap_endpoint}},
+      .bootstrap = {{.address = bootstrap_endpoint.to_multiaddr()}},
    },
 }};
 

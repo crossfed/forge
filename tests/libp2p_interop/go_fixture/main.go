@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	libp2p "github.com/libp2p/go-libp2p"
@@ -50,7 +49,7 @@ import (
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
-	mh "github.com/multiformats/go-multihash"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -253,16 +252,17 @@ func (g *pnetConnectionGater) InterceptUpgraded(network.Conn) (bool, control.Dis
 }
 
 func (h *fixtureHost) Close() error {
+	var closeErr error
 	if h.pnet != nil {
 		h.Network().StopNotify(h.pnet.notifier)
 	}
 	if h.kad != nil {
-		_ = h.kad.Close()
+		closeErr = errors.Join(closeErr, h.kad.Close())
 	}
 	if h.holePunch != nil {
-		_ = h.holePunch.Close()
+		closeErr = errors.Join(closeErr, h.holePunch.Close())
 	}
-	return h.Host.Close()
+	return errors.Join(closeErr, h.Host.Close())
 }
 
 func loadPnetKey(path string) (corepnet.PSK, error) {
@@ -349,7 +349,7 @@ func newHost(transport string, pnetKeyFile string, dnsServer string) (*fixtureHo
 		return &fixtureHost{Host: h, pnet: pnetState}, nil
 	}
 	installEchoHandler(h, nil)
-	if _, err := relayv2.New(h); err != nil {
+	if _, err := relayv2.New(h, relayv2.WithReservationAddressFilter(fixtureReservationAddressFilter(h))); err != nil {
 		h.Close()
 		return nil, err
 	}
@@ -388,6 +388,28 @@ func newHost(transport string, pnetKeyFile string, dnsServer string) (*fixtureHo
 	return &fixtureHost{Host: h, holePunch: holePunchService, kad: dht, dhtStore: dhtStore, pubsub: pubsubRouter}, nil
 }
 
+func fixtureReservationAddressFilter(h host.Host) relayv2.ReservationAddressFilterFunc {
+	fixtureLoopbacks := make(map[string]struct{})
+	for _, addr := range h.Addrs() {
+		if value, err := addr.ValueForProtocol(ma.P_IP4); err == nil {
+			if parsed, parseErr := netip.ParseAddr(value); parseErr == nil && parsed.IsLoopback() {
+				fixtureLoopbacks[addr.String()] = struct{}{}
+			}
+		}
+		if value, err := addr.ValueForProtocol(ma.P_IP6); err == nil {
+			if parsed, parseErr := netip.ParseAddr(value); parseErr == nil && parsed.IsLoopback() {
+				fixtureLoopbacks[addr.String()] = struct{}{}
+			}
+		}
+	}
+	return func(addr ma.Multiaddr) bool {
+		if _, ok := fixtureLoopbacks[addr.String()]; ok {
+			return true
+		}
+		return manet.IsPublicAddr(addr)
+	}
+}
+
 func pnetEvidence(opts options) map[string]any {
 	return map[string]any{
 		"pnet_enabled":     true,
@@ -422,14 +444,6 @@ func pnetRejection(opts options, role string, expectedPeer string, state *pnetCo
 		"application_streams":      applicationStreams,
 		"rejected_before_identify": established == 0 && identifyStreams == 0 && applicationStreams == 0,
 	}
-}
-
-func providerCID() (cid.Cid, error) {
-	hash, err := mh.Sum([]byte("forge-libp2p-dht-provider"), mh.SHA2_256, -1)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return cid.NewCidV1(cid.Raw, hash), nil
 }
 
 func dhtValueFixture(scenario string) ([]byte, []byte, error) {
@@ -940,12 +954,20 @@ func expectUnsupportedProtocol(ctx context.Context, h host.Host, peer peer.ID, i
 	return text, nil
 }
 
-func dial(opts options) error {
+func dial(opts options) (err error) {
 	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
-	defer h.Close()
+	defer func() {
+		if closeErr := h.Close(); closeErr != nil {
+			if err != nil {
+				err = fmt.Errorf("%w; dialer cleanup failed: %v", err, closeErr)
+			} else {
+				err = fmt.Errorf("dialer cleanup failed: %w", closeErr)
+			}
+		}
+	}()
 	var identifyEvents event.Subscription
 	if opts.scenario == "identify" || opts.scenario == "pnet" {
 		identifyEvents, err = h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(4))
@@ -1156,27 +1178,11 @@ func dial(opts options) error {
 		result["dht_queries_delta"] = queries
 		result["negotiated_protocol"] = "/ipfs/kad/1.0.0"
 	case "dht_provide_find_provider":
-		key, err := providerCID()
+		proof, err := independentProviderEvidence(ctx, h, info, opts.transport, opts.pnetKeyFile, opts.dnsServer)
 		if err != nil {
 			return err
 		}
-		if err := h.kad.Provide(ctx, key, true); err != nil {
-			return fmt.Errorf("dht Provide failed: %w", err)
-		}
-		providers := h.kad.FindProvidersAsync(ctx, key, 10)
-		count := 0
-		foundLocal := false
-		for provider := range providers {
-			count++
-			if provider.ID == h.ID() {
-				foundLocal = true
-				break
-			}
-		}
-		if !foundLocal {
-			return fmt.Errorf("dht FindProviders did not return local provider")
-		}
-		result["provider_count"] = count
+		result["network_proof"] = proof
 	case "dht_pk_put_get", "dht_ipns_put_get":
 		key, expected, err := dhtValueFixture(opts.scenario)
 		if err != nil {

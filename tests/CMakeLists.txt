@@ -1085,6 +1085,7 @@ add_executable(
    quic_p2p/session_teardown_tests.cpp
    quic_p2p/node_session_tests.cpp
    quic_p2p/node_addressing_tests.cpp
+   quic_p2p/node_bootstrap_addressing_tests.cpp
    quic_p2p/topology_tests.cpp
 )
 target_sources(
@@ -1124,6 +1125,7 @@ add_executable(
    fixtures/local_dns_server.hxx
    net_dns/dns_tests.cpp
    net_dns/resolver_socket_registry_tests.cpp
+   net_dns/resolver_query_failure_tests.cpp
 )
 target_link_libraries(
    test_forge_net_dns
@@ -1189,6 +1191,12 @@ add_executable(
 add_dependencies(forge_interop_fixture forge_interop_fixture_build_info)
 target_include_directories(forge_interop_fixture PRIVATE ${FORGE_INTEROP_BUILD_INFO_DIRECTORY})
 target_link_libraries(forge_interop_fixture forge)
+
+add_test(
+   NAME test_forge_libp2p_wire_fixture
+   COMMAND forge_interop_fixture --self-test
+)
+set_tests_properties(test_forge_libp2p_wire_fixture PROPERTIES TIMEOUT 45)
 
 set(_forge_libp2p_interop_enabled 0)
 if(FORGE_ENABLE_LIBP2P_INTEROP)
@@ -1310,6 +1318,12 @@ add_test(
    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
 )
 set_tests_properties(test_forge_libp2p_process_lifecycle PROPERTIES TIMEOUT 10)
+add_test(
+   NAME test_forge_libp2p_provider_evidence
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_provider_evidence
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_provider_evidence PROPERTIES TIMEOUT 10)
 
 execute_process(
    COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse HEAD

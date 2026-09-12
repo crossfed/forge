@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <coroutine>
@@ -12,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -24,7 +26,17 @@
 #include "forge_interop_build_info.hxx"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ip/address.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/system/system_error.hpp>
 
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
@@ -35,6 +47,7 @@
 #include <openssl/x509.h>
 
 import forge.asio.blocking;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.codec.hex;
 import forge.crypto.pki.pem;
@@ -75,6 +88,7 @@ constexpr auto large_echo_payload_size = std::size_t{192 * 1024};
 constexpr auto rendezvous_namespace = std::string_view{"forge.discovery"};
 constexpr auto pubsub_topic = std::string_view{"forge.pubsub.interop"};
 constexpr auto pubsub_payload = std::string_view{"forge-gossipsub-live"};
+constexpr auto dht_wire_timeout = 5s;
 
 struct dht_value_fixture {
    forge::net::p2p::dht::key key;
@@ -582,7 +596,7 @@ forge::net::p2p::endpoint p2p_endpoint_for(forge::net::p2p::endpoint value, cons
    return value;
 }
 
-forge::net::p2p::dht::key provider_key() {
+forge::net::p2p::dht::key seed_probe_key() {
    constexpr auto source = std::string_view{"forge-libp2p-dht-provider"};
    auto digest = forge::multiformats::multihash::sha2_256(
        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(source.data()), source.size()});
@@ -744,8 +758,356 @@ boost::asio::awaitable<std::vector<std::uint8_t>> read_length_delimited(forge::n
          }
       }
       auto chunk = co_await stream.async_read();
+      if (chunk.empty()) {
+         throw std::runtime_error{"FORGE wire stream ended before a complete frame"};
+      }
       buffer.insert(buffer.end(), chunk.begin(), chunk.end());
    }
+}
+
+void validate_dht_wire_response(const forge::net::p2p::dht::message& request,
+                                const forge::net::p2p::dht::message& response) {
+   // One request per stream correlates Rust's omitted key, never a wrong key.
+   if (response.type != request.type ||
+       (!response.key_value.bytes.empty() && response.key_value != request.key_value)) {
+      throw std::runtime_error{"FORGE DHT wire response does not match the locally emitted request"};
+   }
+}
+
+// Every access, including cancellation delivery, belongs to the exchange strand.
+struct dht_wire_exchange_state {
+   explicit dht_wire_exchange_state(boost::asio::any_io_executor executor,
+                                     std::chrono::steady_clock::time_point deadline)
+       : timer{executor, deadline} {}
+
+   boost::asio::steady_timer timer;
+   boost::asio::cancellation_signal cancel_io;
+   forge::asio::notification timer_finished;
+   forge::net::p2p::stream stream;
+   forge::net::p2p::dht::message response;
+   std::exception_ptr error;
+   const std::exception_ptr timeout_error =
+       std::make_exception_ptr(std::runtime_error{"FORGE DHT wire exchange timed out"});
+   const std::exception_ptr canceled_error =
+       std::make_exception_ptr(boost::system::system_error{boost::asio::error::operation_aborted});
+   bool terminal = false;
+   bool timer_done = true;
+
+   void finish(std::exception_ptr failure = {}) {
+      if (!terminal) {
+         terminal = true;
+         error = failure;
+      }
+   }
+
+   void request_cancel(std::exception_ptr failure) {
+      if (!terminal) {
+         finish(failure);
+         cancel_io.emit(boost::asio::cancellation_type::all);
+         stream.request_cancel();
+      }
+   }
+
+   std::chrono::milliseconds remaining() {
+      const auto now = std::chrono::steady_clock::now();
+      if (!terminal && now >= timer.expiry()) {
+         request_cancel(timeout_error);
+      }
+      if (error) {
+         std::rethrow_exception(error);
+      }
+      return std::chrono::ceil<std::chrono::milliseconds>(timer.expiry() - now);
+   }
+};
+
+boost::asio::awaitable<void> async_dht_wire_io(
+    std::shared_ptr<dht_wire_exchange_state> state, forge::net::p2p::node& node,
+    forge::net::p2p::peer_id peer, forge::net::p2p::dht::message request,
+    forge::net::p2p::dht::profile profile, std::optional<forge::net::p2p::endpoint> seed_endpoint) {
+   try {
+      if (seed_endpoint) {
+         const auto session = co_await node.async_connect(
+             *seed_endpoint, forge::net::p2p::node::connect_options{
+                                 .expected_peer = peer, .allow_relay = false, .timeout = state->remaining(),
+                                 .allow_hole_punch = false});
+         if (session.identify_state != forge::net::p2p::identify::state::identified) {
+            throw std::runtime_error{"DHT seed did not complete authenticated Identify"};
+         }
+      }
+      state->stream = co_await node.async_open_protocol_stream(
+          peer, forge::net::p2p::builtins::kad_dht,
+          forge::net::p2p::node::open_options{
+              .allow_relay = false, .timeout = state->remaining(), .allow_hole_punch = false});
+      static_cast<void>(state->remaining());
+      co_await state->stream.async_write(forge::net::p2p::dht::codec::encode(request, profile));
+      static_cast<void>(state->remaining());
+      const auto payload = co_await read_length_delimited(state->stream, profile.limits.max_inbound_message_size);
+      state->response = forge::net::p2p::dht::codec::decode(wrap_length_delimited(payload), profile);
+      validate_dht_wire_response(request, state->response);
+      static_cast<void>(state->remaining());
+      // Normal FIN completion is part of the exchange, not unbounded cleanup.
+      co_await state->stream.async_close();
+      static_cast<void>(state->remaining());
+      state->finish();
+   } catch (...) {
+      state->finish(std::current_exception());
+   }
+}
+
+boost::asio::awaitable<forge::net::p2p::dht::message> async_dht_wire_on_strand(
+    forge::net::p2p::node& node, forge::net::p2p::peer_id peer,
+    forge::net::p2p::dht::message request, std::chrono::steady_clock::time_point deadline,
+    std::optional<forge::net::p2p::endpoint> seed_endpoint) {
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto state = std::make_shared<dht_wire_exchange_state>(executor, deadline);
+   const auto inherited = (co_await boost::asio::this_coro::cancellation_state).cancelled();
+   co_await boost::asio::this_coro::reset_cancellation_state([state](boost::asio::cancellation_type type) {
+      if (type != boost::asio::cancellation_type::none) {
+         state->request_cancel(state->canceled_error);
+      }
+      // The supervisor must join I/O even when its caller has canceled.
+      return boost::asio::cancellation_type::none;
+   });
+   if (inherited != boost::asio::cancellation_type::none) {
+      state->request_cancel(state->canceled_error);
+   }
+   try {
+      state->timer.async_wait([state](boost::system::error_code error) {
+         if (!error) {
+            state->request_cancel(state->timeout_error);
+         }
+         state->timer_done = true;
+         state->timer_finished.notify();
+      });
+      state->timer_done = false;
+      co_await boost::asio::co_spawn(
+          executor, async_dht_wire_io(state, node, std::move(peer), std::move(request),
+                                     forge::net::p2p::amino_v1(forge::net::p2p::dht::mode::client),
+                                     std::move(seed_endpoint)),
+          boost::asio::bind_cancellation_slot(state->cancel_io.slot(), boost::asio::use_awaitable));
+   } catch (...) {
+      state->finish(std::current_exception());
+   }
+
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   state->timer.cancel();
+   while (!state->timer_done) {
+      const auto epoch = state->timer_finished.epoch();
+      if (!state->timer_done) {
+         co_await state->timer_finished.async_wait(epoch);
+      }
+   }
+   // Also leave any notifying handler's stack before releasing its resources.
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   if (state->error) {
+      state->stream.request_cancel();
+      try {
+         co_await state->stream.async_close();
+      } catch (...) {
+         // The terminal cleanup barrier has completed; retain the primary error.
+      }
+      std::rethrow_exception(state->error);
+   }
+   co_return std::move(state->response);
+}
+
+boost::asio::awaitable<forge::net::p2p::dht::message> async_bounded_dht_wire_exchange(
+    forge::net::p2p::node& node, forge::net::p2p::peer_id peer,
+    forge::net::p2p::dht::message request, std::chrono::steady_clock::time_point deadline,
+    std::optional<forge::net::p2p::endpoint> seed_endpoint = std::nullopt) {
+   const auto executor = co_await boost::asio::this_coro::executor;
+   co_return co_await boost::asio::co_spawn(
+       boost::asio::make_strand(executor),
+       async_dht_wire_on_strand(node, std::move(peer), std::move(request), deadline, std::move(seed_endpoint)),
+       boost::asio::bind_executor(executor, boost::asio::use_awaitable));
+}
+
+struct dht_wire_self_test_state {
+   boost::asio::any_io_executor executor;
+   boost::asio::cancellation_signal cancel;
+   std::atomic<unsigned> requests = 0;
+};
+
+boost::asio::awaitable<void> async_dht_wire_self_test_reply(
+    std::shared_ptr<dht_wire_self_test_state> state, forge::net::p2p::node::incoming_protocol_stream incoming) {
+   try {
+      const auto profile = forge::net::p2p::amino_v1(forge::net::p2p::dht::mode::server);
+      const auto payload = co_await read_length_delimited(incoming.stream, profile.limits.max_inbound_message_size);
+      auto response = forge::net::p2p::dht::codec::decode(wrap_length_delimited(payload), profile);
+      auto key = forge::multiformats::multihash::decode(response.key_value.bytes);
+      const auto test_case = key.digest.at(0);
+      state->requests.fetch_add(1);
+      if (test_case == 5) {
+         boost::asio::post(state->executor, [state] { state->cancel.emit(boost::asio::cancellation_type::all); });
+      }
+      if (test_case >= 4) {
+         // No reply: only the client's timeout/slot cancellation ends this read.
+         static_cast<void>(co_await incoming.stream.async_read());
+      } else {
+         if (test_case == 0) {
+            response.key_value.bytes.clear();
+         } else if (test_case == 2) {
+            response.type = forge::net::p2p::dht::message_type::find_node;
+         } else if (test_case == 3) {
+            key.digest.back() ^= 0xff;
+            response.key_value.bytes = key.encode();
+         }
+         co_await incoming.stream.async_write(forge::net::p2p::dht::codec::encode(response, profile));
+      }
+   } catch (...) {
+      // Reset/EOF is expected for the deliberately stalled or rejected replies.
+   }
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   co_await incoming.stream.async_close();
+}
+
+boost::asio::awaitable<void> async_dht_wire_self_test(forge::asio::runtime& runtime) {
+   const auto executor = co_await boost::asio::this_coro::executor;
+   auto state = std::make_shared<dht_wire_self_test_state>();
+   state->executor = executor;
+   auto server_options = node_options({}, generate_libp2p_identity());
+   server_options.dht_profiles.clear();
+   auto client_options = node_options({}, generate_libp2p_identity());
+   client_options.dht_profiles.clear();
+   auto server = forge::net::p2p::node{runtime, std::move(server_options)};
+   auto client = forge::net::p2p::node{runtime, std::move(client_options)};
+   std::exception_ptr failure;
+   try {
+      server.register_protocol_handler(forge::net::p2p::builtins::kad_dht,
+                                       [state](forge::net::p2p::node::incoming_protocol_stream incoming) {
+                                          return async_dht_wire_self_test_reply(state, std::move(incoming));
+                                       });
+      co_await server.async_listen(loopback_endpoint_for("quic"));
+      const auto endpoint = p2p_endpoint_for(*server.local_endpoint(), server.local_peer());
+      client.peers().learn_endpoint(server.local_peer(), endpoint,
+                                   forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic});
+      const auto names = std::vector<std::string_view>{
+          "dht_wire_empty_key", "dht_wire_matching_key", "dht_wire_wrong_kind", "dht_wire_wrong_key",
+          "dht_wire_stalled_read_timeout", "dht_wire_stalled_read_parent_cancel"};
+      for (std::size_t test_case = 0; test_case < names.size(); ++test_case) {
+         auto key = forge::multiformats::multihash::decode(seed_probe_key().bytes);
+         // Keep the SHA-256 multihash envelope valid; only its digest carries the case marker.
+         key.digest.at(0) = static_cast<std::uint8_t>(test_case);
+         auto request = forge::net::p2p::dht::message{
+             .type = forge::net::p2p::dht::message_type::get_providers,
+             .key_value = {.bytes = key.encode()}};
+         auto error = std::string{};
+         auto canceled = false;
+         try {
+            static_cast<void>(co_await boost::asio::co_spawn(
+                executor, async_bounded_dht_wire_exchange(client, server.local_peer(), std::move(request),
+                                                          std::chrono::steady_clock::now() + dht_wire_timeout),
+                boost::asio::bind_cancellation_slot(state->cancel.slot(), boost::asio::use_awaitable)));
+         } catch (const boost::system::system_error& caught) {
+            canceled = caught.code() == boost::asio::error::operation_aborted;
+            error = caught.what();
+         } catch (const std::exception& caught) {
+            error = caught.what();
+         }
+         const auto expected_error = test_case == 2 || test_case == 3
+             ? "FORGE DHT wire response does not match the locally emitted request"
+             : test_case == 4 ? "FORGE DHT wire exchange timed out" : "";
+         if (state->requests.load() != test_case + 1 ||
+             (test_case == 5 ? !canceled : error != expected_error)) {
+            throw std::runtime_error{std::string{names[test_case]} + " failed: " + error};
+         }
+      }
+   } catch (...) {
+      failure = std::current_exception();
+   }
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   for (auto* node : {&client, &server}) {
+      try {
+         co_await node->async_stop();
+      } catch (...) {
+         if (!failure) {
+            failure = std::current_exception();
+         }
+      }
+   }
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
+}
+
+int dht_wire_self_test_mode() {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   forge::asio::blocking::run(
+       runtime, boost::asio::co_spawn(boost::asio::make_strand(runtime.context()), async_dht_wire_self_test(runtime),
+                                     boost::asio::use_awaitable));
+   std::cout << "DHT wire self-test: PASS (6 cases; client and server cleanup joined)\n";
+   return 0;
+}
+
+// The DHT peer id carries the identity binding. A /p2p suffix can reinforce
+// that binding, but standard peers may advertise a plain transport multiaddr.
+std::string usable_wire_peer_address(const forge::net::p2p::dht::peer& wire_peer,
+                                     const forge::net::p2p::peer_id& expected,
+                                     std::string_view operation) {
+   if (wire_peer.id != expected) {
+      throw std::runtime_error{std::string{operation} + " wire reply returned the wrong peer id"};
+   }
+   for (const auto& address : wire_peer.endpoints) {
+      const auto& components = address.components();
+      if (components.empty()) {
+         continue;
+      }
+      if (components.back().code == forge::multiformats::protocol_code::p2p &&
+          components.back().value != expected.to_string()) {
+         throw std::runtime_error{std::string{operation} + " wire reply has a contradictory /p2p suffix"};
+      }
+      try {
+         const auto endpoint = forge::net::p2p::parse_endpoint(address.to_string());
+         if (endpoint.is_direct_quic() || endpoint.is_direct_tcp()) {
+            return address.to_string();
+         }
+      } catch (const forge::exceptions::base&) {
+         // Try the remaining advertised addresses before rejecting the peer.
+      }
+   }
+   throw std::runtime_error{std::string{operation} + " wire reply did not contain a usable peer address"};
+}
+
+// This is distinct from async_find_providers: it proves the concrete Q -> S
+// GET_PROVIDERS reply that carried P and its provider-bound address.
+std::string raw_get_providers_address(forge::asio::runtime& runtime, forge::net::p2p::node& querier,
+                                      const forge::net::p2p::peer_id& listener,
+                                      const forge::net::p2p::dht::key& key,
+                                      const forge::net::p2p::peer_id& provider) {
+   const auto response = forge::asio::blocking::run(
+       runtime, async_bounded_dht_wire_exchange(
+                    querier, listener,
+                    forge::net::p2p::dht::message{
+                        .type = forge::net::p2p::dht::message_type::get_providers,
+                        .key_value = key,
+                    },
+                    std::chrono::steady_clock::now() + dht_wire_timeout));
+   const auto found = std::ranges::find(response.provider_peers, provider, &forge::net::p2p::dht::peer::id);
+   if (found == response.provider_peers.end()) {
+      throw std::runtime_error{"FORGE GET_PROVIDERS wire reply did not contain the registered provider"};
+   }
+   return usable_wire_peer_address(*found, provider, "FORGE GET_PROVIDERS");
+}
+
+// This separate RPC proves the exact FIND_NODE reply from the sole seed after
+// async_find_peer has independently returned the previously unknown target.
+std::string raw_find_node_address(forge::asio::runtime& runtime, forge::net::p2p::node& querier,
+                                  const forge::net::p2p::peer_id& seed,
+                                  const forge::net::p2p::peer_id& target) {
+   const auto key = forge::net::p2p::make_dht_key(target);
+   const auto response = forge::asio::blocking::run(
+       runtime, async_bounded_dht_wire_exchange(
+                    querier, seed,
+                    forge::net::p2p::dht::message{
+                        .type = forge::net::p2p::dht::message_type::find_node,
+                        .key_value = key,
+                    },
+                    std::chrono::steady_clock::now() + dht_wire_timeout));
+   const auto found = std::ranges::find(response.closer_peers, target, &forge::net::p2p::dht::peer::id);
+   if (found == response.closer_peers.end()) {
+      throw std::runtime_error{"FORGE FIND_NODE wire reply did not contain the target peer"};
+   }
+   return usable_wire_peer_address(*found, target, "FORGE FIND_NODE");
 }
 
 void establish_dht_seed_route(forge::asio::runtime& runtime, forge::net::p2p::node& value,
@@ -757,32 +1119,19 @@ void establish_dht_seed_route(forge::asio::runtime& runtime, forge::net::p2p::no
    }
    value.peers().learn_endpoint(seed, endpoint,
                                 forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic});
-   const auto session = forge::asio::blocking::run(
-       runtime,
-       value.async_connect(endpoint, forge::net::p2p::node::connect_options{
-                                         .expected_peer = seed, .allow_relay = false, .allow_hole_punch = false}));
-   if (session.identify_state != forge::net::p2p::identify::state::identified) {
-      throw std::runtime_error{"DHT seed did not complete authenticated Identify"};
-   }
-   auto stream = forge::asio::blocking::run(
-       runtime, value.async_open_protocol_stream(seed, forge::net::p2p::builtins::kad_dht,
-                                                 forge::net::p2p::node::open_options{.allow_relay = false}));
-   forge::asio::blocking::run(runtime, stream.async_write(forge::net::p2p::dht::codec::encode(
-                                           forge::net::p2p::dht::message{
-                                               .type = forge::net::p2p::dht::message_type::get_providers,
-                                               .key_value = provider_key(),
-                                           },
-                                           forge::net::p2p::dht::options{})));
-   const auto response = forge::net::p2p::dht::codec::decode(
-       wrap_length_delimited(forge::asio::blocking::run(runtime, read_length_delimited(stream, 1024 * 1024))));
-   if (response.type != forge::net::p2p::dht::message_type::get_providers) {
-      throw std::runtime_error{"DHT seed did not answer a Kademlia GET_PROVIDERS query"};
-   }
+   static_cast<void>(forge::asio::blocking::run(
+       runtime, async_bounded_dht_wire_exchange(
+                    value, seed,
+                    forge::net::p2p::dht::message{
+                        .type = forge::net::p2p::dht::message_type::get_providers,
+                        .key_value = seed_probe_key(),
+                    },
+                    std::chrono::steady_clock::now() + dht_wire_timeout, endpoint)));
    write_file(required(args, "result-file"),
               "{\"implementation\":\"forge\",\"role\":\"routing_listener\",\"scenario\":\"dht_hidden_find_peer\","
               "\"status\":\"ok\",\"seed_peer_id\":\"" +
                   json_escape(seed.to_string()) +
-                  "\",\"authenticated_seed\":true,\"dht_queries_delta\":1,"
+                  "\",\"authenticated_seed\":true,\"seed_route_source\":\"explicit_get_providers_wire_reply\","
                   "\"negotiated_protocol\":\"/ipfs/kad/1.0.0\"}\n");
 }
 
@@ -1066,36 +1415,71 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
    }
    if (scenario == "dht_hidden_find_peer") {
       const auto target = forge::net::p2p::peer_id::from_string(std::string{target_peer_id});
+      const auto target_key = forge::net::p2p::make_dht_key(target);
       if (target == peer) {
          throw std::runtime_error{"hidden target must differ from the known routing peer"};
       }
       if (value.peers().find(target)) {
          throw std::runtime_error{"hidden target was present before FORGE FindPeer"};
       }
-      const auto metrics_before = value.metrics();
       const auto result =
           forge::asio::blocking::run(runtime, value.async_find_peer(forge::net::p2p::builtins::kad_dht, target));
       const auto found = std::ranges::find_if(result.closest_peers, [&](const forge::net::p2p::dht::peer& candidate) {
          return candidate.id == target && !candidate.endpoints.empty();
       });
-      const auto metrics_after = value.metrics();
       if (found == result.closest_peers.end()) {
          throw std::runtime_error{"FORGE FindPeer did not return the hidden target"};
       }
-      if (metrics_after.dht_queries <= metrics_before.dht_queries) {
-         throw std::runtime_error{"FORGE FindPeer did not issue a Kademlia query"};
-      }
+      const auto wire_address = raw_find_node_address(runtime, value, peer, target);
+      const auto querier_text = json_escape(value.local_peer().to_string());
+      const auto seed_text = json_escape(peer.to_string());
+      const auto target_text = json_escape(target.to_string());
+      const auto target_key_text = forge::codec::hex::encode(target_key.bytes);
+      const auto address_text = json_escape(wire_address);
       return "\"preexisting_target\":false,\"found_peer\":\"" + json_escape(target.to_string()) +
              "\",\"addr_count\":" + std::to_string(found->endpoints.size()) +
-             ",\"dht_queries_delta\":" + std::to_string(metrics_after.dht_queries - metrics_before.dht_queries) +
-             ",\"negotiated_protocol\":\"/ipfs/kad/1.0.0\"";
+             ",\"negotiated_protocol\":\"/ipfs/kad/1.0.0\",\"find_peer_proof\":{\"schema\":"
+             "\"forge.libp2p.hidden-find-peer-network-proof.v1\",\"api\":\"async_find_peer\",\"api_succeeded\":true,"
+             "\"querier_peer\":\"" + querier_text + "\",\"seed_peer\":\"" + seed_text + "\",\"target_peer\":\"" + target_text +
+             "\",\"target_key\":\"" + target_key_text + "\",\"preexisting_target\":false,"
+             "\"api_returned_target\":\"" + target_text + "\",\"address\":\"" + address_text +
+             "\",\"protocol\":\"/ipfs/kad/1.0.0\",\"query_context\":\"fresh_hidden_target\","
+             "\"wire_confirmation\":{\"kind\":\"forge_find_node_wire_reply\",\"explicit_wire_confirmation\":true,"
+             "\"seed_peer\":\"" + seed_text + "\",\"target_peer\":\"" + target_text +
+             "\",\"target_key\":\"" + target_key_text + "\",\"returned_target_peer\":\"" + target_text +
+             "\",\"address\":\"" + address_text +
+             "\",\"opened_stream_protocol\":\"/ipfs/kad/1.0.0\"}}";
    }
    if (scenario == "dht_provide_find_provider") {
-      const auto key = provider_key();
       const auto provider_identity = generate_libp2p_identity();
       const auto querier_identity = generate_libp2p_identity();
+      const auto key = forge::net::p2p::make_dht_key(provider_identity.peer);
+      const auto key_text = forge::codec::hex::encode(key.bytes);
       auto provider = forge::net::p2p::node{runtime, node_options({}, provider_identity)};
       auto querier = forge::net::p2p::node{runtime, node_options({}, querier_identity)};
+      const auto stop_nodes = [&] {
+         auto failures = std::string{};
+         const auto stop = [&](forge::net::p2p::node& node, std::string_view name) {
+            try {
+               forge::asio::blocking::run(runtime, node.async_stop());
+            } catch (const std::exception& error) {
+               if (!failures.empty()) {
+                  failures += "; ";
+               }
+               failures += std::string{name} + ": " + error.what();
+            } catch (...) {
+               if (!failures.empty()) {
+                  failures += "; ";
+               }
+               failures += std::string{name} + ": non-standard exception";
+            }
+         };
+         stop(querier, "querier stop failed");
+         stop(provider, "provider stop failed");
+         if (!failures.empty()) {
+            throw std::runtime_error{"provider fixture cleanup failed: " + failures};
+         }
+      };
       try {
          forge::asio::blocking::run(runtime, provider.async_hydrate_peer_state());
          forge::asio::blocking::run(runtime, provider.async_listen(loopback_quic_endpoint()));
@@ -1105,34 +1489,32 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
              runtime, provider.async_connect(
                           remote, forge::net::p2p::node::connect_options{
                                       .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false})));
-         if (provider.local_peer() == value.local_peer()) {
-            throw std::runtime_error{"DHT provider proof requires an independent querier"};
+         const auto provider_peer = provider.local_peer();
+         if (provider_peer == querier_identity.peer || provider_peer == peer || querier_identity.peer == peer) {
+            throw std::runtime_error{"DHT provider proof requires pairwise independent P, Q and S identities"};
          }
          auto registration =
              forge::asio::blocking::run(runtime, provider.async_provide(forge::net::p2p::builtins::kad_dht, key));
          if (!registration.active()) {
             throw std::runtime_error{"FORGE DHT provider registration did not become active"};
          }
-         const auto provider_peer = provider.local_peer();
          forge::asio::blocking::run(runtime, querier.async_hydrate_peer_state());
          forge::asio::blocking::run(runtime, querier.async_listen(loopback_quic_endpoint()));
+         if (querier.peers().find(provider_peer)) {
+            throw std::runtime_error{"FORGE querier learned provider before its DHT lookup"};
+         }
          querier.peers().learn_endpoint(
              peer, remote, forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic});
          static_cast<void>(forge::asio::blocking::run(
              runtime, querier.async_connect(
                           remote, forge::net::p2p::node::connect_options{
                                       .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false})));
-         if (provider.local_peer() == querier.local_peer()) {
-            throw std::runtime_error{"DHT provider proof requires an independent querier"};
-         }
-         const auto streams_before = querier.metrics().protocol_streams_opened;
-         const auto queries_before = querier.metrics().dht_queries;
          constexpr auto retry_interval = 50ms;
          const auto deadline = std::chrono::steady_clock::now() + 5s;
-         auto provider_count = std::size_t{};
-         auto address_count = std::size_t{};
-         auto returned_provider_peer = std::string{};
          while (true) {
+            if (!registration.active()) {
+               throw std::runtime_error{"FORGE provider registration stopped while querier lookup was active"};
+            }
             const auto providers = forge::asio::blocking::run(
                 runtime, querier.async_find_providers(forge::net::p2p::builtins::kad_dht, key,
                                                       {.requested_count = 1, .quorum = 1, .timeout = 1s}));
@@ -1142,13 +1524,10 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
                       const auto& components = address.components();
                       return !components.empty() &&
                              components.back().code == forge::multiformats::protocol_code::p2p &&
-                             components.back().value == provider_peer.to_string();
+                              components.back().value == provider_peer.to_string();
                    })) {
                   throw std::runtime_error{"FORGE DHT provider query did not preserve provider-bound endpoints"};
                }
-               provider_count = providers.size();
-               address_count = found->endpoints.size();
-               returned_provider_peer = found->id.to_string();
                break;
             }
             if (std::chrono::steady_clock::now() >= deadline) {
@@ -1157,33 +1536,53 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
             // ADD_PROVIDER is one-way, so wait for the listener's store to become visible to a different peer.
             std::this_thread::sleep_for(retry_interval);
          }
-         const auto streams_after = querier.metrics().protocol_streams_opened;
-         const auto queries_after = querier.metrics().dht_queries;
-         if (streams_after <= streams_before) {
-            throw std::runtime_error{"FORGE DHT provider proof did not open a production provider stream"};
+         if (!registration.active()) {
+            throw std::runtime_error{"FORGE provider registration stopped during querier lookup"};
          }
-         if (queries_after <= queries_before) {
-            throw std::runtime_error{"FORGE DHT provider proof did not issue a provider query"};
-         }
-         forge::asio::blocking::run(runtime, querier.async_stop());
-         forge::asio::blocking::run(runtime, provider.async_stop());
-         return "\"provider_count\":" + std::to_string(provider_count) + ",\"provider_peer\":\"" +
-                json_escape(provider_peer.to_string()) + "\",\"querier_peer\":\"" +
-                json_escape(querier_identity.peer.to_string()) + "\",\"returned_provider_peer\":\"" +
-                json_escape(returned_provider_peer) + "\",\"address_count\":" + std::to_string(address_count) +
-                ",\"protocol_streams_opened_delta\":" + std::to_string(streams_after - streams_before) +
-                ",\"query_requests_delta\":" + std::to_string(queries_after - queries_before) +
-                ",\"negotiated_protocol\":\"/ipfs/kad/1.0.0\"";
+         const auto wire_address = raw_get_providers_address(runtime, querier, peer, key, provider_peer);
+         stop_nodes();
+         const auto provider_text = json_escape(provider_peer.to_string());
+         const auto querier_text = json_escape(querier_identity.peer.to_string());
+         const auto listener_text = json_escape(peer.to_string());
+         const auto address_text = json_escape(wire_address);
+         return "\"network_proof\":{\"schema\":\"forge.libp2p.provider-network-proof.v1\","
+                "\"implementation\":\"forge\",\"provider_peer\":\"" +
+                provider_text + "\",\"querier_peer\":\"" + querier_text + "\",\"listener_peer\":\"" +
+                listener_text + "\",\"provider_key\":\"" + key_text +
+                "\",\"key_binding\":{\"kind\":\"provider_identity_multihash\",\"provider_peer\":\"" +
+                provider_text + "\",\"provider_key\":\"" + key_text +
+                "\",\"derived_per_run\":true},\"provider_registration\":{\"api\":\"async_provide\","
+                "\"succeeded\":true,\"provider_peer\":\"" + provider_text + "\",\"provider_key\":\"" +
+                key_text + "\"},\"api_lookup\":{\"api\":\"async_find_providers\",\"succeeded\":true,"
+                "\"querier_peer\":\"" + querier_text + "\",\"returned_provider_peer\":\"" + provider_text +
+                "\",\"provider_key\":\"" + key_text +
+                "\"},\"address_proof\":{\"source\":\"get_providers_wire_reply\",\"provider_peer\":\"" +
+                provider_text + "\",\"address\":\"" + address_text +
+                "\"},\"protocol_proof\":{\"protocol\":\"/ipfs/kad/1.0.0\",\"derivation\":"
+                "\"successful_async_open_protocol_stream_with_get_providers_wire_reply\",\"successful_query\":true,"
+                "\"opened_stream_protocol\":\"/ipfs/kad/1.0.0\"},\"source_query_proof\":{\"kind\":"
+                "\"forge_async_find_providers_result\",\"querier_peer\":\"" + querier_text +
+                "\",\"returned_provider_peer\":\"" + provider_text + "\",\"provider_key\":\"" + key_text +
+                "\",\"opened_stream_protocol\":\"/ipfs/kad/1.0.0\"},\"wire_proof\":{\"kind\":"
+                "\"forge_get_providers_wire_reply\",\"explicit_wire_confirmation\":true,\"listener_peer\":\"" +
+                listener_text + "\",\"returned_provider_peer\":\"" + provider_text + "\",\"address\":\"" +
+                address_text + "\",\"opened_stream_protocol\":\"/ipfs/kad/1.0.0\"}}";
       } catch (...) {
+         const auto primary = std::current_exception();
          try {
-            forge::asio::blocking::run(runtime, querier.async_stop());
-         } catch (...) {
+            stop_nodes();
+         } catch (const std::exception& cleanup) {
+            try {
+               std::rethrow_exception(primary);
+            } catch (const std::exception& error) {
+               throw std::runtime_error{std::string{"FORGE provider evidence failed: "} + error.what() +
+                                        "; cleanup also failed: " + cleanup.what()};
+            } catch (...) {
+               throw std::runtime_error{std::string{"FORGE provider evidence failed with non-standard exception; "} +
+                                        "cleanup also failed: " + cleanup.what()};
+            }
          }
-         try {
-            forge::asio::blocking::run(runtime, provider.async_stop());
-         } catch (...) {
-         }
-         throw;
+         std::rethrow_exception(primary);
       }
    }
    if (is_dht_value_scenario(scenario)) {
@@ -1816,6 +2215,9 @@ int build_info_mode() {
 int main(int argc, char** argv) {
    try {
       const auto args = parse_args(argc, argv);
+      if (args.at("command") == "--self-test") {
+         return dht_wire_self_test_mode();
+      }
       if (args.at("command") == "build-info") {
          return build_info_mode();
       }

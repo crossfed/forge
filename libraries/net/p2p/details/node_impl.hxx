@@ -61,7 +61,8 @@ class worker_terminal_owner;
                                                                 std::size_t max_payload_size);
 [[nodiscard]] peer_exchange_codec::options codec_for(const node::options& options) noexcept;
 void validate_operation_timeout(std::chrono::milliseconds timeout, std::string_view name);
-void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty);
+void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty,
+                        const address_resolution::policy& resolution, bool tcp_only = false);
 [[nodiscard]] std::chrono::milliseconds remaining_timeout(std::chrono::steady_clock::time_point started,
                                                           std::chrono::milliseconds timeout,
                                                           std::string_view operation);

@@ -32,6 +32,9 @@ use libp2p_stream as raw_stream;
 use rand::rngs::OsRng;
 use serde_json::json;
 
+mod provider;
+
+const KAD_PROTOCOL: &str = "/ipfs/kad/1.0.0";
 const PUBSUB_TOPIC: &str = "forge.pubsub.interop";
 const PUBSUB_PAYLOAD: &[u8] = b"forge-gossipsub-live";
 
@@ -268,7 +271,7 @@ fn behaviour_for(
 ) -> Behaviour {
     let peer = key.public().to_peer_id();
     let private_network = opts.transport == "tcp-pnet";
-    let mut kad_config = kad::Config::new(StreamProtocol::new("/ipfs/kad/1.0.0"));
+    let mut kad_config = kad::Config::new(StreamProtocol::new(KAD_PROTOCOL));
     kad_config.set_query_timeout(Duration::from_secs(10));
     let mut kad_behaviour =
         kad::Behaviour::with_config(peer, kad::store::MemoryStore::new(peer), kad_config);
@@ -500,14 +503,6 @@ fn pnet_rejection(
     })
 }
 
-fn dht_provider_key() -> kad::RecordKey {
-    kad::RecordKey::new(&[
-        0x12, 0x20, 0x2e, 0xaa, 0xd0, 0x06, 0x69, 0x42, 0x0a, 0xc7, 0x3a, 0x56, 0xd9, 0x80, 0xb7,
-        0x9d, 0xeb, 0x2d, 0x2e, 0x3f, 0xb6, 0x86, 0x6d, 0x1c, 0xac, 0x9e, 0x37, 0x3f, 0x5e, 0x5d,
-        0x4a, 0x62, 0xad, 0xf9,
-    ])
-}
-
 fn decode_hex(value: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     if value.len() % 2 != 0 {
         return Err("hex fixture has odd length".into());
@@ -619,6 +614,11 @@ async fn reserve_relay_address(
                         return Err("initial relay reservation unexpectedly reported renewal=true".into());
                     }
                     progress.record_acceptance(renewal);
+                }
+                SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                    if listener_id == relay_listener_id =>
+                {
+                    return Err(format!("relay reservation listener closed: {error}").into());
                 }
                 other => {
                     eprintln!("rust relay reservation event: {other:?}");
@@ -1099,49 +1099,6 @@ async fn wait_dht_hidden_peer(
                             .kad
                             .get_n_closest_peers(target_peer, NonZeroUsize::new(1).unwrap()),
                     );
-                }
-            }
-        }
-    }
-}
-
-async fn wait_dht_provide_find_provider(
-    swarm: &mut libp2p::Swarm<Behaviour>,
-    local_peer: PeerId,
-) -> Result<usize, Box<dyn Error>> {
-    let key = dht_provider_key();
-    let provide_id = swarm.behaviour_mut().kad.start_providing(key.clone())?;
-    let deadline = tokio::time::sleep(Duration::from_secs(30));
-    tokio::pin!(deadline);
-    let mut providing = false;
-    loop {
-        tokio::select! {
-            _ = &mut deadline => return Err("timed out waiting for Kademlia provider proof".into()),
-            event = swarm.select_next_some() => {
-                match event {
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        id,
-                        result: kad::QueryResult::StartProviding(result),
-                        ..
-                    })) if id == provide_id => {
-                        result?;
-                        providing = true;
-                        let _ = swarm.behaviour_mut().kad.get_providers(key.clone());
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        result: kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders { providers, .. })),
-                        ..
-                    })) if providing => {
-                        if providers.contains(&local_peer) {
-                            return Ok(providers.len());
-                        }
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        result: kad::QueryResult::GetProviders(Err(error)),
-                        ..
-                    })) if providing => return Err(format!("Kademlia providers failed: {error:?}").into()),
-                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
-                    _ => {}
                 }
             }
         }
@@ -1933,6 +1890,9 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
 }
 
 async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
+    if opts.scenario == "dht_provide_find_provider" {
+        return provider::run(&opts).await;
+    }
     let mut swarm = new_swarm(&opts).await?;
     let remote_peer: PeerId = opts.peer_id.parse()?;
     let remote: Multiaddr = opts.addr.parse()?;
@@ -2093,7 +2053,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
     }
     if matches!(
         opts.scenario.as_str(),
-        "dht_provide_find_provider" | "dht_pk_put_get" | "dht_ipns_put_get"
+        "dht_pk_put_get" | "dht_ipns_put_get"
     ) {
         wait_dht_remote_ready(&mut swarm, remote_peer).await?;
     }
@@ -2247,21 +2207,6 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             )?;
             return Ok(());
         }
-        "dht_provide_find_provider" => {
-            let local_peer = *swarm.local_peer_id();
-            let count = wait_dht_provide_find_provider(&mut swarm, local_peer).await?;
-            write_json(
-                &opts.result_file,
-                json!({
-                    "implementation": "rust",
-                    "role": "dialer",
-                    "scenario": opts.scenario,
-                    "status": "ok",
-                    "provider_count": count
-                }),
-            )?;
-            return Ok(());
-        }
         "dht_pk_put_get" | "dht_ipns_put_get" => {
             let bytes = wait_dht_put_get(&mut swarm, &opts.scenario, &opts.payload).await?;
             let operation = match opts.payload.as_str() {
@@ -2397,7 +2342,7 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
     spawn_incoming_stream_echo(&mut swarm, "/forge/interop/relay-echo/1", None)?;
     let peer = *swarm.local_peer_id();
     let relay_addr: Multiaddr = opts.relay_addr.parse()?;
-    swarm.listen_on(relay_addr.clone().with(Protocol::P2pCircuit))?;
+    let relay_listener_id = swarm.listen_on(relay_addr.clone().with(Protocol::P2pCircuit))?;
     let started = Instant::now();
     let mut relay_addrs = Vec::new();
     let mut reservation = false;
@@ -2405,6 +2350,11 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
         let event = swarm.select_next_some().await;
         eprintln!("rust-destination event: {:?}", event);
         match event {
+            SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                if listener_id == relay_listener_id =>
+            {
+                return Err(format!("relay destination listener closed: {error}").into());
+            }
             SwarmEvent::NewListenAddr { address, .. } => {
                 swarm.add_external_address(address.clone());
                 if address.to_string().contains("p2p-circuit") {
@@ -2467,8 +2417,14 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => {
-                if let SwarmEvent::NewListenAddr { address, .. } = event {
-                    swarm.add_external_address(address);
+                match event {
+                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
+                    SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                        if listener_id == relay_listener_id =>
+                    {
+                        return Err(format!("relay destination listener closed: {error}").into());
+                    }
+                    _ => {}
                 }
             }
         }

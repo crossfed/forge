@@ -18,6 +18,7 @@ sys.dont_write_bytecode = True
 
 from dns_fixture import DnsaddrServer
 from process_lifecycle import Listener, current_scope, enter_scope, exit_scope, spawn_owned, tail_text
+from provider_evidence import validate_hidden_find_peer_evidence, validate_provider_evidence
 from provenance import (
     WorktreeIdentity,
     fixture_donor_checkout_errors,
@@ -681,6 +682,8 @@ def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: st
         routing_seed = wait_json(routing_seed_result, 30)
         if routing_seed.get("status") != "ok" or routing_seed.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
             raise RuntimeError(f"{routing} did not establish a real Kademlia seed route: {routing_seed}")
+        if routing == "forge" and routing_seed.get("seed_route_source") != "explicit_get_providers_wire_reply":
+            raise RuntimeError(f"Forge routing listener did not prove its explicit seed RPC: {routing_seed}")
 
         seeker_result = run_dial(
             binaries[seeker],
@@ -697,7 +700,13 @@ def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: st
             raise RuntimeError(f"{seeker} did not find the hidden peer: {seeker_result}")
         if seeker_result.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
             raise RuntimeError(f"{seeker} did not prove the Amino Kademlia protocol: {seeker_result}")
-        if seeker_result.get("dht_queries_delta", 0) < 1:
+        if seeker == "forge":
+            require_hidden_dht_find_peer_evidence(
+                seeker_result,
+                routing_listener.ready["peer_id"],
+                hidden_listener.ready["peer_id"],
+            )
+        elif seeker_result.get("dht_queries_delta", 0) < 1:
             raise RuntimeError(f"{seeker} FindPeer did not issue a DHT query: {seeker_result}")
         if seeker == "rust":
             for field in (
@@ -873,6 +882,11 @@ def prepare_go_fixture(source_dir: Path, build_dir: Path, go_tool: str,
     commands = [
         {"command": [go_tool, "mod", "verify"], "cwd": str(work), "environment": policy},
         {
+            "command": [go_tool, "test", "-mod=readonly", "-count=1", "-timeout=60s", "."],
+            "cwd": str(work),
+            "environment": policy,
+        },
+        {
             "command": [go_tool, "build", "-mod=readonly", "-trimpath", "-o", str(binary), "."],
             "cwd": str(work),
             "environment": policy,
@@ -883,12 +897,44 @@ def prepare_go_fixture(source_dir: Path, build_dir: Path, go_tool: str,
     return binary, commands
 
 
+def remove_rust_fixture_entry(path: Path) -> None:
+    """Remove one refresh entry without ever traversing a symlink."""
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def refresh_rust_fixture_source(source: Path, work: Path) -> None:
+    """Refresh copied Rust sources while retaining only a real Cargo target directory."""
+    if work.is_symlink():
+        raise RuntimeError(f"refusing to refresh Rust fixture through symlinked work directory: {work}")
+    if work.exists() and not work.is_dir():
+        remove_rust_fixture_entry(work)
+    if work.exists():
+        target = work / "target"
+        retain_target = target.is_dir() and not target.is_symlink()
+        for entry in work.iterdir():
+            if retain_target and entry == target:
+                continue
+            remove_rust_fixture_entry(entry)
+        shutil.copytree(
+            source,
+            work,
+            dirs_exist_ok=True,
+            symlinks=True,
+            ignore=shutil.ignore_patterns("target"),
+        )
+        return
+    shutil.copytree(source, work, symlinks=True, ignore=shutil.ignore_patterns("target"))
+
+
 def prepare_rust_fixture(source_dir: Path, build_dir: Path, cargo_tool: str,
                          environment: dict[str, str]) -> tuple[Path, list[dict]]:
     work = build_dir / "rust_fixture"
-    if work.exists():
-        shutil.rmtree(work)
-    shutil.copytree(source_dir / "rust_fixture", work)
+    refresh_rust_fixture_source(source_dir / "rust_fixture", work)
     commands = [
         {
             "command": [cargo_tool, "test", "--frozen"],
@@ -1011,31 +1057,16 @@ def require_rendezvous_lifecycle_evidence(result: dict, dialer: str, listener: s
         raise RuntimeError(f"{dialer} rendezvous lifecycle did not expire and unregister: {result}")
 
 
-def require_dht_provider_evidence(result: dict, dialer: str) -> None:
-    provider_count = result.get("provider_count")
-    if type(provider_count) is not int or provider_count < 1:
-        raise RuntimeError(f"{dialer} DHT provider lookup did not return a provider: {result}")
-    provider_peer = result.get("provider_peer")
-    querier_peer = result.get("querier_peer")
-    if not isinstance(provider_peer, str) or not provider_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof did not identify the provider: {result}")
-    if not isinstance(querier_peer, str) or not querier_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof did not identify the querier: {result}")
-    if provider_peer == querier_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof reused the provider as its querier: {result}")
-    if result.get("returned_provider_peer") != provider_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof returned a different provider: {result}")
-    address_count = result.get("address_count")
-    if type(address_count) is not int or address_count < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof returned no provider address: {result}")
-    stream_delta = result.get("protocol_streams_opened_delta")
-    if type(stream_delta) is not int or stream_delta < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof did not open a DHT protocol stream: {result}")
-    query_delta = result.get("query_requests_delta")
-    if type(query_delta) is not int or query_delta < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof did not issue a DHT query: {result}")
-    if result.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
-        raise RuntimeError(f"{dialer} DHT provider proof negotiated the wrong protocol: {result}")
+def require_dht_provider_evidence(result: dict, dialer: str, listener_peer: str) -> None:
+    errors = validate_provider_evidence(result, listener_peer)
+    if errors:
+        raise RuntimeError(f"{dialer} DHT provider proof is invalid: {'; '.join(errors)}; result={result}")
+
+
+def require_hidden_dht_find_peer_evidence(result: dict, seed_peer: str, target_peer: str) -> None:
+    errors = validate_hidden_find_peer_evidence(result, seed_peer, target_peer)
+    if errors:
+        raise RuntimeError(f"Forge hidden FindPeer proof is invalid: {'; '.join(errors)}; result={result}")
 
 
 @owned_case
@@ -1237,7 +1268,7 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         if scenario == "rendezvous_lifecycle":
             require_rendezvous_lifecycle_evidence(result, dialer, listener)
         if scenario == "dht_provide_find_provider":
-            require_dht_provider_evidence(result, dialer)
+            require_dht_provider_evidence(result, dialer, peer_id)
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")

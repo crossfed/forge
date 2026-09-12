@@ -53,6 +53,7 @@ class bootstrap_service : public std::enable_shared_from_this<bootstrap_service>
  private:
    struct entry {
       bootstrap_peer configured;
+      std::optional<peer_id> configured_peer;
       std::optional<peer_id> connected_peer;
       std::optional<peer_id> protected_peer;
       std::chrono::steady_clock::time_point next_attempt{};

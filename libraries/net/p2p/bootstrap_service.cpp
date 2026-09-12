@@ -43,6 +43,8 @@ import forge.crypto.core.random;
 import forge.exceptions;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.lifecycle;
+import forge.net.p2p.identity;
+import forge.multiformats.multiaddr;
 
 #include "details/bootstrap_service.hxx"
 #include "details/cancellation_latch.hxx"
@@ -173,7 +175,7 @@ boost::asio::awaitable<bool> bootstrap_service::async_attempt(const std::string&
       }
       configured = found->second.configured;
       generation = found->second.generation;
-      known_peer = found->second.connected_peer ? found->second.connected_peer : found->second.configured.address.peer;
+      known_peer = found->second.connected_peer ? found->second.connected_peer : found->second.configured_peer;
    }
 
    if (known_peer && callbacks_.connected(configured, *known_peer)) {
@@ -498,7 +500,12 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
    auto replacements = std::map<std::string, entry>{};
    for (auto& peer : peers) {
       const auto key = key_for(peer);
-      replacements.emplace(key, entry{.configured = std::move(peer), .generation = next_generation_++});
+      auto expected = std::optional<peer_id>{};
+      const auto& components = peer.address.components();
+      if (!components.empty() && components.back().code == forge::multiformats::protocol_code::p2p) {
+         expected = peer_id::from_string(components.back().value);
+      }
+      replacements.emplace(key, entry{.configured = std::move(peer), .configured_peer = std::move(expected)});
    }
 
    auto cancellations = std::vector<std::shared_ptr<cancellation_latch>>{};
@@ -508,6 +515,7 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
       if (stopping_) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "cannot update bootstrap peers after P2P node shutdown");
       }
+      auto next_generation = next_generation_;
       for (auto& [key, value] : replacements) {
          const auto existing = entries_.find(key);
          if (existing != entries_.end()) {
@@ -517,14 +525,16 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
             value.failures = existing->second.failures;
             value.generation = existing->second.generation;
             value.active_cancellation = existing->second.active_cancellation;
+         } else {
+            value.generation = next_generation++;
          }
       }
       auto retained_peers = std::set<peer_id>{};
       for (const auto& [_, value] : replacements) {
          if (value.protected_peer) {
             retained_peers.insert(*value.protected_peer);
-         } else if (value.configured.address.peer) {
-            retained_peers.insert(*value.configured.address.peer);
+         } else if (value.configured_peer) {
+            retained_peers.insert(*value.configured_peer);
          }
       }
       for (const auto& [key, value] : entries_) {
@@ -538,19 +548,22 @@ void bootstrap_service::replace_bootstrap(std::vector<bootstrap_peer> peers) {
             unprotect.insert(*value.protected_peer);
          } else if (value.protected_peer) {
             for (auto& [_, replacement] : replacements) {
-               if (replacement.configured.address.peer == value.protected_peer) {
+               if (replacement.configured_peer == value.protected_peer) {
                   replacement.protected_peer = value.protected_peer;
                   break;
                }
             }
          }
       }
-      entries_ = std::move(replacements);
-      options_.bootstrap.clear();
-      options_.bootstrap.reserve(entries_.size());
-      for (const auto& [_, value] : entries_) {
-         options_.bootstrap.push_back(value.configured);
+      auto configured = std::vector<bootstrap_peer>{};
+      configured.reserve(replacements.size());
+      for (const auto& [_, value] : replacements) {
+         configured.push_back(value.configured);
       }
+      // All copying/allocation precedes this no-throw publication.
+      entries_.swap(replacements);
+      options_.bootstrap.swap(configured);
+      next_generation_ = next_generation;
    }
    for (const auto& cancellation : cancellations) {
       cancellation->request_stop();
@@ -618,7 +631,7 @@ std::size_t bootstrap_service::connected_count() const {
       const auto lock = std::scoped_lock{mutex_};
       entries.reserve(entries_.size());
       for (const auto& [_, value] : entries_) {
-         const auto& peer = value.connected_peer ? value.connected_peer : value.configured.address.peer;
+         const auto& peer = value.connected_peer ? value.connected_peer : value.configured_peer;
          if (peer) {
             entries.emplace_back(value.configured, *peer);
          }

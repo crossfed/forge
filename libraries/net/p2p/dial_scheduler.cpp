@@ -22,6 +22,8 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -586,7 +588,11 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
       expansion = co_await owner->expander_.async_expand(std::move(value.roots), value.expected_peer,
                                                           value.logical_deadline, operation->stop_token());
    }
-   if (is_canceled(value.stop)) {
+   const auto cancellation = co_await boost::asio::this_coro::cancellation_state;
+   const auto parent_canceled = [&] noexcept {
+      return is_canceled(value.stop) || cancellation.cancelled() != boost::asio::cancellation_type::none;
+   };
+   if (parent_canceled()) {
       throw_canceled();
    }
    if (clock::now() >= value.logical_deadline) {
@@ -598,7 +604,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    if (callback_set->prepare_peer) {
       callback_set->prepare_peer(expansion.expected_peer);
    }
-   if (is_canceled(value.stop)) {
+   if (parent_canceled()) {
       throw_canceled();
    }
    if (operation->stop_requested() || callback_set->is_owner_stopping()) {
@@ -700,7 +706,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
 
    try {
       while (!winner && !terminal_error) {
-         if (is_canceled(value.stop) || operation->stop_requested() || callback_set->is_owner_stopping() ||
+         if (parent_canceled() || operation->stop_requested() || callback_set->is_owner_stopping() ||
              clock::now() >= value.logical_deadline) {
             operation->request_stop();
             break;
@@ -713,6 +719,15 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
             }
             const auto stopping = operation->stop_requested();
             const auto owner_stopping = callback_set->is_owner_stopping();
+            if (parent_canceled()) {
+               // Cancellation before winner selection owns this completion too.
+               // Defer its close until cancellation is disabled for the drain.
+               if (completion->attempt) {
+                  pending_discards.emplace_back(std::move(*completion->attempt));
+               }
+               operation->request_stop();
+               break;
+            }
             if (owner_stopping) {
                if (completion->attempt) {
                   co_await async_discard_preserving(callback_set, pending_discards, std::move(*completion->attempt));
@@ -799,7 +814,9 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
          } catch (...) {
             wait_error = std::current_exception();
          }
-         if (wait_error && !is_timeout_wait(wait_error) && !is_operation_aborted_wait(wait_error)) {
+         if (is_operation_aborted_wait(wait_error) && parent_canceled()) {
+            operation->request_stop();
+         } else if (wait_error && !is_timeout_wait(wait_error) && !is_operation_aborted_wait(wait_error)) {
             terminal_error = std::move(wait_error);
             if (!first_error) {
                first_error = terminal_error;
@@ -808,13 +825,15 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
          }
       }
    } catch (...) {
-      if (!first_error) {
-         first_error = std::current_exception();
+      const auto error = std::current_exception();
+      if (!first_error && !(is_operation_aborted_wait(error) && parent_canceled())) {
+         first_error = error;
       }
       operation->request_stop();
    }
 
-   const auto canceled = is_canceled(value.stop);
+   // Snapshot before reset; a winner already selected retains terminal priority.
+   const auto canceled = parent_canceled();
    const auto timed_out = !winner && !first_error && clock::now() >= value.logical_deadline;
    const auto closed = !winner && !first_error && !canceled && !timed_out && operation->stop_requested();
    operation->request_stop();

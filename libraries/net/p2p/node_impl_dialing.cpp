@@ -192,6 +192,12 @@ node::impl::connect_direct(std::vector<forge::multiformats::multiaddr> roots, no
                                     std::shared_ptr<cancellation_latch> child,
                                     direct::tcp_transport_progress_handler progress)
            -> boost::asio::awaitable<detail::direct_attempt> {
+          if (!expected && target.peer) {
+             // A suffixless DNSADDR root may resolve to different peers. Gate
+             // the candidate identity without binding the whole logical dial.
+             self->connection_gate->peer_dial(*target.peer);
+             expected = target.peer;
+          }
           if (expected) {
              self->connection_gate->address_dial(*expected, target);
           }

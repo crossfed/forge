@@ -21,7 +21,11 @@ module;
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -257,6 +261,11 @@ class dial_script final {
       return attempt_terminal_waiting_changed_.wait_for(lock, std::chrono::seconds{1}, [&] {
          return attempt_terminal_waiting_;
       });
+   }
+
+   [[nodiscard]] bool attempt_terminal_waiting() const {
+      const auto lock = std::scoped_lock{mutex_};
+      return attempt_terminal_waiting_;
    }
 
    [[nodiscard]] std::vector<start_event> starts() const {
@@ -1306,6 +1315,182 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_deadline_and_parent_stop_join_every_started_
    });
    BOOST_TEST(stop_script->active_attempts() == 0U);
    BOOST_TEST(stop_script->finished_attempts() == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_inherited_cancellation_stops_stalled_attempt_and_joins_cleanup) {
+   auto context = boost::asio::io_context{};
+   const auto poll = [&] {
+      context.restart();
+      static_cast<void>(context.poll());
+   };
+   auto signal = boost::asio::cancellation_signal{};
+   auto script = std::make_shared<dial_script>();
+   script->resources = std::make_shared<p2p::resource_manager>();
+   script->behaviors.emplace("/ip4/8.8.8.8/tcp/4001", dial_script::behavior::wait_for_cancel_then_succeed);
+   script->block_attempt_terminal_after_stop = true;
+   script->block_discards = true;
+   auto scheduler = p2p::detail::dial_scheduler{context.get_executor(), {.max_concurrent_attempts = 1}};
+   // The deadline only bounds the old-source busy loop, never releases a script gate.
+   auto request = request_for("/ip4/8.8.8.8/tcp/4001", std::chrono::seconds{2});
+   const auto deadline = request.logical_deadline;
+   auto result = boost::asio::co_spawn(
+       context, scheduler.async_dial(std::move(request), callbacks_for(script)),
+       boost::asio::bind_cancellation_slot(
+           signal.slot(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future)));
+   poll();
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 1U);
+   BOOST_TEST(script->active_attempts() == 1U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 1U);
+
+   // No executor thread runs during emit: the inherited wait is already parked.
+   signal.emit(boost::asio::cancellation_type::terminal);
+   poll();
+   BOOST_CHECK(std::chrono::steady_clock::now() < deadline);
+   BOOST_TEST(script->attempt_terminal_waiting());
+   BOOST_TEST(script->active_attempts() == 1U);
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+
+   // Close is a join witness only; cancellation above must already have stopped the attempt.
+   auto closed = boost::asio::co_spawn(
+       context, scheduler.async_close(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future));
+   poll();
+   BOOST_CHECK(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   script->release_attempt_terminal();
+   poll();
+   BOOST_TEST(script->active_attempts() == 0U);
+   BOOST_TEST(script->finished_attempts() == 1U);
+   BOOST_TEST(script->discards() == 1U);
+   BOOST_TEST(script->resources->current().system.outbound_connections == 1U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 1U);
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   BOOST_CHECK(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+
+   script->release_discards();
+   poll();
+   BOOST_REQUIRE(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   BOOST_CHECK_EXCEPTION(static_cast<void>(result.get()), forge::exceptions::base, [](const auto& error) {
+      return p2p::exceptions::code_of(error) == p2p::exceptions::code::canceled;
+   });
+   BOOST_REQUIRE(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   closed.get();
+   BOOST_TEST(script->resources->current().system.outbound_connections == 0U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 0U);
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_inherited_cancellation_before_winner_selection_discards_completion) {
+   auto context = boost::asio::io_context{};
+   const auto poll = [&] {
+      context.restart();
+      static_cast<void>(context.poll());
+   };
+   auto signal = boost::asio::cancellation_signal{};
+   auto script = std::make_shared<dial_script>();
+   script->resources = std::make_shared<p2p::resource_manager>();
+   script->behaviors.emplace("/ip4/8.8.8.8/tcp/4001", dial_script::behavior::wait_for_release_then_succeed);
+   script->block_discards = true;
+   auto callbacks = callbacks_for(script);
+   auto emitted = false;
+   auto completed_owner_checks = std::size_t{};
+   callbacks.is_owner_stopping = [&] noexcept {
+      // The worker is terminal and its completion is available. Emit at the
+      // final owner check before selection, not while the scheduler is waiting.
+      if (!emitted && script->finished_attempts() == 1U && ++completed_owner_checks == 2U) {
+         emitted = true;
+         signal.emit(boost::asio::cancellation_type::terminal);
+      }
+      return false;
+   };
+   auto scheduler = p2p::detail::dial_scheduler{context.get_executor(), {.max_concurrent_attempts = 1}};
+   auto result = boost::asio::co_spawn(
+       context, scheduler.async_dial(request_for("/ip4/8.8.8.8/tcp/4001", std::chrono::seconds{2}),
+                                     std::move(callbacks)),
+       boost::asio::bind_cancellation_slot(
+           signal.slot(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future)));
+   poll();
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 1U);
+   script->release_starts();
+   poll();
+   BOOST_TEST(emitted);
+   BOOST_TEST(script->active_attempts() == 0U);
+   BOOST_TEST(script->finished_attempts() == 1U);
+   BOOST_TEST(script->discards() == 1U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 1U);
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+
+   auto closed = boost::asio::co_spawn(
+       context, scheduler.async_close(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future));
+   poll();
+   BOOST_CHECK(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   script->release_discards();
+   poll();
+   BOOST_REQUIRE(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   BOOST_CHECK_EXCEPTION(static_cast<void>(result.get()), forge::exceptions::base, [](const auto& error) {
+      return p2p::exceptions::code_of(error) == p2p::exceptions::code::canceled;
+   });
+   BOOST_REQUIRE(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   closed.get();
+   BOOST_TEST(script->resources->current().system.outbound_connections == 0U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 0U);
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_inherited_cancellation_after_winner_selection_preserves_winner_and_joins_loser) {
+   auto context = boost::asio::io_context{};
+   const auto poll = [&] {
+      context.restart();
+      static_cast<void>(context.poll());
+   };
+   auto signal = boost::asio::cancellation_signal{};
+   auto script = std::make_shared<dial_script>();
+   script->resources = std::make_shared<p2p::resource_manager>();
+   script->behaviors.emplace("/ip4/192.168.1.1/tcp/4001", dial_script::behavior::wait_for_cancel_then_succeed);
+   script->behaviors.emplace("/ip4/8.8.8.8/tcp/4001", dial_script::behavior::wait_for_release_then_succeed);
+   script->block_attempt_terminal_after_stop = true;
+   script->block_discards = true;
+   auto scheduler = p2p::detail::dial_scheduler{context.get_executor(), {.max_concurrent_attempts = 2}};
+   auto result = boost::asio::co_spawn(
+       context, scheduler.async_dial(
+                    request_for(std::vector<std::string>{"/ip4/192.168.1.1/tcp/4001", "/ip4/8.8.8.8/tcp/4001"},
+                                std::chrono::seconds{2}),
+                    callbacks_for(script)),
+       boost::asio::bind_cancellation_slot(
+           signal.slot(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future)));
+   poll();
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 2U);
+   script->release_starts();
+   poll();
+   BOOST_TEST(script->finished_attempts() == 1U);
+   BOOST_TEST(script->active_attempts() == 1U);
+   BOOST_TEST(script->attempt_terminal_waiting());
+   // The winner has stopped the loser, whose terminal completion is still gated.
+   signal.emit(boost::asio::cancellation_type::terminal);
+   poll();
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   auto closed = boost::asio::co_spawn(
+       context, scheduler.async_close(), boost::asio::bind_executor(context.get_executor(), boost::asio::use_future));
+   poll();
+   BOOST_CHECK(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   script->release_attempt_terminal();
+   poll();
+   BOOST_TEST(script->active_attempts() == 0U);
+   BOOST_TEST(script->finished_attempts() == 2U);
+   BOOST_TEST(script->discards() == 1U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 2U);
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   BOOST_CHECK(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   script->release_discards();
+   poll();
+   BOOST_REQUIRE(result.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   auto winner = result.get();
+   BOOST_TEST(winner.winner.to_string() == "/ip4/8.8.8.8/tcp/4001");
+   BOOST_REQUIRE(closed.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   closed.get();
+   BOOST_TEST(script->resources->current().system.outbound_connections == 1U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 1U);
+   winner.attempt.reset();
+   BOOST_TEST(script->resources->current().system.outbound_connections == 0U);
+   BOOST_TEST(script->resources->current().system.file_descriptors == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(dial_scheduler_neutral_failures_do_not_feed_detectors_or_start_later_candidates) {

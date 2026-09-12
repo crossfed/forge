@@ -1198,9 +1198,9 @@
       "interop_applicability": "not_applicable",
       "decision": "stage_6",
       "planned_branch": "forge-p2p-address-resolution-v1",
-      "forge_feature_ids": [],
+      "forge_feature_ids": [ "dialing.happy_eyeballs" ],
       "donor_sources": [ "donors/go-libp2p/p2p/net/swarm/dial_ranker.go" ],
-      "rationale": "Address-family and transport races need bounded donor-style staggering rather than serial endpoint fallback."
+      "rationale": "The node-owned scheduler applies bounded donor-style address-family and transport staggering. Native/private real-node dual-stack tests exercise an IPv4 authenticated winner with a stalled IPv6 handshake, one logical reservation and joined loser cleanup; ranker/scheduler tests cover launch ordering and bounds. This is host-local behavior, not a wire protocol. The Stage 6 decision retains pending PR5 promotion ownership; the implemented feature mapping remains unverified pending final-head acceptance."
     },
     {
       "id": "dialing.ipv6_black_hole_detection",
@@ -1211,9 +1211,9 @@
       "interop_applicability": "not_applicable",
       "decision": "stage_6",
       "planned_branch": "forge-p2p-address-resolution-v1",
-      "forge_feature_ids": [],
+      "forge_feature_ids": [ "dialing.ipv6_black_hole_detection" ],
       "donor_sources": [ "donors/go-libp2p/p2p/net/swarm/black_hole_detector.go", "donors/go-libp2p/defaults.go" ],
-      "rationale": "Repeatedly unavailable IPv6 paths must be suppressed without permanently disabling recovered address-family paths."
+      "rationale": "Node-owned IPv6 detection is retained in native and TCP-only private profiles. Deterministic detector/scheduler tests cover attributable failures, suppression, periodic successful probes, reset and resource release. These are component proofs, not a real-network IPv6 outage or donor wire experiment. The Stage 6 decision retains pending PR5 promotion ownership; the implemented feature mapping remains unverified pending final-head acceptance."
     },
     {
       "id": "dialing.udp_black_hole_detection",
@@ -1224,12 +1224,12 @@
       "interop_applicability": "not_applicable",
       "decision": "stage_6",
       "planned_branch": "forge-p2p-address-resolution-v1",
-      "forge_feature_ids": [],
+      "forge_feature_ids": [ "dialing.udp_black_hole_detection" ],
       "donor_sources": [
         "donors/go-libp2p/p2p/net/swarm/black_hole_detector.go",
         "donors/go-libp2p/defaults.go"
       ],
-      "rationale": "Repeatedly unavailable UDP paths must be suppressed without permanently disabling recovered transports."
+      "rationale": "The node-owned scheduler applies UDP detection in the native profile and disables it for TCP-only private nodes. Deterministic detector/scheduler tests cover attributable failures, suppression, periodic successful probes, reset and resource release without sending test traffic to the scripted public addresses. This is host-local policy, not donor wire interoperability. The Stage 6 decision retains pending PR5 promotion ownership; the implemented feature mapping remains unverified pending final-head acceptance."
     },
     {
       "id": "events.host_state",

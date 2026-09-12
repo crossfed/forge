@@ -120,10 +120,53 @@ Go-to-Forge and Rust-to-Forge QUIC Ping smoke runs through the revised runner
 also completed with graceful process exit. These are noncanonical smoke runs
 using the existing fixture builds, not final-head matrix evidence.
 
-Before delivery, provider fixtures must prove an independent network lookup,
-and the canonical matrix must be rerun on the final head. Raw lifecycle bootstrap
-still accepts `endpoint` rather than a DNSADDR root; that remaining PR5 integration
-gap must not be described as only a Stage 7 plugin-configuration task.
+Raw lifecycle bootstrap now accepts multiaddr roots and delegates expansion to
+the same node-owned dial operation. Five real-node bootstrap regressions pass
+99 assertions: two-hop DNSADDR in native/private profiles, configured peer
+mismatch, suffixless identity rotation, shared-peer alias protection, root-specific
+connection proof, and removal/stop while DNS is pending. The existing plugin
+adapter converts its concrete endpoint configuration; accepting DNSADDR in YAML
+remains Stage 7. Dynamic bootstrap replacement prepares state before publication
+and invokes cancellation outside its mutex.
+
+### Review Regression Evidence
+
+Inherited coroutine cancellation now enters the scheduler's existing stop/drain
+path. Cancellation before winner selection rejects the call; a selected winner
+keeps terminal priority while losers are joined. Three controlled scheduler
+cases pass 54 assertions. Restoring the old scheduler makes the pre-selection
+cases fail, while the post-selection case still passes.
+
+For a suffixless DNSADDR root, each resolved candidate's explicit peer ID passes
+the peer/address gater before a socket attempt. This does not pin siblings to
+that ID. Two native/private real-node regressions pass 212 assertions; restoring
+the old callback permits forbidden connections and fails both cases.
+
+DNS wait initiation rolls back both handler accounting and watch pending state
+on exceptions. Callback boundaries preserve the error instead of dropping it
+or terminating. Two real c-ares query regressions inject a private thread-scoped,
+one-shot initiation failure after accounting, then prove error delivery and
+completed close with zero active queries. Removing the counter rollback makes
+both close checks fail within their bounded timeout. The fixed regressions pass
+19 assertions; the full DNS suite passes 18 cases and 183 assertions. This is
+initiation-failure evidence, not a simulation of process-wide memory exhaustion.
+
+Provider fixtures now separate P, routing node S and a fresh querier Q. Go and
+Forge retain the real public API lookup and separately decode a GET_PROVIDERS
+reply from S, binding the key, P and its addresses. The extra RPC is explicitly
+wire confirmation, not an internal API counter. Rust binds QueryId, key and
+QueryStats, then immediately dials P by peer ID using the donor's discovered
+addresses. Its protocol proof is derived from the sole configured protocol and
+successful query, not claimed as a separately observed negotiation event.
+Successful empty lookups may be retried within the overall deadline because
+ADD_PROVIDER has no wire acknowledgment. Malformed or failed requests are not
+treated as publication propagation. Controlled donor fixtures cover empty-first
+responses and cached streams. Forge hidden FindPeer likewise keeps its API
+lookup and explicit FIND_NODE confirmation separate from inbound metrics.
+
+Before delivery, the canonical matrix must be rerun on the final head. Its
+artifact records the exact tree, toolchains, commands and process cleanup;
+focused smoke results alone do not satisfy that gate.
 
 The PR remains under validation until controlled DNSADDR, transport parity,
 package consumers and the exact-head donor matrix have passed. No production

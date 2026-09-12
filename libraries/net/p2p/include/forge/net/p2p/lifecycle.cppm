@@ -12,7 +12,7 @@ module;
 export module forge.net.p2p.lifecycle;
 
 import forge.net.p2p.endpoint;
-import forge.net.p2p.identity;
+import forge.multiformats.multiaddr;
 
 export namespace forge::net::p2p {
 
@@ -35,7 +35,7 @@ BOOST_DESCRIBE_ENUM(bootstrap_requirement, allow_disconnected, require_connectio
 BOOST_DESCRIBE_ENUM(lifecycle_phase, idle, hydrating, listening, bootstrapping, maintenance, stopping, stopped)
 
 struct bootstrap_peer {
-   forge::net::p2p::endpoint address;
+   forge::multiformats::multiaddr address;
 };
 
 struct lifecycle_status {

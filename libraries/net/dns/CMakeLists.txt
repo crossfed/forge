@@ -6,12 +6,14 @@ add_library(
    resolver_socket_registry.cpp
    resolver_socket_watch.cpp
    resolver_query.cpp
+   resolver_wait_failure.cpp
    resolver_impl.cpp
    details/cares_library.hxx
    details/nameserver_formatter.hxx
    details/resolver_socket_registry.hxx
    details/resolver_socket_watch.hxx
    details/resolver_query.hxx
+   details/resolver_wait_failure.hxx
    details/resolver_impl.hxx
 )
 forge_target_modules_at(forge_net_dns net/dns)

@@ -29,6 +29,7 @@ import forge.net.p2p.endpoint;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.identity;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.lifecycle;
 import forge.net.p2p.node;
 import forge.net.p2p.peer_store;
@@ -234,7 +235,7 @@ void apply_config(plugin::impl& state, const config& config) {
    state.options.lifecycle.listen = parse_endpoint_list(config.listen);
    state.options.lifecycle.bootstrap.clear();
    for (auto& endpoint : parse_endpoint_list(config.bootstrap)) {
-      state.options.lifecycle.bootstrap.push_back(forge::net::p2p::bootstrap_peer{.address = std::move(endpoint)});
+      state.options.lifecycle.bootstrap.push_back(forge::net::p2p::bootstrap_peer{.address = endpoint.to_multiaddr()});
    }
    state.options.lifecycle.requirement = config.bootstrap_requirement == bootstrap_requirement::require_connection
                                              ? forge::net::p2p::bootstrap_requirement::require_connection

@@ -415,9 +415,6 @@ void validate(const node::options& options) {
       for (const auto& value : options.lifecycle.listen) {
          require_direct_tcp(value, "lifecycle listener");
       }
-      for (const auto& value : options.lifecycle.bootstrap) {
-         require_direct_tcp(value.address, "lifecycle bootstrap endpoint");
-      }
    }
    const auto relay_duration = std::chrono::duration_cast<std::chrono::seconds>(options.limits.relay.max_duration);
    validate(options.limits.topology);
@@ -512,7 +509,7 @@ void validate(const node::options& options) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P AutoRelay policy limits must be positive");
    }
    const auto& lifecycle = options.lifecycle;
-   if (lifecycle.listen.size() > 1'024 || lifecycle.bootstrap.size() > 4'096 || lifecycle.startup_budget.count() <= 0 ||
+   if (lifecycle.listen.size() > 1'024 || lifecycle.startup_budget.count() <= 0 ||
        lifecycle.startup_budget > std::chrono::minutes{10} || lifecycle.max_parallel_bootstrap == 0 ||
        lifecycle.max_parallel_bootstrap > 256 || lifecycle.connect_timeout.count() <= 0 ||
        lifecycle.connect_timeout > std::chrono::minutes{5} || lifecycle.bootstrap_retry_initial_delay.count() <= 0 ||
@@ -523,7 +520,8 @@ void validate(const node::options& options) {
        lifecycle.maintenance_interval > std::chrono::minutes{10}) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P node lifecycle options");
    }
-   validate_bootstrap(lifecycle.bootstrap, lifecycle.requirement == bootstrap_requirement::require_connection);
+   validate_bootstrap(lifecycle.bootstrap, lifecycle.requirement == bootstrap_requirement::require_connection,
+                      options.dns_resolution, options.private_network.has_value());
    constexpr auto max_dht_profiles = std::size_t{64};
    if (options.dht_profiles.size() > max_dht_profiles) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P DHT profile count exceeds the supported limit");

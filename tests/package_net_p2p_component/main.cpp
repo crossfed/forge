@@ -4,6 +4,7 @@ import forge.net.p2p.address_resolution;
 import forge.net.p2p.dialing;
 import forge.net.p2p.identity;
 import forge.net.p2p.ipns;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.provider_registration;
 import forge.net.p2p.topology;
 import forge.net.p2p.node;
@@ -12,6 +13,7 @@ import forge.multiformats.multiaddr;
 static_assert(requires(forge::net::p2p::node& node, forge::multiformats::multiaddr address) {
    node.async_connect(address);
    node.async_connect(address, forge::net::p2p::node::connect_options{});
+   forge::net::p2p::bootstrap_peer{.address = address};
 });
 
 int main() {

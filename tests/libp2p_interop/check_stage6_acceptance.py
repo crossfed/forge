@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from dns_evidence import DNSADDR_SCENARIOS, validate_dnsaddr
+from provider_evidence import validate_provider_evidence
 
 from provenance import (
     FIXTURE_DONOR_DIRECTORIES,
@@ -1082,20 +1083,9 @@ def validate_relay_client_evidence(result: dict, record: dict, _listener: Option
     return ["relay client evidence lacks an implementation-specific reservation/open proof"]
 
 
-def validate_kademlia_evidence(result: dict, _record: dict, _listener: Optional[dict]) -> list[str]:
-    if (
-        result.get("negotiated_protocol") == "/ipfs/kad/1.0.0"
-        and positive_integer(result.get("provider_count"))
-        and nonempty_string(result.get("provider_peer"))
-        and nonempty_string(result.get("querier_peer"))
-        and result.get("returned_provider_peer") == result.get("provider_peer")
-        and result.get("provider_peer") != result.get("querier_peer")
-        and positive_integer(result.get("address_count"))
-        and positive_integer(result.get("protocol_streams_opened_delta"))
-        and positive_integer(result.get("query_requests_delta"))
-    ):
-        return []
-    return ["Kademlia evidence lacks correlated Amino provider, querier, address, stream and query proof"]
+def validate_kademlia_evidence(result: dict, record: dict, _listener: Optional[dict]) -> list[str]:
+    listener_peer = record.get("peer_id")
+    return validate_provider_evidence(result, listener_peer if isinstance(listener_peer, str) else None)
 
 
 def validate_rendezvous_evidence(result: dict, _record: dict, _listener: Optional[dict]) -> list[str]:
@@ -1678,6 +1668,54 @@ def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
     }
 
 
+def semantic_provider_network_proof() -> dict[str, object]:
+    """Observed-result-shaped Forge proof for the shared provider contract."""
+    provider_peer = "provider-peer"
+    querier_peer = "querier-peer"
+    listener_peer = "listener-peer"
+    provider_key = "1220provider-key"
+    address = "/ip4/127.0.0.1/udp/1/quic-v1"
+    return {
+        "schema": "forge.libp2p.provider-network-proof.v1",
+        "implementation": "forge",
+        "provider_peer": provider_peer,
+        "querier_peer": querier_peer,
+        "listener_peer": listener_peer,
+        "provider_key": provider_key,
+        "key_binding": {
+            "kind": "provider_identity_multihash", "provider_peer": provider_peer,
+            "provider_key": provider_key, "derived_per_run": True,
+        },
+        "provider_registration": {
+            "api": "async_provide", "succeeded": True, "provider_peer": provider_peer,
+            "provider_key": provider_key,
+        },
+        "api_lookup": {
+            "api": "async_find_providers", "succeeded": True, "querier_peer": querier_peer,
+            "returned_provider_peer": provider_peer, "provider_key": provider_key,
+        },
+        "address_proof": {
+            "source": "get_providers_wire_reply", "provider_peer": provider_peer, "address": address,
+        },
+        "protocol_proof": {
+            "protocol": "/ipfs/kad/1.0.0",
+            "derivation": "successful_async_open_protocol_stream_with_get_providers_wire_reply",
+            "successful_query": True,
+            "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+        "source_query_proof": {
+            "kind": "forge_async_find_providers_result", "querier_peer": querier_peer,
+            "returned_provider_peer": provider_peer, "provider_key": provider_key,
+            "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+        "wire_proof": {
+            "kind": "forge_get_providers_wire_reply", "explicit_wire_confirmation": True,
+            "listener_peer": listener_peer, "returned_provider_peer": provider_peer,
+            "address": address, "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+    }
+
+
 def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
     """One observed-result-shaped fixture per executable registered contract."""
     if scenario_id in {"dnsaddr", "dnsaddr_private_tcp_yamux_pnet"}:
@@ -1743,12 +1781,7 @@ def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
     elif scenario_id == "relay_v2_client_transport":
         result.update({"implementation": "forge", "voucher_bytes": 16})
     elif scenario_id == "kademlia_amino":
-        result.update({
-            "negotiated_protocol": "/ipfs/kad/1.0.0", "provider_count": 1,
-            "provider_peer": "provider-peer", "querier_peer": "querier-peer",
-            "returned_provider_peer": "provider-peer", "address_count": 1,
-            "protocol_streams_opened_delta": 1, "query_requests_delta": 1,
-        })
+        result["network_proof"] = semantic_provider_network_proof()
     elif scenario_id == "rendezvous_rust":
         result.update({
             "negotiated_protocol": "/rendezvous/1.0.0", "wire_registration_count": 1,
@@ -2048,10 +2081,7 @@ def self_test() -> int:
         "identify": ("signed_peer_record", "protocol_count"),
         "identify_native_tcp_yamux": ("signed_peer_record", "protocol_count"),
         "relay_v2_client_transport": ("voucher_bytes",),
-        "kademlia_amino": (
-            "negotiated_protocol", "provider_count", "provider_peer", "querier_peer",
-            "returned_provider_peer", "address_count", "protocol_streams_opened_delta", "query_requests_delta",
-        ),
+        "kademlia_amino": ("network_proof",),
         "rendezvous_rust": (
             "negotiated_protocol", "wire_registration_count", "signed_peer_record_valid",
             "matching_peer_record", "record_sequence", "record_address_count",
@@ -2257,7 +2287,7 @@ def self_test() -> int:
         print("self-test failed: false TCP Ping with RTT was accepted", file=sys.stderr)
         return 1
     kademlia, record, listener = semantic_fixture("kademlia_amino")
-    kademlia["returned_provider_peer"] = kademlia["querier_peer"]
+    kademlia["network_proof"]["api_lookup"]["returned_provider_peer"] = "querier-peer"
     if not validate_kademlia_evidence(kademlia, record, listener):
         print("self-test failed: uncorrelated Kademlia provider was accepted", file=sys.stderr)
         return 1
