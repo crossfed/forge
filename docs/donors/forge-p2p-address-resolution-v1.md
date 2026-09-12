@@ -108,8 +108,19 @@ diagnostic instrumentation and deliberate RED mutations are not retained.
 
 The full 709-case P2P suite, DNS, structure and QUIC/P2P package checks passed
 with the cleanup fix; the additional terminal-winner case was checked separately.
-Before delivery, the runner must fail on forced cleanup while retaining primary
-and cleanup evidence, provider fixtures must prove an independent network lookup,
+The runner now owns subprocesses before readiness and fails any case requiring
+forced cleanup, even when SIGTERM produces exit code zero. It retains primary
+errors, all attempt histories and cleanup errors, with separate raw output
+snapshots for retries. An unjoined process prevents retry and shared-path reset.
+Requested log paths are not presented as recorded evidence before successful
+open. The process owner is a separate Python component; scenario policy and
+artifact validation remain in the runner. Twenty controlled process regressions
+cover these failure paths; they are harness evidence, not donor interoperability.
+Go-to-Forge and Rust-to-Forge QUIC Ping smoke runs through the revised runner
+also completed with graceful process exit. These are noncanonical smoke runs
+using the existing fixture builds, not final-head matrix evidence.
+
+Before delivery, provider fixtures must prove an independent network lookup,
 and the canonical matrix must be rerun on the final head. Raw lifecycle bootstrap
 still accepts `endpoint` rather than a DNSADDR root; that remaining PR5 integration
 gap must not be described as only a Stage 7 plugin-configuration task.

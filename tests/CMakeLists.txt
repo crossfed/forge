@@ -1304,6 +1304,12 @@ add_test(
    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
 )
 set_tests_properties(test_forge_libp2p_dns_fixture PROPERTIES TIMEOUT 10)
+add_test(
+   NAME test_forge_libp2p_process_lifecycle
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_process_lifecycle
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_process_lifecycle PROPERTIES TIMEOUT 10)
 
 execute_process(
    COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse HEAD
