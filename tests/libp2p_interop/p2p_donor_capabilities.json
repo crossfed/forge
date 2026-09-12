@@ -67,7 +67,6 @@
       "branch": "forge-p2p-address-resolution-v1",
       "dependencies": [ "forge-chrono-v1", "forge-p2p-host-protection-v1" ],
       "allowed_capability_owners": [
-        "addressing.dnsaddr",
         "dialing.happy_eyeballs",
         "dialing.ipv6_black_hole_detection",
         "dialing.udp_black_hole_detection"
@@ -357,8 +356,8 @@
         "limitation": { "implementation": "rust", "source_case_id": "mdns.private_fingerprinted_rust_limitation", "description": "Pinned Rust mDNS lacks the private fingerprinted service configuration." }
       },
       "addressing.dnsaddr": { "scenarios": [
-        { "id": "dnsaddr", "runner_scenario_id": "tcp_stage6/dnsaddr", "profile": "native", "transport_stack": [ "tcp", "yamux" ], "activation": "enabled", "registration": "planned", "evidence_contract": "forge.p2p.evidence.dnsaddr.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" },
-        { "id": "dnsaddr_private_tcp_yamux_pnet", "runner_scenario_id": "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet", "profile": "private_network", "transport_stack": [ "tcp", "pnet", "yamux" ], "activation": "enabled", "registration": "planned", "requires_capabilities": [ "security.private_network_psk" ], "evidence_contract": "forge.p2p.evidence.dnsaddr_private_tcp_yamux_pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
+        { "id": "dnsaddr", "runner_scenario_id": "tcp_stage6/dnsaddr", "profile": "native", "transport_stack": [ "tcp", "yamux" ], "activation": "enabled", "registration": "registered", "source_case_id": "interop.live_dnsaddr", "evidence_contract": "forge.p2p.evidence.dnsaddr.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" },
+        { "id": "dnsaddr_private_tcp_yamux_pnet", "runner_scenario_id": "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet", "profile": "private_network", "transport_stack": [ "tcp", "pnet", "yamux" ], "activation": "enabled", "registration": "registered", "source_case_id": "interop.live_dnsaddr", "requires_capabilities": [ "security.private_network_psk" ], "evidence_contract": "forge.p2p.evidence.dnsaddr_private_tcp_yamux_pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
       ] },
       "security.private_network_psk": { "scenarios": [
         { "id": "pnet", "runner_scenario_id": "private_tcp_yamux_pnet/pnet", "profile": "private_network", "transport_stack": [ "tcp", "pnet", "yamux" ], "activation": "enabled", "registration": "registered", "source_case_id": "interop.live_private_network_pnet", "evidence_contract": "forge.p2p.evidence.pnet.v1", "required_directions": [ "forge_to_go", "go_to_forge", "forge_to_rust", "rust_to_forge" ], "expected_status": "passed" }
@@ -1087,15 +1086,14 @@
       "support_requirement": "required",
       "default_activation": "enabled",
       "interop_applicability": "go_and_rust",
-      "decision": "stage_6",
-      "planned_branch": "forge-p2p-address-resolution-v1",
-      "forge_feature_ids": [],
+      "decision": "current",
+      "forge_feature_ids": [ "addressing.dnsaddr" ],
       "donor_sources": [
         "donors/libp2p-specs/addressing/README.md",
         "donors/go-libp2p/p2p/net/swarm/swarm_dial.go",
         "donors/rust-libp2p/transports/dns/src/lib.rs"
       ],
-      "rationale": "DNSAddr TXT expansion is distinct from resolving dns4/dns6 transport hosts and is required for donor-compatible peer address discovery."
+      "rationale": "DNSAddr TXT expansion is integrated through node-owned resolution and scheduling, with canonical-root attribution and TCP-only private-network filtering. Current denotes implemented feature ownership, not production readiness: the mapped feature remains unverified until exact-head live Go/Rust evidence passes. Registered native/private scenarios and expected_status are acceptance requirements, not recorded results; they do not establish dual-stack or black-hole interop."
     },
     {
       "id": "reachability.observed_address_manager",

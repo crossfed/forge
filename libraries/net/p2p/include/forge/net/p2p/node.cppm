@@ -221,6 +221,7 @@ class node {
    void stop();
 
  private:
+   friend struct node_session_fixture;
    struct impl;
    std::shared_ptr<impl> impl_;
 };

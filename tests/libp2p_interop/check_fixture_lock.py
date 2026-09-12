@@ -49,12 +49,13 @@ EXPECTED_FIXTURE_FILES = {
 EXPECTED_RUNTIME_ARTIFACT_SOURCES = {
     "../CMakeLists.txt",
     "check_fixture_lock.py",
+    "dns_fixture.py",
     "forge_interop_fixture.cpp",
     "provenance.py",
     "runner.py",
 }
 EXPECTED_EVIDENCE_SOURCES = {"donor_cases.json"}
-EXPECTED_REGRESSION_SOURCES = {"test_provenance.py"}
+EXPECTED_REGRESSION_SOURCES = {"test_provenance.py", "test_dns_fixture.py"}
 
 
 def check_hashes(root: Path, label: str, values: object, expected_paths: set[str], errors: list[str]) -> None:

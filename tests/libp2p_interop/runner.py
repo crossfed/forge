@@ -16,6 +16,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
+from dns_fixture import DnsaddrServer
 from provenance import (
     WorktreeIdentity,
     fixture_donor_checkout_errors,
@@ -30,7 +31,8 @@ LIVE_SCENARIO_PROFILES = {
     "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
     "tcp_noise": ("ping", "identify", "echo", "echo_large"),
     "tcp_tls": ("ping", "identify", "echo"),
-    "private_tcp_yamux_pnet": ("pnet",),
+    "private_tcp_yamux_pnet": ("pnet", "dnsaddr_private_tcp_yamux_pnet"),
+    "tcp_stage6": ("dnsaddr",),
     "quic_dht": (
         "dht_find_peer",
         "dht_provide_find_provider",
@@ -60,6 +62,8 @@ CURRENT_ACCEPTANCE_SCENARIOS = {
     "tcp_noise/echo": ("tcp_yamux",),
     "tcp_tls/identify": ("tls_identity",),
     "private_tcp_yamux_pnet/pnet": ("pnet",),
+    "tcp_stage6/dnsaddr": ("dnsaddr",),
+    "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet": ("dnsaddr_private_tcp_yamux_pnet",),
     "quic_dht/dht_provide_find_provider": ("kademlia_amino",),
     "quic_rendezvous/rendezvous_register_discover": ("rendezvous_rust",),
 }
@@ -562,7 +566,7 @@ def start_destination(binary: Path, implementation: str, relay_addr: str, relay_
 def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, addr: str, work: Path,
              payload: Optional[str] = None, transport: str = "quic", fresh_store_each_attempt: bool = False,
              target_peer_id: Optional[str] = None, pnet_key_file: Optional[Path] = None,
-             pnet_fingerprint: Optional[str] = None) -> dict:
+             pnet_fingerprint: Optional[str] = None, dns_server: Optional[str] = None) -> dict:
     payload_suffix = "" if payload is None else f"-{payload}"
     result_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.json"
     log_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.log"
@@ -591,6 +595,8 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
         command.extend(["--pnet-key-file", str(pnet_key_file)])
     if pnet_fingerprint is not None:
         command.extend(["--pnet-fingerprint", pnet_fingerprint])
+    if dns_server is not None:
+        command.extend(["--dns-server", dns_server])
     try:
         reset_paths = (store_dir, result_file) if fresh_store_each_attempt else ()
         attempts = run_command_with_attempts(
@@ -1155,7 +1161,7 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
                             transport_stack: tuple[str, ...], runner_scenario_id: str,
                             acceptance_scenario_id: str, pnet_key_file: Optional[Path] = None,
                             pnet_mismatch_key_file: Optional[Path] = None,
-                            pnet_fingerprint: Optional[str] = None) -> dict:
+                            pnet_fingerprint: Optional[str] = None, dnsaddr: bool = False) -> dict:
     work = root / f"{transport}-{dialer}-to-{listener}-{acceptance_scenario_id}"
     work.mkdir(parents=True, exist_ok=True)
     if acceptance_profile not in {"native", "private_network"}:
@@ -1183,17 +1189,24 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
     try:
         addr = server.ready["listen_addrs"][0]
         peer_id = server.ready["peer_id"]
-        result = run_dial(
-            dialer_binary,
-            dialer,
-            scenario,
-            peer_id,
-            addr,
-            work,
-            transport=transport,
-            pnet_key_file=pnet_key_file,
-            pnet_fingerprint=pnet_fingerprint,
-        )
+        dns_evidence = None
+        if dnsaddr:
+            dns_path = work / "authoritative-dns.json"
+            with DnsaddrServer(addr, peer_id, dns_path) as resolver:
+                addr = resolver.root
+                result = run_dial(
+                    dialer_binary, dialer, scenario, peer_id, addr, work, transport=transport,
+                    pnet_key_file=pnet_key_file, pnet_fingerprint=pnet_fingerprint,
+                    dns_server=resolver.nameserver,
+                )
+            resolver.require_chain()
+            dns_evidence = {"log_file": str(dns_path), "sha256": sha256_file(dns_path),
+                            **json.loads(dns_path.read_text())}
+        else:
+            result = run_dial(
+                dialer_binary, dialer, scenario, peer_id, addr, work, transport=transport,
+                pnet_key_file=pnet_key_file, pnet_fingerprint=pnet_fingerprint,
+            )
         if pnet_profile:
             require_pnet_dial_evidence(result, dialer)
         if scenario == "identify" and dialer == "go" and listener == "forge":
@@ -1216,11 +1229,11 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         if pnet_profile:
             controls = {
                 "missing_key": run_pnet_control(
-                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, None,
+                    dialer_binary, dialer, listener_binary, listener, work, pnet_key_file, None,
                     pnet_fingerprint, "missing_key", f"{dialer}-to-{listener}-missing-key",
                 ),
                 "mismatched_key": run_pnet_control(
-                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, pnet_mismatch_key_file,
+                    dialer_binary, dialer, listener_binary, listener, work, pnet_key_file, pnet_mismatch_key_file,
                     pnet_fingerprint, "mismatched_key", f"{dialer}-to-{listener}-mismatched-key",
                 ),
             }
@@ -1258,6 +1271,8 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
             ),
         }
         out.update(controls)
+        if dns_evidence is not None:
+            out["dns_evidence"] = dns_evidence
         if listener_result is not None:
             out["listener_result_file"] = str(listener_result)
         return out
@@ -1614,7 +1629,7 @@ def main() -> int:
                         except Exception as error:
                             failures.append(f"{dialer}->{listener} {scenario}: {error}")
             for dialer, listener in (("forge", "go"), ("go", "forge"), ("forge", "rust"), ("rust", "forge")):
-                for transport, profile in (("tcp", "tcp_noise"), ("tcp-tls", "tcp_tls")):
+                for transport, profile in (("tcp", "tcp_noise"), ("tcp-tls", "tcp_tls"), ("tcp", "tcp_stage6")):
                     for scenario in LIVE_SCENARIO_PROFILES[profile]:
                         for acceptance_scenario_id in CURRENT_ACCEPTANCE_SCENARIOS.get(
                             f"{profile}/{scenario}", (scenario,)
@@ -1626,13 +1641,14 @@ def main() -> int:
                                         dialer,
                                         binaries[listener],
                                         listener,
-                                        scenario,
+                                        "echo" if scenario == "dnsaddr" else scenario,
                                         root,
                                         transport,
                                         "native",
                                         ("tcp", "yamux"),
                                         f"{profile}/{scenario}",
                                         acceptance_scenario_id,
+                                        dnsaddr=scenario == "dnsaddr",
                                     )
                                 )
                             except Exception as error:
@@ -1647,10 +1663,11 @@ def main() -> int:
                         try:
                             artifacts.append(
                                 run_pair_with_transport(
-                                    binaries[dialer], dialer, binaries[listener], listener, scenario, root,
+                                    binaries[dialer], dialer, binaries[listener], listener, "pnet", root,
                                     "tcp-pnet", "private_network", ("tcp", "pnet", "yamux"),
                                     f"private_tcp_yamux_pnet/{scenario}", acceptance_scenario_id,
                                     pnet_key_file, pnet_mismatch_key_file, pnet_fingerprint,
+                                    dnsaddr=scenario == "dnsaddr_private_tcp_yamux_pnet",
                                 )
                             )
                         except Exception as error:

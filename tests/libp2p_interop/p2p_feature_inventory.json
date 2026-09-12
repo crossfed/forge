@@ -71,7 +71,7 @@
       ],
       "headers": [],
       "module_features": {
-        "forge.net.p2p.address_resolution": [ "resource.dials", "state.peer_store" ],
+        "forge.net.p2p.address_resolution": [ "addressing.dnsaddr", "resource.dials", "state.peer_store" ],
         "forge.net.p2p.connection_gater": [ "security.connection_gater" ],
         "forge.net.p2p.dht": [ "protocol.kademlia", "state.kademlia_routing_table" ],
         "forge.net.p2p.dht.record_store": [ "protocol.kademlia" ],
@@ -82,7 +82,7 @@
         "forge.net.p2p.discovery": [
           "protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "protocol.relay", "lifecycle.discovery"
         ],
-        "forge.net.p2p.dialing": [ "resource.dials", "transport.direct_quic", "transport.tcp_yamux" ],
+        "forge.net.p2p.dialing": [ "addressing.dnsaddr", "resource.dials", "transport.direct_quic", "transport.tcp_yamux" ],
         "forge.net.p2p.endpoint": [ "transport.direct_quic", "transport.tcp_yamux" ],
         "forge.net.p2p.envelope": [ "identity.secure_transport_authentication", "protocol.relay" ],
         "forge.net.p2p.exceptions": [
@@ -118,6 +118,7 @@
         "forge.net.p2p.message": [ "protocol.peer_exchange" ],
         "forge.net.p2p.negotiation": [ "protocol.multistream_select" ],
         "forge.net.p2p.node": [
+          "addressing.dnsaddr",
           "transport.direct_quic",
           "transport.tcp_yamux",
           "security.private_network_psk",
@@ -169,8 +170,9 @@
         ]
       },
       "header_features": {},
-      "sha256": "64f3a6ccd565d99c0fb3faea4ad6986566e1484b280e681b2059f01a868bbd42",
+      "sha256": "76a69d684019206fbd957f8e1dfdff71b056ac5916ab0bc76bffe52032979ce6",
       "feature_ids": [
+        "addressing.dnsaddr",
         "transport.direct_quic",
         "transport.tcp_yamux",
         "security.private_network_psk",
@@ -321,6 +323,40 @@
         "tests": [ "test_forge_stcp", "test_forge_yamux", "test_forge_plugins" ],
         "donor_sources": [ "docs/donors/fcl-p2p-tcp-noise-yamux-v1.md", "docs/donors/fcl-p2p-tcp-tls-yamux-v1.md" ],
         "donor_cases": [ "transport.tcp_noise_yamux_direct", "transport.tcp_tls_yamux_direct" ]
+      }
+    },
+    {
+      "id": "addressing.dnsaddr",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "raw multiaddr async_connect and peer-store direct dialing through the node-owned scheduler",
+      "configuration": "node address resolution bounds, DNS resolver nameservers and direct dial policy; private-network candidates are TCP-only",
+      "resource_ownership": "one logical dial reservation and deadline cover recursive multi-root expansion and bounded deduplicated concrete attempts",
+      "persistence": "peer_store retains canonical unexpanded source roots and their attributable outcomes, not temporary resolved children; each logical dial expands roots anew",
+      "maintenance": "node lifecycle stops scheduler admission and cancellation-resistant drains attempts before session teardown; expansion state is operation-local",
+      "diagnostics": "node snapshot exposes scheduler black-hole status and authenticated session endpoints; DNS, filtered, unlaunched and canceled targets do not prove root failure",
+      "intended_disposition": "preserve integrated runtime ownership; require exact-head native and private Go/Rust DNSADDR evidence before readiness promotion; registration is not a passing result or a dual-stack/black-hole interop claim",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": [ "state_machine", "raw_node", "adversarial", "donor_interop" ],
+        "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/address_resolution.cppm",
+          "libraries/net/p2p/dns_address_expander.cpp",
+          "libraries/net/p2p/dial_ranker.cpp",
+          "libraries/net/p2p/dial_scheduler.cpp",
+          "libraries/net/p2p/node_impl_dialing.cpp",
+          "libraries/net/p2p/node_impl_sessions.cpp",
+          "libraries/net/p2p/node_impl_lifecycle.cpp",
+          "tests/quic_p2p/address_resolution_tests.cpp",
+          "tests/quic_p2p/dial_scheduler_tests.cpp",
+          "tests/quic_p2p/dialing_tests.cpp",
+          "tests/libp2p_interop/runner.py",
+          "tests/libp2p_interop/dns_evidence.py"
+        ],
+        "tests": [ "test_forge_net_dns", "test_forge_quic_p2p", "test_forge_libp2p_dns_fixture" ],
+        "donor_sources": [ "docs/donors/forge-p2p-address-resolution-v1.md", "docs/donors/forge-net-dns-cares-v1.md" ],
+        "donor_cases": [ "interop.live_dnsaddr" ]
       }
     },
     {

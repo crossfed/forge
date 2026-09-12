@@ -1083,6 +1083,7 @@ add_executable(
    quic_p2p/dialing_tests.cpp
    quic_p2p/dial_scheduler_tests.cpp
    quic_p2p/session_teardown_tests.cpp
+   quic_p2p/node_session_tests.cpp
    quic_p2p/topology_tests.cpp
 )
 target_sources(
@@ -1296,6 +1297,12 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${FORGE_P2P_STAGE6_ACCEPTANCE_CHECK} --self-test
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_libp2p_dns_fixture
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_dns_fixture
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_dns_fixture PROPERTIES TIMEOUT 10)
 
 execute_process(
    COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse HEAD

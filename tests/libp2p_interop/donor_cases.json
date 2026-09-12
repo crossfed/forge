@@ -441,6 +441,25 @@
       "known_gap": "The registered evidence covers only direct TCP plus Yamux and the existing Noise/TLS secure-channel compositions. It makes no QUIC, Relay or DCUtR claim."
     },
     {
+      "id": "interop.live_dnsaddr",
+      "protocol": "DNSADDR over native and private TCP/Yamux",
+      "source": "libp2p addressing DNSADDR links and pinned Go/Rust recursive resolution",
+      "donor": "Go swarm ResolveDNSAddr and Rust DNS transport TXT expansion before dialing",
+      "donor_file": [
+        "donors/libp2p-specs/addressing/README.md",
+        "donors/go-libp2p/p2p/net/swarm/swarm_dial.go",
+        "donors/rust-libp2p/transports/dns/src/lib.rs"
+      ],
+      "donor_case": [ "two-hop TXT expansion", "expected peer filtering", "native and PNET authenticated echo" ],
+      "mapping_state": "mapped",
+      "forge_tests": [ "test_forge_libp2p_interop dnsaddr", "test_forge_libp2p_interop dnsaddr_private_tcp_yamux_pnet" ],
+      "forge_live_scenario": [
+        { "profile": "tcp_stage6", "scenario": "dnsaddr" },
+        { "profile": "private_tcp_yamux_pnet", "scenario": "dnsaddr_private_tcp_yamux_pnet" }
+      ],
+      "known_gap": "Registered runner scenarios are not a passing result. Exact-head live execution remains required; these DNSADDR cases do not prove dual-stack races or public-network black-hole detection."
+    },
+    {
       "id": "transport.tcp_tls_yamux_direct",
       "protocol": "TCP + TLS + Yamux",
       "source": "donors/libp2p-specs/tls/tls.md and connections/inlined-muxer-negotiation.md",

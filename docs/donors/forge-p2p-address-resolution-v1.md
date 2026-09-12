@@ -40,12 +40,30 @@ They do not depend on macOS hostname resolution or relax third-party loopback
 filtering. The AutoNAT regression uses distinct certificate identities with
 insecure mode disabled, rather than unrelated explicit peer IDs.
 
-Deterministic integration coverage for cancellation while the session-admission
-gate is occupied and for cached-session removal between selection and stream
-open remains pending. Component cancellation tests and source review do not
-stand in for those race fixtures.
+`node_session_tests.cpp` holds the real session-admission gate while canceling
+or expiring the commit operation. Native close is independently blocked: the
+operation must retain transport/resource ownership until close drains, without
+publishing a session. Disabling the deadline-to-worker cancellation bridge
+makes both regressions fail before cleanup starts.
+
+The cached-session regression selects an owned continuation, fully retires the
+selected connection, then runs the continuation against a real TCP peer with
+an exhausted inbound stream budget. A fresh authenticated connection succeeds
+before stream reset; only one fresh dial is allowed. Replacing the owned cached
+pointer with another registry lookup produces two fresh handshakes and fails
+the regression. The three fixtures pass 79 assertions; these deliberate RED
+mutations are not retained in production sources.
 
 These checks are not a substitute for live Go/Rust DNS and dual-stack interop.
+The focused DNSADDR smoke covers eight Forge/Go/Rust directions over native
+TCP/Yamux and private TCP/PNET/Yamux. Its authoritative UDP server records both
+TXT hops; the checker correlates those records with the launched DNS root and
+the authenticated echo peer. Rust records the completed TCP security/muxer
+upgrade below the DNS wrapper rather than interpreting the outer DNS endpoint
+as a numeric transport address. Missing/mismatched PNET controls have separate
+artifact directories for every scenario. All eight focused smoke directions
+pass, but these noncanonical runs do not close the exact-head delivery gate.
+
 The PR remains under validation until controlled DNSADDR, transport parity,
 package consumers and the exact-head donor matrix have passed. No production
 capability is promoted by this source note.

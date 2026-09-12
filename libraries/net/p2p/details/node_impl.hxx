@@ -604,6 +604,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
        std::chrono::milliseconds direct_attempt_timeout = node::open_options{}.direct_attempt_timeout,
        std::shared_ptr<cancellation_latch> cancellation = {});
 
+   static boost::asio::awaitable<opened_direct_stream> open_protocol_direct_owned(
+       std::shared_ptr<impl> self, std::shared_ptr<session_state> cached,
+       peer_id peer, protocol_id protocol, std::chrono::steady_clock::time_point started,
+       std::chrono::milliseconds timeout, std::size_t max_direct_endpoints,
+       std::chrono::milliseconds direct_attempt_timeout,
+       std::shared_ptr<cancellation_latch> cancellation);
+
    boost::asio::awaitable<dht_exchange_result> exchange_dht(const protocol_id& profile, const peer_id& peer,
                                                             dht::message request, std::chrono::milliseconds timeout,
                                                             std::shared_ptr<cancellation_latch> cancellation = {});

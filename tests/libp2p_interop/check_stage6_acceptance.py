@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from dns_evidence import DNSADDR_SCENARIOS, validate_dnsaddr
+
 from provenance import (
     FIXTURE_DONOR_DIRECTORIES,
     fixture_donor_checkout_errors,
@@ -856,13 +858,15 @@ def validate_quic_v1_transport_evidence(result: dict, record: dict, listener: Op
     return errors
 
 
-def validate_tcp_yamux_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+def validate_tcp_yamux_evidence(result: dict, record: dict, listener: Optional[dict],
+                                security_protocols: tuple[str, ...] = ("/noise",),
+                                require_identify: bool = True) -> list[str]:
     """Require endpoint-observed TCP upgrade state, not requested CLI transport."""
-    errors = validate_identify_evidence(result, record, listener)
+    errors = validate_identify_evidence(result, record, listener) if require_identify else []
     if result.get("negotiated_transport") != "tcp":
         errors.append("TCP/Yamux evidence lacks endpoint-observed tcp transport")
-    if result.get("negotiated_security") != "/noise":
-        errors.append("TCP/Yamux evidence lacks endpoint-observed /noise security")
+    if result.get("negotiated_security") not in security_protocols:
+        errors.append("TCP/Yamux evidence lacks endpoint-observed supported security")
     if result.get("negotiated_muxer") != "/yamux/1.0.0":
         errors.append("TCP/Yamux evidence lacks endpoint-observed /yamux/1.0.0 muxer")
     if result.get("authenticated_remote_peer_id") != record.get("peer_id"):
@@ -1114,6 +1118,15 @@ def evidence_contracts(validator, *scenario_ids: str) -> dict[str, object]:
     return {evidence_contract_for(scenario_id): validator for scenario_id in scenario_ids}
 
 
+def validate_dnsaddr_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+    # DNS resolution proves authenticated echo, not the independent Identify contract.
+    return validate_tcp_yamux_evidence(result, record, listener, ("/noise", "/tls/1.0.0"), False) + validate_dnsaddr(result, record)
+
+
+def validate_private_dnsaddr_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+    return validate_pnet_evidence(result, record, listener) + validate_dnsaddr(result, record)
+
+
 EVIDENCE_CONTRACT_VALIDATORS = {
     **evidence_contracts(validate_quic_v1_transport_evidence, "quic_v1_transport"),
     **evidence_contracts(validate_identify_evidence, "identify", "identify_native_tcp_yamux"),
@@ -1125,6 +1138,8 @@ EVIDENCE_CONTRACT_VALIDATORS = {
     **evidence_contracts(validate_kademlia_evidence, "kademlia_amino"),
     **evidence_contracts(validate_rendezvous_evidence, "rendezvous_rust"),
     **evidence_contracts(validate_pnet_evidence, "pnet"),
+    **evidence_contracts(validate_dnsaddr_evidence, "dnsaddr"),
+    **evidence_contracts(validate_private_dnsaddr_evidence, "dnsaddr_private_tcp_yamux_pnet"),
 }
 
 
@@ -1284,7 +1299,8 @@ def validate_successful_raw_record(
         errors.append("raw runner scenario differs from the capability requirement")
     if record.get("acceptance_scenario_id") != expected_acceptance_scenario:
         errors.append("raw runner acceptance scenario differs from the capability requirement")
-    if record.get("scenario") != expected_runner_scenario.split("/", 1)[1]:
+    fixture_scenario = DNSADDR_SCENARIOS.get(expected_runner_scenario, expected_runner_scenario.split("/", 1)[1])
+    if record.get("scenario") != fixture_scenario:
         errors.append("raw runner fixture scenario does not match runner_scenario_id")
     expected_transport = expected_launcher_transport(
         expected_profile, expected_stack, expected_evidence_contract
@@ -1330,6 +1346,8 @@ def validate_successful_raw_record(
         errors.extend(command_errors)
         required_options = {"--scenario", "--peer-id", "--addr", "--result-file", "--store-dir", "--transport"}
         optional_options = {"--payload", "--target-peer-id"}
+        if expected_runner_scenario in DNSADDR_SCENARIOS:
+            required_options.add("--dns-server")
         if expected_profile == "private_network":
             required_options |= {"--pnet-key-file", "--pnet-fingerprint"}
         if set(options) - (required_options | optional_options) or not required_options <= set(options):
@@ -1406,6 +1424,21 @@ def validate_successful_raw_record(
     errors.extend(validate_result_semantics(
         expected_evidence_contract, payload or {}, record, listener_payload
     ))
+    if expected_runner_scenario in DNSADDR_SCENARIOS:
+        dns = record.get("dns_evidence", {})
+        dns_path = path_within(dns.get("log_file"), artifact_root) if isinstance(dns, dict) else None
+        if dns_path is None:
+            errors.append("DNSADDR authoritative log escapes the artifact directory")
+        else:
+            claim_paths.add(dns_path)
+            dns_payload, dns_errors = load_evidence_json(dns_path, "authoritative DNS log")
+            errors.extend(dns_errors)
+            if dns_payload != {key: value for key, value in dns.items() if key not in {"log_file", "sha256"}}:
+                errors.append("DNSADDR log differs from recorded authoritative observations")
+            if dns_path.is_file() and sha256_file(dns_path) != dns.get("sha256"):
+                errors.append("DNSADDR log hash differs from recorded observations")
+            if dial_options.get("--dns-server") != dns.get("nameserver") or dial_options.get("--addr") != dns.get("root"):
+                errors.append("DNSADDR launcher bypasses the authoritative root or resolver")
     if expected_profile == "private_network":
         errors.extend(validate_pnet_launchers(
             record, payload or {}, listener_payload, dial_options, listener_options, artifact_root
@@ -1600,6 +1633,8 @@ def validate(
 
 
 CURRENT_FIXTURES = {
+    "dnsaddr": ("addressing.dnsaddr", "tcp_stage6/dnsaddr", ("tcp", "yamux"), "echo"),
+    "dnsaddr_private_tcp_yamux_pnet": ("addressing.dnsaddr", "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet", ("tcp", "pnet", "yamux"), "pnet"),
     "quic_v1_transport": ("transport.quic_v1", "quic_base/identify", ("quic",), "identify"),
     "tcp_yamux": ("transport.tcp_yamux", "tcp_noise/echo", ("tcp", "yamux"), "echo"),
     "multistream_select": ("negotiation.multistream_select", "tcp_noise/identify", ("tcp", "yamux"), "identify"),
@@ -1645,6 +1680,21 @@ def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
 
 def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
     """One observed-result-shaped fixture per executable registered contract."""
+    if scenario_id in {"dnsaddr", "dnsaddr_private_tcp_yamux_pnet"}:
+        result, record, listener = semantic_fixture("tcp_yamux" if scenario_id == "dnsaddr" else "pnet")
+        root = "/dnsaddr/root.test/p2p/listener-peer"
+        address = "/ip4/127.0.0.1/tcp/1/p2p/listener-peer"
+        record["listener_process"] = {"listen_addrs": [address]}
+        record["dns_evidence"] = {
+            "root": root, "nameserver": "127.0.0.1:1234",
+            "records": {"_dnsaddr.root.test": "dnsaddr=/dnsaddr/target.root.test/p2p/listener-peer",
+                        "_dnsaddr.target.root.test": f"dnsaddr={address}"},
+            "queries": [{"name": name, "type": 16, "answered": True}
+                        for name in ("_dnsaddr.root.test", "_dnsaddr.target.root.test")],
+        }
+        result.update({"dns_input_address": root, "dns_resolver_configured": True,
+                       "expected_peer_id": "listener-peer"})
+        return result, record, listener
     _, _, stack, scenario = CURRENT_FIXTURES[scenario_id]
     record = {"dialer": "forge", "peer_id": "listener-peer", "scenario": scenario}
     result: dict[str, object] = {

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +37,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
@@ -46,6 +49,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
+	madns "github.com/multiformats/go-multiaddr-dns"
 	mh "github.com/multiformats/go-multihash"
 	"google.golang.org/protobuf/proto"
 )
@@ -70,6 +74,7 @@ type options struct {
 	targetPeerID    string
 	payload         string
 	transport       string
+	dnsServer       string
 	expected        int
 	pnetKeyFile     string
 	pnetFingerprint string
@@ -118,6 +123,12 @@ func parseArgs() (options, error) {
 			out.payload = value
 		case "--transport":
 			out.transport = value
+		case "--dns-server":
+			server, err := netip.ParseAddrPort(value)
+			if err != nil || server.Port() == 0 || server.Addr().Zone() != "" {
+				return options{}, fmt.Errorf("--dns-server requires numeric IP:port (bracket IPv6), port 1..65535")
+			}
+			out.dnsServer = server.String()
 		case "--expected-messages":
 			n, err := strconv.Atoi(value)
 			if err != nil {
@@ -263,11 +274,23 @@ func loadPnetKey(path string) (corepnet.PSK, error) {
 	return corepnet.DecodeV1PSK(input)
 }
 
-func newHost(transport string, pnetKeyFile string) (*fixtureHost, error) {
+func newHost(transport string, pnetKeyFile string, dnsServer string) (*fixtureHost, error) {
 	var pnetState *pnetConnectionState
 	options := []libp2p.Option{
 		libp2p.NoTransports,
 		libp2p.ForceReachabilityPublic(),
+	}
+	if dnsServer != "" {
+		resolver, err := madns.NewResolver(madns.WithDefaultResolver(&net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, dnsServer)
+			},
+		}))
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, libp2p.MultiaddrResolver(swarm.ResolverFromMaDNS{Resolver: resolver}))
 	}
 	if transport != "tcp-pnet" {
 		options = append(options, libp2p.EnableAutoNATv2(), libp2p.EnableRelay())
@@ -648,7 +671,7 @@ func writePubSubStressResult(opts options, state *pubsubStressState) error {
 }
 
 func listen(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
@@ -774,7 +797,7 @@ func listen(opts options) error {
 }
 
 func destination(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
@@ -918,7 +941,7 @@ func expectUnsupportedProtocol(ctx context.Context, h host.Host, peer peer.ID, i
 }
 
 func dial(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
@@ -936,9 +959,24 @@ func dial(opts options) error {
 	if err != nil {
 		return err
 	}
-	info, err := peer.AddrInfoFromP2pAddr(addr)
+	expectedPeer, err := peer.Decode(opts.peerID)
 	if err != nil {
 		return err
+	}
+	_, dnsErr := addr.ValueForProtocol(ma.P_DNSADDR)
+	dnsRoot := dnsErr == nil
+	if dnsRoot && opts.dnsServer == "" {
+		return fmt.Errorf("DNSADDR fixture dial requires --dns-server")
+	}
+	info, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		if !dnsRoot {
+			return err
+		}
+		info = &peer.AddrInfo{ID: expectedPeer, Addrs: []ma.Multiaddr{addr}}
+	}
+	if info.ID != expectedPeer {
+		return fmt.Errorf("address peer disagrees with --peer-id")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -965,6 +1003,18 @@ func dial(opts options) error {
 	}
 	for key, value := range connectionState(h, info.ID) {
 		result[key] = value
+	}
+	if dnsRoot {
+		connections := h.Network().ConnsToPeer(expectedPeer)
+		if len(connections) == 0 || connections[0].RemotePeer() != expectedPeer {
+			return fmt.Errorf("DNSADDR dial has no authenticated expected-peer connection")
+		}
+		result["dns_input_address"] = opts.addr
+		result["dns_resolver_configured"] = opts.dnsServer != ""
+		result["expected_peer_id"] = expectedPeer.String()
+		result["authenticated_remote_peer_id"] = connections[0].RemotePeer().String()
+		result["dns_server"] = opts.dnsServer
+		result["connection_remote_addr"] = connections[0].RemoteMultiaddr().String()
 	}
 	switch opts.scenario {
 	case "ping":
@@ -1225,7 +1275,7 @@ func waitDirectConnection(ctx context.Context, h host.Host, target peer.ID) bool
 }
 
 func dialRelay(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}

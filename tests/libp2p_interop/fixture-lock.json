@@ -28,25 +28,27 @@
   "fixture_files": {
     "fixtures/pnet/mismatched-swarm.key": "8ad4a40c30bc50316be35d89f01fa68f28d288a0e00c301898ac3abaea64f7e5",
     "fixtures/pnet/swarm.key": "a2602305a7773371a5232eb73d3ee4af3fba1efee04c03afa981554a6bebd176",
-    "go_fixture/go.mod": "d932393c652c4fcab045bc9e35d70bb8ee6700610b63f5ed9c4d2b3b8e1e6be2",
+    "go_fixture/go.mod": "1c6c7ed0084ea684bd6a59774fde405678a989e90118a529ee4695345b42de3e",
     "go_fixture/go.sum": "4c5c4bab5b838e9027b83777413feb9c2540f2d0c076c86214a549cfad47902a",
-    "go_fixture/main.go": "8f09fef725f1dcdc13ae963aec1a8a16eb872f708a284c4dda1a1af249333f27",
-    "rust_fixture/Cargo.lock": "3c43c578fee49b4b602b009541317b8b87a4fb943b079d34e689db0ef49c072c",
-    "rust_fixture/Cargo.toml": "112685a538de4e142689ea35224189a2716a56394e7e359ed79765bdeaca57c8",
-    "rust_fixture/main.rs": "4bd1c1bbb61bc8f250dfa72a8659b1fc0d1cb098b5e247dde206e63a979ed5d2",
+    "go_fixture/main.go": "7af490a4306fd1b1e12b495b2680a1f87cbb06bbcc9a36962eb489be2da7096f",
+    "rust_fixture/Cargo.lock": "8a93d81a933bb0dd77766d370cb599cdd4169f1841933e02d2b22685869bd038",
+    "rust_fixture/Cargo.toml": "c34ebc79aba59237fb7c9513742668e315151dba92c88cf37f4607813d8487fa",
+    "rust_fixture/main.rs": "0de654b0069085db0bf1c1a2a40a89bfe3e41505838d2560f8ce49a12c1326c4",
     "rust_fixture/rust-toolchain.toml": "32d99b8237d5832435d362c395422d69f52348a9fd1a154f70336d2991403064"
   },
   "runtime_artifact_sources": {
-    "../CMakeLists.txt": "27c228e7aa2b42f5fb8a9c94eb7e1c3f0a08d7689a77837a971054db76bac921",
-    "check_fixture_lock.py": "18da8fbf8fd92de7d9d0cb9b0c1b92badb27319aa82a6e490dd65cfc4cb3a62b",
-    "forge_interop_fixture.cpp": "53bbb26a0fe1a02f22c546bc2a9b4d4f337274f0938ebb0e55191d8c4a62b069",
+    "../CMakeLists.txt": "5154b42e6c21d65602dc43842fc36274db19eecb4f88d7f2d06173606bf0b5a4",
+    "check_fixture_lock.py": "093b6db0f88604148e595e0529ea2b2730751ad6c99be732ae45f8ee6d15c275",
+    "dns_fixture.py": "36f4fc9890ff9e1d1debf9ca0a08d73b622e4788edfced468e61a1950676b545",
+    "forge_interop_fixture.cpp": "3d52af935d3a8a0208c040f7873f87293d56b5bcca0dd881f45117b8a7cfdd20",
     "provenance.py": "9ae5c8ffa3d9dcd646c2a5c7148e79cd5086d60ecb156d81374fda2ca00609ec",
-    "runner.py": "5fc5b96e097d7e13589de416d78fac2d45f92c1a7f449e28e02fd987ea1c012b"
+    "runner.py": "ed450cd7da97aa36c2baa1b246c4511e9d1633ef6744425a7f53f0c2a5e227d5"
   },
   "evidence_sources": {
-    "donor_cases.json": "bd677ade405b6aa153906db5ddce6ee411091e4f4440b3f966f484df3c3fcaaf"
+    "donor_cases.json": "a0bef22373fcff0809efb2e9a6685789fa5598bb24f850b60765fdcbf3354ea3"
   },
   "regression_sources": {
+    "test_dns_fixture.py": "9f4fae8f9b313d3621e9ef24f20bc33bbd87b1ecde2271e607ba6a283a9e442e",
     "test_provenance.py": "10ffe7cdff1d79e19d44b3eebf4bb0019656abbae6036af046a815e6669bc1ef"
   },
   "dependency_graphs": {
@@ -55,14 +57,14 @@
         "go_fixture/go.mod",
         "go_fixture/go.sum"
       ],
-      "sha256": "accdbbe1df355dfef3de3af53b6efec7f614d235bee0dc1821608bd93de239eb"
+      "sha256": "c52ed8eba5c445b17d5cb71b6adc10009c714f845cf309d21129e7b199a58077"
     },
     "rust": {
       "files": [
         "rust_fixture/Cargo.toml",
         "rust_fixture/Cargo.lock"
       ],
-      "sha256": "bc6d11c2ca81b7163dfbd030a6e09082e8b9e804eae30e45e5c86ebcabeb03a3"
+      "sha256": "0480445faf55645fd1f792190163741ee081396fa802afa4391b260e0ef53659"
     }
   },
   "donors": [

@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <coroutine>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +24,7 @@
 #include "forge_interop_build_info.hxx"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/ip/address.hpp>
 
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
@@ -35,6 +38,7 @@ import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.codec.hex;
 import forge.crypto.pki.pem;
+import forge.net.dns.types;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.diagnostics;
@@ -426,6 +430,34 @@ forge::net::p2p::node::options node_options(const std::filesystem::path& store_p
 
 forge::net::p2p::node::options node_options(const std::filesystem::path& store_path) {
    return node_options(store_path, local_identity());
+}
+
+void configure_dns_server(forge::net::p2p::node::options& options,
+                          const std::map<std::string, std::string>& args) {
+   const auto value = optional_value(args, "dns-server");
+   if (value.empty()) {
+      return;
+   }
+   const auto separator = value.rfind(':');
+   if (separator == std::string::npos) {
+      throw std::runtime_error{"--dns-server requires numeric IP:port (bracket IPv6)"};
+   }
+   auto host = value.substr(0, separator);
+   if (host.size() >= 2 && host.front() == '[' && host.back() == ']') {
+      host = host.substr(1, host.size() - 2);
+   } else if (host.find(':') != std::string::npos) {
+      throw std::runtime_error{"--dns-server IPv6 must be bracketed"};
+   }
+   auto error = boost::system::error_code{};
+   const auto address = boost::asio::ip::make_address(host, error);
+   auto port = unsigned{};
+   const auto end = value.data() + value.size();
+   const auto parsed = std::from_chars(value.data() + separator + 1, end, port);
+   if (error || host.find('%') != std::string::npos || parsed.ec != std::errc{} || parsed.ptr != end ||
+       port == 0 || port > 65'535) {
+      throw std::runtime_error{"--dns-server requires numeric IP and port 1..65535"};
+   }
+   options.dns_resolver.nameservers = {{.address = address.to_string(), .port = static_cast<std::uint16_t>(port)}};
 }
 
 void configure_private_network(forge::net::p2p::node::options& options,
@@ -855,6 +887,7 @@ int listen_mode(const std::map<std::string, std::string>& args) {
    const auto transport = optional_value(args, "transport", "quic");
    auto persistence = forge::net::p2p::dht::record_store::make_memory_persistence();
    auto options = node_options(required(args, "store-dir"));
+   configure_dns_server(options, args);
    configure_private_network(options, args, transport);
    configure_rendezvous_lifecycle_ttls(options, scenario);
    options.dht_record_persistence.emplace(forge::net::p2p::builtins::kad_dht, persistence);
@@ -1398,7 +1431,7 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& v
       }
       auto evidence = "\"protocol\":\"" + json_escape(echo_protocol) + "\",\"payload_bytes\":" +
                       std::to_string(echoed.size()) + ",\"echo_ok\":true";
-      if (scenario == "pnet") {
+      if (remote.transport.protocol != forge::net::p2p::endpoint::protocol_kind::quic_v1) {
          evidence += ",\"negotiated_security\":\"" + std::string{negotiated_security(stream.authentication())} +
                      "\",\"negotiated_muxer\":\"/yamux/1.0.0\"";
       }
@@ -1431,10 +1464,78 @@ int dial_mode(const std::map<std::string, std::string>& args) {
    const auto scenario = required(args, "scenario");
    const auto transport = optional_value(args, "transport", "quic");
    auto options = node_options(required(args, "store-dir"));
+   configure_dns_server(options, args);
    configure_private_network(options, args, transport);
    auto value = forge::net::p2p::node{runtime, std::move(options)};
    forge::asio::blocking::run(runtime, value.async_hydrate_peer_state());
    forge::asio::blocking::run(runtime, value.async_listen(loopback_endpoint_for(transport)));
+
+   const auto root = forge::multiformats::multiaddr::parse(required(args, "addr"));
+   const auto dns_root = std::ranges::any_of(root.components(), [](const auto& component) {
+      return component.code == forge::multiformats::protocol_code::dnsaddr;
+   });
+   if (dns_root && optional_value(args, "dns-server").empty()) {
+      throw std::runtime_error{"DNSADDR fixture dial requires --dns-server"};
+   }
+   if (dns_root) {
+      const auto peer = forge::net::p2p::peer_id::from_string(required(args, "peer-id"));
+      auto session = forge::net::p2p::node::session_info{};
+      try {
+         session = forge::asio::blocking::run(
+             runtime, value.async_connect(root, forge::net::p2p::node::connect_options{
+                                                   .expected_peer = peer, .allow_relay = false, .allow_hole_punch = false}));
+      } catch (const std::exception&) {
+         if (scenario != "pnet" || optional_value(args, "pnet-control").empty()) {
+            throw;
+         }
+         const auto metrics = value.metrics();
+         forge::asio::blocking::run(runtime, value.async_stop());
+         write_file(required(args, "result-file"),
+                    "{" + pnet_rejection_evidence(args, "dialer", metrics, peer.to_string()) + "}\n");
+         return 0;
+      }
+      if (scenario == "pnet" && !optional_value(args, "pnet-control").empty()) {
+         throw std::runtime_error{"pnet rejection control unexpectedly established an authenticated session"};
+      }
+      if (session.remote_peer != peer || session.path != forge::net::p2p::path::kind::direct) {
+         throw std::runtime_error{"DNSADDR dial did not authenticate the expected direct peer"};
+      }
+      if ((scenario == "identify" || scenario == "pnet") &&
+          session.identify_state != forge::net::p2p::identify::state::identified) {
+         throw std::runtime_error{"DNSADDR connection did not complete authenticated Identify"};
+      }
+      const auto snapshot = value.diagnostics();
+      const auto observed = std::ranges::find_if(snapshot.sessions, [&](const auto& current) {
+         return !current.closed && current.remote_peer == peer && current.remote_endpoint.has_value();
+      });
+      if (observed == snapshot.sessions.end()) {
+         throw std::runtime_error{"DNSADDR dial has no observed authenticated connection"};
+      }
+      const auto details = run_scenario(
+          runtime, value, scenario,
+          optional_value(args, "payload", pubsub_payload), peer, *observed->remote_endpoint,
+          optional_value(args, "target-peer-id"));
+      const auto identify_evidence = scenario == "echo"
+          ? run_scenario(runtime, value, "identify", {}, peer, *observed->remote_endpoint, {})
+          : std::string{};
+      const auto negotiated_transport = observed->remote_endpoint->transport.protocol ==
+                                                forge::net::p2p::endpoint::protocol_kind::quic_v1
+                                            ? "/quic-v1" : "tcp";
+      forge::asio::blocking::run(runtime, value.async_stop());
+      write_file(required(args, "result-file"),
+                 "{\"implementation\":\"forge\",\"role\":\"dialer\",\"scenario\":\"" + json_escape(scenario) +
+                 "\",\"status\":\"ok\",\"dns_resolver_configured\":true,\"dns_input_address\":\"" +
+                 json_escape(required(args, "addr")) +
+                 "\",\"expected_peer_id\":\"" + json_escape(peer.to_string()) +
+                 "\",\"authenticated_remote_peer_id\":\"" + json_escape(session.remote_peer.to_string()) +
+                 "\",\"dns_server\":\"" + json_escape(optional_value(args, "dns-server")) +
+                 "\",\"connection_remote_addr\":\"" + json_escape(observed->remote_endpoint->to_string()) +
+                 "\",\"negotiated_transport\":\"" + negotiated_transport + "\"," + details +
+                 (identify_evidence.empty() ? "" : "," + identify_evidence) +
+                 (scenario == "pnet" ? ",\"identify_observed\":true" : "") +
+                 (transport == "tcp-pnet" ? "," + pnet_evidence(args) : "") + "}\n");
+      return 0;
+   }
 
    auto remote = forge::net::p2p::parse_endpoint(required(args, "addr"));
    auto peer = forge::net::p2p::peer_id::from_string(required(args, "peer-id"));
