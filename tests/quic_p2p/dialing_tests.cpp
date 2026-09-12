@@ -264,6 +264,67 @@ BOOST_AUTO_TEST_CASE(black_hole_detector_probes_and_resets_per_logical_peer_dial
    BOOST_TEST(reset.outcomes == 0U);
 }
 
+BOOST_AUTO_TEST_CASE(black_hole_detector_udp_and_ipv6_tcp_complete_failure_and_recovery_cycle) {
+   for (const auto udp : {true, false}) {
+      BOOST_TEST_CONTEXT("UDP=" << udp) {
+         const auto target = endpoint_from(udp ? "/ip4/8.8.8.8/udp/4001/quic-v1" : "/ip6/2400::1/tcp/4001");
+         auto detector = detail::black_hole_detector{{.window_size = 4, .min_successes = 1}};
+         const auto counter = [&] {
+            const auto status = detector.status();
+            return udp ? status.udp : status.ipv6;
+         };
+         for (auto failures = std::size_t{1}; failures <= 4; ++failures) {
+            const auto filtered = detector.filter_peer_dial({target});
+            BOOST_REQUIRE_EQUAL(filtered.allowed.size(), 1U);
+            BOOST_TEST(filtered.blocked.empty());
+            detector.record_address_outcome(target, dialing::outcome::failure);
+            BOOST_TEST(counter().peer_requests == failures);
+            BOOST_TEST(counter().outcomes == failures);
+            BOOST_TEST(counter().successes == 0U);
+            BOOST_CHECK(counter().state == (failures < 4 ? dialing::black_hole_state::probing
+                                                        : dialing::black_hole_state::blocked));
+         }
+         for (auto suppressed = std::size_t{1}; suppressed < 4; ++suppressed) {
+            const auto filtered = detector.filter_peer_dial({target});
+            BOOST_TEST(filtered.allowed.empty());
+            BOOST_REQUIRE_EQUAL(filtered.blocked.size(), 1U);
+            BOOST_CHECK(counter().state == dialing::black_hole_state::blocked);
+            BOOST_TEST(counter().peer_requests == 4U + suppressed);
+            BOOST_TEST(counter().outcomes == 4U);
+            BOOST_TEST(counter().next_probe_after == 4U - suppressed);
+         }
+         const auto probe = detector.filter_peer_dial({target});
+         BOOST_REQUIRE_EQUAL(probe.allowed.size(), 1U);
+         BOOST_TEST(probe.blocked.empty());
+         BOOST_TEST(counter().peer_requests == 8U);
+         BOOST_CHECK(counter().state == dialing::black_hole_state::blocked);
+         detector.record_address_outcome(target, dialing::outcome::success);
+         BOOST_CHECK(counter().state == dialing::black_hole_state::probing);
+         BOOST_TEST(counter().peer_requests == 0U);
+         BOOST_TEST(counter().outcomes == 0U);
+         BOOST_TEST(counter().successes == 0U);
+         BOOST_TEST(counter().next_probe_after == 0U);
+         for (auto successes = std::size_t{1}; successes <= 4; ++successes) {
+            const auto filtered = detector.filter_peer_dial({target});
+            BOOST_REQUIRE_EQUAL(filtered.allowed.size(), 1U);
+            BOOST_TEST(filtered.blocked.empty());
+            detector.record_address_outcome(target, dialing::outcome::success);
+            BOOST_TEST(counter().peer_requests == successes);
+            BOOST_TEST(counter().outcomes == successes);
+            BOOST_TEST(counter().successes == successes);
+            BOOST_CHECK(counter().state == (successes < 4 ? dialing::black_hole_state::probing
+                                                         : dialing::black_hole_state::allowed));
+         }
+         const auto status = detector.status();
+         const auto untouched = udp ? status.ipv6 : status.udp;
+         BOOST_CHECK(untouched.state == dialing::black_hole_state::probing);
+         BOOST_TEST(untouched.peer_requests == 0U);
+         BOOST_TEST(untouched.outcomes == 0U);
+         BOOST_TEST(untouched.successes == 0U);
+      }
+   }
+}
+
 BOOST_AUTO_TEST_CASE(black_hole_detector_counts_requests_and_address_outcomes_separately) {
    const auto public_udp4 = endpoint_from("/ip4/8.8.8.8/udp/4001/quic-v1");
    const auto public_tcp6 = endpoint_from("/ip6/2400::1/tcp/4001");

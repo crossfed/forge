@@ -79,6 +79,7 @@ class dial_script final {
    std::map<std::string, dns::text_response> text_responses;
    std::set<std::string> address_not_found;
    std::map<std::string, behavior> behaviors;
+   std::shared_ptr<p2p::resource_manager> resources;
    bool block_discards = false;
    bool block_dns_until_stop = false;
    bool block_dns_terminal_after_stop = false;
@@ -153,6 +154,20 @@ class dial_script final {
       }
       started_.notify_all();
       [[maybe_unused]] const auto active_attempt = active_attempt_guard{*this};
+      auto attempt = p2p::detail::direct_attempt{};
+      if (resources) {
+         auto session = resources->reserve_session(p2p::resource_manager::session_direction::outbound);
+         if (!session) {
+            FORGE_THROW_EXCEPTION(p2p::exceptions::backpressure_rejected, "scripted session reservation rejected");
+         }
+         auto descriptor = session->reserve_file_descriptors(1);
+         if (!descriptor) {
+            FORGE_THROW_EXCEPTION(p2p::exceptions::backpressure_rejected, "scripted descriptor reservation rejected");
+         }
+         attempt.resources = std::make_shared<p2p::detail::direct_attempt_resources>();
+         attempt.resources->session = std::move(*session);
+         attempt.resources->file_descriptor = std::move(*descriptor);
+      }
 
       if (selected == behavior::delayed_progress_then_attributable_failure) {
          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
@@ -164,10 +179,10 @@ class dial_script final {
       }
       if (selected == behavior::succeed || selected == behavior::wait_for_cancel_then_succeed) {
          if (selected == behavior::succeed) {
-            co_return p2p::detail::direct_attempt{};
+            co_return std::move(attempt);
          }
          co_await wait_for_cancel(std::move(cancellation));
-         co_return p2p::detail::direct_attempt{};
+         co_return std::move(attempt);
       }
       if (selected == behavior::wait_for_cancel_then_fail) {
          co_await wait_for_cancel(std::move(cancellation));
@@ -177,7 +192,7 @@ class dial_script final {
           selected == behavior::wait_for_release_then_attributable_failure) {
          co_await wait_for_start_release(std::move(cancellation));
          if (selected == behavior::wait_for_release_then_succeed) {
-            co_return p2p::detail::direct_attempt{};
+            co_return std::move(attempt);
          }
       }
       if (selected == behavior::terminal_rejection) {
@@ -1103,6 +1118,100 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_filters_black_holes_but_retains_the_periodic
    BOOST_TEST(script->starts().size() == 4U);
    run_failure();
    BOOST_TEST(script->starts().size() == 5U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_udp_and_ipv6_tcp_recover_after_successful_black_hole_probe) {
+   for (const auto udp : {true, false}) {
+      BOOST_TEST_CONTEXT("UDP=" << udp) {
+         auto runtime = forge::asio::runtime{};
+         auto script = std::make_shared<dial_script>();
+         script->resources = std::make_shared<p2p::resource_manager>();
+         const auto target = std::string{udp ? "/ip4/8.8.8.8/udp/4001/quic-v1" : "/ip6/2400::1/tcp/4001"};
+         const auto root = std::string{udp ? "/dns4/recovery.test/udp/4001/quic-v1" : "/dns6/recovery.test/tcp/4001"};
+         script->address_responses.emplace("recovery.test", addresses({udp ? "8.8.8.8" : "2400::1"}));
+         script->behaviors.emplace(target, dial_script::behavior::attributable_failure);
+         auto scheduler = p2p::detail::dial_scheduler{
+             runtime.context().get_executor(),
+             {.black_holes = {.window_size = 4, .min_successes = 1}, .max_concurrent_attempts = 1}};
+         const auto counter = [&] {
+            const auto status = scheduler.black_hole_status();
+            return udp ? status.udp : status.ipv6;
+         };
+         const auto check_released = [&] {
+            BOOST_TEST(script->active_attempts() == 0U);
+            BOOST_TEST(script->finished_attempts() == script->starts().size());
+            const auto resources = script->resources->current();
+            BOOST_TEST(resources.system.outbound_connections == 0U);
+            BOOST_TEST(resources.system.file_descriptors == 0U);
+            BOOST_TEST(resources.active_dials == 0U);
+            BOOST_TEST(resources.denied == 0U);
+         };
+         const auto fail = [&] {
+            auto logical = script->resources->reserve_dial();
+            BOOST_REQUIRE(logical);
+            BOOST_CHECK_EXCEPTION(
+                forge::asio::blocking::run(
+                    runtime, scheduler.async_dial(request_for(root, std::chrono::seconds{1}), callbacks_for(script))),
+                forge::exceptions::base, [](const auto& error) {
+                   return p2p::exceptions::code_of(error) == p2p::exceptions::code::peer_not_found;
+                });
+            BOOST_TEST(script->resources->current().active_dials == 1U);
+            logical.reset();
+            check_released();
+         };
+         for (auto failures = std::size_t{1}; failures <= 4; ++failures) {
+            fail();
+            BOOST_TEST(script->starts().size() == failures);
+            BOOST_TEST(counter().outcomes == failures);
+            BOOST_TEST(counter().peer_requests == failures);
+            BOOST_TEST(counter().successes == 0U);
+            BOOST_CHECK(counter().state == (failures < 4 ? p2p::dialing::black_hole_state::probing
+                                                        : p2p::dialing::black_hole_state::blocked));
+         }
+         // Recovery is available now, but only the scheduled probe may launch it.
+         script->behaviors[target] = dial_script::behavior::succeed;
+         for (auto suppressed = std::size_t{1}; suppressed < 4; ++suppressed) {
+            fail();
+            BOOST_TEST(script->starts().size() == 4U);
+            BOOST_CHECK(counter().state == p2p::dialing::black_hole_state::blocked);
+            BOOST_TEST(counter().outcomes == 4U);
+            BOOST_TEST(counter().peer_requests == 4U + suppressed);
+            BOOST_TEST(counter().next_probe_after == 4U - suppressed);
+         }
+         for (auto successes = std::size_t{}; successes < 2; ++successes) {
+            auto logical = script->resources->reserve_dial();
+            BOOST_REQUIRE(logical);
+            auto winner = forge::asio::blocking::run(
+                runtime, scheduler.async_dial(request_for(root, std::chrono::seconds{1}), callbacks_for(script)));
+            BOOST_TEST(script->starts().size() == 5U + successes);
+            BOOST_TEST(script->starts().back().endpoint == target);
+            BOOST_TEST(script->active_attempts() == 0U);
+            BOOST_REQUIRE_EQUAL(winner.winner_roots.size(), 1U);
+            BOOST_TEST(winner.winner_roots.front().canonical.to_string() == root);
+            BOOST_CHECK(counter().state == p2p::dialing::black_hole_state::probing);
+            BOOST_TEST(counter().peer_requests == successes);
+            BOOST_TEST(counter().outcomes == successes);
+            BOOST_TEST(counter().successes == successes);
+            BOOST_TEST(counter().next_probe_after == 0U);
+            BOOST_TEST(script->resources->current().system.outbound_connections == 1U);
+            BOOST_TEST(script->resources->current().system.file_descriptors == 1U);
+            BOOST_TEST(script->resources->current().active_dials == 1U);
+            winner.attempt.reset();
+            logical.reset();
+            check_released();
+         }
+         const auto status = scheduler.black_hole_status();
+         const auto untouched = udp ? status.ipv6 : status.udp;
+         BOOST_CHECK(untouched.state == p2p::dialing::black_hole_state::probing);
+         BOOST_TEST(untouched.peer_requests == 0U);
+         BOOST_TEST(untouched.outcomes == 0U);
+         BOOST_TEST(untouched.successes == 0U);
+         BOOST_TEST(script->peak_attempts() == 1U);
+         BOOST_TEST(script->discards() == 0U);
+         forge::asio::blocking::run(runtime, scheduler.async_close());
+         check_released();
+      }
+   }
 }
 
 BOOST_AUTO_TEST_CASE(dial_scheduler_never_exceeds_the_configured_concurrent_attempt_bound) {
