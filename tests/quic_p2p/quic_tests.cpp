@@ -30,6 +30,7 @@
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/host_name.hpp>
 #include <boost/asio/ip/udp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -1189,6 +1190,66 @@ BOOST_AUTO_TEST_CASE(quic_connect_timeout_wins_over_pre_connection_error_race) {
    }
 }
 
+BOOST_AUTO_TEST_CASE(quic_native_handshake_preserves_committed_terminal_winner) {
+   struct lifetime_notification {
+      std::promise<void> released;
+      ~lifetime_notification() { released.set_value(); }
+   };
+
+   for (const auto inherited : {false, true}) {
+      BOOST_TEST_CONTEXT((inherited ? "committed timeout before deferred inherited cancellation"
+                                    : "committed connector cancellation before attempted timeout")) {
+         auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+         auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
+         auto client = connector{runtime};
+         auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
+         auto hook_calls = std::make_shared<std::atomic_size_t>(0);
+         auto cleanup = std::unique_ptr<void, std::function<void(void*)>>{&client, [&](void*) noexcept {
+            server.stop();
+            runtime.stop();
+         }};
+         auto lifetime = std::make_shared<lifetime_notification>();
+         auto released = std::weak_ptr<lifetime_notification>{lifetime};
+         auto terminal_release = lifetime->released.get_future();
+         auto options = loopback_client_options();
+         options.connect_timeout = std::chrono::seconds{10};
+         options.handshake_timeout = std::chrono::seconds{10};
+         options.connection_lifetime = std::move(lifetime);
+         options.test_failpoint = [&client, cancellation, hook_calls, inherited](std::string_view name) {
+            if (name != "timeout_before_pre_connection_error_finish") {
+               return false;
+            }
+            hook_calls->fetch_add(1, std::memory_order_relaxed);
+            if (inherited) {
+               // Native co_spawn has completed: forwarding this cancellation
+               // to active_connect is deferred until the engine's catch path.
+               cancellation->emit(boost::asio::cancellation_type::terminal);
+            } else {
+               client.cancel();
+            }
+            return true;
+         };
+         auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+         auto pending = boost::asio::co_spawn(
+             boost::asio::make_strand(runtime.context()),
+             client.async_connect(server.local_endpoint(), std::move(options)),
+             boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::use_future));
+
+         const auto expected = inherited ? exceptions::code::connect_timeout : exceptions::code::canceled;
+         BOOST_CHECK_EXCEPTION(
+             get_with_deadline(pending, std::chrono::seconds{5}, "committed native handshake terminal winner"),
+             forge::exceptions::base, [expected](const auto& error) { return exceptions::code_of(error) == expected; });
+         auto inbound = get_with_deadline(accepted, std::chrono::seconds{2}, "terminal winner native handshake accept");
+         BOOST_TEST(inbound.valid());
+         BOOST_TEST(inbound.metrics().handshakes_completed == 1U);
+         BOOST_TEST(hook_calls->load(std::memory_order_relaxed) == 1U);
+         BOOST_CHECK(terminal_release.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+         BOOST_TEST(released.expired());
+         run_with_deadline(runtime, inbound.async_close(), std::chrono::seconds{2}, "close terminal winner peer");
+      }
+   }
+}
+
 BOOST_AUTO_TEST_CASE(quic_connect_awaits_dns_completion_after_inherited_cancellation) {
    struct resolution_barrier {
       std::mutex mutex;
@@ -1242,6 +1303,64 @@ BOOST_AUTO_TEST_CASE(quic_connect_awaits_dns_completion_after_inherited_cancella
       BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::canceled));
    }
+}
+
+BOOST_AUTO_TEST_CASE(quic_inherited_connect_cancellation_releases_native_lifetime_after_initial) {
+   struct lifetime_notification {
+      std::promise<void> released;
+      ~lifetime_notification() { released.set_value(); }
+   };
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto strand = boost::asio::make_strand(runtime.context());
+   auto blackhole = std::make_shared<udp::socket>(strand, udp::endpoint{boost::asio::ip::make_address("127.0.0.1"), 0});
+   auto packet = std::array<std::uint8_t, 65'536>{};
+   auto source = udp::endpoint{};
+   auto received = blackhole->async_receive_from(boost::asio::buffer(packet), source, boost::asio::use_future);
+   auto client = connector{runtime};
+   // Keep the runtime and silent peer alive throughout the assertions. On a
+   // RED timeout, close/join our receive before stopping the runtime; never
+   // wait for the long native handshake timeout or call connector.cancel().
+   auto cleanup = std::unique_ptr<void, std::function<void(void*)>>{blackhole.get(), [&](void*) noexcept {
+      auto closed = std::make_shared<std::promise<void>>();
+      auto closing = closed->get_future();
+      boost::asio::post(strand, [blackhole, closed] {
+         auto ignored = boost::system::error_code{};
+         blackhole->close(ignored);
+         closed->set_value();
+      });
+      if (closing.wait_for(std::chrono::seconds{2}) == std::future_status::ready && received.valid()) {
+         static_cast<void>(received.wait_for(std::chrono::seconds{2}));
+      }
+      runtime.stop();
+   }};
+   auto lifetime = std::make_shared<lifetime_notification>();
+   auto released = std::weak_ptr<lifetime_notification>{lifetime};
+   auto terminal_release = lifetime->released.get_future();
+   auto options = loopback_client_options();
+   options.connect_timeout = std::chrono::seconds{10};
+   options.handshake_timeout = std::chrono::seconds{10};
+   options.connection_lifetime = std::move(lifetime);
+   auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
+   auto pending = boost::asio::co_spawn(
+       strand, client.async_connect(to_quic_endpoint(blackhole->local_endpoint()), std::move(options)),
+       boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::use_future));
+
+   const auto bytes = get_with_deadline(received, std::chrono::seconds{2}, "receive unanswered QUIC Initial");
+   BOOST_REQUIRE(bytes >= 1200U);
+   BOOST_TEST((packet.front() & 0xc0U) == 0xc0U);
+   BOOST_TEST(!released.expired());
+   BOOST_CHECK(pending.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   boost::asio::post(strand, [cancellation] {
+      cancellation->emit(boost::asio::cancellation_type::terminal);
+   });
+   BOOST_REQUIRE(pending.wait_until(deadline) == std::future_status::ready);
+   BOOST_CHECK_EXCEPTION(pending.get(), forge::exceptions::base, [](const auto& error) {
+      return exceptions::code_of(error) == exceptions::code::canceled;
+   });
+   BOOST_CHECK(terminal_release.wait_until(deadline) == std::future_status::ready);
+   BOOST_TEST(released.expired());
 }
 
 BOOST_AUTO_TEST_CASE(quic_frame_codec_round_trips_payload) {

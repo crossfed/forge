@@ -3077,9 +3077,9 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
 
    auto connection_impl = std::make_shared<engine_connection::impl>(impl_->context, socket, local_endpoint,
                                                                     remote_endpoint.endpoint(), options.limits);
-   // The opaque client owner remains attached to the native UDP connection
-   // until engine cleanup; it is never interpreted by QUIC.
-   connection_impl->inbound_admission = std::move(options.connection_lifetime);
+   // Retain the opaque owner in this operation as well: fail_all() releases
+   // native admission before the asynchronous background-work join completes.
+   connection_impl->inbound_admission = options.connection_lifetime;
    connection_impl->self = connection_impl;
    connection_impl->test_failpoint = options.test_failpoint;
    connection_impl->metrics.connections_opened.store(1, std::memory_order_relaxed);
@@ -3092,32 +3092,10 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       auto lock = std::scoped_lock{active_connect->mutex};
       active_connect->connection = connection_impl;
    }
-   if (active_connect->canceled()) {
-      connect_timer->cancel();
-      co_await asio::co_spawn(
-          connection_impl->strand,
-          [connection_impl]() -> asio::awaitable<void> {
-             connection_impl->fail_all();
-             co_return;
-          },
-          asio::use_awaitable);
-      throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
-   }
-   if (active_connect->timed_out()) {
-      connect_timer->cancel();
-      co_await asio::co_spawn(
-          connection_impl->strand,
-          [connection_impl]() -> asio::awaitable<void> {
-             connection_impl->fail_all();
-             co_return;
-          },
-          asio::use_awaitable);
-      throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
-   }
-
    auto connect_error = std::exception_ptr{};
    auto handshake_limited_by_connect_deadline = false;
    try {
+      throw_if_terminal();
       co_await asio::co_spawn(
           connection_impl->strand,
           [&]() -> asio::awaitable<void> {
@@ -3186,6 +3164,7 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
           asio::use_awaitable);
       finish_connect_or_throw();
    } catch (const engine_failure& error) {
+      request_inherited_cancellation();
       if (active_connect->canceled()) {
          connect_error =
              std::make_exception_ptr(engine_failure{engine_error_kind::canceled, "QUIC client connect canceled"});
@@ -3202,11 +3181,15 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
    if (connect_error) {
       (void)active_connect->finish();
       connect_timer->cancel();
+      // The slot belongs to the old cancellation state; clear it before reset.
+      // Terminal cleanup must run even when cancellation caused the failure.
+      cancellation_slot_cleanup.reset();
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
       co_await asio::co_spawn(
           connection_impl->strand,
           [connection_impl]() -> asio::awaitable<void> {
              connection_impl->fail_all();
-             co_return;
+             co_await connection_impl->wait_background_idle();
           },
           asio::use_awaitable);
       std::rethrow_exception(connect_error);
