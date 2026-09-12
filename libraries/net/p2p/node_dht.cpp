@@ -49,6 +49,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.diagnostics;
@@ -72,6 +73,7 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -100,12 +102,10 @@ dht_value_expiry(const dht::record& value, std::chrono::system_clock::time_point
 namespace {
 
 [[nodiscard]] dht::peer dht_peer_from_record(const peer_store::record& record) {
-   auto endpoints = std::vector<endpoint>{};
+   auto endpoints = std::vector<forge::multiformats::multiaddr>{};
    endpoints.reserve(record.endpoints.size());
    for (const auto& item : record.endpoints) {
-      auto endpoint = item.endpoint;
-      endpoint.peer = record.peer;
-      endpoints.push_back(std::move(endpoint));
+      endpoints.push_back(item.address);
    }
    return dht::peer{
        .id = record.peer, .endpoints = std::move(endpoints), .connection = dht::connection_type::can_connect};
@@ -362,14 +362,19 @@ void node::impl::initialize_dht_provider_registry() {
           if (!self) {
              FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node no longer owns DHT provider state");
           }
-          auto endpoints = self->local_endpoints_for_control();
-          if (endpoints.empty()) {
+          const auto local_endpoints = self->local_endpoints_for_control();
+          if (local_endpoints.empty()) {
              FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                                    "DHT provider publication requires an advertised endpoint");
           }
           auto& state = self->dht_profile(protocol);
-          if (endpoints.size() > state.profile.limits.max_peer_endpoints) {
-             endpoints.resize(state.profile.limits.max_peer_endpoints);
+          auto endpoints = std::vector<forge::multiformats::multiaddr>{};
+          endpoints.reserve(local_endpoints.size());
+          for (const auto& endpoint : local_endpoints) {
+             if (endpoints.size() == state.profile.limits.max_peer_endpoints) {
+                break;
+             }
+             endpoints.push_back(endpoint.to_multiaddr());
           }
           const auto stamped_at = std::chrono::steady_clock::now();
           const auto now = std::chrono::system_clock::now();

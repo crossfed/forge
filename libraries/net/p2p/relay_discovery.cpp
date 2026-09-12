@@ -13,6 +13,7 @@ import forge.net.p2p.identity;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.relay;
+import forge.exceptions;
 
 #include "details/relay_discovery.hxx"
 
@@ -20,8 +21,15 @@ namespace forge::net::p2p::relay_discovery {
 namespace {
 
 [[nodiscard]] bool usable_endpoint(const peer_store::endpoint_record& value) {
-   return value.kind == path::kind::direct && !value.relay_peer &&
-          (value.endpoint.is_direct_quic() || value.endpoint.is_direct_tcp());
+   if (value.kind != path::kind::direct || value.relay_peer) {
+      return false;
+   }
+   try {
+      const auto endpoint = parse_endpoint(value.address.to_string());
+      return endpoint.is_direct_quic() || endpoint.is_direct_tcp();
+   } catch (const forge::exceptions::base&) {
+      return false;
+   }
 }
 
 [[nodiscard]] bool relay_capable(const peer_store::record& value) {

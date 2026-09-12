@@ -27,6 +27,7 @@ constexpr auto protocols = std::array{
     protocol_entry{.name = "dns", .code = multicodec_code::dns},
     protocol_entry{.name = "dns4", .code = multicodec_code::dns4},
     protocol_entry{.name = "dns6", .code = multicodec_code::dns6},
+    protocol_entry{.name = "dnsaddr", .code = multicodec_code::dnsaddr},
     protocol_entry{.name = "tcp", .code = multicodec_code::tcp},
     protocol_entry{.name = "udp", .code = multicodec_code::udp},
     protocol_entry{.name = "p2p-circuit", .code = multicodec_code::p2p_circuit},
@@ -67,6 +68,8 @@ multicodec_code multicodec_decode(std::span<const std::uint8_t> data, std::size_
          return multicodec_code::dns4;
       case code_value(multicodec_code::dns6):
          return multicodec_code::dns6;
+      case code_value(multicodec_code::dnsaddr):
+         return multicodec_code::dnsaddr;
       case code_value(multicodec_code::udp):
          return multicodec_code::udp;
       case code_value(multicodec_code::p2p_circuit):

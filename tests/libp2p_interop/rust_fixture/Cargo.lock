@@ -663,6 +663,7 @@ name = "forge-libp2p-rust-fixture"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "hickory-resolver",
  "libp2p",
  "libp2p-stream",
  "rand 0.8.7",

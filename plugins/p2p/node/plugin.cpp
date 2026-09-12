@@ -115,7 +115,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "5.0.0";
+   return "6.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {

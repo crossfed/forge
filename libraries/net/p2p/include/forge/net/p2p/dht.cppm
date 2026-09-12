@@ -14,7 +14,7 @@ module;
 
 export module forge.net.p2p.dht;
 
-import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 
@@ -85,7 +85,7 @@ struct record {
 
 struct peer {
    peer_id id;
-   std::vector<endpoint> endpoints;
+   std::vector<forge::multiformats::multiaddr> endpoints;
    connection_type connection = connection_type::not_connected;
 };
 

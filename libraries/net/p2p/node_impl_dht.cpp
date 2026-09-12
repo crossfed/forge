@@ -48,6 +48,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.diagnostics;
@@ -69,6 +70,7 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -118,7 +120,7 @@ void record_dht_exchange_failure(std::mutex& mutex, const bool& stopped, peer_st
 }
 
 [[nodiscard]] dht::peer sanitize_discovered_peer_for_session(dht::peer value, const auto& session) {
-   value.endpoints = host_addresses::sanitize_discovered_endpoints(
+   value.endpoints = host_addresses::sanitize_discovered_addresses(
        std::move(value.endpoints), value.id,
        discovery_context_for_session_peer(session ? std::optional<peer_id>{session->info.remote_peer} : std::nullopt,
                                           session ? session->remote_endpoint : std::nullopt,
@@ -305,18 +307,20 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             try {
                const auto requested = peer_id::from_bytes(request.key_value.bytes);
                if (requested == local) {
+                  auto addresses = std::vector<forge::multiformats::multiaddr>{};
+                  for (const auto& endpoint : local_endpoints_for_control()) {
+                     addresses.push_back(endpoint.to_multiaddr());
+                  }
                   append_unique_bounded(response, response.closer_peers,
                                         dht::peer{.id = local,
-                                                  .endpoints = local_endpoints_for_control(),
+                                                  .endpoints = std::move(addresses),
                                                   .connection = dht::connection_type::connected},
                                         profile.limits.replication, response_profile);
                } else if (requested != session->info.remote_peer) {
                   if (const auto record = store.find(requested)) {
                      auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
                      for (const auto& item : record->endpoints) {
-                        auto endpoint = item.endpoint;
-                        endpoint.peer = requested;
-                        exact.endpoints.push_back(std::move(endpoint));
+                        exact.endpoints.push_back(item.address);
                      }
                      append_unique_bounded(response, response.closer_peers, std::move(exact),
                                            profile.limits.replication, response_profile);

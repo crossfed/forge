@@ -36,6 +36,7 @@ module forge.net.p2p.node;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.multiformats.varint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -128,7 +129,7 @@ BOOST_AUTO_TEST_CASE(p2p_lifecycle_stop_latch_is_sticky_and_waits_for_operation_
 BOOST_AUTO_TEST_CASE(p2p_node_optional_bootstrap_reports_degraded_and_keeps_running) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto options = make_lifecycle_node_options("lifecycle-optional");
-   options.lifecycle.bootstrap = {{.address = unavailable_bootstrap("lifecycle-optional-bootstrap")}};
+   options.lifecycle.bootstrap = {{.address = unavailable_bootstrap("lifecycle-optional-bootstrap").to_multiaddr()}};
    options.lifecycle.startup_budget = std::chrono::milliseconds{100};
    options.lifecycle.connect_timeout = std::chrono::milliseconds{25};
    auto value = node{runtime, std::move(options)};
@@ -148,7 +149,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_optional_bootstrap_reports_degraded_and_keeps_runn
 BOOST_AUTO_TEST_CASE(p2p_node_strict_bootstrap_retries_until_shared_startup_budget) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto options = make_lifecycle_node_options("lifecycle-strict-failure");
-   options.lifecycle.bootstrap = {{.address = unavailable_bootstrap("lifecycle-strict-unavailable")}};
+   options.lifecycle.bootstrap = {{.address = unavailable_bootstrap("lifecycle-strict-unavailable").to_multiaddr()}};
    options.lifecycle.requirement = bootstrap_requirement::require_connection;
    options.lifecycle.startup_budget = std::chrono::milliseconds{180};
    options.lifecycle.connect_timeout = std::chrono::milliseconds{25};
@@ -192,7 +193,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_stop_cancels_active_bootstrap_dial) {
    auto options = make_lifecycle_node_options("lifecycle-active-dial-node");
    options.lifecycle.bootstrap = {
        {.address = parse_endpoint("/ip4/127.0.0.1/tcp/" + std::to_string(acceptor->local_endpoint().port()) + "/p2p/" +
-                                  bootstrap_peer.to_string())}};
+                                  bootstrap_peer.to_string()).to_multiaddr()}};
    options.lifecycle.requirement = bootstrap_requirement::require_connection;
    options.lifecycle.startup_budget = std::chrono::seconds{5};
    options.lifecycle.connect_timeout = std::chrono::seconds{5};
@@ -234,7 +235,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_lifecycle_bootstrap_connects_and_dynamic_removal_u
    BOOST_REQUIRE(address->peer.has_value());
 
    auto client_options = make_lifecycle_node_options("lifecycle-client");
-   client_options.lifecycle.bootstrap = {{.address = *address}};
+   client_options.lifecycle.bootstrap = {{.address = address->to_multiaddr()}};
    client_options.lifecycle.requirement = bootstrap_requirement::require_connection;
    client_options.lifecycle.startup_budget = std::chrono::seconds{3};
    client_options.lifecycle.connect_timeout = std::chrono::seconds{2};
@@ -266,7 +267,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_learns_authenticated_peer) {
    address->peer.reset();
 
    auto client_options = make_lifecycle_node_options("lifecycle-peerless-bootstrap-client");
-   client_options.lifecycle.bootstrap = {{.address = *address}};
+   client_options.lifecycle.bootstrap = {{.address = address->to_multiaddr()}};
    client_options.lifecycle.requirement = bootstrap_requirement::require_connection;
    client_options.lifecycle.startup_budget = std::chrono::seconds{3};
    auto client = node{runtime, std::move(client_options)};
@@ -290,7 +291,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_replaces_authenticated_peer_pro
    address->peer.reset();
 
    auto client_options = make_lifecycle_node_options("lifecycle-peerless-rotation-client");
-   client_options.lifecycle.bootstrap = {{.address = *address}};
+   client_options.lifecycle.bootstrap = {{.address = address->to_multiaddr()}};
    client_options.lifecycle.requirement = bootstrap_requirement::require_connection;
    client_options.lifecycle.startup_budget = std::chrono::seconds{3};
    client_options.lifecycle.maintenance_interval = std::chrono::milliseconds{25};
@@ -341,8 +342,8 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_alias_removal_preserves_shared_
 
    auto client_options = make_lifecycle_node_options("lifecycle-peerless-alias-client");
    client_options.lifecycle.bootstrap = {
-       {.address = tcp_address},
-       {.address = quic_address},
+       {.address = tcp_address.to_multiaddr()},
+       {.address = quic_address.to_multiaddr()},
    };
    client_options.lifecycle.requirement = bootstrap_requirement::require_connection;
    client_options.lifecycle.startup_budget = std::chrono::seconds{3};
@@ -368,7 +369,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_peerless_bootstrap_alias_removal_preserves_shared_
    BOOST_REQUIRE(eventually([&] { return client.is_peer_protected(second_peer); }, std::chrono::seconds{3}));
    BOOST_TEST(client.is_peer_protected(first_peer));
 
-   forge::asio::blocking::run(runtime, client.async_set_bootstrap({bootstrap_peer{.address = tcp_address}}));
+   forge::asio::blocking::run(runtime, client.async_set_bootstrap({bootstrap_peer{.address = tcp_address.to_multiaddr()}}));
    BOOST_REQUIRE(
        eventually([&] { return !client.is_peer_protected(first_peer) && client.is_peer_protected(second_peer); },
                   std::chrono::seconds{3}));
@@ -407,7 +408,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_strict_bootstrap_cancellation_does_not_report_lose
                       stalled_peer.to_string());
 
    auto client_options = make_lifecycle_node_options("lifecycle-bootstrap-race-client");
-   client_options.lifecycle.bootstrap = {{.address = *available}, {.address = stalled}};
+   client_options.lifecycle.bootstrap = {{.address = available->to_multiaddr()}, {.address = stalled.to_multiaddr()}};
    client_options.lifecycle.requirement = bootstrap_requirement::require_connection;
    client_options.lifecycle.startup_budget = std::chrono::seconds{3};
    client_options.lifecycle.connect_timeout = std::chrono::seconds{2};

@@ -12,6 +12,7 @@ module;
 export module forge.net.p2p.diagnostics;
 
 import forge.net.p2p.discovery;
+import forge.net.p2p.dialing;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
@@ -24,6 +25,7 @@ import forge.net.p2p.reachability;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.topology;
+import forge.multiformats.multiaddr;
 
 export namespace forge::net::p2p {
 
@@ -104,7 +106,7 @@ struct diagnostics {
    };
 
    struct endpoint_record {
-      forge::net::p2p::endpoint endpoint;
+      forge::multiformats::multiaddr address;
       path::kind kind = path::kind::direct;
       std::optional<peer_id> relay_peer;
       std::uint64_t successes = 0;
@@ -240,6 +242,7 @@ struct diagnostics {
       lifecycle_status lifecycle;
       resource_manager::limits effective_limits;
       topology_state topology;
+      dialing::black_hole_status black_holes;
    };
 };
 
@@ -263,7 +266,7 @@ BOOST_DESCRIBE_STRUCT(
      backpressure_rejections, active_sessions, active_relays, active_relay_reservations, stopped))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::network_state, (), (local_peer, local_endpoints, stopped))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::endpoint_record, (),
-                      (endpoint, kind, relay_peer, successes, failures, last_latency, backoff_until, score))
+                      (address, kind, relay_peer, successes, failures, last_latency, backoff_until, score))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::relay_reservation, (),
                       (relay, reservation_id, expires_at, endpoints, successes, failures, last_latency, score))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::peer, (),
@@ -291,4 +294,4 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::topology_state, (),
                        observations, active_operations, waiting_refreshes, completed_refreshes, failed_refreshes))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
                       (network, metrics, resources, pubsub, connections, peers, sessions, persistence, dht_profiles,
-                       lifecycle, effective_limits, topology))
+                       lifecycle, effective_limits, topology, black_holes))

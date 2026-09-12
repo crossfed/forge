@@ -23,6 +23,7 @@ module;
 #include <ranges>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -55,8 +56,11 @@ import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
 import forge.crypto.digest.hmac;
 import forge.crypto.asymmetric;
+import forge.multiformats.multiaddr;
+import forge.net.dns.resolver;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
+import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.envelope;
 import forge.net.p2p.hole_punch;
@@ -88,6 +92,7 @@ import forge.net.yamux.session;
 
 #include "details/lifecycle_wakeup.hxx"
 #include "details/cancellation_latch.hxx"
+#include "details/dial_scheduler.hxx"
 #include "details/node_impl.hxx"
 #include "details/owner_cancellation.hxx"
 #include "details/peer_exchange_learning.hxx"
@@ -358,7 +363,29 @@ void normalize_topology_capacity(node::options& options) noexcept {
    policy.peers.low = std::min(policy.peers.low, policy.peers.target);
 }
 
+[[nodiscard]] detail::dial_scheduler::policy dial_scheduler_policy(const node::options& options) {
+   auto black_holes = options.direct_dial.black_holes;
+   if (options.private_network) {
+      // Private networks are direct-TCP-only, but IPv6 reachability detection remains useful.
+      black_holes.udp_enabled = false;
+   }
+   return detail::dial_scheduler::policy{
+       .resolution = options.dns_resolution,
+       .ranker = options.direct_dial.ranker,
+       .black_holes = std::move(black_holes),
+       .max_concurrent_attempts = options.direct_dial.max_concurrent_attempts,
+   };
+}
+
 void validate(const node::options& options) {
+   detail::dns_address_expander::validate_policy(options.dns_resolution);
+   detail::dial_scheduler::validate_policy(dial_scheduler_policy(options));
+   try {
+      forge::net::dns::validate(options.dns_resolver);
+   } catch (const forge::net::dns::exceptions::invalid_options& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "invalid P2P DNS resolver options: " + std::string{error.what()});
+   }
    if (options.private_network) {
       private_network::validate(*options.private_network);
       if (options.capabilities.has(capabilities::direct_quic) || options.capabilities.has(capabilities::relay) ||
@@ -387,9 +414,6 @@ void validate(const node::options& options) {
       }
       for (const auto& value : options.lifecycle.listen) {
          require_direct_tcp(value, "lifecycle listener");
-      }
-      for (const auto& value : options.lifecycle.bootstrap) {
-         require_direct_tcp(value.address, "lifecycle bootstrap endpoint");
       }
    }
    const auto relay_duration = std::chrono::duration_cast<std::chrono::seconds>(options.limits.relay.max_duration);
@@ -485,7 +509,7 @@ void validate(const node::options& options) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P AutoRelay policy limits must be positive");
    }
    const auto& lifecycle = options.lifecycle;
-   if (lifecycle.listen.size() > 1'024 || lifecycle.bootstrap.size() > 4'096 || lifecycle.startup_budget.count() <= 0 ||
+   if (lifecycle.listen.size() > 1'024 || lifecycle.startup_budget.count() <= 0 ||
        lifecycle.startup_budget > std::chrono::minutes{10} || lifecycle.max_parallel_bootstrap == 0 ||
        lifecycle.max_parallel_bootstrap > 256 || lifecycle.connect_timeout.count() <= 0 ||
        lifecycle.connect_timeout > std::chrono::minutes{5} || lifecycle.bootstrap_retry_initial_delay.count() <= 0 ||
@@ -496,7 +520,8 @@ void validate(const node::options& options) {
        lifecycle.maintenance_interval > std::chrono::minutes{10}) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P node lifecycle options");
    }
-   validate_bootstrap(lifecycle.bootstrap, lifecycle.requirement == bootstrap_requirement::require_connection);
+   validate_bootstrap(lifecycle.bootstrap, lifecycle.requirement == bootstrap_requirement::require_connection,
+                      options.dns_resolution, options.private_network.has_value());
    constexpr auto max_dht_profiles = std::size_t{64};
    if (options.dht_profiles.size() > max_dht_profiles) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P DHT profile count exceeds the supported limit");
@@ -542,6 +567,8 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
                                      : make_peer_id(decode_public_key(identity.public_key))),
       resources(resource_limits_for(options.limits)),
       connection_gate(std::make_shared<detail::connection_gate>(options.connection_gater)),
+      dial_scheduler(std::make_shared<detail::dial_scheduler>(runtime_value.context().get_executor(),
+                                                              dial_scheduler_policy(options), options.dns_resolver)),
       direct_registry(runtime_value, options, identity, resources, connection_gate),
       teardown(runtime_value.context().get_executor()), lifecycle(runtime_value.context().get_executor()),
       lifecycle_wakeup(std::make_shared<detail::lifecycle_wakeup>()),
@@ -561,6 +588,18 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
                                "configured P2P certificate does not match the identity private key");
       }
    }
+}
+
+void node::impl::request_dial_scheduler_stop() noexcept {
+   dial_scheduler->request_stop();
+}
+
+boost::asio::awaitable<void> node::impl::async_close_dial_scheduler() {
+   co_await dial_scheduler->async_close();
+}
+
+dialing::black_hole_status node::impl::dial_black_hole_status() const {
+   return dial_scheduler->black_hole_status();
 }
 
 bool node::impl::private_network_enabled() const noexcept {
@@ -619,6 +658,25 @@ bool node::impl::launch_tracked(std::function<boost::asio::awaitable<void>()> ta
              }
              co_await task();
           },
+          [operation = std::move(operation)](std::exception_ptr error) mutable {
+             static_cast<void>(error);
+             operation.release();
+          });
+      return true;
+   } catch (...) {
+      return false;
+   }
+}
+
+bool node::impl::launch_tracked_cleanup(std::function<boost::asio::awaitable<void>()> task) noexcept {
+   auto operation = lifecycle.track();
+   if (!operation.active()) {
+      return false;
+   }
+   const auto executor = operation.executor();
+   try {
+      asio::co_spawn(
+          executor, [task = std::move(task)]() mutable -> asio::awaitable<void> { co_await task(); },
           [operation = std::move(operation)](std::exception_ptr error) mutable {
              static_cast<void>(error);
              operation.release();
@@ -1204,7 +1262,8 @@ discovery_context_for_session_peer(std::optional<peer_id> session_peer, std::opt
 
 namespace {
 
-[[nodiscard]] std::vector<endpoint> endpoints_from_registration(const rendezvous::registration& registration) {
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+endpoints_from_registration(const rendezvous::registration& registration) {
    if (registration.signed_peer_record.empty()) {
       return registration.endpoints;
    }
@@ -1227,7 +1286,7 @@ sanitize_registration_for_session(rendezvous::registration registration, const a
       }
       return registration;
    }
-   auto sanitized = host_addresses::sanitize_discovered_endpoints(
+   auto sanitized = host_addresses::sanitize_discovered_addresses(
        original_endpoints, registration.peer,
        discovery_context_for_session_peer(session ? std::optional<peer_id>{session->info.remote_peer} : std::nullopt,
                                           session ? session->remote_endpoint : std::nullopt,
@@ -1271,7 +1330,7 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
          response.status_value = rendezvous::status::invalid_ttl;
          response.status_text = "rendezvous registration TTL outside allowed range";
       } else {
-         auto endpoints = std::vector<endpoint>{};
+         auto endpoints = std::vector<forge::multiformats::multiaddr>{};
          auto registered_peer = session->info.remote_peer;
          if (!request.register_value->signed_peer_record.empty()) {
             try {
@@ -1290,9 +1349,7 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
          if (response.status_value == rendezvous::status::ok && endpoints.empty()) {
             if (const auto record = store.find(registered_peer)) {
                for (const auto& endpoint : record->endpoints) {
-                  auto item = endpoint.endpoint;
-                  item.peer = registered_peer;
-                  endpoints.push_back(std::move(item));
+                  endpoints.push_back(endpoint.address);
                }
             }
          }
@@ -1426,7 +1483,7 @@ boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::s
    for (const auto& endpoint : local_endpoints_for_control()) {
       append_endpoint(peer_exchange_message::endpoint_record{
           .peer = local,
-          .endpoint = endpoint,
+          .address = endpoint.to_multiaddr(),
           .capabilities = options.capabilities,
       });
       if (response.endpoints.size() >= response_options.max_endpoint_records) {
@@ -1445,7 +1502,7 @@ boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::s
          }
          append_endpoint(peer_exchange_message::endpoint_record{
              .peer = record.peer,
-             .endpoint = endpoint.endpoint,
+             .address = endpoint.address,
              .capabilities = record.capabilities,
          });
          if (response.endpoints.size() >= response_options.max_endpoint_records) {

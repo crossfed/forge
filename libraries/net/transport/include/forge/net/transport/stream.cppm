@@ -45,6 +45,9 @@ class stream {
    boost::asio::awaitable<std::vector<std::uint8_t>> async_read_frame(frame_options options);
    boost::asio::awaitable<chunk> async_read_frame_chunk();
    boost::asio::awaitable<chunk> async_read_frame_chunk(frame_options options);
+   // Completion, including an exception, is a terminal cleanup barrier. All
+   // concurrent and repeated callers join the same terminal result, so native
+   // lifetime and resource ownership may be released only after it resumes.
    boost::asio::awaitable<void> async_close();
    void cancel();
    void request_cancel() noexcept;
@@ -75,6 +78,8 @@ class stream_concept {
    virtual boost::asio::awaitable<void> async_write_frame_chunk(chunk bytes);
    virtual boost::asio::awaitable<std::vector<std::uint8_t>> async_read() = 0;
    virtual boost::asio::awaitable<chunk> async_read_chunk();
+   // Implementations must complete all native and lower-stream cleanup before
+   // this resumes, including when reporting their terminal cause by exception.
    virtual boost::asio::awaitable<void> async_close() = 0;
    virtual void cancel() = 0;
 };

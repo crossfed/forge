@@ -19,6 +19,7 @@ import forge.net.p2p.exceptions;
 import forge.net.p2p.discovery;
 import forge.net.p2p.identity;
 import forge.net.p2p.peer_store;
+import forge.multiformats.multiaddr;
 
 #include "details/host_addresses.hxx"
 #include "details/peer_exchange_learning.hxx"
@@ -51,10 +52,10 @@ void learn_authenticated_peer_exchange_response(peer_store& store, const peer_ex
       if (from_sender) {
          context.remote_endpoint = remote_endpoint;
       }
-      if (auto learned = host_addresses::learned(endpoint.endpoint, endpoint.peer, context)) {
+      if (auto learned = host_addresses::learned(endpoint.address, endpoint.peer, context)) {
          // PEX endpoint capabilities are third-party claims, including claims about the responder.
          // Identify remains the sole authority for capability indexes and protocol support.
-         store.learn_endpoint(endpoint.peer, *learned, capability_set{});
+         store.learn_address(endpoint.peer, std::move(*learned), capability_set{});
          if (!from_sender) {
             // Third-party endpoint records are untrusted topology hints until their own Identify succeeds.
             static_cast<void>(store.apply_discovery(

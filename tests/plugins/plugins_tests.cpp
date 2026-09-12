@@ -3742,7 +3742,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_static_topology_starts_without_autonomous_d
    forge::asio::blocking::run(app.runtime(), app.startup());
 
    const auto diagnostics = app.apis().get<forge::plugins::p2p::node::diagnostics_source>(
-       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 2, .min_revision = 0});
    const auto snapshot = diagnostics->snapshot();
    BOOST_TEST(snapshot.topology.mode == "static-only");
    BOOST_TEST(snapshot.topology.phase == "idle");
@@ -3761,7 +3761,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_normalizes_managed_topology_to_hard_session
    forge::asio::blocking::run(app.runtime(), app.startup());
 
    const auto diagnostics = app.apis().get<forge::plugins::p2p::node::diagnostics_source>(
-       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 2, .min_revision = 0});
    const auto snapshot = diagnostics->snapshot();
    const auto topology = snapshot.topology;
    const auto& system = snapshot.effective_limits.system;
@@ -3783,7 +3783,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_reserves_a_directional_provisional_session_
    forge::asio::blocking::run(app.runtime(), app.startup());
 
    const auto diagnostics = app.apis().get<forge::plugins::p2p::node::diagnostics_source>(
-       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.node.diagnostics_source"}, .major = 2, .min_revision = 0});
    const auto& system = diagnostics->snapshot().effective_limits.system;
    BOOST_TEST(system.max_connections == 1025U);
    BOOST_TEST(system.max_inbound_connections == 1025U);
@@ -3802,6 +3802,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_config_preserves_legacy_positional_prefix) 
 
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_config_is_described_from_public_schema) {
    auto plugin = forge::plugins::p2p::diagnostics::plugin{};
+   BOOST_TEST(plugin.version() == "2.0.0");
    const auto descriptor = plugin.describe_config();
    BOOST_REQUIRE(descriptor.has_value());
    BOOST_TEST(descriptor->section == "plugins.p2p.diagnostics");
@@ -3813,6 +3814,10 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_config_is_described_from_public_sche
    const auto& max_sessions = require_field(*descriptor, "max-sessions");
    BOOST_TEST(max_sessions.has_default);
    BOOST_TEST(std::get<std::uint64_t>(max_sessions.default_value.storage) > 0U);
+
+   const auto api_descriptor = forge::plugins::p2p::diagnostics::api::describe();
+   BOOST_TEST(api_descriptor.id.value == "forge.plugins.p2p.diagnostics");
+   BOOST_TEST(api_descriptor.version.major == 2U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_api_rejects_facade_calls_before_initialize) {
@@ -3823,7 +3828,7 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_api_rejects_facade_calls_before_initialize)
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto diagnostics = apis.get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
 
    BOOST_CHECK_THROW((void)diagnostics->snapshot(),
                      forge::plugins::p2p::diagnostics::exceptions::plugin_not_initialized);
@@ -3865,7 +3870,7 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    auto client_p2p = client.apis().get<forge::plugins::p2p::node::api>(
        {.id = {"forge.plugins.p2p.node"}, .major = 2, .min_revision = 0});
    auto diagnostics = client.apis().get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
 
    auto remote = forge::asio::blocking::run(
        client.runtime(),
@@ -3876,6 +3881,13 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
 
    const auto snapshot = diagnostics->snapshot();
    BOOST_TEST(snapshot.network.local_peer.to_string() == client_p2p->local_peer().to_string());
+   BOOST_TEST(snapshot.black_holes.udp.enabled);
+   BOOST_TEST(snapshot.black_holes.ipv6.enabled);
+   BOOST_TEST(snapshot.black_holes.udp.peer_requests == 0U);
+   BOOST_TEST(snapshot.black_holes.ipv6.peer_requests == 0U);
+   const auto bounded_snapshot = diagnostics->snapshot(forge::net::p2p::diagnostics::options{.max_peers = 0});
+   BOOST_TEST(bounded_snapshot.black_holes.udp.enabled == snapshot.black_holes.udp.enabled);
+   BOOST_TEST(bounded_snapshot.black_holes.ipv6.enabled == snapshot.black_holes.ipv6.enabled);
    BOOST_TEST(snapshot.metrics.active_sessions >= 1U);
    BOOST_TEST(snapshot.resources.system.outbound_connections >= 1U);
    BOOST_REQUIRE(!snapshot.sessions.empty());
@@ -3919,7 +3931,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_maintains_bootstrap_session_after_peer_rest
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
    auto client_diagnostics = client.apis().get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
 
    const auto connected = forge::asio::blocking::run(
        client.runtime(),
@@ -3957,7 +3969,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_maintains_bootstrap_session_after_peer_rest
    replacement.configure(replacement_config);
    forge::asio::blocking::run(replacement.runtime(), replacement.startup());
    auto replacement_diagnostics = replacement.apis().get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
 
    const auto reconnected = forge::asio::blocking::run(
        client.runtime(),
@@ -4142,9 +4154,9 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_th
    forge::asio::blocking::run(client.runtime(), client.startup());
 
    auto server_diagnostics = server.apis().get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
    auto client_diagnostics = client.apis().get<forge::plugins::p2p::diagnostics::api>(
-       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2, .min_revision = 0});
    BOOST_REQUIRE(forge::asio::blocking::run(
        server.runtime(),
        async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 1U; },

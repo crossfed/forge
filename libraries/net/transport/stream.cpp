@@ -5,16 +5,21 @@ module;
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <utility>
 #include <vector>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/compat/move_only_function.hpp>
 
 module forge.net.transport.stream;
 
+import forge.asio.notification;
 import forge.net.transport.exceptions;
 
 #include "details/bounded_frame_buffer.hxx"
@@ -22,12 +27,6 @@ import forge.net.transport.exceptions;
 namespace forge::net::transport {
 
 struct stream::impl {
-   enum class terminal_state : std::uint8_t {
-      active,
-      close_requested,
-      cancel_requested,
-   };
-
    impl(std::shared_ptr<detail::stream_concept> model_value,
         detail::stream_cancel_request request_cancel_value,
         detail::stream_cancel_request abandon_cancel_value)
@@ -38,21 +37,12 @@ struct stream::impl {
       request_abandon_cancel();
    }
 
-   [[nodiscard]] bool claim_terminal(terminal_state requested) noexcept {
-      auto expected = terminal_state::active;
-      return terminal.compare_exchange_strong(expected, requested, std::memory_order_acq_rel,
-                                              std::memory_order_acquire);
+   [[nodiscard]] bool claim_close() noexcept {
+      return !close_started.exchange(true, std::memory_order_acq_rel);
    }
 
    [[nodiscard]] bool claim_cancel() noexcept {
-      auto current = terminal.load(std::memory_order_acquire);
-      while (current == terminal_state::active || current == terminal_state::close_requested) {
-         if (terminal.compare_exchange_weak(current, terminal_state::cancel_requested,
-                                            std::memory_order_acq_rel, std::memory_order_acquire)) {
-            return true;
-         }
-      }
-      return false;
+      return !cancel_requested.exchange(true, std::memory_order_acq_rel);
    }
 
    void invoke_cancel() noexcept {
@@ -74,7 +64,7 @@ struct stream::impl {
    }
 
    void request_abandon_cancel() noexcept {
-      if (claim_terminal(terminal_state::cancel_requested)) {
+      if (!close_started.load(std::memory_order_acquire) && claim_cancel()) {
          if (abandon_cancel) {
             abandon_cancel();
          } else {
@@ -83,18 +73,44 @@ struct stream::impl {
       }
    }
 
-   void release_close_after_failure() noexcept {
-      auto expected = terminal_state::close_requested;
-      terminal.compare_exchange_strong(expected, terminal_state::active, std::memory_order_acq_rel,
-                                       std::memory_order_acquire);
+   boost::asio::awaitable<void> wait_for_close() {
+      auto error = std::exception_ptr{};
+      while (true) {
+         const auto observed = close_notification.epoch();
+         {
+            const auto lock = std::scoped_lock{close_mutex};
+            if (close_done) {
+               error = close_error;
+               break;
+            }
+         }
+         static_cast<void>(co_await close_notification.async_wait(observed));
+      }
+      if (error) {
+         std::rethrow_exception(error);
+      }
+   }
+
+   void finish_close(std::exception_ptr error) noexcept {
+      {
+         const auto lock = std::scoped_lock{close_mutex};
+         close_error = std::move(error);
+         close_done = true;
+      }
+      close_notification.notify();
    }
 
    std::shared_ptr<detail::stream_concept> model;
    detail::bounded_frame_buffer buffer;
-   // Immutable after publication. terminal is the sole invocation gate.
+   // Immutable after publication; the atomics gate independent close/cancel paths.
    detail::stream_cancel_request request_cancel;
    detail::stream_cancel_request abandon_cancel;
-   std::atomic<terminal_state> terminal{terminal_state::active};
+   std::atomic_bool close_started = false;
+   std::atomic_bool cancel_requested = false;
+   std::mutex close_mutex;
+   bool close_done = false;
+   std::exception_ptr close_error;
+   forge::asio::notification close_notification;
 };
 
 stream::stream() = default;
@@ -194,20 +210,24 @@ boost::asio::awaitable<void> stream::async_close() {
       co_return;
    }
    auto state = impl_;
-   auto expected = impl::terminal_state::active;
-   const auto owns_close = state->terminal.compare_exchange_strong(
-       expected, impl::terminal_state::close_requested, std::memory_order_acq_rel,
-       std::memory_order_acquire);
-   if (!owns_close && expected != impl::terminal_state::cancel_requested) {
+   // A close result is the ownership barrier for the native model. Once one
+   // caller starts it, cancellation may not let any caller observe completion
+   // before that model has published its terminal result.
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+   if (!state->claim_close()) {
+      co_await state->wait_for_close();
       co_return;
    }
+
+   auto error = std::exception_ptr{};
    try {
       co_await state->model->async_close();
    } catch (...) {
-      if (owns_close) {
-         state->release_close_after_failure();
-      }
-      throw;
+      error = std::current_exception();
+   }
+   state->finish_close(error);
+   if (error) {
+      std::rethrow_exception(error);
    }
 }
 

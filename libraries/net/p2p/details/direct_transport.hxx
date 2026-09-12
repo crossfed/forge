@@ -24,6 +24,11 @@ class connection_gate;
 namespace forge::net::p2p::direct {
 
 using authenticated_admission_handler = std::function<void(const peer_id&)>;
+using tcp_transport_progress_handler = std::function<void()>;
+
+// TCP progress is advisory scheduler input. It must never alter transport
+// ownership or cause an already-connected socket to skip terminal cleanup.
+void notify_tcp_transport_progress(const tcp_transport_progress_handler& handler) noexcept;
 
 struct connection {
    peer_id peer;
@@ -35,6 +40,10 @@ struct connection {
    peer_authentication authentication = peer_authentication::unverified;
 };
 
+// An accepted connection is not yet visible to node session registries. Its
+// admission and native lifetime remain owned until the lower close completes.
+boost::asio::awaitable<void> async_discard_unpublished(connection& value);
+
 struct profile {
    std::function<bool(const forge::net::p2p::endpoint&)> supports;
    std::function<bool()> listening;
@@ -44,7 +53,8 @@ struct profile {
    std::function<boost::asio::awaitable<void>()> async_stop;
    std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint, const node::connect_options&,
                                                     std::shared_ptr<forge::net::p2p::cancellation_latch>,
-                                                    std::shared_ptr<void>, authenticated_admission_handler)>
+                                                    std::shared_ptr<void>, authenticated_admission_handler,
+                                                    tcp_transport_progress_handler)>
        async_connect;
    std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint)> async_accept;
 };
@@ -70,7 +80,8 @@ class registry {
    boost::asio::awaitable<connection>
    async_connect(forge::net::p2p::endpoint endpoint, const node::connect_options& options,
                  std::shared_ptr<forge::net::p2p::cancellation_latch> cancellation = {},
-                 std::shared_ptr<void> native_lifetime = {}, authenticated_admission_handler authenticated = {});
+                 std::shared_ptr<void> native_lifetime = {}, authenticated_admission_handler authenticated = {},
+                 tcp_transport_progress_handler tcp_transport_progress = {});
    boost::asio::awaitable<connection> async_accept(forge::net::p2p::endpoint endpoint);
 
  private:

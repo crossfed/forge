@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+from functools import wraps
 import hashlib
 import io
 import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tarfile
@@ -16,6 +16,9 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
+from dns_fixture import DnsaddrServer
+from process_lifecycle import Listener, current_scope, enter_scope, exit_scope, spawn_owned, tail_text
+from provider_evidence import validate_hidden_find_peer_evidence, validate_provider_evidence
 from provenance import (
     WorktreeIdentity,
     fixture_donor_checkout_errors,
@@ -30,7 +33,8 @@ LIVE_SCENARIO_PROFILES = {
     "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
     "tcp_noise": ("ping", "identify", "echo", "echo_large"),
     "tcp_tls": ("ping", "identify", "echo"),
-    "private_tcp_yamux_pnet": ("pnet",),
+    "private_tcp_yamux_pnet": ("pnet", "dnsaddr_private_tcp_yamux_pnet"),
+    "tcp_stage6": ("dnsaddr",),
     "quic_dht": (
         "dht_find_peer",
         "dht_provide_find_provider",
@@ -60,6 +64,8 @@ CURRENT_ACCEPTANCE_SCENARIOS = {
     "tcp_noise/echo": ("tcp_yamux",),
     "tcp_tls/identify": ("tls_identity",),
     "private_tcp_yamux_pnet/pnet": ("pnet",),
+    "tcp_stage6/dnsaddr": ("dnsaddr",),
+    "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet": ("dnsaddr_private_tcp_yamux_pnet",),
     "quic_dht/dht_provide_find_provider": ("kademlia_amino",),
     "quic_rendezvous/rendezvous_register_discover": ("rendezvous_rust",),
 }
@@ -349,56 +355,71 @@ def wait_json(path: Path, timeout: float) -> dict:
     raise TimeoutError(f"timed out waiting for {path}")
 
 
-def tail_text(path: Path, limit: int = 20) -> str:
-    if not path.exists():
-        return "<missing log>"
-    lines = path.read_text(errors="replace").splitlines()
-    return "\n".join(lines[-limit:])
+class CaseFailure(RuntimeError):
+    def __init__(self, primary: Optional[Exception], cleanup_errors: list[str], artifact: dict):
+        self.primary = primary
+        self.cleanup_errors = cleanup_errors
+        self.artifact = artifact
+        details = ([str(primary)] if primary is not None else []) + cleanup_errors
+        super().__init__("; ".join(details))
 
 
-class Listener:
-    def __init__(self, process: subprocess.Popen, ready: dict, stop_file: Path, log_file: Path, log_handle,
-                 command: list[str]):
-        self.process = process
-        self.ready = ready
-        self.stop_file = stop_file
-        self.log_file = log_file
-        self.log_handle = log_handle
-        self.command = command
-        # Keep a mutable terminal record so artifacts built after close include
-        # the process outcome without inventing a separate listener result.
-        self.terminal_status: dict[str, object] = {"exit_code": None, "termination": "running"}
-
-    def close(self) -> None:
-        if self.terminal_status["termination"] != "running":
-            return
+def owned_case(function):
+    """Nested scenario helpers share one owner; only the outer case commits."""
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        if current_scope() is not None:
+            return function(*args, **kwargs)
+        scope, token = enter_scope()
+        result = None
+        primary = None
         try:
-            self.stop_file.write_text("stop\n")
-            self.terminal_status["exit_code"] = self.process.wait(timeout=5)
-            self.terminal_status["termination"] = "graceful"
-        except Exception:
-            self.process.send_signal(signal.SIGTERM)
             try:
-                self.terminal_status["exit_code"] = self.process.wait(timeout=5)
-                self.terminal_status["termination"] = "terminated"
-            except Exception:
-                self.process.kill()
-                self.terminal_status["exit_code"] = self.process.wait(timeout=5)
-                self.terminal_status["termination"] = "killed"
+                result = function(*args, **kwargs)
+            except Exception as error:
+                primary = error
+            finally:
+                cleanup_errors = scope.close()
+            if primary is not None or cleanup_errors:
+                artifact = {
+                    "status": "failed",
+                    "case_function": function.__name__,
+                    "primary_error": str(primary) if primary is not None else None,
+                    "cleanup_errors": cleanup_errors,
+                    "processes": scope.evidence(),
+                    "attempts": scope.attempts,
+                }
+                if result is not None:
+                    artifact["uncommitted_result"] = result
+                raise CaseFailure(primary, cleanup_errors, artifact) from primary
+            if "result_file" in result:
+                # Standalone dial helpers return a raw payload. Keep runner
+                # metadata in attempts, which the evidence checker excludes.
+                result["attempts"][-1]["owned_processes"] = scope.evidence()
+            else:
+                result["owned_processes"] = scope.evidence()
+            return result
         finally:
-            self.log_handle.close()
+            exit_scope(token)
+    return invoke
 
 
 def command_attempt(command: list[str], log_file: Path, scenario: str, attempt_id: int, kind: str,
                     timeout: float) -> dict:
-    return {
+    attempt = {
         "kind": kind,
         "scenario_id": scenario,
         "attempt_id": attempt_id,
         "command": command,
-        "log_file": str(log_file),
+        "requested_log_file": str(log_file),
         "timeout_seconds": timeout,
+        "exit_code": None,
     }
+    scope = current_scope()
+    if scope is None:
+        raise RuntimeError("fixture attempt requires an owning scenario")
+    scope.attempts.append(attempt)
+    return attempt
 
 
 def run_command_with_attempts(command: list[str], log_file: Path, scenario: str, kind: str, timeout: float,
@@ -410,58 +431,64 @@ def run_command_with_attempts(command: list[str], log_file: Path, scenario: str,
                 shutil.rmtree(path)
             elif path.exists():
                 path.unlink()
-        attempt = command_attempt(command, log_file, scenario, attempt_id, kind, timeout)
+        attempt_log = log_file if attempt_id == 1 else log_file.with_name(f"{log_file.stem}-attempt-{attempt_id}{log_file.suffix}")
+        attempt = command_attempt(command, attempt_log, scenario, attempt_id, kind, timeout)
         attempts.append(attempt)
-        with log_file.open("w") as log:
-            process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        owned = spawn_owned(command, attempt_log, attempt=attempt)
+        process = owned.process
+        try:
             attempt["pid"] = process.pid
             try:
                 exit_code = process.wait(timeout=timeout)
                 attempt["exit_code"] = exit_code
-                attempt["log_tail"] = tail_text(log_file)
+                attempt["log_tail"] = tail_text(attempt_log)
                 if exit_code == 0:
                     return attempts
                 attempt["failure_class"] = "process_exit"
                 raise RuntimeError(
-                    f"{kind} exited with {exit_code}; log={log_file}; tail={attempt['log_tail']}"
+                    f"{kind} exited with {exit_code}; log={attempt_log}; tail={attempt['log_tail']}"
                 )
             except subprocess.TimeoutExpired as error:
                 attempt["timeout_class"] = "fixture_timeout"
-                attempt["log_tail"] = tail_text(log_file)
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except Exception:
-                    process.kill()
-                    process.wait(timeout=5)
-                attempt["exit_code"] = process.returncode
+                attempt["log_tail"] = tail_text(attempt_log)
+                owned.close()
+                attempt["exit_code"] = owned.terminal_status["exit_code"]
+                if attempt["exit_code"] is None:
+                    raise RuntimeError(
+                        f"{kind} timed out after {error.timeout}s; process was not reaped; retry disabled; "
+                        f"log={attempt_log}; tail={attempt['log_tail']}"
+                    ) from error
                 if attempt_id == 1:
                     continue
                 raise RuntimeError(
-                    f"{kind} timed out after {error.timeout}s; log={log_file}; tail={attempt['log_tail']}"
+                    f"{kind} timed out after {error.timeout}s; log={attempt_log}; tail={attempt['log_tail']}"
                 )
+        finally:
+            owned.close()
+            attempt["exit_code"] = owned.terminal_status["exit_code"]
+            attempt["log_tail"] = tail_text(attempt_log)
     return attempts
 
 
 def run_command_once(command: list[str], log_file: Path, scenario: str, kind: str, timeout: float) -> list[dict]:
     """Negative controls represent one deliberately observed connection attempt."""
     attempt = command_attempt(command, log_file, scenario, 1, kind, timeout)
-    with log_file.open("w") as log:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+    owned = spawn_owned(command, log_file, attempt=attempt)
+    process = owned.process
+    try:
         attempt["pid"] = process.pid
         try:
             attempt["exit_code"] = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as error:
             attempt["timeout_class"] = "fixture_timeout"
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except Exception:
-                process.kill()
-                process.wait(timeout=5)
-            attempt["exit_code"] = process.returncode
+            owned.close()
+            attempt["exit_code"] = owned.terminal_status["exit_code"]
             attempt["log_tail"] = tail_text(log_file)
             raise RuntimeError(f"{kind} timed out after {error.timeout}s; log={log_file}; tail={attempt['log_tail']}") from error
+    finally:
+        owned.close()
+        attempt["exit_code"] = owned.terminal_status["exit_code"]
+        attempt["log_tail"] = tail_text(log_file)
     attempt["log_tail"] = tail_text(log_file)
     if attempt["exit_code"] != 0:
         attempt["failure_class"] = "process_exit"
@@ -516,16 +543,12 @@ def start_listener(binary: Path, implementation: str, work: Path, scenario: Opti
         command.extend(["--pnet-fingerprint", pnet_fingerprint])
     if pnet_control is not None and pnet_correlation is not None:
         command.extend(["--pnet-control", pnet_control, "--pnet-correlation", pnet_correlation])
-    log = log_file.open("w")
-    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+    owned = spawn_owned(command, log_file, stop_file)
     try:
-        ready = wait_json(ready_file, 20)
+        owned.ready = wait_json(ready_file, 20)
     except Exception as error:
-        process.terminate()
-        process.wait(timeout=5)
-        log.close()
         raise RuntimeError(f"{implementation} listener did not become ready: {error}; log={log_file}; tail={tail_text(log_file)}")
-    return Listener(process, ready, stop_file, log_file, log, command)
+    return owned
 
 
 def start_destination(binary: Path, implementation: str, relay_addr: str, relay_peer_id: str, work: Path) -> Listener:
@@ -547,22 +570,19 @@ def start_destination(binary: Path, implementation: str, relay_addr: str, relay_
         "--store-dir",
         str(store_dir),
     ]
-    log = log_file.open("w")
-    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+    owned = spawn_owned(command, log_file, stop_file)
     try:
-        ready = wait_json(ready_file, 30)
+        owned.ready = wait_json(ready_file, 30)
     except Exception as error:
-        process.terminate()
-        process.wait(timeout=5)
-        log.close()
         raise RuntimeError(f"{implementation} destination did not become ready: {error}; log={log_file}; tail={tail_text(log_file)}")
-    return Listener(process, ready, stop_file, log_file, log, command)
+    return owned
 
 
+@owned_case
 def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, addr: str, work: Path,
              payload: Optional[str] = None, transport: str = "quic", fresh_store_each_attempt: bool = False,
              target_peer_id: Optional[str] = None, pnet_key_file: Optional[Path] = None,
-             pnet_fingerprint: Optional[str] = None) -> dict:
+             pnet_fingerprint: Optional[str] = None, dns_server: Optional[str] = None) -> dict:
     payload_suffix = "" if payload is None else f"-{payload}"
     result_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.json"
     log_file = work / f"{implementation}-dial-{scenario}{payload_suffix}.log"
@@ -591,6 +611,8 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
         command.extend(["--pnet-key-file", str(pnet_key_file)])
     if pnet_fingerprint is not None:
         command.extend(["--pnet-fingerprint", pnet_fingerprint])
+    if dns_server is not None:
+        command.extend(["--dns-server", dns_server])
     try:
         reset_paths = (store_dir, result_file) if fresh_store_each_attempt else ()
         attempts = run_command_with_attempts(
@@ -608,6 +630,7 @@ def run_dial(binary: Path, implementation: str, scenario: str, peer_id: str, add
     return attach_attempts(result, attempts)
 
 
+@owned_case
 def run_rejected_pnet_dial(binary: Path, implementation: str, peer_id: str, addr: str, work: Path,
                            control: str, correlation: str, key_file: Optional[Path], fingerprint: str) -> dict:
     result_file = work / f"{implementation}-dial-pnet-{control}.json"
@@ -639,6 +662,7 @@ def listener_evidence(listener: Listener) -> dict:
     }
 
 
+@owned_case
 def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: str, hidden: str, root: Path) -> dict:
     work = root / f"quic-{seeker}-via-{routing}-to-{hidden}-{HIDDEN_DHT_SCENARIO}"
     work.mkdir(parents=True, exist_ok=True)
@@ -658,6 +682,8 @@ def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: st
         routing_seed = wait_json(routing_seed_result, 30)
         if routing_seed.get("status") != "ok" or routing_seed.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
             raise RuntimeError(f"{routing} did not establish a real Kademlia seed route: {routing_seed}")
+        if routing == "forge" and routing_seed.get("seed_route_source") != "explicit_get_providers_wire_reply":
+            raise RuntimeError(f"Forge routing listener did not prove its explicit seed RPC: {routing_seed}")
 
         seeker_result = run_dial(
             binaries[seeker],
@@ -674,7 +700,13 @@ def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: st
             raise RuntimeError(f"{seeker} did not find the hidden peer: {seeker_result}")
         if seeker_result.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
             raise RuntimeError(f"{seeker} did not prove the Amino Kademlia protocol: {seeker_result}")
-        if seeker_result.get("dht_queries_delta", 0) < 1:
+        if seeker == "forge":
+            require_hidden_dht_find_peer_evidence(
+                seeker_result,
+                routing_listener.ready["peer_id"],
+                hidden_listener.ready["peer_id"],
+            )
+        elif seeker_result.get("dht_queries_delta", 0) < 1:
             raise RuntimeError(f"{seeker} FindPeer did not issue a DHT query: {seeker_result}")
         if seeker == "rust":
             for field in (
@@ -711,11 +743,10 @@ def run_hidden_dht_find_peer(binaries: dict[str, Path], seeker: str, routing: st
             "result": seeker_result,
         }
     finally:
-        if routing_listener is not None:
-            routing_listener.close()
-        hidden_listener.close()
+        current_scope().close()
 
 
+@owned_case
 def run_pubsub_mixed_mesh_stress(binaries: dict[str, Path], root: Path) -> dict:
     work = root / PUBSUB_STRESS_SCENARIO
     work.mkdir(parents=True, exist_ok=True)
@@ -779,8 +810,7 @@ def run_pubsub_mixed_mesh_stress(binaries: dict[str, Path], root: Path) -> dict:
 
         time.sleep(8)
     finally:
-        for listener in listeners:
-            listener.close()
+        current_scope().close()
 
     listener_results = []
     for name, result_file in result_files:
@@ -807,6 +837,7 @@ def run_pubsub_mixed_mesh_stress(binaries: dict[str, Path], root: Path) -> dict:
     }
 
 
+@owned_case
 def run_relay_dial(binary: Path, implementation: str, scenario: str, target_peer_id: str, relay_peer_id: str,
                    relay_addr: str, work: Path) -> dict:
     result_file = work / f"{implementation}-relay-dial-{scenario}.json"
@@ -851,6 +882,11 @@ def prepare_go_fixture(source_dir: Path, build_dir: Path, go_tool: str,
     commands = [
         {"command": [go_tool, "mod", "verify"], "cwd": str(work), "environment": policy},
         {
+            "command": [go_tool, "test", "-mod=readonly", "-count=1", "-timeout=60s", "."],
+            "cwd": str(work),
+            "environment": policy,
+        },
+        {
             "command": [go_tool, "build", "-mod=readonly", "-trimpath", "-o", str(binary), "."],
             "cwd": str(work),
             "environment": policy,
@@ -861,12 +897,44 @@ def prepare_go_fixture(source_dir: Path, build_dir: Path, go_tool: str,
     return binary, commands
 
 
+def remove_rust_fixture_entry(path: Path) -> None:
+    """Remove one refresh entry without ever traversing a symlink."""
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def refresh_rust_fixture_source(source: Path, work: Path) -> None:
+    """Refresh copied Rust sources while retaining only a real Cargo target directory."""
+    if work.is_symlink():
+        raise RuntimeError(f"refusing to refresh Rust fixture through symlinked work directory: {work}")
+    if work.exists() and not work.is_dir():
+        remove_rust_fixture_entry(work)
+    if work.exists():
+        target = work / "target"
+        retain_target = target.is_dir() and not target.is_symlink()
+        for entry in work.iterdir():
+            if retain_target and entry == target:
+                continue
+            remove_rust_fixture_entry(entry)
+        shutil.copytree(
+            source,
+            work,
+            dirs_exist_ok=True,
+            symlinks=True,
+            ignore=shutil.ignore_patterns("target"),
+        )
+        return
+    shutil.copytree(source, work, symlinks=True, ignore=shutil.ignore_patterns("target"))
+
+
 def prepare_rust_fixture(source_dir: Path, build_dir: Path, cargo_tool: str,
                          environment: dict[str, str]) -> tuple[Path, list[dict]]:
     work = build_dir / "rust_fixture"
-    if work.exists():
-        shutil.rmtree(work)
-    shutil.copytree(source_dir / "rust_fixture", work)
+    refresh_rust_fixture_source(source_dir / "rust_fixture", work)
     commands = [
         {
             "command": [cargo_tool, "test", "--frozen"],
@@ -989,33 +1057,19 @@ def require_rendezvous_lifecycle_evidence(result: dict, dialer: str, listener: s
         raise RuntimeError(f"{dialer} rendezvous lifecycle did not expire and unregister: {result}")
 
 
-def require_dht_provider_evidence(result: dict, dialer: str) -> None:
-    provider_count = result.get("provider_count")
-    if type(provider_count) is not int or provider_count < 1:
-        raise RuntimeError(f"{dialer} DHT provider lookup did not return a provider: {result}")
-    provider_peer = result.get("provider_peer")
-    querier_peer = result.get("querier_peer")
-    if not isinstance(provider_peer, str) or not provider_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof did not identify the provider: {result}")
-    if not isinstance(querier_peer, str) or not querier_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof did not identify the querier: {result}")
-    if provider_peer == querier_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof reused the provider as its querier: {result}")
-    if result.get("returned_provider_peer") != provider_peer:
-        raise RuntimeError(f"{dialer} DHT provider proof returned a different provider: {result}")
-    address_count = result.get("address_count")
-    if type(address_count) is not int or address_count < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof returned no provider address: {result}")
-    stream_delta = result.get("protocol_streams_opened_delta")
-    if type(stream_delta) is not int or stream_delta < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof did not open a DHT protocol stream: {result}")
-    query_delta = result.get("query_requests_delta")
-    if type(query_delta) is not int or query_delta < 1:
-        raise RuntimeError(f"{dialer} DHT provider proof did not issue a DHT query: {result}")
-    if result.get("negotiated_protocol") != "/ipfs/kad/1.0.0":
-        raise RuntimeError(f"{dialer} DHT provider proof negotiated the wrong protocol: {result}")
+def require_dht_provider_evidence(result: dict, dialer: str, listener_peer: str) -> None:
+    errors = validate_provider_evidence(result, listener_peer)
+    if errors:
+        raise RuntimeError(f"{dialer} DHT provider proof is invalid: {'; '.join(errors)}; result={result}")
 
 
+def require_hidden_dht_find_peer_evidence(result: dict, seed_peer: str, target_peer: str) -> None:
+    errors = validate_hidden_find_peer_evidence(result, seed_peer, target_peer)
+    if errors:
+        raise RuntimeError(f"Forge hidden FindPeer proof is invalid: {'; '.join(errors)}; result={result}")
+
+
+@owned_case
 def run_pair(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str, root: Path,
              acceptance_scenario_id: Optional[str] = None) -> dict:
     runner_profile = "quic_base"
@@ -1040,6 +1094,7 @@ def run_pair(dialer_binary: Path, dialer: str, listener_binary: Path, listener: 
     )
 
 
+@owned_case
 def run_dht_value_remote_get(binaries: dict[str, Path], writer: str, listener: str, scenario: str,
                              root: Path) -> dict:
     readers = [implementation for implementation in binaries if implementation not in (writer, listener)]
@@ -1085,9 +1140,10 @@ def run_dht_value_remote_get(binaries: dict[str, Path], writer: str, listener: s
             "retrieval": retrieval,
         }
     finally:
-        server.close()
+        current_scope().close()
 
 
+@owned_case
 def run_pnet_control(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, root: Path,
                      key_file: Path, dial_key_file: Optional[Path], fingerprint: str, control: str,
                      correlation: str) -> dict:
@@ -1150,12 +1206,13 @@ def require_pnet_dial_evidence(result: dict, implementation: str) -> None:
                 raise RuntimeError(f"Rust pnet dial did not prove {field}=false: {result}")
 
 
+@owned_case
 def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: Path, listener: str, scenario: str,
                             root: Path, transport: str, acceptance_profile: str,
                             transport_stack: tuple[str, ...], runner_scenario_id: str,
                             acceptance_scenario_id: str, pnet_key_file: Optional[Path] = None,
                             pnet_mismatch_key_file: Optional[Path] = None,
-                            pnet_fingerprint: Optional[str] = None) -> dict:
+                            pnet_fingerprint: Optional[str] = None, dnsaddr: bool = False) -> dict:
     work = root / f"{transport}-{dialer}-to-{listener}-{acceptance_scenario_id}"
     work.mkdir(parents=True, exist_ok=True)
     if acceptance_profile not in {"native", "private_network"}:
@@ -1183,17 +1240,24 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
     try:
         addr = server.ready["listen_addrs"][0]
         peer_id = server.ready["peer_id"]
-        result = run_dial(
-            dialer_binary,
-            dialer,
-            scenario,
-            peer_id,
-            addr,
-            work,
-            transport=transport,
-            pnet_key_file=pnet_key_file,
-            pnet_fingerprint=pnet_fingerprint,
-        )
+        dns_evidence = None
+        if dnsaddr:
+            dns_path = work / "authoritative-dns.json"
+            with DnsaddrServer(addr, peer_id, dns_path) as resolver:
+                addr = resolver.root
+                result = run_dial(
+                    dialer_binary, dialer, scenario, peer_id, addr, work, transport=transport,
+                    pnet_key_file=pnet_key_file, pnet_fingerprint=pnet_fingerprint,
+                    dns_server=resolver.nameserver,
+                )
+            resolver.require_chain()
+            dns_evidence = {"log_file": str(dns_path), "sha256": sha256_file(dns_path),
+                            **json.loads(dns_path.read_text())}
+        else:
+            result = run_dial(
+                dialer_binary, dialer, scenario, peer_id, addr, work, transport=transport,
+                pnet_key_file=pnet_key_file, pnet_fingerprint=pnet_fingerprint,
+            )
         if pnet_profile:
             require_pnet_dial_evidence(result, dialer)
         if scenario == "identify" and dialer == "go" and listener == "forge":
@@ -1204,7 +1268,7 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         if scenario == "rendezvous_lifecycle":
             require_rendezvous_lifecycle_evidence(result, dialer, listener)
         if scenario == "dht_provide_find_provider":
-            require_dht_provider_evidence(result, dialer)
+            require_dht_provider_evidence(result, dialer, peer_id)
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")
@@ -1216,11 +1280,11 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         if pnet_profile:
             controls = {
                 "missing_key": run_pnet_control(
-                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, None,
+                    dialer_binary, dialer, listener_binary, listener, work, pnet_key_file, None,
                     pnet_fingerprint, "missing_key", f"{dialer}-to-{listener}-missing-key",
                 ),
                 "mismatched_key": run_pnet_control(
-                    dialer_binary, dialer, listener_binary, listener, root, pnet_key_file, pnet_mismatch_key_file,
+                    dialer_binary, dialer, listener_binary, listener, work, pnet_key_file, pnet_mismatch_key_file,
                     pnet_fingerprint, "mismatched_key", f"{dialer}-to-{listener}-mismatched-key",
                 ),
             }
@@ -1258,11 +1322,13 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
             ),
         }
         out.update(controls)
+        if dns_evidence is not None:
+            out["dns_evidence"] = dns_evidence
         if listener_result is not None:
             out["listener_result_file"] = str(listener_result)
         return out
     finally:
-        server.close()
+        current_scope().close()
 
 
 def require_local_topology_evidence(result: dict, scenario: str) -> None:
@@ -1291,6 +1357,7 @@ def require_local_topology_evidence(result: dict, scenario: str) -> None:
     raise RuntimeError(f"unknown Forge topology evidence scenario: {scenario}")
 
 
+@owned_case
 def run_topology(binary: Path, implementation: str, scenario: str, root: Path) -> dict:
     work = root / f"{implementation}-{scenario}"
     work.mkdir(parents=True, exist_ok=True)
@@ -1324,6 +1391,7 @@ def run_topology(binary: Path, implementation: str, scenario: str, root: Path) -
     }
 
 
+@owned_case
 def run_native_relay_topology(binaries: dict[str, Path], source: str, relay_impl: str, destination_impl: str,
                               scenario: str, root: Path) -> dict:
     work = root / f"{source}-source-{relay_impl}-relay-{destination_impl}-destination-{scenario}"
@@ -1359,9 +1427,7 @@ def run_native_relay_topology(binaries: dict[str, Path], source: str, relay_impl
             "result": result,
         }
     finally:
-        if destination is not None:
-            destination.close()
-        relay.close()
+        current_scope().close()
 
 
 def referenced_evidence_paths(value: object) -> set[Path]:
@@ -1426,6 +1492,12 @@ def write_artifact(path: Path, root: Path, provenance: dict, artifacts: list[dic
         )
         + "\n"
     )
+
+
+def record_case_failure(artifacts: list[dict], failures: list[str], label: str, error: Exception) -> None:
+    failures.append(f"{label}: {error}")
+    if isinstance(error, CaseFailure):
+        artifacts.append({"case_label": label, **error.artifact})
 
 
 def main() -> int:
@@ -1580,7 +1652,7 @@ def main() -> int:
                                     )
                                 )
                             except Exception as error:
-                                failures.append(f"{dialer}->{listener} {acceptance_scenario_id}: {error}")
+                                record_case_failure(artifacts, failures, f"{dialer}->{listener} {acceptance_scenario_id}", error)
                     for scenario in DHT_SCENARIOS:
                         try:
                             if scenario in DHT_VALUE_SCENARIOS:
@@ -1601,7 +1673,7 @@ def main() -> int:
                                         )
                                     )
                         except Exception as error:
-                            failures.append(f"{dialer}->{listener} {scenario}: {error}")
+                            record_case_failure(artifacts, failures, f"{dialer}->{listener} {scenario}", error)
                     for scenario in PUBSUB_SCENARIOS:
                         if "forge" not in (dialer, listener):
                             continue
@@ -1612,9 +1684,9 @@ def main() -> int:
                                 )
                             )
                         except Exception as error:
-                            failures.append(f"{dialer}->{listener} {scenario}: {error}")
+                            record_case_failure(artifacts, failures, f"{dialer}->{listener} {scenario}", error)
             for dialer, listener in (("forge", "go"), ("go", "forge"), ("forge", "rust"), ("rust", "forge")):
-                for transport, profile in (("tcp", "tcp_noise"), ("tcp-tls", "tcp_tls")):
+                for transport, profile in (("tcp", "tcp_noise"), ("tcp-tls", "tcp_tls"), ("tcp", "tcp_stage6")):
                     for scenario in LIVE_SCENARIO_PROFILES[profile]:
                         for acceptance_scenario_id in CURRENT_ACCEPTANCE_SCENARIOS.get(
                             f"{profile}/{scenario}", (scenario,)
@@ -1626,19 +1698,19 @@ def main() -> int:
                                         dialer,
                                         binaries[listener],
                                         listener,
-                                        scenario,
+                                        "echo" if scenario == "dnsaddr" else scenario,
                                         root,
                                         transport,
                                         "native",
                                         ("tcp", "yamux"),
                                         f"{profile}/{scenario}",
                                         acceptance_scenario_id,
+                                        dnsaddr=scenario == "dnsaddr",
                                     )
                                 )
                             except Exception as error:
-                                failures.append(
-                                    f"{dialer}->{listener} {transport} {acceptance_scenario_id}: {error}"
-                                )
+                                record_case_failure(artifacts, failures,
+                                                    f"{dialer}->{listener} {transport} {acceptance_scenario_id}", error)
             for dialer, listener in (("forge", "go"), ("go", "forge"), ("forge", "rust"), ("rust", "forge")):
                 for scenario in LIVE_SCENARIO_PROFILES["private_tcp_yamux_pnet"]:
                     for acceptance_scenario_id in CURRENT_ACCEPTANCE_SCENARIOS.get(
@@ -1647,18 +1719,20 @@ def main() -> int:
                         try:
                             artifacts.append(
                                 run_pair_with_transport(
-                                    binaries[dialer], dialer, binaries[listener], listener, scenario, root,
+                                    binaries[dialer], dialer, binaries[listener], listener, "pnet", root,
                                     "tcp-pnet", "private_network", ("tcp", "pnet", "yamux"),
                                     f"private_tcp_yamux_pnet/{scenario}", acceptance_scenario_id,
                                     pnet_key_file, pnet_mismatch_key_file, pnet_fingerprint,
+                                    dnsaddr=scenario == "dnsaddr_private_tcp_yamux_pnet",
                                 )
                             )
                         except Exception as error:
-                            failures.append(f"{dialer}->{listener} tcp-pnet {acceptance_scenario_id}: {error}")
+                            record_case_failure(artifacts, failures,
+                                                f"{dialer}->{listener} tcp-pnet {acceptance_scenario_id}", error)
             try:
                 artifacts.append(run_pubsub_mixed_mesh_stress(binaries, root))
             except Exception as error:
-                failures.append(f"{PUBSUB_STRESS_SCENARIO}: {error}")
+                record_case_failure(artifacts, failures, PUBSUB_STRESS_SCENARIO, error)
             for listener, dialer in (("rust", "forge"), ("forge", "rust")):
                 for scenario in RENDEZVOUS_SCENARIOS:
                     for acceptance_scenario_id in CURRENT_ACCEPTANCE_SCENARIOS.get(
@@ -1677,26 +1751,25 @@ def main() -> int:
                                 )
                             )
                         except Exception as error:
-                            failures.append(f"{dialer}->{listener} {acceptance_scenario_id}: {error}")
+                            record_case_failure(artifacts, failures, f"{dialer}->{listener} {acceptance_scenario_id}", error)
             for seeker, routing, hidden in HIDDEN_DHT_PERMUTATIONS:
                 try:
                     artifacts.append(run_hidden_dht_find_peer(binaries, seeker, routing, hidden, root))
                 except Exception as error:
-                    failures.append(f"{seeker}->{routing}->{hidden} {HIDDEN_DHT_SCENARIO}: {error}")
+                    record_case_failure(artifacts, failures, f"{seeker}->{routing}->{hidden} {HIDDEN_DHT_SCENARIO}", error)
             for scenario in TOPOLOGY_SCENARIOS:
                 try:
                     artifacts.append(run_topology(binaries["forge"], "forge", scenario, root))
                 except Exception as error:
-                    failures.append(f"forge topology {scenario}: {error}")
+                    record_case_failure(artifacts, failures, f"forge topology {scenario}", error)
                 for source, relay_impl, destination_impl in NATIVE_TOPOLOGIES:
                     try:
                         artifacts.append(
                             run_native_relay_topology(binaries, source, relay_impl, destination_impl, scenario, root)
                         )
                     except Exception as error:
-                        failures.append(
-                            f"{source}->{relay_impl}->{destination_impl} native relay topology {scenario}: {error}"
-                        )
+                        record_case_failure(artifacts, failures,
+                                            f"{source}->{relay_impl}->{destination_impl} native relay topology {scenario}", error)
     except Exception as error:
         failures.append(f"preflight: {error}")
     finally:

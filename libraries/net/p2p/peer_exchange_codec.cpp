@@ -52,6 +52,7 @@ import forge.crypto.core.random;
 import forge.crypto.asymmetric.rsa;
 import forge.crypto.digest.sha256;
 import forge.crypto.asymmetric.x25519;
+import forge.multiformats.multiaddr;
 import forge.multiformats.types;
 import forge.multiformats.varint;
 import forge.multiformats.exceptions;
@@ -234,7 +235,7 @@ class reader {
    checked_add(total, sizeof(std::uint32_t));
    for (const auto& endpoint : message.endpoints) {
       checked_string_size(total, endpoint.peer.value);
-      checked_string_size(total, endpoint.endpoint.to_string());
+      checked_string_size(total, endpoint.address.to_string());
       checked_add(total, sizeof(std::uint64_t));
    }
    checked_bytes_size(total, message.payload);
@@ -274,7 +275,7 @@ class reader {
    append_u32(out, static_cast<std::uint32_t>(message.endpoints.size()));
    for (const auto& endpoint : message.endpoints) {
       append_string(out, endpoint.peer.value);
-      append_string(out, endpoint.endpoint.to_string());
+      append_string(out, endpoint.address.to_string());
       append_u64(out, endpoint.capabilities.bits);
    }
    append_bytes(out, message.payload);
@@ -308,11 +309,16 @@ class reader {
    }
    out.endpoints.reserve(endpoint_count);
    for (auto i = std::uint32_t{0}; i != endpoint_count; ++i) {
-      out.endpoints.push_back(peer_exchange_message::endpoint_record{
-          .peer = peer_id{.value = in.string()},
-          .endpoint = parse_endpoint(in.string()),
-          .capabilities = capability_set{.bits = in.u64()},
-      });
+      auto endpoint = peer_exchange_message::endpoint_record{};
+      endpoint.peer = peer_id{.value = in.string()};
+      const auto address = in.string();
+      endpoint.capabilities = capability_set{.bits = in.u64()};
+      try {
+         endpoint.address = forge::multiformats::multiaddr::parse(address);
+      } catch (const forge::multiformats::exceptions::invalid_format& error) {
+         FORGE_THROW_EXCEPTION(exceptions::codec_error, error.what());
+      }
+      out.endpoints.push_back(std::move(endpoint));
    }
    out.payload = in.bytes();
    in.expect_end();

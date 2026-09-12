@@ -51,6 +51,7 @@ module forge.net.p2p.node;
 
 import forge.asio.gate;
 import forge.asio.notification;
+import forge.exceptions;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -61,6 +62,7 @@ import forge.net.p2p.identify;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.topology;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -103,10 +105,10 @@ void append_topology_result(std::vector<discovery::result>& out, const peer_stor
    if (exists) {
       return;
    }
-   auto endpoints = std::vector<endpoint>{};
+   auto endpoints = std::vector<forge::multiformats::multiaddr>{};
    endpoints.reserve(record.endpoints.size());
    for (const auto& item : record.endpoints) {
-      endpoints.push_back(item.endpoint);
+      endpoints.push_back(item.address);
    }
    out.push_back(discovery::result{
        .peer = record.peer,
@@ -119,7 +121,8 @@ void append_topology_result(std::vector<discovery::result>& out, const peer_stor
    });
 }
 
-void append_topology_hint(std::vector<discovery::result>& out, const peer_id& peer, std::vector<endpoint> endpoints,
+void append_topology_hint(std::vector<discovery::result>& out, const peer_id& peer,
+                          std::vector<forge::multiformats::multiaddr> endpoints,
                           discovery::source source, std::chrono::system_clock::time_point expires_at,
                           std::size_t limit) {
    if (!valid_peer_id(peer) || endpoints.empty() || out.size() >= limit) {
@@ -342,6 +345,9 @@ boost::asio::awaitable<void> node::impl::async_close_topology_sessions(std::vect
 boost::asio::awaitable<bool>
 node::impl::async_dial_topology_candidate(discovery::result candidate,
                                           std::shared_ptr<cancellation_latch> cancellation) {
+   std::erase_if(candidate.endpoints, [](const auto& address) {
+      return !path_selector::supported_direct(address);
+   });
    if (candidate.peer == local || candidate.endpoints.empty()) {
       co_return false;
    }
@@ -352,44 +358,38 @@ node::impl::async_dial_topology_candidate(discovery::result candidate,
                                                                   .expires_at = candidate.expires_at,
                                                               }));
    };
-   for (auto endpoint : candidate.endpoints) {
-      endpoint.peer = candidate.peer;
-      if (session_for_path(candidate.peer, path::kind::direct)) {
+   if (session_for_path(candidate.peer, path::kind::direct)) {
+      apply_discovery_observation();
+      co_return true;
+   }
+   auto session = std::shared_ptr<session_state>{};
+   try {
+      {
+         auto [direct_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
+         session = co_await connect_direct(
+             std::move(candidate.endpoints),
+             node::connect_options{.expected_peer = candidate.peer,
+                                   .allow_relay = false,
+                                   .timeout = options.limits.topology.query_timeout,
+                                   .direct_attempt_timeout = options.limits.topology.query_timeout,
+                                   .allow_hole_punch = false},
+             std::move(direct_cancellation));
+         parent_subscription.reset();
+      }
+      co_await identify_session(session);
+      auto identified = false;
+      {
+         const auto lock = std::scoped_lock{mutex};
+         identified = !session->closed && session->info.identify_state == identify::state::identified;
+      }
+      if (identified) {
          apply_discovery_observation();
          co_return true;
       }
-      auto session = std::shared_ptr<session_state>{};
-      try {
-         {
-            auto [direct_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
-            session = co_await connect_direct(endpoint,
-                                              node::connect_options{
-                                                  .expected_peer = candidate.peer,
-                                                  .allow_relay = false,
-                                                  .timeout = options.limits.topology.query_timeout,
-                                                  .direct_attempt_timeout = options.limits.topology.query_timeout,
-                                                  .allow_hole_punch = false,
-                                              },
-                                              nullptr, std::move(direct_cancellation));
-            parent_subscription.reset();
-         }
-         co_await identify_session(session);
-         auto identified = false;
-         {
-            const auto lock = std::scoped_lock{mutex};
-            identified = !session->closed && session->info.identify_state == identify::state::identified;
-         }
-         if (!identified) {
-            co_await async_close_topology_sessions({session->id});
-            continue;
-         }
-         apply_discovery_observation();
-         co_return true;
-      } catch (const forge::exceptions::base&) {
-      }
-      if (session) {
-         co_await async_close_topology_sessions({session->id});
-      }
+   } catch (const forge::exceptions::base&) {
+   }
+   if (session) {
+      co_await async_close_topology_sessions({session->id});
    }
    co_return false;
 }
@@ -541,8 +541,10 @@ node::impl::ensure_topology_rendezvous_session(std::size_t point_index, bool all
       }
       for (const auto& [_, candidate] : sessions) {
          if (!candidate->closed && candidate->info.remote_peer == rendezvous_peer &&
-             candidate->info.path == path::kind::direct && candidate->direct_endpoint &&
-             candidate->direct_endpoint->to_string() == configured_key) {
+             candidate->info.path == path::kind::direct &&
+             std::ranges::any_of(candidate->direct_roots, [&](const auto& root) {
+                return root.to_string() == configured_key;
+             })) {
             session = candidate;
             break;
          }
@@ -552,7 +554,7 @@ node::impl::ensure_topology_rendezvous_session(std::size_t point_index, bool all
       if (!allow_dial) {
          co_return std::shared_ptr<session_state>{};
       }
-      store.learn_endpoint(rendezvous_peer, configured);
+      store.learn_address(rendezvous_peer, configured.to_multiaddr());
       {
          auto [direct_cancellation, parent_subscription] = make_topology_child_cancellation(cancellation);
          session = co_await connect_direct(configured,
@@ -563,7 +565,7 @@ node::impl::ensure_topology_rendezvous_session(std::size_t point_index, bool all
                                                .direct_attempt_timeout = policy.query_timeout,
                                                .allow_hole_punch = false,
                                            },
-                                           nullptr, std::move(direct_cancellation));
+                                           std::move(direct_cancellation));
          parent_subscription.reset();
       }
    }

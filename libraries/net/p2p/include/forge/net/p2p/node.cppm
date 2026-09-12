@@ -17,9 +17,13 @@ module;
 export module forge.net.p2p.node;
 
 import forge.asio.runtime;
+import forge.net.dns.types;
+import forge.net.p2p.address_resolution;
 import forge.net.p2p.dht;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.connection_gater;
+import forge.net.p2p.dialing;
 import forge.net.p2p.discovery;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
@@ -78,6 +82,9 @@ class node {
       relay::policy relay_policy{.service_enabled = true, .client_enabled = true, .public_relay_allowed = false};
       path::policy path_policy{};
       std::optional<forge::net::p2p::private_network::options> private_network;
+      address_resolution::policy dns_resolution{};
+      forge::net::dns::resolver_options dns_resolver{};
+      dialing::policy direct_dial{};
       forge::net::transport::limits transport_limits{};
       std::vector<forge::net::p2p::endpoint> advertised_endpoints;
       std::vector<std::uint8_t> public_key;
@@ -167,6 +174,8 @@ class node {
    boost::asio::awaitable<void> async_hydrate_peer_state();
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint);
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint, connect_options options);
+   boost::asio::awaitable<session_info> async_connect(forge::multiformats::multiaddr address);
+   boost::asio::awaitable<session_info> async_connect(forge::multiformats::multiaddr address, connect_options options);
    boost::asio::awaitable<void> async_request_peer_exchange(peer_id peer);
    boost::asio::awaitable<reachability::state> async_probe_reachability(peer_id observer);
    boost::asio::awaitable<relay::reservation::info> async_reserve_relay(peer_id relay_peer);
@@ -212,6 +221,7 @@ class node {
    void stop();
 
  private:
+   friend struct node_session_fixture;
    struct impl;
    std::shared_ptr<impl> impl_;
 };

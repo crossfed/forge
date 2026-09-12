@@ -55,14 +55,23 @@ void append_string(std::vector<std::uint8_t>& out, std::uint32_t field, std::str
 }
 
 [[nodiscard]] std::vector<std::uint8_t> endpoint_bytes(const endpoint& value) {
-   return forge::multiformats::multiaddr::parse(value.to_string()).to_bytes();
+   return value.to_multiaddr().to_bytes();
 }
 
-[[nodiscard]] std::optional<endpoint> supported_endpoint(std::span<const std::uint8_t> value) {
-   const auto address = forge::multiformats::multiaddr::from_bytes(value);
+[[nodiscard]] std::optional<endpoint> supported_observed_endpoint(std::span<const std::uint8_t> value) {
    try {
+      const auto address = forge::multiformats::multiaddr::from_bytes(value);
       return parse_endpoint(address.to_string());
    } catch (const forge::exceptions::base&) {
+      return std::nullopt;
+   }
+}
+
+[[nodiscard]] std::optional<forge::multiformats::multiaddr>
+supported_listen_address(std::span<const std::uint8_t> value) {
+   try {
+      return forge::multiformats::multiaddr::from_bytes(value);
+   } catch (const forge::multiformats::exceptions::invalid_format&) {
       return std::nullopt;
    }
 }
@@ -133,8 +142,8 @@ forge::multiformats::bytes encode(const document& value) {
    if (!value.public_key.empty()) {
       append_bytes(out, 1, value.public_key);
    }
-   for (const auto& endpoint : value.listen_endpoints) {
-      const auto bytes = endpoint_bytes(endpoint);
+   for (const auto& address : value.listen_endpoints) {
+      const auto bytes = address.to_bytes();
       append_bytes(out, 2, bytes);
    }
    for (const auto& protocol : value.protocols) {
@@ -185,13 +194,8 @@ document decode(std::span<const std::uint8_t> bytes, const limits& limits_value)
          if (listen_address_count++ >= limits_value.max_listen_endpoints) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "Identify has too many listen addresses");
          }
-         try {
-            auto endpoint = supported_endpoint(in.bytes(limits_value.max_message_size));
-            if (endpoint) {
-               out.listen_endpoints.push_back(std::move(*endpoint));
-            }
-         } catch (const forge::multiformats::exceptions::invalid_format& error) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, error.what());
+         if (auto address = supported_listen_address(in.bytes(limits_value.max_message_size))) {
+            out.listen_endpoints.push_back(std::move(*address));
          }
          break;
       }
@@ -206,14 +210,13 @@ document decode(std::span<const std::uint8_t> bytes, const limits& limits_value)
          out.protocols.push_back(protocol_id{.value = std::move(protocol)});
          break;
       }
-      case 4:
-         try {
-            out.observed_endpoint = supported_endpoint(in.bytes(limits_value.max_message_size));
+      case 4: {
+         if (auto observed = supported_observed_endpoint(in.bytes(limits_value.max_message_size))) {
+            out.observed_endpoint = std::move(observed);
             out.present.observed_endpoint = true;
-         } catch (const forge::multiformats::exceptions::invalid_format& error) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, error.what());
          }
          break;
+      }
       case 5:
          out.protocol_version = in.string(limits_value.max_version_size);
          out.present.protocol_version = true;

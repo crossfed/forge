@@ -67,6 +67,7 @@ module;
 #include <openssl/x509.h>
 
 #include "libp2p_identity_fixture.hxx"
+#include "../fixtures/local_dns_server.hxx"
 
 module forge.net.p2p.node;
 
@@ -102,6 +103,7 @@ import forge.net.p2p.endpoint;
 import forge.net.p2p.envelope;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.diagnostics;
+import forge.net.p2p.dialing;
 import forge.net.p2p.hole_punch;
 import forge.net.p2p.identify;
 import forge.net.p2p.identity;
@@ -403,6 +405,29 @@ test_identity make_p256_identity() {
    return out;
 }
 
+[[nodiscard]] forge::multiformats::multiaddr address_for(const endpoint& value) {
+   return value.to_multiaddr();
+}
+
+[[nodiscard]] std::vector<forge::multiformats::multiaddr> addresses_for(std::vector<endpoint> values) {
+   auto addresses = std::vector<forge::multiformats::multiaddr>{};
+   addresses.reserve(values.size());
+   for (const auto& value : values) {
+      addresses.push_back(address_for(value));
+   }
+   return addresses;
+}
+
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+addresses_for(std::initializer_list<endpoint> values) {
+   auto addresses = std::vector<forge::multiformats::multiaddr>{};
+   addresses.reserve(values.size());
+   for (const auto& value : values) {
+      addresses.push_back(address_for(value));
+   }
+   return addresses;
+}
+
 test_identity make_rsa_identity() {
    auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::rsa::private_key>();
    auto key = public_key{
@@ -423,7 +448,7 @@ std::vector<std::uint8_t> make_signed_rendezvous_peer_record(const test_identity
    return rendezvous::codec::seal_peer_record(
               rendezvous::peer_record{
                   .peer = identity.peer,
-                  .endpoints = std::move(endpoints),
+                  .endpoints = addresses_for(std::move(endpoints)),
                   .sequence = sequence,
               },
               identity.key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem))
@@ -444,7 +469,7 @@ std::vector<std::uint8_t> make_signed_rendezvous_peer_record(const test_certific
    return rendezvous::codec::seal_peer_record(
               rendezvous::peer_record{
                   .peer = identity.peer,
-                  .endpoints = std::move(endpoints),
+                  .endpoints = addresses_for(std::move(endpoints)),
                   .sequence = sequence,
               },
               key, private_key)
@@ -471,7 +496,7 @@ std::vector<std::uint8_t> make_signed_identify_peer_record(const test_identity& 
    }
    const auto payload = rendezvous::codec::encode_peer_record(rendezvous::peer_record{
        .peer = identity.peer,
-       .endpoints = std::move(endpoints),
+       .endpoints = addresses_for(std::move(endpoints)),
        .sequence = sequence,
    });
    return signed_envelope::seal(identity.key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem),
@@ -487,7 +512,7 @@ std::vector<std::uint8_t> make_signed_identify_peer_record(const test_certificat
    }
    const auto payload = rendezvous::codec::encode_peer_record(rendezvous::peer_record{
        .peer = identity.peer,
-       .endpoints = std::move(endpoints),
+       .endpoints = addresses_for(std::move(endpoints)),
        .sequence = sequence,
    });
    return signed_envelope::seal(public_key_for(identity),
@@ -1084,6 +1109,20 @@ endpoint listen(node& value, forge::asio::runtime& runtime) {
    return *endpoint;
 }
 
+std::optional<forge::tests::dns::bytes> hidden_dns_response(const std::uint8_t* request, std::size_t size) {
+   const auto question = forge::tests::dns::parse_question(request, size);
+   if (!question) {
+      return std::nullopt;
+   }
+   if (question->name != "hidden.test") {
+      return forge::tests::dns::make_failure_response(request, *question, 3);
+   }
+   const auto answers = question->type == 1
+                            ? std::vector<forge::tests::dns::response_answer>{{.type = 1, .value = {127, 0, 0, 1}}}
+                            : std::vector<forge::tests::dns::response_answer>{};
+   return forge::tests::dns::make_response(request, *question, answers);
+}
+
 endpoint listen_quic_with_advertised_dns4(node& value, forge::asio::runtime& runtime) {
    forge::asio::blocking::run(runtime, value.async_listen(make_quic_endpoint(0, "0.0.0.0")));
    const auto local_endpoint = value.local_endpoint();
@@ -1091,7 +1130,7 @@ endpoint listen_quic_with_advertised_dns4(node& value, forge::asio::runtime& run
 
    auto advertised = endpoint{.transport = {.host_type = endpoint::host_kind::dns4,
                                             .protocol = endpoint::protocol_kind::quic_v1,
-                                            .host = boost::asio::ip::host_name(),
+                                            .host = "hidden.test",
                                             .port = local_endpoint->transport.port}};
    advertised.peer = value.local_peer();
    value.set_advertised_endpoints({advertised});
@@ -1242,6 +1281,13 @@ void run_live_api_over(endpoint::protocol_kind transport) {
                               [protocol](const endpoint& value) { return value.transport.protocol == protocol; });
 }
 
+[[nodiscard]] bool contains_protocol(const std::vector<forge::multiformats::multiaddr>& addresses,
+                                     endpoint::protocol_kind protocol) {
+   return std::ranges::any_of(addresses, [protocol](const auto& address) {
+      return parse_endpoint(address.to_string()).transport.protocol == protocol;
+   });
+}
+
 [[nodiscard]] endpoint require_endpoint_for(const std::vector<endpoint>& endpoints, endpoint::protocol_kind protocol) {
    auto found = std::ranges::find_if(
        endpoints, [protocol](const endpoint& value) { return value.transport.protocol == protocol; });
@@ -1249,9 +1295,23 @@ void run_live_api_over(endpoint::protocol_kind transport) {
    return *found;
 }
 
+[[nodiscard]] peer_id peer_for(const forge::multiformats::multiaddr& address) {
+   const auto& components = address.components();
+   const auto component = std::ranges::find_if(components.rbegin(), components.rend(), [](const auto& value) {
+      return value.code == forge::multiformats::protocol_code::p2p;
+   });
+   BOOST_REQUIRE(component != components.rend());
+   return peer_id::from_string(component->value);
+}
+
+[[nodiscard]] std::uint16_t transport_port_for(const forge::multiformats::multiaddr& address) {
+   return parse_endpoint(address.to_string()).transport.port;
+}
+
 endpoint start_stalling_tcp_peer(forge::asio::runtime& runtime,
                                  std::chrono::milliseconds hold = std::chrono::seconds{2},
-                                 std::shared_ptr<std::promise<void>> accepted = {}) {
+                                 std::shared_ptr<std::promise<void>> accepted = {},
+                                 std::shared_ptr<std::atomic_size_t> accepted_count = {}) {
    namespace asio = boost::asio;
    using asio_tcp = asio::ip::tcp;
    auto acceptor = std::make_shared<asio_tcp::acceptor>(runtime.context(), asio_tcp::endpoint{asio_tcp::v4(), 0});
@@ -1260,16 +1320,49 @@ endpoint start_stalling_tcp_peer(forge::asio::runtime& runtime,
 
    asio::co_spawn(
        runtime.context(),
-       [acceptor, socket, hold, accepted = std::move(accepted)]() -> asio::awaitable<void> {
+       [acceptor, socket, hold, accepted = std::move(accepted), accepted_count = std::move(accepted_count)]()
+           -> asio::awaitable<void> {
           auto error = boost::system::error_code{};
           co_await acceptor->async_accept(*socket, asio::redirect_error(asio::use_awaitable, error));
           if (!error) {
+             if (accepted_count) {
+                accepted_count->fetch_add(1U, std::memory_order_relaxed);
+             }
              if (accepted) {
                 accepted->set_value();
              }
-             auto timer = asio::steady_timer{co_await asio::this_coro::executor};
-             timer.expires_after(hold);
-             co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+             const auto executor = co_await asio::this_coro::executor;
+             if (accepted_count) {
+                auto stop_accepting = std::make_shared<asio::steady_timer>(executor);
+                stop_accepting->expires_after(hold);
+                asio::co_spawn(
+                    executor,
+                    [acceptor, stop_accepting]() -> asio::awaitable<void> {
+                       auto wait_error = boost::system::error_code{};
+                       co_await stop_accepting->async_wait(asio::redirect_error(asio::use_awaitable, wait_error));
+                       auto ignored = boost::system::error_code{};
+                       acceptor->cancel(ignored);
+                    },
+                    asio::detached);
+                auto retained = std::vector<std::shared_ptr<asio_tcp::socket>>{socket};
+                while (true) {
+                   auto additional = std::make_shared<asio_tcp::socket>(acceptor->get_executor());
+                   co_await acceptor->async_accept(*additional, asio::redirect_error(asio::use_awaitable, error));
+                   if (error) {
+                      break;
+                   }
+                   accepted_count->fetch_add(1U, std::memory_order_relaxed);
+                   retained.push_back(std::move(additional));
+                }
+                for (const auto& value : retained) {
+                   auto ignored = boost::system::error_code{};
+                   value->close(ignored);
+                }
+             } else {
+                auto timer = asio::steady_timer{executor};
+                timer.expires_after(hold);
+                co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+             }
           }
           auto ignored = boost::system::error_code{};
           socket->close(ignored);
@@ -2382,8 +2475,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_listens_on_quic_and_tcp_and_identify_advertises_bo
    BOOST_TEST(contains_protocol(doc.listen_endpoints, endpoint::protocol_kind::quic_v1));
    BOOST_TEST(contains_protocol(doc.listen_endpoints, endpoint::protocol_kind::tcp));
    for (const auto& item : doc.listen_endpoints) {
-      BOOST_REQUIRE(item.peer.has_value());
-      BOOST_TEST(item.peer->value == server.local_peer().value);
+      BOOST_TEST(peer_for(item).value == server.local_peer().value);
    }
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -2571,6 +2663,30 @@ BOOST_AUTO_TEST_CASE(p2p_connection_gater_orders_all_direct_stages_for_tcp_and_q
    }
 }
 
+BOOST_AUTO_TEST_CASE(p2p_suffixless_literal_tcp_connect_gates_authenticated_stages_without_late_peer_dial) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = node{runtime, options_for(make_test_identity())};
+   auto client_gater = std::make_shared<recording_connection_gater>(recorded_gater_stage::peer_dial);
+   auto client_options = options_for(make_test_identity());
+   client_options.connection_gater = client_gater;
+   auto client = node{runtime, std::move(client_options)};
+   const auto listening = listen_tcp(server, runtime);
+   const auto root = forge::multiformats::multiaddr::parse(
+       "/ip4/127.0.0.1/tcp/" + std::to_string(listening.transport.port));
+
+   const auto session = forge::asio::blocking::run(
+       runtime, client.async_connect(root, node::connect_options{.allow_relay = false}));
+   BOOST_TEST(session.remote_peer.to_string() == server.local_peer().to_string());
+   check_gater_stages(client_gater->stages(), {recorded_gater_stage::secured, recorded_gater_stage::upgraded});
+   check_gater_stages(client_gater->stages_for(server.local_peer()),
+                      {recorded_gater_stage::secured, recorded_gater_stage::upgraded});
+   BOOST_TEST(client.metrics().active_sessions == 1U);
+   BOOST_TEST(client.diagnostics().resources.active_dials == 0U);
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_connection_gater_local_denials_are_typed_and_leave_no_client_state_for_tcp_and_quic) {
    for (const auto transport : {endpoint::protocol_kind::tcp, endpoint::protocol_kind::quic_v1}) {
       for (const auto rejected : {recorded_gater_stage::peer_dial, recorded_gater_stage::address_dial,
@@ -2661,6 +2777,72 @@ BOOST_AUTO_TEST_CASE(p2p_authenticated_peer_limit_rejects_direct_outbound_before
       forge::asio::blocking::run(runtime, client.async_stop());
       forge::asio::blocking::run(runtime, server.async_stop());
    }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_known_peer_dial_limit_rejects_second_tcp_attempt_before_transport_effects) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   const auto target_peer = peer(248);
+   auto client_gater = std::make_shared<recording_connection_gater>();
+   auto client_options = options_for(peer(247));
+   client_options.connection_gater = client_gater;
+   client_options.limits.resources.max_dial_attempts_per_peer = 1;
+   auto client = node{runtime, std::move(client_options)};
+   auto first_accepted = std::make_shared<std::promise<void>>();
+   auto first_accepted_future = first_accepted->get_future();
+   auto accepted_count = std::make_shared<std::atomic_size_t>(0U);
+   const auto endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{2}, first_accepted, accepted_count);
+   const auto options = node::connect_options{
+       .expected_peer = target_peer,
+       .allow_relay = false,
+       .timeout = std::chrono::seconds{5},
+   };
+
+   auto first = boost::asio::co_spawn(runtime.context(), client.async_connect(endpoint, options), boost::asio::use_future);
+   BOOST_REQUIRE(first_accepted_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   const auto staged = client.diagnostics().resources;
+   BOOST_TEST(staged.active_dials == 1U);
+   BOOST_TEST(staged.transient.outbound_connections == 1U);
+   BOOST_TEST(staged.system.outbound_connections == 1U);
+   BOOST_TEST(staged.system.file_descriptors == 1U);
+
+   auto rejected = false;
+   try {
+      static_cast<void>(forge::asio::blocking::run(runtime, client.async_connect(endpoint, options)));
+   } catch (const forge::exceptions::base& error) {
+      rejected = exceptions::code_of(error) == exceptions::code::backpressure_rejected;
+   }
+
+   wait_on_runtime(runtime, std::chrono::milliseconds{20}, "second TCP accept observation");
+   BOOST_TEST(rejected);
+   BOOST_TEST(accepted_count->load(std::memory_order_relaxed) == 1U);
+   // Peer gating precedes per-peer permit binding; a rejected binding never
+   // launches a numeric candidate or reaches its address gater.
+   check_gater_stages(client_gater->stages_for(target_peer),
+                      {recorded_gater_stage::peer_dial, recorded_gater_stage::address_dial,
+                       recorded_gater_stage::peer_dial});
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   BOOST_REQUIRE(first.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   auto first_stopped = false;
+   try {
+      static_cast<void>(first.get());
+   } catch (...) {
+      first_stopped = true;
+   }
+   BOOST_TEST(first_stopped);
+
+   const auto released_by = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while ((client.diagnostics().resources.active_dials != 0U ||
+           client.diagnostics().resources.transient.outbound_connections != 0U ||
+           client.diagnostics().resources.system.file_descriptors != 0U) &&
+          std::chrono::steady_clock::now() < released_by) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{1}, "staged direct attempt resource release");
+   }
+   const auto resources = client.diagnostics().resources;
+   BOOST_TEST(resources.active_dials == 0U);
+   BOOST_TEST(resources.transient.outbound_connections == 0U);
+   BOOST_TEST(resources.system.outbound_connections == 0U);
+   BOOST_TEST(resources.system.file_descriptors == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_tcp_session_fd_reservation_survives_tls_handoff_until_transport_close) {
@@ -2864,15 +3046,14 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_multiple_direct_endpoints_witho
    auto learned_endpoints = std::vector<endpoint>{};
    learned_endpoints.reserve(learned->endpoints.size());
    for (const auto& item : learned->endpoints) {
-      learned_endpoints.push_back(item.endpoint);
+      learned_endpoints.push_back(parse_endpoint(item.address.to_string()));
    }
    BOOST_TEST(contains_protocol(learned_endpoints, endpoint::protocol_kind::quic_v1));
    BOOST_TEST(contains_protocol(learned_endpoints, endpoint::protocol_kind::tcp));
    auto seen = std::set<std::string>{};
    for (const auto& item : learned->endpoints) {
-      BOOST_REQUIRE(item.endpoint.peer.has_value());
-      BOOST_TEST(item.endpoint.peer->to_bytes() == server.local_peer().to_bytes(), boost::test_tools::per_element());
-      BOOST_TEST(seen.insert(item.endpoint.to_string()).second);
+      BOOST_TEST(peer_for(item.address).to_bytes() == server.local_peer().to_bytes(), boost::test_tools::per_element());
+      BOOST_TEST(seen.insert(item.address.to_string()).second);
    }
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -2971,6 +3152,37 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_receive_limits_are_typed_and_v1_bounded) 
                      exceptions::codec_error);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_peer_exchange_codec_preserves_dnsaddr) {
+   const auto remote = peer(220);
+   const auto address = forge::multiformats::multiaddr::parse("/dnsaddr/pex.example/p2p/" + remote.to_string());
+   const auto message = peer_exchange_message{
+       .kind = peer_exchange_message::type::peer_exchange_response,
+       .peer = peer(219),
+       .endpoints = {peer_exchange_message::endpoint_record{.peer = remote, .address = address}},
+   };
+
+   const auto decoded = peer_exchange_codec::decode(peer_exchange_codec::encode(message));
+   BOOST_REQUIRE_EQUAL(decoded.endpoints.size(), 1U);
+   BOOST_TEST(decoded.endpoints.front().address.to_string() == address.to_string());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_exchange_codec_rejects_malformed_multiaddr_endpoint_record) {
+   const auto remote = peer(220);
+   const auto address = forge::multiformats::multiaddr::parse("/dnsaddr/pex.example/p2p/" + remote.to_string());
+   const auto message = peer_exchange_message{
+       .kind = peer_exchange_message::type::peer_exchange_response,
+       .peer = peer(219),
+       .endpoints = {peer_exchange_message::endpoint_record{.peer = remote, .address = address}},
+   };
+   auto encoded = peer_exchange_codec::encode(message);
+   const auto address_text = address.to_string();
+   const auto encoded_address = std::search(encoded.begin(), encoded.end(), address_text.begin(), address_text.end());
+   BOOST_REQUIRE(encoded_address != encoded.end());
+   *encoded_address = static_cast<std::uint8_t>('x');
+
+   BOOST_CHECK_THROW((void)peer_exchange_codec::decode(encoded), exceptions::codec_error);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_peer_exchange_rejects_spoofed_response_identity_without_mutating_victim) {
    auto store = peer_store{};
    const auto authenticated_peer = peer(218);
@@ -2993,7 +3205,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_rejects_spoofed_response_identity_without
        .capabilities = capability_set{.bits = capabilities::pubsub},
        .endpoints = {{
            .peer = victim,
-           .endpoint = spoofed_endpoint,
+           .address = address_for(spoofed_endpoint),
            .capabilities = capability_set{.bits = capabilities::pubsub},
        }},
    };
@@ -3010,7 +3222,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_rejects_spoofed_response_identity_without
    BOOST_REQUIRE(after);
    BOOST_TEST(after->capabilities.bits == before->capabilities.bits);
    BOOST_REQUIRE_EQUAL(after->endpoints.size(), before->endpoints.size());
-   BOOST_TEST(after->endpoints.front().endpoint.to_string() == before->endpoints.front().endpoint.to_string());
+   BOOST_TEST(after->endpoints.front().address.to_string() == before->endpoints.front().address.to_string());
    BOOST_TEST(!store.find(authenticated_peer).has_value());
 }
 
@@ -3033,7 +3245,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_keeps_third_party_capabilities_untrusted)
            .capabilities = capability_set{.bits = capabilities::peer_exchange},
            .endpoints = {peer_exchange_message::endpoint_record{
                .peer = third_party,
-               .endpoint = third_party_endpoint,
+               .address = address_for(third_party_endpoint),
                .capabilities = capability_set{.bits = capabilities::peer_exchange | capabilities::pubsub},
            }},
        },
@@ -3050,7 +3262,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_keeps_third_party_capabilities_untrusted)
    BOOST_TEST(!learned->capabilities.has(capabilities::pubsub));
    BOOST_TEST(static_cast<int>(learned->discovered_by) == static_cast<int>(discovery::source::peer_exchange));
    BOOST_REQUIRE_EQUAL(learned->endpoints.size(), 1U);
-   BOOST_TEST(learned->endpoints.front().endpoint.to_string() == third_party_endpoint.to_string());
+   BOOST_TEST(learned->endpoints.front().address.to_string() == third_party_endpoint.to_string());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_peer_exchange_scheduler_requires_exact_identify_protocol_and_bounds_singleflight) {
@@ -3892,7 +4104,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_filters_non_routable_third_party_endpoint
    BOOST_REQUIRE(learned);
    auto seen = std::set<std::string>{};
    for (const auto& item : learned->endpoints) {
-      seen.insert(item.endpoint.to_string());
+      seen.insert(item.address.to_string());
    }
    BOOST_TEST(seen.contains(public_endpoint.to_string()));
    BOOST_TEST(seen.contains(dns_endpoint.to_string()));
@@ -3932,7 +4144,7 @@ BOOST_AUTO_TEST_CASE(p2p_host_addresses_rejects_third_party_relay_with_non_routa
    BOOST_REQUIRE(learned);
    auto seen = std::set<std::string>{};
    for (const auto& item : learned->endpoints) {
-      seen.insert(item.endpoint.to_string());
+      seen.insert(item.address.to_string());
    }
    BOOST_TEST(seen.contains(public_relay.to_string()));
    BOOST_TEST(seen.contains(dns_relay.to_string()));
@@ -3969,22 +4181,22 @@ BOOST_AUTO_TEST_CASE(p2p_dht_provider_response_uses_response_stream_provenance) 
                              {
                                  {.key = key,
                                   .provider = public_provider,
-                                  .endpoints = {public_endpoint},
+                                  .endpoints = addresses_for({public_endpoint}),
                                   .provider_expires_at = provider_expiry,
                                   .addresses_expires_at = address_expiry},
                                  {.key = key,
                                   .provider = loopback_provider,
-                                  .endpoints = {loopback_endpoint},
+                                  .endpoints = addresses_for({loopback_endpoint}),
                                   .provider_expires_at = provider_expiry,
                                   .addresses_expires_at = address_expiry},
                                  {.key = key,
                                   .provider = private_provider,
-                                  .endpoints = {private_endpoint},
+                                  .endpoints = addresses_for({private_endpoint}),
                                   .provider_expires_at = provider_expiry,
                                   .addresses_expires_at = address_expiry},
                                  {.key = key,
                                   .provider = loopback_relay_provider,
-                                  .endpoints = {loopback_relay_endpoint},
+                                  .endpoints = addresses_for({loopback_relay_endpoint}),
                                   .provider_expires_at = provider_expiry,
                                   .addresses_expires_at = address_expiry},
                              });
@@ -4068,7 +4280,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_add_provider_preserves_identity_and_continues_rpc_s
            .key_value = key,
            .provider_peers = std::vector<dht::peer>{dht::peer{
                .id = *authenticated_peer,
-               .endpoints = std::vector<endpoint>{provider_endpoint},
+               .endpoints = addresses_for({provider_endpoint}),
                .connection = dht::connection_type::connected,
            }},
        },
@@ -4145,7 +4357,8 @@ BOOST_AUTO_TEST_CASE(p2p_dht_add_provider_retains_identity_when_address_is_filte
        dht::message{
            .type = dht::message_type::add_provider,
            .key_value = key,
-           .provider_peers = {dht::peer{.id = *authenticated_peer, .endpoints = {provider_endpoint}}},
+           .provider_peers = {dht::peer{.id = *authenticated_peer,
+                                        .endpoints = addresses_for({provider_endpoint})}},
        },
        server_profile);
    const auto ping = dht::codec::encode(dht::message{.type = dht::message_type::ping}, server_profile);
@@ -4413,7 +4626,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_provider_response_incrementally_truncates_to_wire_b
       providers.push_back(dht::record_store::provider_record{
           .key = key,
           .provider = provider,
-          .endpoints = std::move(endpoints),
+          .endpoints = addresses_for(std::move(endpoints)),
           .provider_expires_at = now + std::chrono::hours{1},
           .addresses_expires_at = now + std::chrono::hours{1},
       });
@@ -4469,7 +4682,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_rejected_request_cannot_inject_routing_candidates) 
                                   .key_value = make_dht_key(std::vector<std::uint8_t>{'r', 'e', 'j', 'e', 'c', 't'}),
                                   .closer_peers = std::vector<dht::peer>{dht::peer{
                                       .id = injected,
-                                      .endpoints = std::vector<endpoint>{injected_endpoint},
+                                      .endpoints = addresses_for({injected_endpoint}),
                                       .connection = dht::connection_type::can_connect,
                                   }},
                               })));
@@ -4523,7 +4736,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
    forge::asio::blocking::run(runtime, server.peers().async_upsert_rendezvous(rendezvous::registration{
                                            .namespace_name = "forge.discovery",
                                            .peer = public_identity.peer,
-                                           .endpoints = std::vector<endpoint>{public_endpoint},
+                                           .endpoints = addresses_for({public_endpoint}),
                                            .signed_peer_record = make_signed_rendezvous_peer_record(
                                                public_identity, std::vector<endpoint>{public_endpoint}, 1),
                                            .ttl = std::chrono::seconds{7'200},
@@ -4533,7 +4746,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
    forge::asio::blocking::run(runtime, server.peers().async_upsert_rendezvous(rendezvous::registration{
                                            .namespace_name = "forge.discovery",
                                            .peer = relay_identity.peer,
-                                           .endpoints = std::vector<endpoint>{relay_endpoint},
+                                           .endpoints = addresses_for({relay_endpoint}),
                                            .signed_peer_record = make_signed_rendezvous_peer_record(
                                                relay_identity, std::vector<endpoint>{relay_endpoint}, 2),
                                            .ttl = std::chrono::seconds{7'200},
@@ -4543,7 +4756,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
    forge::asio::blocking::run(runtime, server.peers().async_upsert_rendezvous(rendezvous::registration{
                                            .namespace_name = "forge.discovery",
                                            .peer = loopback_identity.peer,
-                                           .endpoints = std::vector<endpoint>{loopback_endpoint},
+                                           .endpoints = addresses_for({loopback_endpoint}),
                                            .signed_peer_record = make_signed_rendezvous_peer_record(
                                                loopback_identity, std::vector<endpoint>{loopback_endpoint}, 3),
                                            .ttl = std::chrono::seconds{7'200},
@@ -4553,7 +4766,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
    forge::asio::blocking::run(runtime, server.peers().async_upsert_rendezvous(rendezvous::registration{
                                            .namespace_name = "forge.discovery",
                                            .peer = private_identity.peer,
-                                           .endpoints = std::vector<endpoint>{private_endpoint},
+                                           .endpoints = addresses_for({private_endpoint}),
                                            .signed_peer_record = make_signed_rendezvous_peer_record(
                                                private_identity, std::vector<endpoint>{private_endpoint}, 4),
                                            .ttl = std::chrono::seconds{7'200},
@@ -4564,7 +4777,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
                               server.peers().async_upsert_rendezvous(rendezvous::registration{
                                   .namespace_name = "forge.discovery",
                                   .peer = loopback_relay_identity.peer,
-                                  .endpoints = std::vector<endpoint>{loopback_relay_endpoint},
+                                  .endpoints = addresses_for({loopback_relay_endpoint}),
                                   .signed_peer_record = make_signed_rendezvous_peer_record(
                                       loopback_relay_identity, std::vector<endpoint>{loopback_relay_endpoint}, 5),
                                   .ttl = std::chrono::seconds{7'200},
@@ -4575,7 +4788,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_discovery_rejects_third_party_non_routable_e
                               server.peers().async_upsert_rendezvous(rendezvous::registration{
                                   .namespace_name = "forge.discovery",
                                   .peer = private_relay_identity.peer,
-                                  .endpoints = std::vector<endpoint>{private_relay_endpoint},
+                                  .endpoints = addresses_for({private_relay_endpoint}),
                                   .signed_peer_record = make_signed_rendezvous_peer_record(
                                       private_relay_identity, std::vector<endpoint>{private_relay_endpoint}, 6),
                                   .ttl = std::chrono::seconds{7'200},
@@ -4654,6 +4867,107 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames) {
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_raw_dns4_connect_retains_source_root_for_public_and_private_tcp) {
+   for (const auto private_profile : {false, true}) {
+      BOOST_TEST_CONTEXT("private profile=" << private_profile) {
+         auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+         const auto server_identity = make_test_identity();
+         const auto client_identity = make_test_identity();
+         auto server_options = private_profile ? private_network_options_for(server_identity) : options_for(server_identity);
+         auto client_options = private_profile ? private_network_options_for(client_identity) : options_for(client_identity);
+         auto gater = std::make_shared<recording_connection_gater>();
+         client_options.connection_gater = gater;
+         client_options.limits.resources.max_dial_attempts = 1;
+         client_options.limits.resources.max_dial_attempts_per_peer = 1;
+         auto server = node{runtime, std::move(server_options)};
+         auto client = node{runtime, std::move(client_options)};
+         register_echo(server);
+         const auto listening = listen_tcp(server, runtime);
+         const auto root = forge::multiformats::multiaddr::parse(
+             "/dns4/localhost/tcp/" + std::to_string(listening.transport.port) + "/p2p/" + server.local_peer().to_string());
+         // Identify also advertises the source root, so no numeric address is
+         // independently learned from the remote node during this assertion.
+         server.set_advertised_endpoints({parse_endpoint(root.to_string())});
+
+         const auto session = forge::asio::blocking::run(
+             runtime, client.async_connect(root, node::connect_options{
+                 .allow_relay = false, .timeout = std::chrono::seconds{3}, .max_direct_endpoints = 1}));
+         BOOST_TEST(session.remote_peer.to_string() == server.local_peer().to_string());
+         const auto stages = gater->stages_for(server.local_peer());
+         BOOST_TEST(std::count(stages.begin(), stages.end(), recorded_gater_stage::peer_dial) == 1);
+         BOOST_TEST(std::count(stages.begin(), stages.end(), recorded_gater_stage::address_dial) == 1);
+         BOOST_TEST(client.diagnostics().resources.active_dials == 0U);
+
+         auto stream = forge::asio::blocking::run(
+             runtime, client.async_open_protocol_stream(server.local_peer(), builtins::echo));
+         const auto payload = std::vector<std::uint8_t>{'d', 'n', 's'};
+         forge::asio::blocking::run(runtime, stream.async_write_frame(payload));
+         const auto reply = forge::asio::blocking::run(runtime, stream.async_read_frame());
+         BOOST_TEST(reply == payload, boost::test_tools::per_element());
+
+         const auto record = client.peers().find(server.local_peer());
+         BOOST_REQUIRE(record.has_value());
+         const auto source = std::ranges::find_if(record->endpoints, [&](const auto& candidate) {
+            return candidate.address.to_string() == root.to_string();
+         });
+         BOOST_REQUIRE(source != record->endpoints.end());
+         BOOST_TEST(source->successes >= 1U);
+         BOOST_TEST(source->failures == 0U);
+         BOOST_TEST(source->sources.learned);
+         for (const auto& candidate : record->endpoints) {
+            if (candidate.address.to_string() != root.to_string()) {
+               BOOST_TEST(candidate.successes == 0U);
+               BOOST_TEST(!candidate.sources.learned);
+            }
+         }
+         forge::asio::blocking::run(runtime, client.async_stop());
+         BOOST_TEST(client.diagnostics().resources.active_dials == 0U);
+         BOOST_TEST(client.diagnostics().resources.system.file_descriptors == 0U);
+         forge::asio::blocking::run(runtime, server.async_stop());
+      }
+   }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_raw_dns4_connect_holds_one_logical_permit_and_stop_releases_it) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto options = options_for(make_test_identity());
+   options.limits.resources.max_dial_attempts = 1;
+   options.limits.resources.max_dial_attempts_per_peer = 1;
+   auto client = node{runtime, std::move(options)};
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   const auto stalled = start_stalling_tcp_peer(runtime, std::chrono::seconds{5}, accepted);
+   const auto root = forge::multiformats::multiaddr::parse(
+       "/dns4/localhost/tcp/" + std::to_string(stalled.transport.port) + "/p2p/" + peer(248).to_string());
+   const auto connect_options = node::connect_options{
+       .allow_relay = false, .timeout = std::chrono::seconds{10},
+       .direct_attempt_timeout = std::chrono::seconds{5}, .max_direct_endpoints = 1};
+   auto pending = boost::asio::co_spawn(runtime.context(), client.async_connect(root, connect_options),
+                                      boost::asio::use_future);
+   BOOST_REQUIRE(accepted_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_TEST(client.diagnostics().resources.active_dials == 1U);
+   BOOST_TEST(client.diagnostics().resources.system.outbound_connections == 1U);
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(runtime, client.async_connect(root, connect_options)),
+       forge::exceptions::base, [](const auto& error) {
+          return exceptions::code_of(error) == exceptions::code::backpressure_rejected;
+       });
+   BOOST_TEST(client.diagnostics().resources.active_dials == 1U);
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   const auto resources = client.diagnostics().resources;
+   BOOST_TEST(resources.active_dials == 0U);
+   BOOST_TEST(resources.transient.outbound_connections == 0U);
+   BOOST_TEST(resources.system.outbound_connections == 0U);
+   BOOST_TEST(resources.system.file_descriptors == 0U);
+   BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_EXCEPTION(pending.get(), forge::exceptions::base, [](const auto& error) {
+      const auto kind = exceptions::code_of(error);
+      return kind == exceptions::code::canceled || kind == exceptions::code::closed;
+   });
+   BOOST_TEST(client.metrics().active_sessions == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_private_network_tcp_tls_yamux_protects_direct_streams) {
@@ -5065,7 +5379,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_rejects_tls_peer_mismatch) {
    auto server = node{runtime, std::move(server_options)};
    auto client = node{runtime, std::move(client_options)};
 
-   const auto server_endpoint = listen_tcp(server, runtime);
+   auto server_endpoint = listen_tcp(server, runtime);
+   server_endpoint.peer.reset();
    auto rejected = boost::asio::co_spawn(
        runtime.context(), client.async_connect(server_endpoint, node::connect_options{.expected_peer = peer(150)}),
        boost::asio::use_future);
@@ -5685,12 +6000,12 @@ BOOST_AUTO_TEST_CASE(p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_m
            .key_value = key,
            .closer_peers = std::vector<dht::peer>{dht::peer{
                .id = target,
-               .endpoints = std::vector<endpoint>{target_endpoint},
+               .endpoints = addresses_for({target_endpoint}),
                .connection = dht::connection_type::can_connect,
            }},
            .provider_peers = std::vector<dht::peer>{dht::peer{
                .id = provider,
-               .endpoints = std::vector<endpoint>{provider_endpoint},
+               .endpoints = addresses_for({provider_endpoint}),
                .connection = dht::connection_type::connected,
            }},
        },
@@ -5838,15 +6153,18 @@ BOOST_AUTO_TEST_CASE(p2p_dht_k_bucket_candidate_updates_cannot_downgrade_verifie
    active_endpoint.peer = peers[0];
    auto replacement_endpoint = make_dns_tcp_endpoint(4237, "replacement.example.com");
    replacement_endpoint.peer = peers[1];
-   table.upsert(dht::peer{.id = peers[0], .endpoints = {active_endpoint}}, dht::routing_admission::verified_server);
-   table.upsert(dht::peer{.id = peers[1], .endpoints = {replacement_endpoint}},
+   table.upsert(dht::peer{.id = peers[0], .endpoints = addresses_for({active_endpoint})},
+                dht::routing_admission::verified_server);
+   table.upsert(dht::peer{.id = peers[1], .endpoints = addresses_for({replacement_endpoint})},
                 dht::routing_admission::verified_server);
 
    auto untrusted_endpoint = make_dns_tcp_endpoint(4238, "untrusted.example.com");
    untrusted_endpoint.peer = peers[0];
-   table.upsert(dht::peer{.id = peers[0], .endpoints = {untrusted_endpoint}}, dht::routing_admission::candidate);
+   table.upsert(dht::peer{.id = peers[0], .endpoints = addresses_for({untrusted_endpoint})},
+                dht::routing_admission::candidate);
    untrusted_endpoint.peer = peers[1];
-   table.upsert(dht::peer{.id = peers[1], .endpoints = {untrusted_endpoint}}, dht::routing_admission::candidate);
+   table.upsert(dht::peer{.id = peers[1], .endpoints = addresses_for({untrusted_endpoint})},
+                dht::routing_admission::candidate);
 
    auto active = table.snapshot();
    BOOST_REQUIRE_EQUAL(active.size(), 1U);
@@ -6003,7 +6321,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_failed_target_seed_is_not_complete_or_closest
                .options = custom_test_dht_profile(dht::mode::client, dht::options{.replication = 2, .alpha = 1}).limits,
                .seeds = std::vector<dht::peer>{dht::peer{
                    .id = target,
-                   .endpoints = std::vector<endpoint>{target_endpoint},
+                   .endpoints = addresses_for({target_endpoint}),
                    .connection = dht::connection_type::can_connect,
                }},
            },
@@ -6030,7 +6348,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_stops_after_closest_nonfailed_k_peers_are_que
       candidate_endpoint.peer = id;
       candidates.push_back(dht::peer{
           .id = id,
-          .endpoints = std::vector<endpoint>{std::move(candidate_endpoint)},
+          .endpoints = addresses_for({candidate_endpoint}),
           .connection = dht::connection_type::can_connect,
       });
    }
@@ -6641,7 +6959,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_fast_completion_advances_while_sibling_is_blo
       auto endpoint = make_dns_tcp_endpoint(port, std::move(host));
       endpoint.peer = id;
       return dht::peer{.id = std::move(id),
-                       .endpoints = std::vector<forge::net::p2p::endpoint>{std::move(endpoint)},
+                       .endpoints = addresses_for({endpoint}),
                        .connection = dht::connection_type::can_connect};
    };
    const auto slow_candidate = candidate(slow, 4'045, "query-event-slow.example.com");
@@ -6718,10 +7036,10 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_early_target_success_cancels_and_drains_child
                .seeds =
                    std::vector<dht::peer>{
                        dht::peer{.id = target,
-                                 .endpoints = std::vector<endpoint>{std::move(target_endpoint)},
+                                 .endpoints = addresses_for({target_endpoint}),
                                  .connection = dht::connection_type::can_connect},
                        dht::peer{.id = slow,
-                                 .endpoints = std::vector<endpoint>{std::move(slow_endpoint)},
+                                 .endpoints = addresses_for({slow_endpoint}),
                                  .connection = dht::connection_type::can_connect},
                    },
            },
@@ -6762,7 +7080,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_value_quorum_cancels_and_drains_children) {
       auto address = make_dns_tcp_endpoint(port, "value-quorum.example.com");
       address.peer = id;
       return dht::peer{
-          .id = std::move(id), .endpoints = {std::move(address)}, .connection = dht::connection_type::can_connect};
+          .id = std::move(id), .endpoints = addresses_for({address}), .connection = dht::connection_type::can_connect};
    };
    auto slow_drained = false;
    auto unnecessary_started = false;
@@ -6837,7 +7155,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_discovered_peer_bound_keeps_closest_candidate
       auto endpoint = make_dns_tcp_endpoint(port, "query-bound-discovered.example.com");
       endpoint.peer = id;
       return dht::peer{.id = id,
-                       .endpoints = std::vector<forge::net::p2p::endpoint>{std::move(endpoint)},
+                       .endpoints = addresses_for({endpoint}),
                        .connection = dht::connection_type::can_connect};
    };
    auto attempts = std::size_t{};
@@ -6851,7 +7169,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_discovered_peer_bound_keeps_closest_candidate
                               .limits,
                .seeds = std::vector<dht::peer>{dht::peer{
                    .id = seed,
-                   .endpoints = std::vector<endpoint>{std::move(seed_endpoint)},
+                   .endpoints = addresses_for({seed_endpoint}),
                    .connection = dht::connection_type::can_connect,
                }},
            },
@@ -6880,7 +7198,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_failure_is_not_also_reported_as_queried) {
       auto endpoint = make_dns_tcp_endpoint(port, "query-accounting.example.com");
       endpoint.peer = id;
       return dht::peer{.id = std::move(id),
-                       .endpoints = std::vector<forge::net::p2p::endpoint>{std::move(endpoint)},
+                       .endpoints = addresses_for({endpoint}),
                        .connection = dht::connection_type::can_connect};
    };
    auto attempts = std::map<peer_id, std::size_t>{};
@@ -6937,12 +7255,12 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_cancels_and_joins_children_with_parent) {
                    std::vector<dht::peer>{
                        dht::peer{
                            .id = peer(42),
-                           .endpoints = std::vector<endpoint>{std::move(first_endpoint)},
+                           .endpoints = addresses_for({first_endpoint}),
                            .connection = dht::connection_type::can_connect,
                        },
                        dht::peer{
                            .id = peer(44),
-                           .endpoints = std::vector<endpoint>{std::move(second_endpoint)},
+                           .endpoints = addresses_for({second_endpoint}),
                            .connection = dht::connection_type::can_connect,
                        },
                    },
@@ -7107,13 +7425,20 @@ BOOST_AUTO_TEST_CASE(p2p_peer_record_uses_canonical_libp2p_domain_type_and_wire_
 
    const auto fixture = rendezvous::codec::encode_peer_record(rendezvous::peer_record{
        .peer = peer(42),
-       .endpoints = std::vector<endpoint>{parse_endpoint("/ip4/127.0.0.1/tcp/4001")},
+       .endpoints = addresses_for({parse_endpoint("/ip4/127.0.0.1/tcp/4001")}),
        .sequence = 42,
    });
    const auto canonical_go_rust_payload = std::vector<std::uint8_t>{
        0x0a, 0x03, 0x00, 0x01, 0x2a, 0x10, 0x2a, 0x1a, 0x0a, 0x0a, 0x08, 0x04, 0x7f, 0x00, 0x00, 0x01, 0x06, 0x0f, 0xa1,
    };
    BOOST_TEST(fixture == canonical_go_rust_payload, boost::test_tools::per_element());
+
+   const auto dnsaddr =
+       forge::multiformats::multiaddr::parse("/dnsaddr/rendezvous.example/p2p/" + peer(42).to_string());
+   const auto dnsaddr_decoded = rendezvous::codec::decode_peer_record(rendezvous::codec::encode_peer_record(
+       rendezvous::peer_record{.peer = peer(42), .endpoints = {dnsaddr}, .sequence = 43}));
+   BOOST_REQUIRE_EQUAL(dnsaddr_decoded.endpoints.size(), 1U);
+   BOOST_TEST(dnsaddr_decoded.endpoints.front().to_string() == dnsaddr.to_string());
 
    auto mixed_valid_and_malformed = fixture;
    const auto malformed_address_info = std::array<std::uint8_t, 5>{0x1a, 0x03, 0x0a, 0x01, 0xff};
@@ -7127,6 +7452,67 @@ BOOST_AUTO_TEST_CASE(p2p_peer_record_uses_canonical_libp2p_domain_type_and_wire_
    BOOST_CHECK_NO_THROW(envelope.verify("libp2p-peer-record", identity.peer));
    BOOST_CHECK_THROW(envelope.verify("libp2p-routing-state", identity.peer), forge::exceptions::base);
    BOOST_CHECK_THROW((void)rendezvous::codec::open_peer_record(envelope, identity.peer), forge::exceptions::base);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_record_canonicalizes_relay_suffixes_and_rejects_invalid_carriers) {
+   const auto target = peer(42);
+   const auto relay = peer(43);
+   const auto other = peer(44);
+   const auto relay_carrier = forge::multiformats::multiaddr::parse(
+       "/ip4/8.8.8.8/tcp/4001/p2p/" + relay.to_string() + "/p2p-circuit/p2p/" + target.to_string());
+
+   const auto normalized = rendezvous::codec::decode_peer_record(rendezvous::codec::encode_peer_record(
+       rendezvous::peer_record{.peer = target, .endpoints = {relay_carrier}, .sequence = 44}));
+   BOOST_REQUIRE_EQUAL(normalized.endpoints.size(), 1U);
+   BOOST_TEST(normalized.endpoints.front().to_string() == relay_carrier.to_string());
+
+   const auto anonymous_relay_carrier = forge::multiformats::multiaddr::parse(
+       "/ip4/8.8.8.8/tcp/4001/p2p-circuit/p2p/" + target.to_string());
+   const auto anonymous_normalized = rendezvous::codec::decode_peer_record(rendezvous::codec::encode_peer_record(
+       rendezvous::peer_record{.peer = target, .endpoints = {anonymous_relay_carrier}, .sequence = 45}));
+   BOOST_REQUIRE_EQUAL(anonymous_normalized.endpoints.size(), 1U);
+   BOOST_TEST(anonymous_normalized.endpoints.front().to_string() == anonymous_relay_carrier.to_string());
+
+   const auto malformed_relay = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p/1/p2p-circuit/p2p/" + target.to_string());
+   BOOST_CHECK_THROW((void)rendezvous::codec::encode_peer_record(
+                         rendezvous::peer_record{.peer = target, .endpoints = {malformed_relay}, .sequence = 46}),
+                     exceptions::invalid_identity);
+
+   const auto unrelated_after_circuit = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/relay.example/p2p-circuit/tcp/4001/p2p/" + target.to_string());
+   BOOST_CHECK_THROW((void)rendezvous::codec::encode_peer_record(
+                         rendezvous::peer_record{.peer = target, .endpoints = {unrelated_after_circuit}, .sequence = 47}),
+                     exceptions::invalid_identity);
+
+   const auto nonterminal_target = forge::multiformats::multiaddr::parse(
+       "/dnsaddr/target.example/p2p/" + target.to_string() + "/tcp/4001");
+   BOOST_CHECK_THROW((void)rendezvous::codec::encode_peer_record(
+                         rendezvous::peer_record{.peer = target, .endpoints = {nonterminal_target}, .sequence = 48}),
+                     exceptions::invalid_identity);
+
+   const auto conflicting_terminal =
+       forge::multiformats::multiaddr::parse("/dnsaddr/target.example/p2p/" + other.to_string());
+   BOOST_CHECK_THROW((void)rendezvous::codec::encode_peer_record(
+                         rendezvous::peer_record{.peer = target, .endpoints = {conflicting_terminal}, .sequence = 49}),
+                     exceptions::invalid_identity);
+
+   const auto valid_relay = forge::multiformats::multiaddr::parse(
+       relay_carrier.to_string());
+   const auto conflicting_relay = forge::multiformats::multiaddr::parse(
+       "/ip4/8.8.8.8/tcp/4001/p2p/" + relay.to_string() + "/p2p-circuit/p2p/" + other.to_string());
+   auto mixed = rendezvous::codec::encode_peer_record(
+       rendezvous::peer_record{.peer = target, .endpoints = {valid_relay, valid_relay}, .sequence = 50});
+   const auto valid_bytes = valid_relay.to_bytes();
+   const auto conflicting_bytes = conflicting_relay.to_bytes();
+   BOOST_REQUIRE_EQUAL(valid_bytes.size(), conflicting_bytes.size());
+   const auto first = std::search(mixed.begin(), mixed.end(), valid_bytes.begin(), valid_bytes.end());
+   BOOST_REQUIRE(first != mixed.end());
+   const auto second =
+       std::search(std::next(first), mixed.end(), valid_bytes.begin(), valid_bytes.end());
+   BOOST_REQUIRE(second != mixed.end());
+   std::copy(conflicting_bytes.begin(), conflicting_bytes.end(), second);
+   BOOST_CHECK_THROW((void)rendezvous::codec::decode_peer_record(mixed), exceptions::codec_error);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed) {
@@ -7340,6 +7726,7 @@ BOOST_AUTO_TEST_CASE(p2p_resource_stream_close_forwards_cancel_without_releasing
    auto backend = std::make_shared<queued_transport_stream>(507);
    backend->close_entered = &close_entered;
    backend->close_release = &close_release;
+   backend->throw_on_close = true;
    auto resource = std::make_shared<detail::resource_stream>(std::move(*reservation));
    resource->attach(forge::net::transport::detail::stream_access::make(backend));
 
@@ -7351,7 +7738,8 @@ BOOST_AUTO_TEST_CASE(p2p_resource_stream_close_forwards_cancel_without_releasing
    BOOST_TEST(active_stream_count(manager.current()) == 1U);
    BOOST_TEST(backend->cancel_calls == 1U);
    close_release.arrive_and_wait();
-   BOOST_CHECK_NO_THROW(closed.get());
+   BOOST_CHECK_THROW(closed.get(), std::runtime_error);
+   BOOST_TEST(backend->closed);
    BOOST_TEST(active_stream_count(manager.current()) == 0U);
    BOOST_TEST(backend->close_calls == 1U);
    BOOST_TEST(backend->cancel_calls == 1U);
@@ -7913,6 +8301,60 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_snapshot_defaults_persistence_state) {
    BOOST_TEST(value.persistence.pending_peer_mutations == 0U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_diagnostics_black_holes_reflect_effective_public_and_private_policy) {
+   static_assert(boost::describe::has_describe_members<dialing::black_hole_counter_status>::value);
+   static_assert(boost::describe::has_describe_members<dialing::black_hole_status>::value);
+   static_assert(boost::describe::has_describe_enumerators<dialing::black_hole_state>::value);
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto public_node = node{runtime, options_for(make_test_identity())};
+   const auto status = public_node.diagnostics().black_holes;
+   BOOST_TEST(status.udp.enabled);
+   BOOST_TEST(status.ipv6.enabled);
+   BOOST_CHECK(status.udp.state == dialing::black_hole_state::probing);
+   BOOST_CHECK(status.ipv6.state == dialing::black_hole_state::probing);
+   BOOST_TEST(status.udp.peer_requests == 0U);
+   BOOST_TEST(status.ipv6.peer_requests == 0U);
+   BOOST_TEST(status.udp.outcomes == 0U);
+   BOOST_TEST(status.ipv6.outcomes == 0U);
+   for (const auto ipv6_enabled : {false, true}) {
+      auto options = private_network_options_for(make_test_identity());
+      options.direct_dial.black_holes.ipv6_enabled = ipv6_enabled;
+      auto private_node = node{runtime, std::move(options)};
+      const auto private_status = private_node.diagnostics().black_holes;
+      BOOST_TEST(!private_status.udp.enabled);
+      BOOST_TEST(private_status.ipv6.enabled == ipv6_enabled);
+      forge::asio::blocking::run(runtime, private_node.async_stop());
+   }
+   forge::asio::blocking::run(runtime, public_node.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_diagnostics_black_holes_report_neutral_gated_requests_without_mutation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto options = options_for(make_test_identity());
+   options.connection_gater = std::make_shared<recording_connection_gater>(recorded_gater_stage::address_dial);
+   auto client = node{runtime, std::move(options)};
+   const auto target = parse_endpoint("/ip6/2400::1/udp/4001/quic-v1/p2p/" + peer(214).to_string());
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(runtime, client.async_connect(target, node::connect_options{.allow_relay = false})),
+       forge::exceptions::base, [](const auto& error) {
+          return exceptions::code_of(error) == exceptions::code::connection_rejected;
+       });
+   for (auto read = 0; read < 2; ++read) {
+      const auto status = client.diagnostics().black_holes;
+      BOOST_TEST(status.udp.peer_requests == 1U);
+      BOOST_TEST(status.ipv6.peer_requests == 1U);
+      BOOST_TEST(status.udp.outcomes == 0U);
+      BOOST_TEST(status.ipv6.outcomes == 0U);
+      BOOST_TEST(status.udp.successes == 0U);
+      BOOST_TEST(status.ipv6.successes == 0U);
+      BOOST_TEST(status.udp.next_probe_after == 0U);
+      BOOST_TEST(status.ipv6.next_probe_after == 0U);
+      BOOST_CHECK(status.udp.state == dialing::black_hole_state::probing);
+      BOOST_CHECK(status.ipv6.state == dialing::black_hole_state::probing);
+   }
+   forge::asio::blocking::run(runtime, client.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_snapshot_reports_live_network_state_without_mutation) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    auto server = node{
@@ -8458,6 +8900,8 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_prepare_failure_preserves_sessions_a
    BOOST_TEST(after_failure.sessions_pruned == before.sessions_pruned);
    BOOST_TEST(after_failure.sessions_opened == before.sessions_opened);
    BOOST_TEST(client.diagnostics().resources.system.outbound_connections == 1U);
+   BOOST_TEST(client.diagnostics().resources.transient.outbound_connections == 0U);
+   BOOST_TEST(client.diagnostics().resources.system.file_descriptors == 1U);
 
    auto retained =
        forge::asio::blocking::run(runtime, client.async_open_protocol_stream(first.local_peer(), builtins::echo,
@@ -8920,10 +9364,21 @@ BOOST_AUTO_TEST_CASE(p2p_libp2p_autonat_v2_rejects_oversized_data_response_and_u
 
 BOOST_AUTO_TEST_CASE(p2p_autonat_v2_probe_public_and_persists_observation) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto observer =
-       node{runtime, options_for(peer(100), capability_set{.bits = capabilities::direct_quic | capabilities::autonat})};
-   auto subject =
-       node{runtime, options_for(peer(101), capability_set{.bits = capabilities::direct_quic | capabilities::autonat})};
+   const auto observer_identity = make_test_certificate_identity("autonat-public-observer");
+   const auto subject_identity = make_test_certificate_identity("autonat-public-subject");
+   auto observer_options = options_for(
+       observer_identity, capability_set{.bits = capabilities::direct_quic | capabilities::autonat});
+   auto subject_options = options_for(
+       subject_identity, capability_set{.bits = capabilities::direct_quic | capabilities::autonat});
+   observer_options.allow_insecure_test_mode = false;
+   subject_options.allow_insecure_test_mode = false;
+   observer_options.peer_state.persistence = peer_store::make_memory_persistence();
+   subject_options.peer_state.persistence = peer_store::make_memory_persistence();
+   auto observer = node{runtime, std::move(observer_options)};
+   auto subject = node{runtime, std::move(subject_options)};
+   BOOST_TEST(observer.local_peer().to_string() == observer_identity.peer.to_string());
+   BOOST_TEST(subject.local_peer().to_string() == subject_identity.peer.to_string());
+   BOOST_TEST(observer.local_peer().to_string() != subject.local_peer().to_string());
 
    const auto observer_endpoint = listen(observer, runtime);
    (void)listen(subject, runtime);
@@ -9163,7 +9618,8 @@ BOOST_AUTO_TEST_CASE(p2p_autorelay_refresh_accepts_dht_and_rendezvous_sourced_ca
        .capabilities =
            capability_set{.bits = capabilities::direct_quic | capabilities::relay | capabilities::relay_reservation},
        .discovered_by = discovery::source::dht,
-       .endpoints = std::vector<peer_store::endpoint_record>{peer_store::endpoint_record{.endpoint = dht_endpoint}},
+       .endpoints = std::vector<peer_store::endpoint_record>{
+           peer_store::endpoint_record{.address = address_for(dht_endpoint)}},
        .discovery_expires_at = std::chrono::system_clock::now() + std::chrono::minutes{5},
    });
    client.peers().upsert(peer_store::record{
@@ -9172,7 +9628,8 @@ BOOST_AUTO_TEST_CASE(p2p_autorelay_refresh_accepts_dht_and_rendezvous_sourced_ca
            capability_set{.bits = capabilities::direct_quic | capabilities::relay | capabilities::relay_reservation},
        .discovered_by = discovery::source::rendezvous,
        .endpoints =
-           std::vector<peer_store::endpoint_record>{peer_store::endpoint_record{.endpoint = rendezvous_endpoint}},
+           std::vector<peer_store::endpoint_record>{peer_store::endpoint_record{
+               .address = address_for(rendezvous_endpoint)}},
        .discovery_expires_at = std::chrono::system_clock::now() + std::chrono::minutes{5},
    });
 
@@ -9970,7 +10427,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_document_roundtrips_libp2p_fields) {
        .agent_version = "forge-test/1",
        .public_key = std::vector<std::uint8_t>{1, 2, 3},
        .listen_endpoints =
-           std::vector<endpoint>{parse_endpoint("/ip4/127.0.0.1/udp/4001/quic-v1/p2p/" + id.to_string())},
+           {forge::multiformats::multiaddr::parse("/dnsaddr/identify.example/p2p/" + id.to_string())},
        .observed_endpoint = parse_endpoint("/ip4/127.0.0.1/udp/5001/quic-v1/p2p/" + id.to_string()),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify},
        .signed_peer_record = std::vector<std::uint8_t>{9, 8, 7},
@@ -9988,6 +10445,24 @@ BOOST_AUTO_TEST_CASE(p2p_identify_document_roundtrips_libp2p_fields) {
    BOOST_REQUIRE_EQUAL(decoded.protocols.size(), 2U);
    BOOST_TEST(decoded.protocols.front().value == builtins::ping.value);
    BOOST_TEST(decoded.signed_peer_record == doc.signed_peer_record, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_identify_ignores_malformed_optional_observed_address) {
+   auto encoded = identify::encode(identify::document{
+       .protocol_version = "ipfs/0.1.0",
+       .agent_version = "forge/test",
+       .protocols = {builtins::ping},
+   });
+   const auto malformed_observed = std::array<std::uint8_t, 3>{0x22, 0x01, 0xff};
+   encoded.insert(encoded.end(), malformed_observed.begin(), malformed_observed.end());
+
+   const auto decoded = identify::decode(encoded);
+   BOOST_TEST(decoded.protocol_version == "ipfs/0.1.0");
+   BOOST_TEST(decoded.agent_version == "forge/test");
+   BOOST_REQUIRE_EQUAL(decoded.protocols.size(), 1U);
+   BOOST_TEST(decoded.protocols.front().value == builtins::ping.value);
+   BOOST_TEST(!decoded.observed_endpoint.has_value());
+   BOOST_TEST(!decoded.present.observed_endpoint);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_direct_nodes_negotiate_protocol_and_echo_frames) {
@@ -10444,7 +10919,7 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_candidate_probes_share_one_overall_timeout) {
       client.peers().upsert_routing_peer(
           builtins::kad_dht,
           dht::peer{.id = candidate,
-                    .endpoints = std::vector<forge::net::p2p::endpoint>{std::move(endpoint)},
+                    .endpoints = addresses_for({endpoint}),
                     .connection = dht::connection_type::can_connect},
           discovery::source::explicit_config, std::chrono::system_clock::now() + std::chrono::hours{1});
    }
@@ -10497,13 +10972,13 @@ BOOST_AUTO_TEST_CASE(p2p_discovery_tcp_candidate_timeout_does_not_poison_parent_
    stalled_endpoint.peer = stalled_peer;
    client.peers().upsert_routing_peer(builtins::kad_dht,
                                       dht::peer{.id = stalled_peer,
-                                                .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
+                                                .endpoints = addresses_for({stalled_endpoint}),
                                                 .connection = dht::connection_type::can_connect},
                                       discovery::source::explicit_config,
                                       std::chrono::system_clock::now() + std::chrono::hours{1});
    client.peers().upsert_routing_peer(builtins::kad_dht,
                                       dht::peer{.id = donor.local_peer(),
-                                                .endpoints = std::vector<endpoint>{donor_endpoint},
+                                                .endpoints = addresses_for({donor_endpoint}),
                                                 .connection = dht::connection_type::can_connect},
                                       discovery::source::explicit_config,
                                       std::chrono::system_clock::now() + std::chrono::hours{1});
@@ -10555,7 +11030,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_profiles_isolate_a_timed_out_profile) {
    client.peers().upsert_routing_peer(fast_protocol,
                                       dht::peer{
                                           .id = server.local_peer(),
-                                          .endpoints = std::vector<endpoint>{server_endpoint},
+                                          .endpoints = addresses_for({server_endpoint}),
                                           .connection = dht::connection_type::can_connect,
                                       },
                                       discovery::source::explicit_config,
@@ -10566,7 +11041,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_dht_profiles_isolate_a_timed_out_profile) {
    client.peers().upsert_routing_peer(slow_protocol,
                                       dht::peer{
                                           .id = stalled_peer,
-                                          .endpoints = std::vector<endpoint>{std::move(stalled_endpoint)},
+                                          .endpoints = addresses_for({stalled_endpoint}),
                                           .connection = dht::connection_type::can_connect,
                                       },
                                       discovery::source::explicit_config,
@@ -10597,7 +11072,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_hydrated_candidate_bootstraps_lookup_without_refres
                                       .discovered_by = discovery::source::explicit_config,
                                       .protocols = std::vector<protocol_id>{builtins::kad_dht},
                                       .endpoints = std::vector<peer_store::endpoint_record>{peer_store::endpoint_record{
-                                          .endpoint = server_endpoint}},
+                                          .address = address_for(server_endpoint)}},
                                       .discovery_expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
                                   }},
                               }));
@@ -11030,14 +11505,14 @@ BOOST_AUTO_TEST_CASE(p2p_dht_node_finds_peer_and_provider_over_negotiated_stream
 
    const auto found_peer = forge::asio::blocking::run(runtime, client.async_find_peer(builtins::kad_dht, target));
    BOOST_TEST(std::ranges::any_of(found_peer.closest_peers, [&](const dht::peer& value) {
-      return value.id == target && std::ranges::any_of(value.endpoints, [&](const endpoint& current) {
+      return value.id == target && std::ranges::any_of(value.endpoints, [&](const auto& current) {
                 return current.to_string() == target_endpoint.to_string();
              });
    }));
 
    const auto providers = forge::asio::blocking::run(runtime, client.async_find_providers(builtins::kad_dht, key));
    BOOST_TEST(std::ranges::any_of(providers, [&](const dht::peer& value) {
-      return value.id == provider && std::ranges::any_of(value.endpoints, [&](const endpoint& current) {
+      return value.id == provider && std::ranges::any_of(value.endpoints, [&](const auto& current) {
                 return current.to_string() == provider_endpoint.to_string();
              });
    }));
@@ -11282,7 +11757,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_iterative_lookup_walks_many_peer_topology) {
    const auto found = forge::asio::blocking::run(runtime, client.async_find_peer(content_swarm_test_dht, target));
    BOOST_TEST(found.complete);
    BOOST_TEST(std::ranges::any_of(found.closest_peers, [&](const dht::peer& value) {
-      return value.id == target && std::ranges::any_of(value.endpoints, [&](const endpoint& current) {
+      return value.id == target && std::ranges::any_of(value.endpoints, [&](const auto& current) {
                 return current.to_string() == target_endpoint.to_string();
              });
    }));
@@ -11340,7 +11815,7 @@ BOOST_AUTO_TEST_CASE(p2p_dht_iterative_provider_lookup_and_provide_reach_closest
 
    const auto providers = forge::asio::blocking::run(runtime, client.async_find_providers(content_swarm_test_dht, key));
    BOOST_TEST(std::ranges::any_of(providers, [&](const dht::peer& value) {
-      return value.id == provider && std::ranges::any_of(value.endpoints, [&](const endpoint& current) {
+      return value.id == provider && std::ranges::any_of(value.endpoints, [&](const auto& current) {
                 return current.to_string() == provider_endpoint.to_string();
              });
    }));
@@ -11450,7 +11925,7 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_signed_registration_rejects_mixed_endpoints_
 
    auto malformed_payload = rendezvous::codec::encode_peer_record(rendezvous::peer_record{
        .peer = client.local_peer(),
-       .endpoints = std::vector<endpoint>{accepted},
+       .endpoints = addresses_for({accepted}),
        .sequence = 2,
    });
    const auto malformed_address_info = std::array<std::uint8_t, 5>{0x1a, 0x03, 0x0a, 0x01, 0xff};
@@ -11713,6 +12188,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_stream_timeout_preserves_shared_aut
 
 BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises_local_registrations) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto dns_server = forge::tests::dns::local_dns_server{hidden_dns_response};
    const auto upstream_identity = make_test_certificate_identity("rendezvous-readvertise-upstream");
    const auto registrar_identity = make_test_certificate_identity("rendezvous-readvertise-registrar");
    const auto bridge_identity = make_test_certificate_identity("rendezvous-readvertise-bridge");
@@ -11720,14 +12196,18 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
    auto upstream_options =
        options_for(upstream_identity, capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
    upstream_options.limits.rendezvous.operating_role = rendezvous::role::server;
+   upstream_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
    auto upstream = node{runtime, std::move(upstream_options)};
-   auto registrar = node{runtime, options_for(registrar_identity, capability_set{.bits = capabilities::direct_quic})};
+   auto registrar_options = options_for(registrar_identity, capability_set{.bits = capabilities::direct_quic});
+   registrar_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto registrar = node{runtime, std::move(registrar_options)};
    auto upstream_endpoint = listen(upstream, runtime);
    auto registrar_endpoint = listen_quic_with_advertised_dns4(registrar, runtime);
    upstream_endpoint.peer = upstream.local_peer();
 
    auto bridge_options =
        options_for(bridge_identity, capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   bridge_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
    bridge_options.limits.rendezvous.operating_role = rendezvous::role::client_and_server;
    bridge_options.limits.topology.peers = topology::watermarks{.low = 1, .target = 1, .high = 3};
    bridge_options.limits.topology.refresh_interval = std::chrono::seconds{60};
@@ -11745,7 +12225,9 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
    auto bridge = node{runtime, std::move(bridge_options)};
    auto bridge_endpoint = listen(bridge, runtime);
    bridge_endpoint.peer = bridge.local_peer();
-   auto observer = node{runtime, options_for(observer_identity, capability_set{.bits = capabilities::direct_quic})};
+   auto observer_options = options_for(observer_identity, capability_set{.bits = capabilities::direct_quic});
+   observer_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto observer = node{runtime, std::move(observer_options)};
 
    registrar.peers().learn_endpoint(upstream.local_peer(), upstream_endpoint,
                                     capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
@@ -11815,7 +12297,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
        });
    BOOST_REQUIRE(served != after_local_registration.registrations.end());
    BOOST_REQUIRE(!served->endpoints.empty());
-   BOOST_TEST(std::ranges::any_of(served->endpoints, [&](const endpoint& current) {
+   BOOST_TEST(std::ranges::any_of(served->endpoints, [&](const auto& current) {
       return current.to_string() == registrar_endpoint.to_string();
    }));
 
@@ -11823,6 +12305,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_client_and_server_only_readvertises
    forge::asio::blocking::run(runtime, bridge.async_stop());
    forge::asio::blocking::run(runtime, registrar.async_stop());
    forge::asio::blocking::run(runtime, upstream.async_stop());
+   dns_server.close();
 }
 
 BOOST_AUTO_TEST_CASE(p2p_rendezvous_refresh_replaces_registration_and_cookie_discovers_new_records) {
@@ -12028,6 +12511,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_dht_peer_from_
 
 BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_rendezvous_registration) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto dns_server = forge::tests::dns::local_dns_server{hidden_dns_response};
    const auto rendezvous_identity = make_test_certificate_identity("topology-hidden-rendezvous-point");
    const auto hidden_identity = make_test_certificate_identity("topology-hidden-rendezvous-target");
    const auto seeker_identity = make_test_certificate_identity("topology-hidden-rendezvous-seeker");
@@ -12036,7 +12520,10 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_rendezvous_reg
    auto rendezvous_persistence = std::make_shared<tracking_peer_store_persistence>();
    rendezvous_options.peer_state.persistence = rendezvous_persistence;
    rendezvous_options.limits.rendezvous.operating_role = rendezvous::role::server;
-   auto hidden = node{runtime, options_for(hidden_identity, capability_set{.bits = capabilities::direct_quic})};
+   rendezvous_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto hidden_options = options_for(hidden_identity, capability_set{.bits = capabilities::direct_quic});
+   hidden_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto hidden = node{runtime, std::move(hidden_options)};
    auto rendezvous_point = node{runtime, std::move(rendezvous_options)};
    auto rendezvous_endpoint = listen(rendezvous_point, runtime);
    auto hidden_endpoint = listen_quic_with_advertised_dns4(hidden, runtime);
@@ -12056,6 +12543,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_rendezvous_reg
    BOOST_REQUIRE(registered.status_value == rendezvous::status::ok);
 
    auto seeker_options = options_for(seeker_identity, capability_set{.bits = capabilities::direct_quic});
+   seeker_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
    seeker_options.limits.topology.peers = topology::watermarks{.low = 2, .target = 2, .high = 3};
    seeker_options.limits.topology.refresh_interval = std::chrono::milliseconds{60'000};
    seeker_options.limits.topology.query_timeout = std::chrono::milliseconds{5'000};
@@ -12097,6 +12585,9 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_rendezvous_reg
    const auto learned = seeker.peers().find(hidden.local_peer());
    BOOST_REQUIRE(learned.has_value());
    BOOST_TEST(static_cast<int>(learned->discovered_by) == static_cast<int>(discovery::source::rendezvous));
+   BOOST_TEST(std::ranges::any_of(learned->endpoints, [&](const auto& value) {
+      return value.address.to_string() == hidden_endpoint.to_string();
+   }));
    BOOST_TEST(has_identified_session(seeker, hidden.local_peer()));
 
    seeker.request_stop();
@@ -12107,15 +12598,21 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_and_identifies_hidden_rendezvous_reg
        after_stop, [&](const rendezvous::registration& value) { return value.peer == seeker.local_peer(); }));
    forge::asio::blocking::run(runtime, hidden.async_stop());
    forge::asio::blocking::run(runtime, rendezvous_point.async_stop());
+   dns_server.close();
 }
 
 BOOST_AUTO_TEST_CASE(p2p_topology_discovers_pex_hint_then_identifies_hidden_peer) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto dns_server = forge::tests::dns::local_dns_server{hidden_dns_response};
    const auto source_identity = make_test_certificate_identity("topology-hidden-pex-source");
    const auto hidden_identity = make_test_certificate_identity("topology-hidden-pex-target");
    const auto seeker_identity = make_test_certificate_identity("topology-hidden-pex-seeker");
-   auto source = node{runtime, options_for(source_identity)};
-   auto hidden = node{runtime, options_for(hidden_identity, capability_set{.bits = capabilities::direct_quic})};
+   auto source_options = options_for(source_identity);
+   source_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto source = node{runtime, std::move(source_options)};
+   auto hidden_options = options_for(hidden_identity, capability_set{.bits = capabilities::direct_quic});
+   hidden_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
+   auto hidden = node{runtime, std::move(hidden_options)};
    const auto source_endpoint = listen(source, runtime);
    const auto hidden_endpoint = listen_quic_with_advertised_dns4(hidden, runtime);
    static_cast<void>(forge::asio::blocking::run(
@@ -12130,6 +12627,7 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_pex_hint_then_identifies_hidden_peer
    BOOST_TEST(source_hint->capabilities.has(capabilities::pubsub));
 
    auto seeker_options = options_for(seeker_identity);
+   seeker_options.dns_resolver.nameservers = {{.address = "127.0.0.1", .port = dns_server.port()}};
    seeker_options.limits.topology.peers = topology::watermarks{.low = 2, .target = 2, .high = 3};
    seeker_options.limits.topology.refresh_interval = std::chrono::milliseconds{60'000};
    seeker_options.limits.topology.query_timeout = std::chrono::milliseconds{5'000};
@@ -12160,14 +12658,68 @@ BOOST_AUTO_TEST_CASE(p2p_topology_discovers_pex_hint_then_identifies_hidden_peer
    const auto learned = seeker.peers().find(hidden.local_peer());
    BOOST_REQUIRE(learned.has_value());
    BOOST_TEST(static_cast<int>(learned->discovered_by) == static_cast<int>(discovery::source::peer_exchange));
+   BOOST_TEST(std::ranges::any_of(learned->endpoints, [&](const auto& value) {
+      return value.address.to_string() == hidden_endpoint.to_string();
+   }));
    BOOST_TEST(!learned->capabilities.has(capabilities::pubsub));
    BOOST_TEST(
-       std::ranges::any_of(learned->endpoints, [](const auto& value) { return value.endpoint.is_direct_quic(); }));
+       std::ranges::any_of(learned->endpoints, [](const auto& value) {
+          return parse_endpoint(value.address.to_string()).is_direct_quic();
+       }));
    BOOST_TEST(has_identified_session(seeker, hidden.local_peer()));
 
    forge::asio::blocking::run(runtime, seeker.async_stop());
    forge::asio::blocking::run(runtime, hidden.async_stop());
    forge::asio::blocking::run(runtime, source.async_stop());
+   dns_server.close();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_topology_mixed_circuit_and_direct_candidate_reaches_direct_listener) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto hidden = node{runtime, options_for(make_test_identity())};
+   auto direct = listen_tcp(hidden, runtime);
+   direct.peer = hidden.local_peer();
+   const auto circuit = forge::multiformats::multiaddr::parse(
+       "/ip4/127.0.0.1/tcp/1/p2p/" + peer(122).to_string() +
+       "/p2p-circuit/p2p/" + hidden.local_peer().to_string());
+   auto seeker_options = options_for(make_test_identity());
+   seeker_options.limits.topology.peers = topology::watermarks{.low = 1, .target = 1, .high = 2};
+   seeker_options.limits.topology.refresh_interval = std::chrono::seconds{60};
+   seeker_options.limits.topology.query_timeout = std::chrono::seconds{3};
+   seeker_options.limits.topology.max_parallel_queries = 1;
+   seeker_options.limits.topology.max_parallel_dials = 1;
+   seeker_options.limits.topology.max_peer_exchange_peers = 1;
+   seeker_options.limits.topology.dht_enabled = false;
+   auto seeker = node{runtime, std::move(seeker_options)};
+   // Seed the existing PEX candidate cache, preserving the optional relay peer
+   // alongside the same target's direct address for the topology dial callback.
+   seeker.peers().upsert(peer_store::record{
+       .peer = hidden.local_peer(),
+       .capabilities = capability_set{.bits = capabilities::direct_quic},
+       .discovered_by = discovery::source::peer_exchange,
+       .endpoints = {{.address = circuit}, {.address = direct.to_multiaddr()}},
+       .discovery_expires_at = std::chrono::system_clock::now() + std::chrono::minutes{1},
+   });
+   const auto candidates = seeker.peers().scored_candidates(discovery::source::peer_exchange, 1);
+   BOOST_REQUIRE_EQUAL(candidates.size(), 1U);
+   BOOST_REQUIRE_EQUAL(candidates.front().endpoints.size(), 2U);
+   BOOST_TEST(std::ranges::any_of(candidates.front().endpoints, [&](const auto& item) {
+      return item.address.to_string() == circuit.to_string();
+   }));
+   BOOST_TEST(std::ranges::any_of(candidates.front().endpoints, [&](const auto& item) {
+      return item.address.to_string() == direct.to_string();
+   }));
+
+   static_cast<void>(listen_tcp(seeker, runtime));
+   static_cast<void>(forge::asio::blocking::run(runtime, seeker.async_start()));
+   static_cast<void>(forge::asio::blocking::run(runtime, seeker.async_refresh_discovery()));
+   BOOST_TEST(has_identified_session(seeker, hidden.local_peer()));
+   BOOST_TEST(seeker.metrics().path_direct_attempts == 1U);
+   BOOST_TEST(seeker.metrics().active_sessions == 1U);
+   BOOST_TEST(seeker.diagnostics().resources.active_dials == 0U);
+
+   forge::asio::blocking::run(runtime, seeker.async_stop());
+   forge::asio::blocking::run(runtime, hidden.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_topology_rendezvous_requires_exact_identify_protocol) {
@@ -14788,8 +15340,8 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_updates_peer_store) {
    auto pushed = identify::document{
        .protocol_version = "/forge/push-test/1",
        .agent_version = "forge-push-test/1",
-       .listen_endpoints = std::vector<endpoint>{parse_endpoint("/ip4/127.0.0.1/udp/4101/quic-v1/p2p/" +
-                                                                client.local_peer().to_string())},
+       .listen_endpoints = addresses_for(
+           {parse_endpoint("/ip4/127.0.0.1/udp/4101/quic-v1/p2p/" + client.local_peer().to_string())}),
        .protocols = std::vector<protocol_id>{builtins::ping},
    };
    forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(identify::encode(pushed))));
@@ -14802,10 +15354,11 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_updates_peer_store) {
    BOOST_TEST(
        std::ranges::any_of(found->protocols, [](const protocol_id& protocol) { return protocol == builtins::ping; }));
    BOOST_REQUIRE_EQUAL(found->endpoints.size(), 2U);
-   const auto identified =
-       std::ranges::find_if(found->endpoints, [](const auto& value) { return value.endpoint.transport.port == 4101U; });
+   const auto identified = std::ranges::find_if(found->endpoints, [](const auto& value) {
+      return transport_port_for(value.address) == 4101U;
+   });
    BOOST_REQUIRE(identified != found->endpoints.end());
-   BOOST_TEST(identified->endpoint.peer->to_bytes() == client.local_peer().to_bytes(),
+   BOOST_TEST(peer_for(identified->address).to_bytes() == client.local_peer().to_bytes(),
               boost::test_tools::per_element());
    BOOST_TEST(!identified->sources.learned);
    BOOST_TEST(identified->sources.identify_unsigned);
@@ -14814,7 +15367,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_updates_peer_store) {
    const auto replacement = parse_endpoint("/ip4/127.0.0.1/udp/4102/quic-v1/p2p/" + client.local_peer().to_string());
    stream = forge::asio::blocking::run(runtime,
                                        client.async_open_protocol_stream(server.local_peer(), builtins::identify_push));
-   pushed.listen_endpoints = {replacement};
+   pushed.listen_endpoints = addresses_for({replacement});
    forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(identify::encode(pushed))));
    forge::asio::blocking::run(runtime, stream.async_close());
    wait_on_runtime(runtime, std::chrono::milliseconds{100}, "Identify unsigned snapshot replacement");
@@ -14822,13 +15375,14 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_updates_peer_store) {
    const auto replaced = server.peers().find(client.local_peer());
    BOOST_REQUIRE(replaced);
    BOOST_REQUIRE_EQUAL(replaced->endpoints.size(), 2U);
-   BOOST_TEST(std::ranges::none_of(replaced->endpoints,
-                                   [](const auto& value) { return value.endpoint.transport.port == 4101U; }));
-   BOOST_TEST(std::ranges::any_of(replaced->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4099U && value.sources.learned;
+   BOOST_TEST(std::ranges::none_of(replaced->endpoints, [](const auto& value) {
+      return transport_port_for(value.address) == 4101U;
    }));
    BOOST_TEST(std::ranges::any_of(replaced->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4102U && value.sources.identify_unsigned;
+      return transport_port_for(value.address) == 4099U && value.sources.learned;
+   }));
+   BOOST_TEST(std::ranges::any_of(replaced->endpoints, [](const auto& value) {
+      return transport_port_for(value.address) == 4102U && value.sources.identify_unsigned;
    }));
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -14872,7 +15426,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_merges_multiple_length_delimited_messages
    const auto second = identify::document{
        .protocol_version = "/forge/multipart/1",
        .agent_version = "forge-multipart/1",
-       .listen_endpoints = std::vector<endpoint>{advertised_endpoints.front()},
+       .listen_endpoints = addresses_for({advertised_endpoints.front()}),
        .protocols = std::move(first_protocols),
    };
    const auto first_bytes = identify::encode(first);
@@ -15003,7 +15557,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_rejects_mismatched_endpoint_peer_suffix) 
    auto pushed = identify::document{
        .protocol_version = "/forge/push-bad-peer/1",
        .agent_version = "forge-push-bad-peer/1",
-       .listen_endpoints = std::vector<endpoint>{bad_endpoint},
+       .listen_endpoints = addresses_for({bad_endpoint}),
        .protocols = std::vector<protocol_id>{builtins::ping},
    };
    forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(identify::encode(pushed))));
@@ -15014,7 +15568,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_rejects_mismatched_endpoint_peer_suffix) 
    BOOST_REQUIRE(found);
    BOOST_TEST(found->protocol_version == "/forge/push-bad-peer/1");
    BOOST_TEST(std::ranges::none_of(found->endpoints, [&](const peer_store::endpoint_record& record) {
-      return record.endpoint.to_string() == bad_endpoint.to_string();
+      return record.address.to_string() == bad_endpoint.to_string();
    }));
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -15048,14 +15602,13 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_flushes_memory_peer_record_for_hydration)
        .protocol_version = "/forge/push-persist/1",
        .agent_version = "forge-push-persist/1",
        .public_key = encoded_public_key,
-       .listen_endpoints = std::vector<endpoint>{advertised},
+       .listen_endpoints = addresses_for({advertised}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify},
        .signed_peer_record = signed_peer_record,
    };
    const auto decoded = identify::decode(identify::encode(pushed));
    BOOST_REQUIRE_EQUAL(decoded.listen_endpoints.size(), 1U);
-   BOOST_REQUIRE(decoded.listen_endpoints.front().peer.has_value());
-   BOOST_TEST(decoded.listen_endpoints.front().peer->to_bytes() == client.local_peer().to_bytes(),
+   BOOST_TEST(peer_for(decoded.listen_endpoints.front()).to_bytes() == client.local_peer().to_bytes(),
               boost::test_tools::per_element());
    forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(identify::encode(pushed))));
    forge::asio::blocking::run(runtime, stream.async_close());
@@ -15075,7 +15628,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_flushes_memory_peer_record_for_hydration)
    BOOST_TEST(
        std::ranges::any_of(found->protocols, [](const protocol_id& value) { return value == builtins::identify; }));
    BOOST_REQUIRE_EQUAL(found->endpoints.size(), 1U);
-   BOOST_TEST(found->endpoints.front().endpoint.transport.port == 4201);
+   BOOST_TEST(transport_port_for(found->endpoints.front().address) == 4201U);
    BOOST_TEST(!found->endpoints.front().sources.learned);
    BOOST_TEST(found->endpoints.front().sources.identify_signed);
 
@@ -15114,7 +15667,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_accepts_rust_legacy_signed_peer_record) {
        .protocol_version = "/forge/rust-identify/1",
        .agent_version = "rust-libp2p",
        .public_key = encode_public_key(public_key_for(client_identity)),
-       .listen_endpoints = std::vector<endpoint>{advertised},
+       .listen_endpoints = addresses_for({advertised}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify},
        .signed_peer_record = signed_peer_record,
    };
@@ -15127,7 +15680,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_accepts_rust_legacy_signed_peer_record) {
    BOOST_TEST(found->protocol_version == "/forge/rust-identify/1");
    BOOST_TEST(found->signed_peer_record == signed_peer_record, boost::test_tools::per_element());
    BOOST_REQUIRE_EQUAL(found->endpoints.size(), 1U);
-   BOOST_TEST(found->endpoints.front().endpoint.transport.port == 4207U);
+   BOOST_TEST(transport_port_for(found->endpoints.front().address) == 4207U);
    BOOST_TEST(found->endpoints.front().sources.identify_signed);
    BOOST_TEST(
        std::ranges::any_of(found->protocols, [](const protocol_id& value) { return value == builtins::identify; }));
@@ -15163,7 +15716,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
 
    push(identify::document{
        .protocol_version = "/forge/certified/1",
-       .listen_endpoints = std::vector<endpoint>{advertised},
+       .listen_endpoints = addresses_for({advertised}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify_push},
        .signed_peer_record = signed_record,
    });
@@ -15177,7 +15730,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
        parse_endpoint("/ip4/127.0.0.1/udp/4203/quic-v1/p2p/" + client.local_peer().to_string());
    push(identify::document{
        .protocol_version = "/forge/unsigned-update/1",
-       .listen_endpoints = std::vector<endpoint>{unsigned_advertised},
+       .listen_endpoints = addresses_for({unsigned_advertised}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify_push},
    });
    found = server.peers().find(client.local_peer());
@@ -15192,7 +15745,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
        client_identity, std::vector<endpoint>{equal_sequence_endpoint}, signed_sequence);
    push(identify::document{
        .protocol_version = "/forge/equal-sequence-refresh/1",
-       .listen_endpoints = std::vector<endpoint>{equal_sequence_endpoint},
+       .listen_endpoints = addresses_for({equal_sequence_endpoint}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify_push},
        .signed_peer_record = equal_sequence_record,
    });
@@ -15201,7 +15754,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
    BOOST_TEST(found->protocol_version == "/forge/equal-sequence-refresh/1");
    BOOST_TEST(found->signed_peer_record == equal_sequence_record, boost::test_tools::per_element());
    BOOST_TEST(std::ranges::any_of(found->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4206U && value.sources.identify_signed;
+      return transport_port_for(value.address) == 4206U && value.sources.identify_signed;
    }));
 
    const auto replacement = parse_endpoint("/ip4/127.0.0.1/udp/4204/quic-v1/p2p/" + client.local_peer().to_string());
@@ -15211,7 +15764,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
        make_signed_identify_peer_record(client_identity, std::vector<endpoint>{replacement}, signed_sequence + 1);
    push(identify::document{
        .protocol_version = "/forge/certified/2",
-       .listen_endpoints = std::vector<endpoint>{ignored_unsigned},
+       .listen_endpoints = addresses_for({ignored_unsigned}),
        .protocols = std::vector<protocol_id>{builtins::ping, builtins::identify_push},
        .signed_peer_record = replacement_record,
    });
@@ -15219,11 +15772,11 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_preserves_certified_record_across_unsigne
    BOOST_REQUIRE(found);
    BOOST_TEST(found->signed_peer_record == replacement_record, boost::test_tools::per_element());
    BOOST_TEST(std::ranges::none_of(found->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4202U || value.endpoint.transport.port == 4205U ||
-             value.endpoint.transport.port == 4206U;
+      return transport_port_for(value.address) == 4202U || transport_port_for(value.address) == 4205U ||
+             transport_port_for(value.address) == 4206U;
    }));
    BOOST_TEST(std::ranges::any_of(found->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4204U && value.sources.identify_signed;
+      return transport_port_for(value.address) == 4204U && value.sources.identify_signed;
    }));
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -15279,21 +15832,32 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_rejects_canonical_record_with_mismatched_
    const auto before =
        wait_for_identified_peer(server, client.local_peer(), runtime, "inner-peer Push inbound Identify");
    const auto advertised = parse_endpoint("/ip4/127.0.0.1/udp/4208/quic-v1/p2p/" + client.local_peer().to_string());
-   const auto payload = rendezvous::codec::encode_peer_record(rendezvous::peer_record{
-       .peer = peer(214),
-       .endpoints = std::vector<endpoint>{advertised},
-       .sequence = identify_peer_record_sequence(before.signed_peer_record) + 1,
-   });
+   // Encode hostile protobuf directly: the validating peer-record encoder
+   // correctly refuses this disagreement before it can reach the wire.
+   auto payload = std::vector<std::uint8_t>{0x0a};
+   const auto inner_peer = wrap_length_delimited(peer(214).to_bytes());
+   payload.insert(payload.end(), inner_peer.begin(), inner_peer.end());
+   payload.push_back(0x10);
+   const auto sequence = forge::multiformats::varint_encode(
+       identify_peer_record_sequence(before.signed_peer_record) + 1);
+   payload.insert(payload.end(), sequence.begin(), sequence.end());
+   auto address_info = std::vector<std::uint8_t>{0x0a};
+   const auto address = wrap_length_delimited(advertised.to_multiaddr().to_bytes());
+   address_info.insert(address_info.end(), address.begin(), address.end());
+   payload.push_back(0x1a);
+   const auto encoded_address_info = wrap_length_delimited(address_info);
+   payload.insert(payload.end(), encoded_address_info.begin(), encoded_address_info.end());
    const auto invalid_record =
        signed_envelope::seal(public_key_for(client_identity),
                              forge::crypto::pki::pem::read_private_key(client_identity.private_key_pem),
                              "libp2p-peer-record", identify_peer_record_payload_type(), payload)
            .encode();
+   BOOST_CHECK_NO_THROW(signed_envelope::decode(invalid_record).verify("libp2p-peer-record", client.local_peer()));
    auto stream = forge::asio::blocking::run(
        runtime, client.async_open_protocol_stream(server.local_peer(), builtins::identify_push));
    const auto pushed = identify::document{
        .protocol_version = "/forge/inner-peer-mismatch/1",
-       .listen_endpoints = std::vector<endpoint>{advertised},
+       .listen_endpoints = addresses_for({advertised}),
        .protocols = std::vector<protocol_id>{builtins::ping},
        .signed_peer_record = invalid_record,
    };
@@ -15306,7 +15870,7 @@ BOOST_AUTO_TEST_CASE(p2p_identify_push_rejects_canonical_record_with_mismatched_
    BOOST_TEST(found->protocol_version == "/forge/inner-peer-mismatch/1");
    BOOST_TEST(found->signed_peer_record == before.signed_peer_record, boost::test_tools::per_element());
    BOOST_TEST(std::ranges::any_of(found->endpoints, [](const auto& value) {
-      return value.endpoint.transport.port == 4208U && value.sources.identify_unsigned;
+      return transport_port_for(value.address) == 4208U && value.sources.identify_unsigned;
    }));
 
    forge::asio::blocking::run(runtime, client.async_stop());
@@ -15395,7 +15959,7 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_open_shutdown_does_not_penalize_peer) {
    const auto before = client.peers().find(server.local_peer());
    BOOST_REQUIRE(before.has_value());
    const auto endpoint_before = std::ranges::find_if(before->endpoints, [&](const auto& current) {
-      return current.endpoint.to_string() == server_endpoint.to_string();
+      return current.address.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(endpoint_before != before->endpoints.end());
    const auto peer_failures_before = before->failures;
@@ -15436,7 +16000,7 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_open_shutdown_does_not_penalize_peer) {
    const auto after = client.peers().find(server.local_peer());
    BOOST_REQUIRE(after.has_value());
    const auto endpoint_after = std::ranges::find_if(after->endpoints, [&](const auto& current) {
-      return current.endpoint.to_string() == server_endpoint.to_string();
+      return current.address.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(endpoint_after != after->endpoints.end());
    BOOST_TEST(after->failures == peer_failures_before);
@@ -15479,7 +16043,7 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_timeout_penalizes_peer_without_advancin
    const auto before = client.peers().find(server.local_peer());
    BOOST_REQUIRE(before.has_value());
    const auto endpoint_before = std::ranges::find_if(before->endpoints, [&](const auto& current) {
-      return current.endpoint.to_string() == server_endpoint.to_string();
+      return current.address.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(endpoint_before != before->endpoints.end());
    const auto peer_failures_before = before->failures;
@@ -15504,7 +16068,7 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_timeout_penalizes_peer_without_advancin
    const auto after = client.peers().find(server.local_peer());
    BOOST_REQUIRE(after.has_value());
    const auto endpoint_after = std::ranges::find_if(after->endpoints, [&](const auto& current) {
-      return current.endpoint.to_string() == server_endpoint.to_string();
+      return current.address.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(endpoint_after != after->endpoints.end());
    BOOST_TEST(after->failures == peer_failures_before + 1U);
@@ -15589,7 +16153,7 @@ BOOST_AUTO_TEST_CASE(p2p_direct_path_timeout_before_stop_penalizes_peer) {
           runtime,
           client.async_open_protocol_stream(stalled_peer, builtins::echo,
                                             node::open_options{.allow_relay = false,
-                                                               .timeout = std::chrono::milliseconds{100},
+                                                               .timeout = std::chrono::milliseconds{1'000},
                                                                .direct_attempt_timeout = std::chrono::milliseconds{100},
                                                                .max_direct_endpoints = 1})));
       BOOST_FAIL("expected direct path timeout");
@@ -15609,10 +16173,51 @@ BOOST_AUTO_TEST_CASE(p2p_direct_path_timeout_before_stop_penalizes_peer) {
    forge::asio::blocking::run(runtime, client.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_direct_path_global_budget_cancel_does_not_penalize_peer) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto client = node{runtime, options_for(peer(213))};
+   const auto stalled_endpoint = start_stalling_tcp_peer(runtime);
+   const auto stalled_peer = peer(214);
+   client.peers().learn_endpoint(stalled_peer, stalled_endpoint, capability_set{.bits = capabilities::direct_quic});
+   const auto before = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(before.has_value());
+   BOOST_REQUIRE(!before->endpoints.empty());
+   const auto peer_failures_before = before->failures;
+   const auto endpoint_failures_before = before->endpoints.front().failures;
+   const auto endpoint_backoff_before = before->endpoints.front().backoff_until;
+   const auto direct_failures_before = client.metrics().direct_failures;
+   const auto direct_attempts_before = client.metrics().path_direct_attempts;
+
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(
+           runtime, client.async_open_protocol_stream(stalled_peer, builtins::echo,
+               node::open_options{.allow_relay = false,
+                                  .timeout = std::chrono::milliseconds{100},
+                                  .direct_attempt_timeout = std::chrono::milliseconds{1'000},
+                                  .max_direct_endpoints = 1})),
+       forge::exceptions::base, [](const auto& error) {
+          return exceptions::code_of(error) == exceptions::code::timeout;
+       });
+   BOOST_TEST(client.metrics().path_direct_attempts == direct_attempts_before + 1U);
+   forge::asio::blocking::run(runtime, client.async_stop());
+
+   const auto after = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(after.has_value());
+   BOOST_REQUIRE(!after->endpoints.empty());
+   BOOST_TEST(after->failures == peer_failures_before);
+   BOOST_TEST(after->endpoints.front().failures == endpoint_failures_before);
+   BOOST_CHECK(after->endpoints.front().backoff_until == endpoint_backoff_before);
+   BOOST_TEST(client.metrics().direct_failures == direct_failures_before);
+   BOOST_TEST(client.diagnostics().resources.active_dials == 0U);
+   BOOST_TEST(client.diagnostics().resources.system.outbound_connections == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_path_manager_tries_next_direct_endpoint_after_attempt_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server = node{runtime, options_for(peer(64))};
-   auto client = node{runtime, options_for(peer(65))};
+   auto client_options = options_for(peer(65));
+   client_options.direct_dial.max_concurrent_attempts = 1;
+   auto client = node{runtime, std::move(client_options)};
    register_echo(server);
 
    const auto server_endpoint = listen(server, runtime);
@@ -15639,10 +16244,10 @@ BOOST_AUTO_TEST_CASE(p2p_path_manager_tries_next_direct_endpoint_after_attempt_t
    auto record = client.peers().find(server.local_peer());
    BOOST_REQUIRE(record.has_value());
    auto failed = std::ranges::find_if(record->endpoints, [&](const peer_store::endpoint_record& current) {
-      return current.endpoint.to_string() == make_quic_endpoint(9).to_string();
+      return current.address.to_string() == make_quic_endpoint(9).to_string();
    });
    auto succeeded = std::ranges::find_if(record->endpoints, [&](const peer_store::endpoint_record& current) {
-      return current.endpoint.to_string() == server_endpoint.to_string();
+      return current.address.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(failed != record->endpoints.end());
    BOOST_REQUIRE(succeeded != record->endpoints.end());
@@ -15805,7 +16410,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_identify_update_preserves_independent_endpoi
                                                          .protocol_version = "/forge/atomic-identify/1",
                                                          .protocols = std::vector<protocol_id>{builtins::identify},
                                                          .capabilities = capability_set{},
-                                                         .unsigned_endpoints = std::vector<endpoint>{second},
+                                                         .unsigned_endpoints = addresses_for({second}),
                                                      });
 
    const auto found = store.find(remote);
@@ -15813,9 +16418,9 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_identify_update_preserves_independent_endpoi
    BOOST_TEST(found->protocol_version == "/forge/atomic-identify/1");
    BOOST_TEST(updated.protocol_version == found->protocol_version);
    BOOST_TEST(std::ranges::any_of(found->endpoints,
-                                  [&](const auto& value) { return value.endpoint.to_string() == first.to_string(); }));
+                                  [&](const auto& value) { return value.address.to_string() == first.to_string(); }));
    const auto identified = std::ranges::find_if(
-       found->endpoints, [&](const auto& value) { return value.endpoint.to_string() == second.to_string(); });
+       found->endpoints, [&](const auto& value) { return value.address.to_string() == second.to_string(); });
    BOOST_REQUIRE(identified != found->endpoints.end());
    BOOST_TEST(identified->sources.identify_unsigned);
    BOOST_TEST(!identified->sources.learned);
@@ -15832,7 +16437,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_identify_update_preserves_independent_endpoi
    BOOST_TEST(static_cast<int>(discovered->discovered_by) == static_cast<int>(discovery::source::rendezvous));
    BOOST_TEST(discovered->discovered_at == observed_at);
    BOOST_TEST(std::ranges::any_of(discovered->endpoints,
-                                  [&](const auto& value) { return value.endpoint.to_string() == third.to_string(); }));
+                                  [&](const auto& value) { return value.address.to_string() == third.to_string(); }));
 
    store.upsert_relay_reservation(peer_store::relay_record{
        .relay = remote,
@@ -15844,7 +16449,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_identify_update_preserves_independent_endpoi
    BOOST_REQUIRE(with_relay);
    BOOST_TEST(with_relay->protocol_version == "/forge/atomic-identify/1");
    BOOST_TEST(std::ranges::any_of(with_relay->endpoints,
-                                  [&](const auto& value) { return value.endpoint.to_string() == first.to_string(); }));
+                                  [&](const auto& value) { return value.address.to_string() == first.to_string(); }));
    BOOST_REQUIRE_EQUAL(with_relay->relay_reservations.size(), 1U);
    BOOST_TEST(with_relay->relay_reservations.front().reservation_id == 17U);
 }
@@ -15866,7 +16471,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_st
        .public_key = public_key_bytes,
        .protocols = {builtins::identify},
        .signed_peer_record = {0x03, 0x04},
-       .endpoints = {peer_store::endpoint_record{.endpoint = original_endpoint}},
+       .endpoints = {peer_store::endpoint_record{.address = address_for(original_endpoint)}},
        .relay_reservations = {peer_store::relay_record{
            .relay = remote,
            .reservation_id = 23,
@@ -15884,7 +16489,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_st
            .capabilities = capability_set{.bits = capabilities::peer_exchange},
            .endpoints = {peer_exchange_message::endpoint_record{
                .peer = remote,
-               .endpoint = exchanged_endpoint,
+               .address = address_for(exchanged_endpoint),
                .capabilities = capability_set{.bits = capabilities::pubsub},
            }},
        },
@@ -15904,10 +16509,10 @@ BOOST_AUTO_TEST_CASE(p2p_peer_exchange_preserves_identify_discovery_and_relay_st
    BOOST_TEST(!stored->capabilities.has(capabilities::peer_exchange));
    BOOST_TEST(!stored->capabilities.has(capabilities::pubsub));
    BOOST_TEST(std::ranges::any_of(stored->endpoints, [&](const auto& value) {
-      return value.endpoint.to_string() == original_endpoint.to_string();
+      return value.address.to_string() == original_endpoint.to_string();
    }));
    BOOST_TEST(std::ranges::any_of(stored->endpoints, [&](const auto& value) {
-      return value.endpoint.to_string() == exchanged_endpoint.to_string();
+      return value.address.to_string() == exchanged_endpoint.to_string();
    }));
 }
 
@@ -15978,7 +16583,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_bounds_variable_peer_record_state) {
    const auto stored = store.find(subject);
    BOOST_REQUIRE(stored.has_value());
    BOOST_REQUIRE_EQUAL(stored->endpoints.size(), 1U);
-   BOOST_TEST(stored->endpoints.front().endpoint.to_string() == make_quic_endpoint(4070).to_string());
+   BOOST_TEST(stored->endpoints.front().address.to_string() == make_quic_endpoint(4070).to_string());
 
    BOOST_CHECK_THROW(store.upsert(peer_store::record{
                          .peer = peer(71),
@@ -16010,7 +16615,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_bounds_variable_peer_record_state) {
            runtime, store.async_upsert_rendezvous(rendezvous::registration{
                         .namespace_name = "forge.bounds",
                         .peer = peer(78),
-                        .endpoints = std::vector<endpoint>{make_quic_endpoint(4076), make_quic_endpoint(4077)},
+                        .endpoints = addresses_for({make_quic_endpoint(4076), make_quic_endpoint(4077)}),
                     }))),
        exceptions::backpressure_rejected);
 }
@@ -17051,6 +17656,39 @@ BOOST_AUTO_TEST_CASE(p2p_node_options_reject_zero_global_dial_limit) {
    options.limits.resources.max_dial_attempts = 0;
 
    BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_options_fail_fast_on_invalid_address_resolution_and_dial_policies) {
+   {
+      auto options = options_for(peer(250));
+      options.dns_resolution.bounds.max_dns_lookups = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.dns_resolver.max_in_flight = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.max_concurrent_attempts = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.max_concurrent_attempts = 5;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.ranker.public_delay = std::chrono::milliseconds::zero();
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
+   {
+      auto options = options_for(peer(250));
+      options.direct_dial.black_holes.window_size = 0;
+      BOOST_CHECK_THROW(validate(options), exceptions::invalid_options);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_production_options_use_peer_state_persistence) {

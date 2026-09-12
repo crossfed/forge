@@ -49,6 +49,7 @@ import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.envelope;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.hole_punch;
@@ -373,11 +374,16 @@ void node::impl::increment_direct_failure() {
 std::chrono::system_clock::time_point node::impl::endpoint_backoff_until(const peer_id& peer,
                                                                          const forge::net::p2p::endpoint& endpoint,
                                                                          path::kind kind) const {
+   return endpoint_backoff_until(peer, endpoint.to_multiaddr(), kind);
+}
+
+std::chrono::system_clock::time_point node::impl::endpoint_backoff_until(
+    const peer_id& peer, const forge::multiformats::multiaddr& address, path::kind kind) const {
    auto failures = std::uint64_t{1};
    if (auto record = store.find(peer)) {
-      const auto endpoint_string = endpoint.to_string();
+      const auto endpoint_string = address.to_string();
       for (const auto& current : record->endpoints) {
-         if (current.kind == kind && current.endpoint.to_string() == endpoint_string) {
+         if (current.kind == kind && current.address.to_string() == endpoint_string) {
             failures = current.failures + 1;
             break;
          }

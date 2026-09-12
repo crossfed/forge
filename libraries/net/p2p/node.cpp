@@ -47,6 +47,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.symmetric.chacha20_poly1305;
 import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
@@ -75,6 +76,7 @@ import forge.crypto.asymmetric.rsa;
 import forge.crypto.digest.sha256;
 import forge.crypto.asymmetric.x25519;
 import forge.multiformats.types;
+import forge.multiformats.multiaddr;
 import forge.multiformats.varint;
 import forge.multiformats.exceptions;
 import forge.net.transport.session;
@@ -116,7 +118,7 @@ void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) 
 }
 
 [[nodiscard]] dht::peer sanitize_discovered_peer(dht::peer value, host_addresses::learning_context context) {
-   value.endpoints = host_addresses::sanitize_discovered_endpoints(std::move(value.endpoints), value.id, context);
+   value.endpoints = host_addresses::sanitize_discovered_addresses(std::move(value.endpoints), value.id, context);
    return value;
 }
 
@@ -124,7 +126,8 @@ void mark_dht_routing_failure(dht::routing_table& routing, const peer_id& peer) 
    return !value.endpoints.empty();
 }
 
-[[nodiscard]] std::vector<endpoint> endpoints_from_registration(const rendezvous::registration& registration) {
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+endpoints_from_registration(const rendezvous::registration& registration) {
    if (registration.signed_peer_record.empty()) {
       return registration.endpoints;
    }
@@ -147,7 +150,7 @@ sanitize_discovered_registration(rendezvous::registration registration, host_add
       return registration;
    }
    auto sanitized =
-       host_addresses::sanitize_discovered_endpoints(original_endpoints, registration.peer, std::move(context));
+       host_addresses::sanitize_discovered_addresses(original_endpoints, registration.peer, std::move(context));
    if (sanitized.empty()) {
       return std::nullopt;
    }
@@ -189,7 +192,7 @@ diagnostics_endpoints(std::span<const peer_store::endpoint_record> records, std:
          break;
       }
       out.push_back(diagnostics::endpoint_record{
-          .endpoint = record.endpoint,
+          .address = record.address,
           .kind = record.kind,
           .relay_peer = record.relay_peer,
           .successes = record.successes,
@@ -358,31 +361,42 @@ void stop_owned(auto self) {
 
 boost::asio::awaitable<void> async_stop_owned(auto self) {
    auto failure = std::exception_ptr{};
+   const auto capture_failure = [&failure] {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   };
    try {
       co_await self->provider_registry->async_drain();
    } catch (...) {
-      failure = std::current_exception();
+      capture_failure();
    }
-   co_await self->lifecycle.wait();
-   co_await self->teardown.wait();
+   try {
+      co_await self->lifecycle.wait();
+   } catch (...) {
+      capture_failure();
+   }
+   try {
+      co_await self->teardown.wait();
+   } catch (...) {
+      capture_failure();
+   }
    if (failure) {
+      // Provider removals are durable state transitions. Keep their backing
+      // stores open so a subsequent async_stop() can retry the failed drain.
       std::rethrow_exception(failure);
    }
    for (auto& [_, profile] : self->dht_profiles) {
       try {
          co_await profile->records.async_close();
       } catch (...) {
-         if (!failure) {
-            failure = std::current_exception();
-         }
+         capture_failure();
       }
    }
    try {
       co_await self->store.async_close();
    } catch (...) {
-      if (!failure) {
-         failure = std::current_exception();
-      }
+      capture_failure();
    }
    self->lifecycle.finish_stop();
    if (failure) {
@@ -397,10 +411,31 @@ boost::asio::awaitable<void> async_stop_after_topology_join(auto self) {
    co_await boost::asio::co_spawn(
        executor,
        [self = std::move(self)]() mutable -> boost::asio::awaitable<void> {
+          auto failure = std::exception_ptr{};
           self->request_lifecycle_stop();
-          co_await self->async_join_topology_manager();
-          stop_owned(self);
-          co_await async_stop_owned(std::move(self));
+          try {
+             co_await self->async_join_topology_manager();
+          } catch (...) {
+             failure = std::current_exception();
+          }
+          try {
+             co_await self->async_close_dial_scheduler();
+          } catch (...) {
+             if (!failure) {
+                failure = std::current_exception();
+             }
+          }
+          try {
+             stop_owned(self);
+             co_await async_stop_owned(self);
+          } catch (...) {
+             if (!failure) {
+                failure = std::current_exception();
+             }
+          }
+          if (failure) {
+             std::rethrow_exception(failure);
+          }
        },
        boost::asio::bind_cancellation_slot(boost::asio::cancellation_slot{}, boost::asio::use_awaitable));
 }
@@ -486,6 +521,8 @@ node::metrics_snapshot node::metrics() const {
 }
 
 forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagnostics::options options) const {
+   // Snapshot the detector under its own lock before entering the node mutex.
+   const auto black_holes = impl_->dial_black_hole_status();
    const auto persistence = impl_->store.persistence_state();
    const auto lifecycle = lifecycle_state();
    const auto retained_identify_attempts = impl_->identify_service.retained();
@@ -547,6 +584,7 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
        .stopped = impl_->stopped,
    };
    out.lifecycle = lifecycle;
+   out.black_holes = black_holes;
    out.effective_limits = impl_->resources.configured_limits();
    out.metrics = impl_->metrics_value;
    out.metrics.gater_peer_dial_rejections = impl_->connection_gate->denied(detail::connection_gater_stage::peer_dial);
@@ -711,21 +749,17 @@ boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::
 
 boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::endpoint endpoint,
                                                                node::connect_options options) {
-   validate_operation_timeout(options.timeout, "P2P connect timeout");
-   auto self = impl_;
-   self->require_private_direct_tcp(endpoint, "connect");
-   if (self->private_network_enabled()) {
-      if (options.relay_peer) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
-                               "P2P private-network connect does not permit a relay peer");
-      }
-      options.allow_relay = false;
-      options.allow_hole_punch = false;
-   }
-   self->record_path_attempt(path::kind::direct);
-   auto session = co_await self->connect_direct(std::move(endpoint), std::move(options));
-   co_await self->identify_session(session);
-   co_return self->session_info_for(session);
+   impl_->require_private_direct_tcp(endpoint, "connect");
+   return async_connect(endpoint.to_multiaddr(), std::move(options));
+}
+
+boost::asio::awaitable<node::session_info> node::async_connect(forge::multiformats::multiaddr address) {
+   return async_connect(std::move(address), connect_options{});
+}
+
+boost::asio::awaitable<node::session_info> node::async_connect(forge::multiformats::multiaddr address,
+                                                               node::connect_options options) {
+   return impl::async_connect_owned(impl_, std::move(address), std::move(options));
 }
 
 boost::asio::awaitable<void> node::async_request_peer_exchange(peer_id peer) {

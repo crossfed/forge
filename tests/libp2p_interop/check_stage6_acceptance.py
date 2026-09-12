@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from dns_evidence import DNSADDR_SCENARIOS, validate_dnsaddr
+from provider_evidence import validate_provider_evidence
+
 from provenance import (
     FIXTURE_DONOR_DIRECTORIES,
     fixture_donor_checkout_errors,
@@ -856,13 +859,15 @@ def validate_quic_v1_transport_evidence(result: dict, record: dict, listener: Op
     return errors
 
 
-def validate_tcp_yamux_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+def validate_tcp_yamux_evidence(result: dict, record: dict, listener: Optional[dict],
+                                security_protocols: tuple[str, ...] = ("/noise",),
+                                require_identify: bool = True) -> list[str]:
     """Require endpoint-observed TCP upgrade state, not requested CLI transport."""
-    errors = validate_identify_evidence(result, record, listener)
+    errors = validate_identify_evidence(result, record, listener) if require_identify else []
     if result.get("negotiated_transport") != "tcp":
         errors.append("TCP/Yamux evidence lacks endpoint-observed tcp transport")
-    if result.get("negotiated_security") != "/noise":
-        errors.append("TCP/Yamux evidence lacks endpoint-observed /noise security")
+    if result.get("negotiated_security") not in security_protocols:
+        errors.append("TCP/Yamux evidence lacks endpoint-observed supported security")
     if result.get("negotiated_muxer") != "/yamux/1.0.0":
         errors.append("TCP/Yamux evidence lacks endpoint-observed /yamux/1.0.0 muxer")
     if result.get("authenticated_remote_peer_id") != record.get("peer_id"):
@@ -1078,20 +1083,9 @@ def validate_relay_client_evidence(result: dict, record: dict, _listener: Option
     return ["relay client evidence lacks an implementation-specific reservation/open proof"]
 
 
-def validate_kademlia_evidence(result: dict, _record: dict, _listener: Optional[dict]) -> list[str]:
-    if (
-        result.get("negotiated_protocol") == "/ipfs/kad/1.0.0"
-        and positive_integer(result.get("provider_count"))
-        and nonempty_string(result.get("provider_peer"))
-        and nonempty_string(result.get("querier_peer"))
-        and result.get("returned_provider_peer") == result.get("provider_peer")
-        and result.get("provider_peer") != result.get("querier_peer")
-        and positive_integer(result.get("address_count"))
-        and positive_integer(result.get("protocol_streams_opened_delta"))
-        and positive_integer(result.get("query_requests_delta"))
-    ):
-        return []
-    return ["Kademlia evidence lacks correlated Amino provider, querier, address, stream and query proof"]
+def validate_kademlia_evidence(result: dict, record: dict, _listener: Optional[dict]) -> list[str]:
+    listener_peer = record.get("peer_id")
+    return validate_provider_evidence(result, listener_peer if isinstance(listener_peer, str) else None)
 
 
 def validate_rendezvous_evidence(result: dict, _record: dict, _listener: Optional[dict]) -> list[str]:
@@ -1114,6 +1108,15 @@ def evidence_contracts(validator, *scenario_ids: str) -> dict[str, object]:
     return {evidence_contract_for(scenario_id): validator for scenario_id in scenario_ids}
 
 
+def validate_dnsaddr_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+    # DNS resolution proves authenticated echo, not the independent Identify contract.
+    return validate_tcp_yamux_evidence(result, record, listener, ("/noise", "/tls/1.0.0"), False) + validate_dnsaddr(result, record)
+
+
+def validate_private_dnsaddr_evidence(result: dict, record: dict, listener: Optional[dict]) -> list[str]:
+    return validate_pnet_evidence(result, record, listener) + validate_dnsaddr(result, record)
+
+
 EVIDENCE_CONTRACT_VALIDATORS = {
     **evidence_contracts(validate_quic_v1_transport_evidence, "quic_v1_transport"),
     **evidence_contracts(validate_identify_evidence, "identify", "identify_native_tcp_yamux"),
@@ -1125,6 +1128,8 @@ EVIDENCE_CONTRACT_VALIDATORS = {
     **evidence_contracts(validate_kademlia_evidence, "kademlia_amino"),
     **evidence_contracts(validate_rendezvous_evidence, "rendezvous_rust"),
     **evidence_contracts(validate_pnet_evidence, "pnet"),
+    **evidence_contracts(validate_dnsaddr_evidence, "dnsaddr"),
+    **evidence_contracts(validate_private_dnsaddr_evidence, "dnsaddr_private_tcp_yamux_pnet"),
 }
 
 
@@ -1284,7 +1289,8 @@ def validate_successful_raw_record(
         errors.append("raw runner scenario differs from the capability requirement")
     if record.get("acceptance_scenario_id") != expected_acceptance_scenario:
         errors.append("raw runner acceptance scenario differs from the capability requirement")
-    if record.get("scenario") != expected_runner_scenario.split("/", 1)[1]:
+    fixture_scenario = DNSADDR_SCENARIOS.get(expected_runner_scenario, expected_runner_scenario.split("/", 1)[1])
+    if record.get("scenario") != fixture_scenario:
         errors.append("raw runner fixture scenario does not match runner_scenario_id")
     expected_transport = expected_launcher_transport(
         expected_profile, expected_stack, expected_evidence_contract
@@ -1330,6 +1336,8 @@ def validate_successful_raw_record(
         errors.extend(command_errors)
         required_options = {"--scenario", "--peer-id", "--addr", "--result-file", "--store-dir", "--transport"}
         optional_options = {"--payload", "--target-peer-id"}
+        if expected_runner_scenario in DNSADDR_SCENARIOS:
+            required_options.add("--dns-server")
         if expected_profile == "private_network":
             required_options |= {"--pnet-key-file", "--pnet-fingerprint"}
         if set(options) - (required_options | optional_options) or not required_options <= set(options):
@@ -1406,6 +1414,21 @@ def validate_successful_raw_record(
     errors.extend(validate_result_semantics(
         expected_evidence_contract, payload or {}, record, listener_payload
     ))
+    if expected_runner_scenario in DNSADDR_SCENARIOS:
+        dns = record.get("dns_evidence", {})
+        dns_path = path_within(dns.get("log_file"), artifact_root) if isinstance(dns, dict) else None
+        if dns_path is None:
+            errors.append("DNSADDR authoritative log escapes the artifact directory")
+        else:
+            claim_paths.add(dns_path)
+            dns_payload, dns_errors = load_evidence_json(dns_path, "authoritative DNS log")
+            errors.extend(dns_errors)
+            if dns_payload != {key: value for key, value in dns.items() if key not in {"log_file", "sha256"}}:
+                errors.append("DNSADDR log differs from recorded authoritative observations")
+            if dns_path.is_file() and sha256_file(dns_path) != dns.get("sha256"):
+                errors.append("DNSADDR log hash differs from recorded observations")
+            if dial_options.get("--dns-server") != dns.get("nameserver") or dial_options.get("--addr") != dns.get("root"):
+                errors.append("DNSADDR launcher bypasses the authoritative root or resolver")
     if expected_profile == "private_network":
         errors.extend(validate_pnet_launchers(
             record, payload or {}, listener_payload, dial_options, listener_options, artifact_root
@@ -1600,6 +1623,8 @@ def validate(
 
 
 CURRENT_FIXTURES = {
+    "dnsaddr": ("addressing.dnsaddr", "tcp_stage6/dnsaddr", ("tcp", "yamux"), "echo"),
+    "dnsaddr_private_tcp_yamux_pnet": ("addressing.dnsaddr", "private_tcp_yamux_pnet/dnsaddr_private_tcp_yamux_pnet", ("tcp", "pnet", "yamux"), "pnet"),
     "quic_v1_transport": ("transport.quic_v1", "quic_base/identify", ("quic",), "identify"),
     "tcp_yamux": ("transport.tcp_yamux", "tcp_noise/echo", ("tcp", "yamux"), "echo"),
     "multistream_select": ("negotiation.multistream_select", "tcp_noise/identify", ("tcp", "yamux"), "identify"),
@@ -1643,8 +1668,71 @@ def fixture_manifest(scenario_id: str = "tcp_yamux") -> dict[str, object]:
     }
 
 
+def semantic_provider_network_proof() -> dict[str, object]:
+    """Observed-result-shaped Forge proof for the shared provider contract."""
+    provider_peer = "provider-peer"
+    querier_peer = "querier-peer"
+    listener_peer = "listener-peer"
+    provider_key = "1220provider-key"
+    address = "/ip4/127.0.0.1/udp/1/quic-v1"
+    return {
+        "schema": "forge.libp2p.provider-network-proof.v1",
+        "implementation": "forge",
+        "provider_peer": provider_peer,
+        "querier_peer": querier_peer,
+        "listener_peer": listener_peer,
+        "provider_key": provider_key,
+        "key_binding": {
+            "kind": "provider_identity_multihash", "provider_peer": provider_peer,
+            "provider_key": provider_key, "derived_per_run": True,
+        },
+        "provider_registration": {
+            "api": "async_provide", "succeeded": True, "provider_peer": provider_peer,
+            "provider_key": provider_key,
+        },
+        "api_lookup": {
+            "api": "async_find_providers", "succeeded": True, "querier_peer": querier_peer,
+            "returned_provider_peer": provider_peer, "provider_key": provider_key,
+        },
+        "address_proof": {
+            "source": "get_providers_wire_reply", "provider_peer": provider_peer, "address": address,
+        },
+        "protocol_proof": {
+            "protocol": "/ipfs/kad/1.0.0",
+            "derivation": "successful_async_open_protocol_stream_with_get_providers_wire_reply",
+            "successful_query": True,
+            "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+        "source_query_proof": {
+            "kind": "forge_async_find_providers_result", "querier_peer": querier_peer,
+            "returned_provider_peer": provider_peer, "provider_key": provider_key,
+            "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+        "wire_proof": {
+            "kind": "forge_get_providers_wire_reply", "explicit_wire_confirmation": True,
+            "listener_peer": listener_peer, "returned_provider_peer": provider_peer,
+            "address": address, "opened_stream_protocol": "/ipfs/kad/1.0.0",
+        },
+    }
+
+
 def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
     """One observed-result-shaped fixture per executable registered contract."""
+    if scenario_id in {"dnsaddr", "dnsaddr_private_tcp_yamux_pnet"}:
+        result, record, listener = semantic_fixture("tcp_yamux" if scenario_id == "dnsaddr" else "pnet")
+        root = "/dnsaddr/root.test/p2p/listener-peer"
+        address = "/ip4/127.0.0.1/tcp/1/p2p/listener-peer"
+        record["listener_process"] = {"listen_addrs": [address]}
+        record["dns_evidence"] = {
+            "root": root, "nameserver": "127.0.0.1:1234",
+            "records": {"_dnsaddr.root.test": "dnsaddr=/dnsaddr/target.root.test/p2p/listener-peer",
+                        "_dnsaddr.target.root.test": f"dnsaddr={address}"},
+            "queries": [{"name": name, "type": 16, "answered": True}
+                        for name in ("_dnsaddr.root.test", "_dnsaddr.target.root.test")],
+        }
+        result.update({"dns_input_address": root, "dns_resolver_configured": True,
+                       "expected_peer_id": "listener-peer"})
+        return result, record, listener
     _, _, stack, scenario = CURRENT_FIXTURES[scenario_id]
     record = {"dialer": "forge", "peer_id": "listener-peer", "scenario": scenario}
     result: dict[str, object] = {
@@ -1693,12 +1781,7 @@ def semantic_fixture(scenario_id: str) -> tuple[dict, dict, Optional[dict]]:
     elif scenario_id == "relay_v2_client_transport":
         result.update({"implementation": "forge", "voucher_bytes": 16})
     elif scenario_id == "kademlia_amino":
-        result.update({
-            "negotiated_protocol": "/ipfs/kad/1.0.0", "provider_count": 1,
-            "provider_peer": "provider-peer", "querier_peer": "querier-peer",
-            "returned_provider_peer": "provider-peer", "address_count": 1,
-            "protocol_streams_opened_delta": 1, "query_requests_delta": 1,
-        })
+        result["network_proof"] = semantic_provider_network_proof()
     elif scenario_id == "rendezvous_rust":
         result.update({
             "negotiated_protocol": "/rendezvous/1.0.0", "wire_registration_count": 1,
@@ -1998,10 +2081,7 @@ def self_test() -> int:
         "identify": ("signed_peer_record", "protocol_count"),
         "identify_native_tcp_yamux": ("signed_peer_record", "protocol_count"),
         "relay_v2_client_transport": ("voucher_bytes",),
-        "kademlia_amino": (
-            "negotiated_protocol", "provider_count", "provider_peer", "querier_peer",
-            "returned_provider_peer", "address_count", "protocol_streams_opened_delta", "query_requests_delta",
-        ),
+        "kademlia_amino": ("network_proof",),
         "rendezvous_rust": (
             "negotiated_protocol", "wire_registration_count", "signed_peer_record_valid",
             "matching_peer_record", "record_sequence", "record_address_count",
@@ -2207,7 +2287,7 @@ def self_test() -> int:
         print("self-test failed: false TCP Ping with RTT was accepted", file=sys.stderr)
         return 1
     kademlia, record, listener = semantic_fixture("kademlia_amino")
-    kademlia["returned_provider_peer"] = kademlia["querier_peer"]
+    kademlia["network_proof"]["api_lookup"]["returned_provider_peer"] = "querier-peer"
     if not validate_kademlia_evidence(kademlia, record, listener):
         print("self-test failed: uncorrelated Kademlia provider was accepted", file=sys.stderr)
         return 1

@@ -5,14 +5,49 @@ sessions, protocol stream negotiation, peer exchange, relay reservations,
 reachability probes, hole punching, path scoring, discovery protocol machinery
 and GossipSub/pubsub.
 
-API status: `forge.net.p2p.resource_manager` is Preview while P2P production
-hardening replaces manual counters with move-only reservations. The Stage 3
-migration intentionally removes `try_acquire_*`/`release_*`; callers retain the
-returned reservation for the complete operation lifetime instead. Staged stream
-scope binding returns an explicit result: only `policy_rejected` is backpressure;
-`invalid_transition` and `runtime_failure` are internal failures. Other public
-P2P contracts remain Stable unless their owning section explicitly says
-otherwise.
+API status: the `forge_net_p2p` P2P surface is Preview under the approved Stage
+6 assumption. `forge.net.p2p.resource_manager` remains Preview while P2P
+production hardening replaces manual counters with move-only reservations. The
+Stage 3 migration intentionally removes `try_acquire_*`/`release_*`; callers
+retain the returned reservation for the complete operation lifetime instead.
+Staged stream scope binding returns an explicit result: only `policy_rejected`
+is backpressure; `invalid_transition` and `runtime_failure` are internal
+failures.
+
+`forge.net.p2p.dialing` is Preview. The node-owned dial scheduler integrates
+bounded DNS expansion, Happy Eyeballs and black-hole detection for direct dials,
+including raw multiaddr, peer-store and bootstrap roots. One logical dial owns
+the deadline and bounded concrete attempts; shutdown drains those attempts.
+Native/private IPv6 detection remains enabled by default; the TCP-only private
+profile disables UDP detection. Local dual-stack node tests and deterministic
+detector/scheduler recovery tests are distinct from Go/Rust DNSADDR wire
+evidence. Final-head acceptance remains pending; integration is not a
+production-readiness claim.
+
+## Stage 6 Carrier Migration
+
+| Previous surface | Current Preview surface |
+| --- | --- |
+| `endpoint_record.endpoint` | `endpoint_record.address` as `forge::multiformats::multiaddr` |
+| `bootstrap_peer.address` as `endpoint` | `forge::multiformats::multiaddr`; convert with `endpoint.to_multiaddr()` |
+| `identify::document.listen_endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
+| DHT peer/provider `endpoints` as `vector<endpoint>` | the same field as `vector<forge::multiformats::multiaddr>` |
+| Discovery and Rendezvous `endpoints` as `vector<endpoint>` | the same fields as `vector<forge::multiformats::multiaddr>` |
+| Node diagnostics source and diagnostics plugin API major 1 | major 2; node plugin 6.0.0 and diagnostics plugin 2.0.0 |
+| Private ObjectDB P2P cache v2 | v3 marker; use `schema-policy: reset` rather than hydration |
+
+No compatibility aliases are provided for these carrier changes.
+
+Bootstrap roots use the node-owned DNS expander and dial scheduler, including
+recursive `/dnsaddr` resolution. `lifecycle.listen` remains concrete `endpoint`.
+A suffixless root learns a peer for connected-session checks and protection,
+but does not pin that identity for later resolutions after disconnect. A
+terminal `/p2p/<peer>` remains an explicit identity constraint. Bootstrap
+updates validate the complete list (at most 4096 roots) before replacement.
+Private nodes accept unresolved `/dnsaddr` roots but reject explicit QUIC and
+circuit routes; resolved candidates pass through the existing TCP-only filter.
+Plugin YAML endpoint syntax is unchanged: its existing parsed endpoints are
+converted with `to_multiaddr()`. Raw DNSADDR YAML configuration is Stage 7 work.
 
 ## Private-Network Profile
 
@@ -58,10 +93,11 @@ The following surfaces are not production claims yet:
   sampling, AutoNAT v1 node-level reachability and AutoNAT v2 address-level
   evidence remain separate Stage 6 host-local inputs to the managed topology
   score;
-- observed-address confidence/expiry, public mDNS, private fingerprinted mDNS,
-  DNSAddr, optional native UPnP
-  mapping, adaptive Happy Eyeballs, IPv6 black-hole detection for native/private
-  profiles and UDP black-hole detection for the native profile are Stage 6 work;
+- DNSAddr, Happy Eyeballs, native/private IPv6 black-hole detection and native
+  UDP black-hole detection are integrated into node-owned dialing; their
+  inventory readiness remains `unverified` pending final-head acceptance;
+- observed-address confidence/expiry, public mDNS, private fingerprinted mDNS
+  and optional native UPnP mapping remain separate Stage 6 work;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
   reachability feed;
 - `node::options::connection_gater` is a synchronous, concurrent-callable
@@ -289,7 +325,7 @@ boost::asio::awaitable<void> start_node(forge::asio::runtime& runtime) {
          .listen = {forge::net::p2p::parse_endpoint(
             "/ip4/127.0.0.1/udp/9443/quic-v1")},
          .bootstrap = {forge::net::p2p::bootstrap_peer{
-            .address = forge::net::p2p::parse_endpoint(bootstrap_endpoint)}},
+            .address = forge::net::p2p::parse_endpoint(bootstrap_endpoint).to_multiaddr()}},
       },
    };
 
@@ -344,6 +380,29 @@ proved across donor implementations rather than inferred from raw Yamux tests.
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint
 compatibility convenience for older single-listen consumers.
 
+### Direct Dial Resolution
+
+`async_connect(multiaddr, connect_options)` accepts raw DNS carriers, including
+`/dnsaddr`; the existing endpoint overload uses the same node-owned scheduler.
+The node expands a batch of peer addresses under one logical deadline and one
+dial reservation, then starts bounded, ranked TCP/QUIC attempts. The attempt
+limit counts native launches, not DNS roots. Private-network dials filter to TCP
+before ranking, so an ineligible QUIC record does not hide an eligible TCP record.
+Peer gating follows resolved identity inference; address gating runs on each
+concrete candidate before native transport admission.
+
+Only the authenticated winner enters the node session registry, after all
+losers have completed native cleanup. Stop seals session admission before
+draining the scheduler. A failed publication retires the exact session and
+waits for its native close and reservation-release barrier.
+
+Peer-store success and failure feedback retain the original address roots;
+temporary DNS answers do not replace those roots. A root fails only when all
+its eligible planned children were launched and failed attributably. Global
+deadline, caller cancellation, filtered/unlaunched candidates and canceled
+losers remain neutral. A cached DNS-child stream failure alone is not evidence
+that fresh resolution of its root would fail.
+
 ### Peer And DHT Record Persistence
 
 The low-level node requires `peer_store::persistence` outside explicit insecure
@@ -362,8 +421,10 @@ belong to the profile-scoped `dht::record_store` described below.
 
 Identify address provenance is operational metadata used to replace each live
 unsigned or certified snapshot without appending stale addresses. The existing
-ObjectDB cache schema v2 separates peer/Rendezvous rows from profile-scoped DHT
-value/provider rows while retaining one physical named store. Hydrated peer
+ObjectDB cache schema v3 separates peer/Rendezvous rows from profile-scoped DHT
+value/provider rows while retaining one physical named store. Schema v2 caches
+must be reset instead of hydrated because they cannot safely represent raw DNS
+address carriers. Hydrated peer
 endpoints conservatively re-enter as
 learned cache facts and age through the existing peer-health/expiry policy;
 the next verified Identify refresh establishes provenance for its live
@@ -465,7 +526,7 @@ auto node = forge::net::p2p::node{runtime, {
    .peer_state = {.persistence = persistence},
    .lifecycle = {
       .listen = {listen_endpoint},
-      .bootstrap = {{.address = bootstrap_endpoint}},
+      .bootstrap = {{.address = bootstrap_endpoint.to_multiaddr()}},
    },
 }};
 

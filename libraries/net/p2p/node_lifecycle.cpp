@@ -44,11 +44,13 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.exceptions;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identify;
 import forge.net.p2p.lifecycle;
@@ -117,13 +119,8 @@ boost::asio::awaitable<lifecycle_status> node::async_start() {
 }
 
 boost::asio::awaitable<void> node::async_set_bootstrap(std::vector<bootstrap_peer> peers) {
-   validate_bootstrap(peers, false);
    auto self = impl_;
-   if (self->private_network_enabled()) {
-      for (const auto& peer : peers) {
-         self->require_private_direct_tcp(peer.address, "bootstrap endpoint");
-      }
-   }
+   validate_bootstrap(peers, false, self->options.dns_resolution, self->private_network_enabled());
    co_await self->bootstrap->async_set_bootstrap(std::move(peers));
 }
 

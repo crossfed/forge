@@ -1062,6 +1062,8 @@ add_test(NAME test_forge_http_websocket COMMAND test_forge_http_websocket WORKIN
 add_executable(
    test_forge_quic_p2p
    unit/main.cpp
+   fixtures/local_dns_server.cpp
+   fixtures/local_dns_server.hxx
    quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/dht_record_store_fixture.cpp
    quic_p2p/dht_record_store_tests.cpp
@@ -1076,7 +1078,14 @@ add_executable(
    quic_p2p/resource_manager_tests.cpp
    quic_p2p/p2p_lifecycle_tests.cpp
    quic_p2p/p2p_tests.cpp
+   quic_p2p/direct_transport_tests.cpp
+   quic_p2p/address_resolution_tests.cpp
+   quic_p2p/dialing_tests.cpp
+   quic_p2p/dial_scheduler_tests.cpp
    quic_p2p/session_teardown_tests.cpp
+   quic_p2p/node_session_tests.cpp
+   quic_p2p/node_addressing_tests.cpp
+   quic_p2p/node_bootstrap_addressing_tests.cpp
    quic_p2p/topology_tests.cpp
 )
 target_sources(
@@ -1108,6 +1117,41 @@ target_link_libraries(
    Boost::included_unit_test_framework
 )
 add_test(NAME test_forge_net_pnet COMMAND test_forge_net_pnet WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_net_dns
+   unit/main.cpp
+   fixtures/local_dns_server.cpp
+   fixtures/local_dns_server.hxx
+   net_dns/dns_tests.cpp
+   net_dns/resolver_socket_registry_tests.cpp
+   net_dns/resolver_query_failure_tests.cpp
+)
+target_link_libraries(
+   test_forge_net_dns
+   forge_asio
+   forge_net_dns
+   Boost::included_unit_test_framework
+)
+target_include_directories(
+   test_forge_net_dns
+   PRIVATE
+      "${PROJECT_SOURCE_DIR}/libraries/net/dns"
+      "${PROJECT_SOURCE_DIR}/vendor/c-ares"
+      "${PROJECT_SOURCE_DIR}/vendor/c-ares/include"
+      "${CMAKE_BINARY_DIR}/vendor/c-ares"
+)
+add_test(NAME test_forge_net_dns COMMAND test_forge_net_dns WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+set(FORGE_CARES_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/net_dns/check_cares_structure.py)
+add_custom_target(
+   test_forge_net_dns_cares_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_CARES_STRUCTURE_CHECK} --source ${CMAKE_SOURCE_DIR}
+)
+add_test(
+   NAME test_forge_net_dns_cares_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_CARES_STRUCTURE_CHECK} --source ${CMAKE_SOURCE_DIR}
+)
 
 set(FORGE_INTEROP_PROVENANCE ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/provenance.py)
 set(FORGE_INTEROP_ARTIFACT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/libp2p_interop)
@@ -1147,6 +1191,12 @@ add_executable(
 add_dependencies(forge_interop_fixture forge_interop_fixture_build_info)
 target_include_directories(forge_interop_fixture PRIVATE ${FORGE_INTEROP_BUILD_INFO_DIRECTORY})
 target_link_libraries(forge_interop_fixture forge)
+
+add_test(
+   NAME test_forge_libp2p_wire_fixture
+   COMMAND forge_interop_fixture --self-test
+)
+set_tests_properties(test_forge_libp2p_wire_fixture PROPERTIES TIMEOUT 45)
 
 set(_forge_libp2p_interop_enabled 0)
 if(FORGE_ENABLE_LIBP2P_INTEROP)
@@ -1256,6 +1306,24 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${FORGE_P2P_STAGE6_ACCEPTANCE_CHECK} --self-test
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_libp2p_dns_fixture
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_dns_fixture
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_dns_fixture PROPERTIES TIMEOUT 10)
+add_test(
+   NAME test_forge_libp2p_process_lifecycle
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_process_lifecycle
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_process_lifecycle PROPERTIES TIMEOUT 10)
+add_test(
+   NAME test_forge_libp2p_provider_evidence
+   COMMAND ${Python3_EXECUTABLE} -B -m unittest test_provider_evidence
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop
+)
+set_tests_properties(test_forge_libp2p_provider_evidence PROPERTIES TIMEOUT 10)
 
 execute_process(
    COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse HEAD
@@ -1720,6 +1788,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_net_pnet_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_dns_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_dns_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-dns-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_dns_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -2726,6 +2805,17 @@ add_test(
       --test-command forge_package_net_pnet_component
 )
 set_tests_properties(test_forge_package_net_pnet_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_dns_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_dns_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-dns-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_dns_component
+)
+set_tests_properties(test_forge_package_net_dns_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_otlp_component
    COMMAND ${CMAKE_CTEST_COMMAND}

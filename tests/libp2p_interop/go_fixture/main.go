@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	libp2p "github.com/libp2p/go-libp2p"
@@ -35,6 +36,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
@@ -46,7 +48,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
-	mh "github.com/multiformats/go-multihash"
+	madns "github.com/multiformats/go-multiaddr-dns"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -70,6 +73,7 @@ type options struct {
 	targetPeerID    string
 	payload         string
 	transport       string
+	dnsServer       string
 	expected        int
 	pnetKeyFile     string
 	pnetFingerprint string
@@ -118,6 +122,12 @@ func parseArgs() (options, error) {
 			out.payload = value
 		case "--transport":
 			out.transport = value
+		case "--dns-server":
+			server, err := netip.ParseAddrPort(value)
+			if err != nil || server.Port() == 0 || server.Addr().Zone() != "" {
+				return options{}, fmt.Errorf("--dns-server requires numeric IP:port (bracket IPv6), port 1..65535")
+			}
+			out.dnsServer = server.String()
 		case "--expected-messages":
 			n, err := strconv.Atoi(value)
 			if err != nil {
@@ -242,16 +252,17 @@ func (g *pnetConnectionGater) InterceptUpgraded(network.Conn) (bool, control.Dis
 }
 
 func (h *fixtureHost) Close() error {
+	var closeErr error
 	if h.pnet != nil {
 		h.Network().StopNotify(h.pnet.notifier)
 	}
 	if h.kad != nil {
-		_ = h.kad.Close()
+		closeErr = errors.Join(closeErr, h.kad.Close())
 	}
 	if h.holePunch != nil {
-		_ = h.holePunch.Close()
+		closeErr = errors.Join(closeErr, h.holePunch.Close())
 	}
-	return h.Host.Close()
+	return errors.Join(closeErr, h.Host.Close())
 }
 
 func loadPnetKey(path string) (corepnet.PSK, error) {
@@ -263,11 +274,23 @@ func loadPnetKey(path string) (corepnet.PSK, error) {
 	return corepnet.DecodeV1PSK(input)
 }
 
-func newHost(transport string, pnetKeyFile string) (*fixtureHost, error) {
+func newHost(transport string, pnetKeyFile string, dnsServer string) (*fixtureHost, error) {
 	var pnetState *pnetConnectionState
 	options := []libp2p.Option{
 		libp2p.NoTransports,
 		libp2p.ForceReachabilityPublic(),
+	}
+	if dnsServer != "" {
+		resolver, err := madns.NewResolver(madns.WithDefaultResolver(&net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, dnsServer)
+			},
+		}))
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, libp2p.MultiaddrResolver(swarm.ResolverFromMaDNS{Resolver: resolver}))
 	}
 	if transport != "tcp-pnet" {
 		options = append(options, libp2p.EnableAutoNATv2(), libp2p.EnableRelay())
@@ -326,7 +349,7 @@ func newHost(transport string, pnetKeyFile string) (*fixtureHost, error) {
 		return &fixtureHost{Host: h, pnet: pnetState}, nil
 	}
 	installEchoHandler(h, nil)
-	if _, err := relayv2.New(h); err != nil {
+	if _, err := relayv2.New(h, relayv2.WithReservationAddressFilter(fixtureReservationAddressFilter(h))); err != nil {
 		h.Close()
 		return nil, err
 	}
@@ -365,6 +388,28 @@ func newHost(transport string, pnetKeyFile string) (*fixtureHost, error) {
 	return &fixtureHost{Host: h, holePunch: holePunchService, kad: dht, dhtStore: dhtStore, pubsub: pubsubRouter}, nil
 }
 
+func fixtureReservationAddressFilter(h host.Host) relayv2.ReservationAddressFilterFunc {
+	fixtureLoopbacks := make(map[string]struct{})
+	for _, addr := range h.Addrs() {
+		if value, err := addr.ValueForProtocol(ma.P_IP4); err == nil {
+			if parsed, parseErr := netip.ParseAddr(value); parseErr == nil && parsed.IsLoopback() {
+				fixtureLoopbacks[addr.String()] = struct{}{}
+			}
+		}
+		if value, err := addr.ValueForProtocol(ma.P_IP6); err == nil {
+			if parsed, parseErr := netip.ParseAddr(value); parseErr == nil && parsed.IsLoopback() {
+				fixtureLoopbacks[addr.String()] = struct{}{}
+			}
+		}
+	}
+	return func(addr ma.Multiaddr) bool {
+		if _, ok := fixtureLoopbacks[addr.String()]; ok {
+			return true
+		}
+		return manet.IsPublicAddr(addr)
+	}
+}
+
 func pnetEvidence(opts options) map[string]any {
 	return map[string]any{
 		"pnet_enabled":     true,
@@ -399,14 +444,6 @@ func pnetRejection(opts options, role string, expectedPeer string, state *pnetCo
 		"application_streams":      applicationStreams,
 		"rejected_before_identify": established == 0 && identifyStreams == 0 && applicationStreams == 0,
 	}
-}
-
-func providerCID() (cid.Cid, error) {
-	hash, err := mh.Sum([]byte("forge-libp2p-dht-provider"), mh.SHA2_256, -1)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return cid.NewCidV1(cid.Raw, hash), nil
 }
 
 func dhtValueFixture(scenario string) ([]byte, []byte, error) {
@@ -648,7 +685,7 @@ func writePubSubStressResult(opts options, state *pubsubStressState) error {
 }
 
 func listen(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
@@ -774,7 +811,7 @@ func listen(opts options) error {
 }
 
 func destination(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
@@ -917,12 +954,20 @@ func expectUnsupportedProtocol(ctx context.Context, h host.Host, peer peer.ID, i
 	return text, nil
 }
 
-func dial(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+func dial(opts options) (err error) {
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}
-	defer h.Close()
+	defer func() {
+		if closeErr := h.Close(); closeErr != nil {
+			if err != nil {
+				err = fmt.Errorf("%w; dialer cleanup failed: %v", err, closeErr)
+			} else {
+				err = fmt.Errorf("dialer cleanup failed: %w", closeErr)
+			}
+		}
+	}()
 	var identifyEvents event.Subscription
 	if opts.scenario == "identify" || opts.scenario == "pnet" {
 		identifyEvents, err = h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(4))
@@ -936,9 +981,24 @@ func dial(opts options) error {
 	if err != nil {
 		return err
 	}
-	info, err := peer.AddrInfoFromP2pAddr(addr)
+	expectedPeer, err := peer.Decode(opts.peerID)
 	if err != nil {
 		return err
+	}
+	_, dnsErr := addr.ValueForProtocol(ma.P_DNSADDR)
+	dnsRoot := dnsErr == nil
+	if dnsRoot && opts.dnsServer == "" {
+		return fmt.Errorf("DNSADDR fixture dial requires --dns-server")
+	}
+	info, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		if !dnsRoot {
+			return err
+		}
+		info = &peer.AddrInfo{ID: expectedPeer, Addrs: []ma.Multiaddr{addr}}
+	}
+	if info.ID != expectedPeer {
+		return fmt.Errorf("address peer disagrees with --peer-id")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -965,6 +1025,18 @@ func dial(opts options) error {
 	}
 	for key, value := range connectionState(h, info.ID) {
 		result[key] = value
+	}
+	if dnsRoot {
+		connections := h.Network().ConnsToPeer(expectedPeer)
+		if len(connections) == 0 || connections[0].RemotePeer() != expectedPeer {
+			return fmt.Errorf("DNSADDR dial has no authenticated expected-peer connection")
+		}
+		result["dns_input_address"] = opts.addr
+		result["dns_resolver_configured"] = opts.dnsServer != ""
+		result["expected_peer_id"] = expectedPeer.String()
+		result["authenticated_remote_peer_id"] = connections[0].RemotePeer().String()
+		result["dns_server"] = opts.dnsServer
+		result["connection_remote_addr"] = connections[0].RemoteMultiaddr().String()
 	}
 	switch opts.scenario {
 	case "ping":
@@ -1106,27 +1178,11 @@ func dial(opts options) error {
 		result["dht_queries_delta"] = queries
 		result["negotiated_protocol"] = "/ipfs/kad/1.0.0"
 	case "dht_provide_find_provider":
-		key, err := providerCID()
+		proof, err := independentProviderEvidence(ctx, h, info, opts.transport, opts.pnetKeyFile, opts.dnsServer)
 		if err != nil {
 			return err
 		}
-		if err := h.kad.Provide(ctx, key, true); err != nil {
-			return fmt.Errorf("dht Provide failed: %w", err)
-		}
-		providers := h.kad.FindProvidersAsync(ctx, key, 10)
-		count := 0
-		foundLocal := false
-		for provider := range providers {
-			count++
-			if provider.ID == h.ID() {
-				foundLocal = true
-				break
-			}
-		}
-		if !foundLocal {
-			return fmt.Errorf("dht FindProviders did not return local provider")
-		}
-		result["provider_count"] = count
+		result["network_proof"] = proof
 	case "dht_pk_put_get", "dht_ipns_put_get":
 		key, expected, err := dhtValueFixture(opts.scenario)
 		if err != nil {
@@ -1225,7 +1281,7 @@ func waitDirectConnection(ctx context.Context, h host.Host, target peer.ID) bool
 }
 
 func dialRelay(opts options) error {
-	h, err := newHost(opts.transport, opts.pnetKeyFile)
+	h, err := newHost(opts.transport, opts.pnetKeyFile, opts.dnsServer)
 	if err != nil {
 		return err
 	}

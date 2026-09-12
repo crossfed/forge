@@ -6,6 +6,7 @@ module;
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
@@ -32,6 +33,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.blocking;
+import forge.asio.notification;
 import forge.asio.runtime;
 import forge.crypto.asymmetric;
 import forge.exceptions;
@@ -101,6 +103,98 @@ class throwing_cancel_session final : public forge::net::transport::detail::sess
    std::atomic_bool open_{true};
    std::atomic_size_t cancel_calls_{0};
    std::atomic_size_t close_calls_{0};
+};
+
+class terminal_throwing_session final : public forge::net::transport::detail::session_concept {
+ public:
+   explicit terminal_throwing_session(std::shared_ptr<void> native_lifetime)
+       : native_lifetime_(std::move(native_lifetime)) {}
+
+   [[nodiscard]] bool valid() const noexcept override {
+      return open_.load(std::memory_order_acquire);
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_open_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_accept_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      close_calls_.fetch_add(1, std::memory_order_release);
+      open_.store(false, std::memory_order_release);
+      native_lifetime_.reset();
+      throw std::runtime_error{"injected terminal close failure"};
+      co_return;
+   }
+
+   void cancel() override {
+      cancel_calls_.fetch_add(1, std::memory_order_release);
+      open_.store(false, std::memory_order_release);
+   }
+
+   [[nodiscard]] std::size_t cancel_calls() const noexcept {
+      return cancel_calls_.load(std::memory_order_acquire);
+   }
+
+   [[nodiscard]] std::size_t close_calls() const noexcept {
+      return close_calls_.load(std::memory_order_acquire);
+   }
+
+ private:
+   std::shared_ptr<void> native_lifetime_;
+   std::atomic_bool open_{true};
+   std::atomic_size_t cancel_calls_{0};
+   std::atomic_size_t close_calls_{0};
+};
+
+struct terminal_barrier_state {
+   std::atomic_bool close_entered = false;
+   std::atomic_bool release_close = false;
+   std::atomic_size_t cancel_calls{0};
+   forge::asio::notification changed;
+};
+
+class terminal_barrier_session final : public forge::net::transport::detail::session_concept {
+ public:
+   terminal_barrier_session(std::shared_ptr<terminal_barrier_state> state, std::shared_ptr<void> native_lifetime)
+       : state_(std::move(state)), native_lifetime_(std::move(native_lifetime)) {}
+
+   [[nodiscard]] bool valid() const noexcept override {
+      return open_.load(std::memory_order_acquire);
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_open_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<forge::net::transport::stream> async_accept_stream() override {
+      co_return forge::net::transport::stream{};
+   }
+
+   boost::asio::awaitable<void> async_close() override {
+      state_->close_entered.store(true, std::memory_order_release);
+      state_->changed.notify();
+      while (!state_->release_close.load(std::memory_order_acquire)) {
+         const auto observed = state_->changed.epoch();
+         if (!state_->release_close.load(std::memory_order_acquire)) {
+            (void)co_await state_->changed.async_wait(observed);
+         }
+      }
+      open_.store(false, std::memory_order_release);
+      native_lifetime_.reset();
+   }
+
+   void cancel() override {
+      state_->cancel_calls.fetch_add(1, std::memory_order_release);
+   }
+
+ private:
+   std::shared_ptr<terminal_barrier_state> state_;
+   std::shared_ptr<void> native_lifetime_;
+   std::atomic_bool open_{true};
 };
 
 BOOST_AUTO_TEST_CASE(p2p_session_rejection_stages_transport_cancel_after_owner_unlock) {
@@ -659,7 +753,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failu
           .stop = std::move(stop),
           .async_stop = std::move(async_stop),
           .async_connect = [](endpoint, const node::connect_options&, std::shared_ptr<cancellation_latch>,
-                              std::shared_ptr<void>, direct::authenticated_admission_handler)
+                              std::shared_ptr<void>, direct::authenticated_admission_handler,
+                              direct::tcp_transport_progress_handler)
               -> boost::asio::awaitable<direct::connection> {
              co_return direct::connection{};
           },
@@ -800,6 +895,11 @@ BOOST_AUTO_TEST_CASE(p2p_session_retirement_transfers_active_map_node_without_re
 }
 
 BOOST_AUTO_TEST_CASE(p2p_session_retirement_releases_terminal_tracking_once) {
+   static_assert(noexcept(std::declval<detail::session_retirement&>().begin_close(false)));
+   static_assert(noexcept(std::declval<detail::session_retirement&>().complete_terminal(
+       std::declval<detail::session_teardown::ticket&>())));
+   static_assert(noexcept(std::declval<detail::session_retirement&>().quarantine()));
+
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto teardown = detail::session_teardown{runtime.context().get_executor()};
    auto retirement = detail::session_retirement{};
@@ -847,60 +947,288 @@ BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantines_untracked_close_without_
               static_cast<int>(detail::session_retirement::close_start::untracked));
 }
 
-BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_retains_authority_after_teardown_stop) {
-   struct retained_authority {
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_wait_observes_completion_before_subscription) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::in_flight);
+   // Creating an awaitable does not run its body. Completion in this gap must
+   // remain observable even though no notification subscriber exists yet.
+   auto wait = retirement.async_wait_not_in_flight();
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   auto completed = boost::asio::co_spawn(context, std::move(wait), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(completed.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(completed.get());
+   BOOST_CHECK(retirement.begin_close(true) == close_start::terminal);
+
+   context.restart();
+   auto late = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(late.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(late.get());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_parallel_waiters_observe_cleanup_barrier) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   BOOST_REQUIRE(retirement.begin_close(true) == detail::session_retirement::close_start::started);
+
+   auto native_closed = false;
+   auto resources_released = false;
+   auto registry_erased = false;
+   auto wait = [&]() -> boost::asio::awaitable<bool> {
+      co_await retirement.async_wait_not_in_flight();
+      co_return retirement.terminal() && native_closed && resources_released && registry_erased;
+   };
+   auto waiters = std::vector<std::future<bool>>{};
+   for (auto index = 0; index < 8; ++index) {
+      waiters.push_back(boost::asio::co_spawn(context, wait(), boost::asio::use_future));
+   }
+   context.poll();
+   native_closed = true;
+   resources_released = true;
+   registry_erased = true;
+   context.poll();
+   for (auto& waiter : waiters) {
+      BOOST_CHECK(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   }
+
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   context.poll();
+   for (auto& waiter : waiters) {
+      BOOST_REQUIRE(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+      BOOST_TEST(waiter.get());
+   }
+   BOOST_TEST(!retirement.complete_terminal(ticket));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_wait_observes_quarantine_before_subscription) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::in_flight);
+   auto wait = retirement.async_wait_not_in_flight();
+   retirement.quarantine();
+   auto completed = boost::asio::co_spawn(context, std::move(wait), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(completed.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(completed.get());
+   BOOST_TEST(!retirement.terminal());
+   BOOST_CHECK(retirement.begin_close(true) == close_start::started);
+   BOOST_CHECK(retirement.begin_close(true) == close_start::in_flight);
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(retirement.complete_terminal(ticket));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_wakes_subscribers_and_rechecks_new_owner) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   auto first = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   BOOST_CHECK(first.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   retirement.quarantine();
+   context.poll();
+   BOOST_REQUIRE(first.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(first.get());
+   BOOST_TEST(!retirement.terminal());
+
+   context.restart();
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   auto second = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   retirement.quarantine();
+   // A new owner can win before an already notified coroutine resumes.
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   context.poll();
+   BOOST_CHECK(second.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   context.poll();
+   BOOST_REQUIRE(second.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(second.get());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_wakes_parallel_retries_with_one_owner) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.track(teardown.track()));
+   BOOST_REQUIRE(retirement.begin_close(false) == close_start::started);
+
+   auto entered = std::atomic_size_t{0};
+   auto owners = std::atomic_size_t{0};
+   auto finish_retry = forge::asio::notification{};
+   auto retry = [&]() -> boost::asio::awaitable<bool> {
+      entered.fetch_add(1, std::memory_order_release);
+      for (;;) {
+         const auto start = retirement.begin_close(true);
+         if (start == close_start::in_flight) {
+            co_await retirement.async_wait_not_in_flight();
+            continue;
+         }
+         if (start == close_start::terminal) {
+            co_return true;
+         }
+         if (start != close_start::started) {
+            co_return false;
+         }
+         owners.fetch_add(1, std::memory_order_release);
+         co_await finish_retry.async_wait(0);
+         auto ticket = detail::session_teardown::ticket{};
+         co_return retirement.complete_terminal(ticket);
+      }
+   };
+   auto waiters = std::vector<std::future<bool>>{};
+   for (auto index = 0; index < 8; ++index) {
+      waiters.push_back(boost::asio::co_spawn(runtime.context(), retry(), boost::asio::use_future));
+   }
+   const auto all_entered = wait_for_count(entered, 8);
+   retirement.quarantine();
+   const auto retry_started = wait_for_count(owners, 1);
+   BOOST_TEST(all_entered);
+   BOOST_TEST(retry_started);
+   BOOST_TEST(!retirement.tracked());
+   BOOST_TEST(!retirement.terminal());
+   for (auto& waiter : waiters) {
+      BOOST_CHECK(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   }
+   finish_retry.notify();
+   auto all_ready = true;
+   for (auto& waiter : waiters) {
+      if (waiter.wait_for(std::chrono::seconds{2}) != std::future_status::ready) {
+         all_ready = false;
+      }
+   }
+   // A lost-wakeup failure must not leave workers accessing destroyed locals.
+   runtime.stop();
+   BOOST_REQUIRE(all_ready);
+   for (auto& waiter : waiters) {
+      BOOST_TEST(waiter.get());
+   }
+   BOOST_TEST(owners.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(retirement.terminal());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_staged_attempt_close_error_releases_resources_after_terminal_barrier) {
+   struct staged_attempt_owner {
+      detail::session_teardown::ticket terminal_ticket;
       resource_manager::session_reservation reservation;
-      std::shared_ptr<void> native_lifetime;
-      detail::session_retirement retirement;
+      resource_manager::file_descriptor_reservation file_descriptor;
    };
 
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto teardown = detail::session_teardown{runtime.context().get_executor()};
-   auto resources = resource_manager{resource_manager::limits{.system = {.max_connections = 1}}};
+   auto resources = resource_manager{resource_manager::limits{.system = {.max_file_descriptors = 1, .max_connections = 1}}};
    auto admission = resources.reserve_session(resource_manager::session_direction::outbound);
    BOOST_REQUIRE(admission);
-   auto native_releases = std::atomic_size_t{0};
-   auto native_lifetime = std::shared_ptr<void>{new int{0}, [&native_releases](void* value) {
-                                                     delete static_cast<int*>(value);
-                                                     native_releases.fetch_add(1, std::memory_order_release);
-                                                  }};
-   auto authority = std::make_shared<retained_authority>();
-   authority->reservation = std::move(*admission);
-   authority->native_lifetime = std::move(native_lifetime);
-   auto retiring_sessions = std::map<std::uint64_t, std::shared_ptr<retained_authority>>{};
-   retiring_sessions.emplace(17, authority);
-   authority.reset();
-
-   auto retained = retiring_sessions.at(17);
-   auto close_calls = std::atomic_size_t{0};
-   auto operations = std::vector<detail::session_teardown::operation>{};
-   operations.push_back(detail::session_teardown::operation{
-       .close = [retained, &close_calls]() -> boost::asio::awaitable<void> {
-          if (retained->retirement.begin_close(true) != detail::session_retirement::close_start::started) {
-             co_return;
-          }
-          close_calls.fetch_add(1, std::memory_order_release);
-          try {
-             throw std::runtime_error{"expected terminal close failure"};
-          } catch (...) {
-             // A throwing async_close quarantines the session; only its node owner may release it later.
-             retained->retirement.quarantine();
-          }
-          co_return;
-       },
+   auto descriptor = admission->reserve_file_descriptors(1);
+   BOOST_REQUIRE(descriptor);
+   auto cancellation_requested = std::atomic_size_t{0};
+   auto owner = std::make_shared<staged_attempt_owner>();
+   owner->terminal_ticket = teardown.track([&cancellation_requested] {
+      cancellation_requested.fetch_add(1U, std::memory_order_release);
    });
-   teardown.start(std::move(operations));
-   forge::asio::blocking::run(runtime, teardown.wait());
+   BOOST_REQUIRE(owner->terminal_ticket.active());
+   owner->reservation = std::move(*admission);
+   owner->file_descriptor = std::move(*descriptor);
 
-   BOOST_TEST(close_calls.load(std::memory_order_acquire) == 1U);
-   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 0U);
+   auto terminal_owner = std::weak_ptr<staged_attempt_owner>{owner};
+   auto model = std::make_shared<terminal_throwing_session>(owner);
+   auto candidate = forge::net::transport::detail::session_access::make(model);
+   owner.reset();
+   candidate.request_cancel();
+   BOOST_TEST(!candidate.valid());
+   BOOST_TEST(model->cancel_calls() == 1U);
+
+   teardown.start({});
+   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+   BOOST_TEST(static_cast<int>(stopped.wait_for(std::chrono::milliseconds{20})) ==
+              static_cast<int>(std::future_status::timeout));
+   BOOST_TEST(cancellation_requested.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(resources.current().system.outbound_connections == 1U);
+   BOOST_TEST(resources.current().system.file_descriptors == 1U);
    BOOST_TEST(!resources.reserve_session(resource_manager::session_direction::outbound));
 
-   retained.reset();
-   retiring_sessions.clear();
+   auto closed = boost::asio::co_spawn(runtime.context(), candidate.async_close(), boost::asio::use_future);
+   BOOST_REQUIRE(static_cast<int>(closed.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   BOOST_CHECK_THROW(closed.get(), std::runtime_error);
+   BOOST_TEST(model->close_calls() == 1U);
+   BOOST_TEST(!terminal_owner.lock());
 
-   BOOST_TEST(native_releases.load(std::memory_order_acquire) == 1U);
+   BOOST_REQUIRE(static_cast<int>(stopped.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   BOOST_TEST(resources.current().system.outbound_connections == 0U);
+   BOOST_TEST(resources.current().system.file_descriptors == 0U);
+   stopped.get();
    BOOST_REQUIRE(resources.reserve_session(resource_manager::session_direction::outbound));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_unpublished_direct_discard_holds_admission_and_native_lifetime_to_terminal_close) {
+   struct inbound_owner {
+      detail::session_teardown::ticket teardown_ticket;
+      resource_manager::file_descriptor_reservation file_descriptor;
+   };
+
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto resources = resource_manager{resource_manager::limits{.system = {.max_file_descriptors = 1, .max_connections = 1}}};
+   auto admission = resources.reserve_session(resource_manager::session_direction::inbound);
+   BOOST_REQUIRE(admission);
+   auto descriptor = admission->reserve_file_descriptors(1);
+   BOOST_REQUIRE(descriptor);
+
+   auto owner = std::make_shared<inbound_owner>();
+   owner->teardown_ticket = teardown.track();
+   owner->file_descriptor = std::move(*descriptor);
+   auto terminal_owner = std::weak_ptr<inbound_owner>{owner};
+   auto state = std::make_shared<terminal_barrier_state>();
+   auto model = std::make_shared<terminal_barrier_session>(state, owner);
+   auto connection = direct::connection{
+       .session = forge::net::transport::detail::session_access::make(model),
+       .admission = std::move(*admission),
+       .native_lifetime = owner,
+   };
+   model.reset();
+   owner.reset();
+
+   teardown.start({});
+   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+   auto discarded = boost::asio::co_spawn(runtime.context(), direct::async_discard_unpublished(connection),
+                                           boost::asio::use_future);
+   BOOST_REQUIRE(wait_for_count(state->cancel_calls, 1U));
+   const auto close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (!state->close_entered.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < close_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE(state->close_entered.load(std::memory_order_acquire));
+   BOOST_TEST(static_cast<int>(discarded.wait_for(std::chrono::milliseconds{20})) ==
+              static_cast<int>(std::future_status::timeout));
+   BOOST_TEST(static_cast<int>(stopped.wait_for(std::chrono::milliseconds{20})) ==
+              static_cast<int>(std::future_status::timeout));
+   BOOST_TEST(resources.current().system.inbound_connections == 1U);
+   BOOST_TEST(resources.current().system.file_descriptors == 1U);
+
+   state->release_close.store(true, std::memory_order_release);
+   state->changed.notify();
+   BOOST_REQUIRE(static_cast<int>(discarded.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   discarded.get();
+   BOOST_TEST(!terminal_owner.lock());
+   BOOST_REQUIRE(static_cast<int>(stopped.wait_for(std::chrono::seconds{1})) ==
+                 static_cast<int>(std::future_status::ready));
+   stopped.get();
+   BOOST_TEST(resources.current().system.inbound_connections == 0U);
+   BOOST_TEST(resources.current().system.file_descriptors == 0U);
 }
 
 } // namespace

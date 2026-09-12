@@ -13,7 +13,7 @@ module;
 export module forge.net.p2p.dht.record_store;
 
 export import forge.net.p2p.dht;
-import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.identity;
 
 export namespace forge::net::p2p::dht {
@@ -40,7 +40,7 @@ class record_store {
    struct provider_record {
       dht::key key;
       peer_id provider;
-      std::vector<endpoint> endpoints;
+      std::vector<forge::multiformats::multiaddr> endpoints;
       std::chrono::system_clock::time_point provider_expires_at{};
       std::chrono::system_clock::time_point addresses_expires_at{};
       bool local_owned = false;

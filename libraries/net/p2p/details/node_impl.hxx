@@ -26,10 +26,15 @@
 #include "session_teardown.hxx"
 #include "topology_manager.hxx"
 
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
+
+#include "direct_attempt.hxx"
 
 namespace forge::net::p2p {
 
@@ -38,6 +43,7 @@ class cancellation_latch;
 namespace detail {
 
 class bootstrap_service;
+class dial_scheduler;
 class lifecycle_wakeup;
 class resource_stream;
 class worker_terminal_owner;
@@ -55,7 +61,8 @@ class worker_terminal_owner;
                                                                 std::size_t max_payload_size);
 [[nodiscard]] peer_exchange_codec::options codec_for(const node::options& options) noexcept;
 void validate_operation_timeout(std::chrono::milliseconds timeout, std::string_view name);
-void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty);
+void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty,
+                        const address_resolution::policy& resolution, bool tcp_only = false);
 [[nodiscard]] std::chrono::milliseconds remaining_timeout(std::chrono::steady_clock::time_point started,
                                                           std::chrono::milliseconds timeout,
                                                           std::string_view operation);
@@ -84,6 +91,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       // Keeps the native socket descriptor reservation through security handoff.
       std::shared_ptr<void> native_lifetime;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
+      std::vector<forge::multiformats::multiaddr> direct_roots;
       std::optional<forge::net::p2p::endpoint> remote_endpoint;
       connection_manager::direction direction = connection_manager::direction::outbound;
       std::string identify_error;
@@ -232,6 +240,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    peer_id local;
    resource_manager resources;
    std::shared_ptr<detail::connection_gate> connection_gate;
+   std::shared_ptr<detail::dial_scheduler> dial_scheduler;
    direct::registry direct_registry;
    detail::session_teardown teardown;
    detail::lifecycle_tracker lifecycle;
@@ -267,6 +276,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::metrics_snapshot metrics_value;
    std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
+   bool session_admission_closed = false;
    bool peer_exchange_admission_closed = false;
    bool peer_state_hydrated = false;
 
@@ -277,7 +287,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void start_topology_manager();
    boost::asio::awaitable<void> async_join_topology_manager();
    [[nodiscard]] bool launch_tracked(std::function<boost::asio::awaitable<void>()> operation) noexcept;
+   [[nodiscard]] bool launch_tracked_cleanup(std::function<boost::asio::awaitable<void>()> operation) noexcept;
    void request_lifecycle_stop() noexcept;
+   void request_dial_scheduler_stop() noexcept;
+   boost::asio::awaitable<void> async_close_dial_scheduler();
+   [[nodiscard]] dialing::black_hole_status dial_black_hole_status() const;
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
    boost::asio::awaitable<void> async_hydrate_peer_state();
    void listen(forge::net::p2p::endpoint endpoint);
@@ -338,7 +352,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    identify_peer_for_discovery(const peer_id& peer, discovery::source source, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<void> remember_session(std::shared_ptr<session_state> session,
-                                                 connection_manager::direction direction);
+                                                 connection_manager::direction direction,
+                                                 std::function<void()> before_publish = {});
 
    void refresh_connection_scores();
    [[nodiscard]] connection_manager::snapshot topology_sessions() const;
@@ -456,9 +471,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void record_direct_failure(const peer_id& peer);
 
    void increment_direct_failure();
+   void record_direct_session_failure(const std::shared_ptr<session_state>& session);
 
    [[nodiscard]] std::chrono::system_clock::time_point
    endpoint_backoff_until(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind) const;
+
+   [[nodiscard]] std::chrono::system_clock::time_point
+   endpoint_backoff_until(const peer_id& peer, const forge::multiformats::multiaddr& address, path::kind kind) const;
 
    void record_relay_failure();
 
@@ -538,10 +557,31 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> pubsub_heartbeat_once();
 
+   boost::asio::awaitable<detail::direct_attempt>
+   connect_direct_attempt(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
+                          std::shared_ptr<cancellation_latch> cancellation = {},
+                          direct::tcp_transport_progress_handler tcp_transport_progress = {});
+
+   boost::asio::awaitable<void> async_close_direct_attempt(detail::direct_attempt& attempt);
+
+   boost::asio::awaitable<void> async_discard_session(const std::shared_ptr<session_state>& session);
+
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   commit_direct_attempt(detail::direct_attempt attempt, std::vector<forge::multiformats::multiaddr> roots,
+                         std::chrono::steady_clock::time_point deadline,
+                         std::shared_ptr<cancellation_latch> cancellation);
+
    boost::asio::awaitable<std::shared_ptr<session_state>>
    connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
-                  resource_manager::dial_reservation* dial = nullptr,
                   std::shared_ptr<cancellation_latch> cancellation = {});
+
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   connect_direct(std::vector<forge::multiformats::multiaddr> roots, node::connect_options connect_options_value,
+                  std::shared_ptr<cancellation_latch> cancellation = {});
+
+   static boost::asio::awaitable<node::session_info>
+   async_connect_owned(std::shared_ptr<impl> self, forge::multiformats::multiaddr address,
+                       node::connect_options value);
 
    boost::asio::awaitable<std::shared_ptr<session_state>> ensure_direct_session(
        const peer_id& peer, std::chrono::milliseconds timeout = node::connect_options{}.timeout,
@@ -564,6 +604,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
        std::size_t max_direct_endpoints = node::open_options{}.max_direct_endpoints,
        std::chrono::milliseconds direct_attempt_timeout = node::open_options{}.direct_attempt_timeout,
        std::shared_ptr<cancellation_latch> cancellation = {});
+
+   static boost::asio::awaitable<opened_direct_stream> open_protocol_direct_owned(
+       std::shared_ptr<impl> self, std::shared_ptr<session_state> cached,
+       peer_id peer, protocol_id protocol, std::chrono::steady_clock::time_point started,
+       std::chrono::milliseconds timeout, std::size_t max_direct_endpoints,
+       std::chrono::milliseconds direct_attempt_timeout,
+       std::shared_ptr<cancellation_latch> cancellation);
 
    boost::asio::awaitable<dht_exchange_result> exchange_dht(const protocol_id& profile, const peer_id& peer,
                                                             dht::message request, std::chrono::milliseconds timeout,
@@ -620,7 +667,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                                   forge::net::transport::stream stream,
                                                                   resource_manager::stream_reservation reservation);
 
-   void launch_session_accept_loop(std::shared_ptr<session_state> session);
+   bool launch_session_accept_loop(std::shared_ptr<session_state> session);
 
    boost::asio::awaitable<void> handle_incoming_stream(std::shared_ptr<session_state> session,
                                                        forge::net::transport::stream raw,

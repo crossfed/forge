@@ -8,7 +8,7 @@ struct p2p_state_schema {
                                                      forge::plugins::db::store::store_handle store,
                                                      bool reset_incompatible_cache);
 
-   static constexpr std::uint32_t format_version = 2;
+   static constexpr std::uint32_t format_version = 3;
 
    // These IDs are part of the private persisted format and must not be renumbered.
    static constexpr std::uint8_t state_space = 80;

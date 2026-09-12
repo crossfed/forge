@@ -48,11 +48,13 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.envelope;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.hole_punch;

@@ -47,6 +47,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -61,6 +62,7 @@ import forge.net.p2p.protocol;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.stream;
 import forge.net.p2p.topology;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -219,18 +221,10 @@ void verify_identify_identity(const peer_id& peer, const identify::document& doc
    }
 }
 
-[[nodiscard]] std::vector<forge::net::p2p::endpoint>
-validated_identify_endpoints(const std::vector<forge::net::p2p::endpoint>& endpoints, const peer_id& peer,
+[[nodiscard]] std::vector<forge::multiformats::multiaddr>
+validated_identify_addresses(const std::vector<forge::multiformats::multiaddr>& addresses, const peer_id& peer,
                              const host_addresses::learning_context& context) {
-   auto out = std::vector<forge::net::p2p::endpoint>{};
-   out.reserve(endpoints.size());
-   for (const auto& endpoint : endpoints) {
-      auto learned = host_addresses::learned(endpoint, peer, context);
-      if (learned) {
-         out.push_back(std::move(*learned));
-      }
-   }
-   return out;
+   return host_addresses::sanitize_discovered_addresses(addresses, peer, context);
 }
 
 [[nodiscard]] identify::document
@@ -238,11 +232,15 @@ local_identify_document_locked(const auto& self,
                                std::optional<forge::net::p2p::endpoint> observed_endpoint = std::nullopt) {
    auto& state = self.identify_push_value;
    if (state.cached_generation != state.generation) {
+      auto listen_addresses = std::vector<forge::multiformats::multiaddr>{};
+      for (const auto& endpoint : self.local_endpoints_for_control_locked()) {
+         listen_addresses.push_back(endpoint.to_multiaddr());
+      }
       auto document = identify::document{
           .protocol_version = self.options.protocol_version,
           .agent_version = self.options.agent_version,
           .public_key = self.identity.public_key,
-          .listen_endpoints = self.local_endpoints_for_control_locked(),
+          .listen_endpoints = std::move(listen_addresses),
           .protocols = self.supported_protocols_locked(),
       };
       state.peer_record_sequence = next_peer_record_sequence(state.peer_record_sequence);
@@ -669,9 +667,9 @@ void node::impl::learn_from_identify(const std::shared_ptr<session_state>& sessi
       }
       if (certified) {
          update.signed_peer_record = document.signed_peer_record;
-         update.signed_endpoints = validated_identify_endpoints(certified->endpoints, peer, context);
+         update.signed_endpoints = validated_identify_addresses(certified->endpoints, peer, context);
       } else if (!received_push || !document.listen_endpoints.empty()) {
-         update.unsigned_endpoints = validated_identify_endpoints(document.listen_endpoints, peer, context);
+         update.unsigned_endpoints = validated_identify_addresses(document.listen_endpoints, peer, context);
       }
       const auto record = store.apply_identify(peer, std::move(update));
       const auto remote_capabilities = capabilities_for(record.protocols);
@@ -680,7 +678,7 @@ void node::impl::learn_from_identify(const std::shared_ptr<session_state>& sessi
       auto routing_peer = dht::peer{.id = peer, .connection = dht::connection_type::can_connect};
       routing_peer.endpoints.reserve(record.endpoints.size());
       for (const auto& endpoint : record.endpoints) {
-         routing_peer.endpoints.push_back(endpoint.endpoint);
+         routing_peer.endpoints.push_back(endpoint.address);
       }
 
       for (auto& [protocol, state] : dht_profiles) {

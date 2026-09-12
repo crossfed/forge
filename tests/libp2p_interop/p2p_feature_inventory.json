@@ -54,10 +54,12 @@
   "public_surface_snapshots": {
     "net.p2p.node": {
       "owner": "net.p2p.node",
-      "module_count": 28,
+      "module_count": 30,
       "modules": [
+        "forge.net.p2p.address_resolution",
         "forge.net.p2p.connection_gater", "forge.net.p2p.dht",        "forge.net.p2p.dht.record_store",
         "forge.net.p2p.diagnostics",
+        "forge.net.p2p.dialing",
         "forge.net.p2p.discovery",  "forge.net.p2p.endpoint",         "forge.net.p2p.envelope",
         "forge.net.p2p.exceptions", "forge.net.p2p.hole_punch",       "forge.net.p2p.identify",
         "forge.net.p2p.identity",   "forge.net.p2p.ipns",             "forge.net.p2p.lifecycle",
@@ -69,15 +71,20 @@
       ],
       "headers": [],
       "module_features": {
+        "forge.net.p2p.address_resolution": [ "addressing.dnsaddr", "resource.dials", "state.peer_store" ],
         "forge.net.p2p.connection_gater": [ "security.connection_gater" ],
         "forge.net.p2p.dht": [ "protocol.kademlia", "state.kademlia_routing_table" ],
         "forge.net.p2p.dht.record_store": [ "protocol.kademlia" ],
         "forge.net.p2p.diagnostics": [
           "state.peer_store", "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes",
-          "topology.connection_manager"
+          "topology.connection_manager", "dialing.ipv6_black_hole_detection", "dialing.udp_black_hole_detection"
         ],
         "forge.net.p2p.discovery": [
           "protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "protocol.relay", "lifecycle.discovery"
+        ],
+        "forge.net.p2p.dialing": [
+          "addressing.dnsaddr", "resource.dials", "transport.direct_quic", "transport.tcp_yamux",
+          "dialing.happy_eyeballs", "dialing.ipv6_black_hole_detection", "dialing.udp_black_hole_detection"
         ],
         "forge.net.p2p.endpoint": [ "transport.direct_quic", "transport.tcp_yamux" ],
         "forge.net.p2p.envelope": [ "identity.secure_transport_authentication", "protocol.relay" ],
@@ -110,10 +117,14 @@
         "forge.net.p2p.identify": [ "protocol.identify" ],
         "forge.net.p2p.identity": [ "identity.secure_transport_authentication" ],
         "forge.net.p2p.ipns": [ "protocol.kademlia" ],
-        "forge.net.p2p.lifecycle": [ "lifecycle.bootstrap" ],
+        "forge.net.p2p.lifecycle": [ "lifecycle.bootstrap", "addressing.dnsaddr" ],
         "forge.net.p2p.message": [ "protocol.peer_exchange" ],
         "forge.net.p2p.negotiation": [ "protocol.multistream_select" ],
         "forge.net.p2p.node": [
+          "addressing.dnsaddr",
+          "dialing.happy_eyeballs",
+          "dialing.ipv6_black_hole_detection",
+          "dialing.udp_black_hole_detection",
           "transport.direct_quic",
           "transport.tcp_yamux",
           "security.private_network_psk",
@@ -165,8 +176,12 @@
         ]
       },
       "header_features": {},
-      "sha256": "d99ae81810a650dc06ca746fa9b84c635cb73c06ddba0a0db9d84905f5009df3",
+      "sha256": "26592374988c3f43808c33ebab6ed28d23d942fbc176e0ce92e715f13be232ed",
       "feature_ids": [
+        "addressing.dnsaddr",
+        "dialing.happy_eyeballs",
+        "dialing.ipv6_black_hole_detection",
+        "dialing.udp_black_hole_detection",
         "transport.direct_quic",
         "transport.tcp_yamux",
         "security.private_network_psk",
@@ -212,7 +227,7 @@
         "forge.plugins.p2p.node.types": [ "plugin.node" ]
       },
       "header_features": {},
-      "sha256": "62fae922193a4f6cdcf2fa6b16a12bd65a7be897fe739f2c6d52d883574a09b3",
+      "sha256": "aa4e6b99d7843a3392de3e92c4a6bc04545411e43d9284353192e580fd2a9195",
       "feature_ids": [ "plugin.node" ]
     },
     "plugin.p2p.resolver": {
@@ -271,7 +286,7 @@
         "forge.plugins.p2p.diagnostics.types": [ "plugin.diagnostics" ]
       },
       "header_features": {},
-      "sha256": "003937279e6c1660d27a9bf6d402bba070adb308e10d42c6dbea6a7b53444542",
+      "sha256": "7853971093c78a8855410568e8a6850826b7c216729588621f00e1397a942cad",
       "feature_ids": [ "plugin.diagnostics" ]
     }
   },
@@ -317,6 +332,134 @@
         "tests": [ "test_forge_stcp", "test_forge_yamux", "test_forge_plugins" ],
         "donor_sources": [ "docs/donors/fcl-p2p-tcp-noise-yamux-v1.md", "docs/donors/fcl-p2p-tcp-tls-yamux-v1.md" ],
         "donor_cases": [ "transport.tcp_noise_yamux_direct", "transport.tcp_tls_yamux_direct" ]
+      }
+    },
+    {
+      "id": "addressing.dnsaddr",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "raw multiaddr async_connect and peer-store direct dialing through the node-owned scheduler",
+      "configuration": "node address resolution bounds, DNS resolver nameservers and direct dial policy; private-network candidates are TCP-only",
+      "resource_ownership": "one logical dial reservation and deadline cover recursive multi-root expansion and bounded deduplicated concrete attempts",
+      "persistence": "peer_store retains canonical unexpanded source roots and their attributable outcomes, not temporary resolved children; each logical dial expands roots anew",
+      "maintenance": "node lifecycle stops scheduler admission and cancellation-resistant drains attempts before session teardown; expansion state is operation-local",
+      "diagnostics": "node snapshot exposes scheduler black-hole status and authenticated session endpoints; DNS, filtered, unlaunched and canceled targets do not prove root failure",
+      "intended_disposition": "preserve integrated runtime ownership; require exact-head native and private Go/Rust DNSADDR evidence before readiness promotion; registration is not a passing result or a dual-stack/black-hole interop claim",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": [ "state_machine", "raw_node", "adversarial", "donor_interop" ],
+        "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/address_resolution.cppm",
+          "libraries/net/p2p/dns_address_expander.cpp",
+          "libraries/net/p2p/dial_ranker.cpp",
+          "libraries/net/p2p/dial_scheduler.cpp",
+          "libraries/net/p2p/node_impl_dialing.cpp",
+          "libraries/net/p2p/node_impl_sessions.cpp",
+          "libraries/net/p2p/node_impl_lifecycle.cpp",
+          "tests/quic_p2p/address_resolution_tests.cpp",
+          "tests/quic_p2p/dial_scheduler_tests.cpp",
+          "tests/quic_p2p/dialing_tests.cpp",
+          "tests/libp2p_interop/runner.py",
+          "tests/libp2p_interop/dns_evidence.py"
+        ],
+        "tests": [ "test_forge_net_dns", "test_forge_quic_p2p", "test_forge_libp2p_dns_fixture" ],
+        "donor_sources": [ "docs/donors/forge-p2p-address-resolution-v1.md", "docs/donors/forge-net-dns-cares-v1.md" ],
+        "donor_cases": [ "interop.live_dnsaddr" ]
+      }
+    },
+    {
+      "id": "dialing.happy_eyeballs",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node-owned direct dial scheduler ranks and staggers deduplicated concrete targets after multi-root expansion in native and private profiles",
+      "configuration": "node direct_dial ranker policy and max_concurrent_attempts; per-logical-dial deadline and concrete launch limit; private candidates are TCP-only",
+      "resource_ownership": "one logical reservation covers concurrent concrete attempts; authenticated losers and canceled attempts are drained before return or scheduler close",
+      "persistence": "winner feedback credits canonical source roots, never temporary resolved children; launch and progress state is operation-local",
+      "maintenance": "bounded launch offsets and TCP progress holds share the logical deadline; owner stop cancels admission and joins attempts before session teardown",
+      "diagnostics": "node snapshots expose logical dial resources, native attempt counts and authenticated session endpoints",
+      "intended_disposition": "retain implemented host-local scheduling with readiness unverified until final-head acceptance; p2p_dual_stack_dns_tcp_race_preserves_logical_ownership_and_drains_loser exercises real authoritative A/AAAA, stalled IPv6 and authenticated IPv4 echo in native/private profiles; deterministic ranker/scheduler coverage is not Go/Rust wire evidence",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": [ "state_machine", "raw_node", "adversarial" ],
+        "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/dialing.cppm",
+          "libraries/net/p2p/dial_ranker.cpp",
+          "libraries/net/p2p/dial_scheduler.cpp",
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/node_impl_dialing.cpp",
+          "libraries/net/p2p/node_impl_sessions.cpp",
+          "libraries/net/p2p/node_impl_lifecycle.cpp",
+          "tests/quic_p2p/dialing_tests.cpp",
+          "tests/quic_p2p/dial_scheduler_tests.cpp",
+          "tests/quic_p2p/node_addressing_tests.cpp"
+        ],
+        "tests": [ "test_forge_quic_p2p" ],
+        "donor_sources": [ "docs/donors/forge-p2p-address-resolution-v1.md" ],
+        "donor_cases": []
+      }
+    },
+    {
+      "id": "dialing.ipv6_black_hole_detection",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node-owned scheduler filters public IPv6 candidates in native and TCP-only private profiles while retaining periodic probes",
+      "configuration": "node direct_dial.black_holes bounded window and minimum successes; private normalization preserves ipv6_enabled",
+      "resource_ownership": "one outcome per deduplicated concrete target; suppressed candidates do not launch or reserve native resources; attempts drain before terminal completion",
+      "persistence": "bounded detector history is scheduler-owned memory, not learned peer addresses or persisted DNS children",
+      "maintenance": "attributable failures fill the window, blocked paths are periodically probed and a successful probe resets suppression; cancellation and local failures remain neutral",
+      "diagnostics": "node diagnostics forwards the scheduler IPv6 state, request/outcome/success counters and next-probe position outside the node mutex",
+      "intended_disposition": "retain native/private node integration with readiness unverified until final-head acceptance; black_hole_detector_udp_and_ipv6_tcp_complete_failure_and_recovery_cycle and dial_scheduler_udp_and_ipv6_tcp_recover_after_successful_black_hole_probe exercise IPv6 TCP suppression/reset and resource ownership with scripted attempts; they are component evidence, not a real-network outage or donor wire experiment",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": [ "state_machine", "adversarial" ],
+        "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/dialing.cppm",
+          "libraries/net/p2p/include/forge/net/p2p/diagnostics.cppm",
+          "libraries/net/p2p/black_hole_detector.cpp",
+          "libraries/net/p2p/dial_scheduler.cpp",
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/node_impl_dialing.cpp",
+          "libraries/net/p2p/node.cpp",
+          "tests/quic_p2p/dialing_tests.cpp",
+          "tests/quic_p2p/dial_scheduler_tests.cpp"
+        ],
+        "tests": [ "test_forge_quic_p2p" ],
+        "donor_sources": [ "docs/donors/forge-p2p-address-resolution-v1.md" ],
+        "donor_cases": []
+      }
+    },
+    {
+      "id": "dialing.udp_black_hole_detection",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node-owned scheduler filters public UDP/QUIC candidates in the native profile while retaining periodic probes; disabled for TCP-only private nodes",
+      "configuration": "node direct_dial.black_holes bounded window and minimum successes; private normalization disables udp_enabled only",
+      "resource_ownership": "one outcome per deduplicated concrete target; suppressed candidates do not launch or reserve native resources; attempts drain before terminal completion",
+      "persistence": "bounded detector history is scheduler-owned memory, not learned peer addresses or persisted DNS children",
+      "maintenance": "attributable failures fill the window, blocked paths are periodically probed and a successful probe resets suppression; cancellation and local failures remain neutral",
+      "diagnostics": "node diagnostics forwards the scheduler UDP state, request/outcome/success counters and next-probe position outside the node mutex",
+      "intended_disposition": "retain native node integration with readiness unverified until final-head acceptance; black_hole_detector_udp_and_ipv6_tcp_complete_failure_and_recovery_cycle and dial_scheduler_udp_and_ipv6_tcp_recover_after_successful_black_hole_probe exercise UDP suppression/reset and resource ownership with scripted attempts, without network traffic to the scripted public addresses; no donor wire or private UDP support claim",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": [ "state_machine", "adversarial" ],
+        "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/dialing.cppm",
+          "libraries/net/p2p/include/forge/net/p2p/diagnostics.cppm",
+          "libraries/net/p2p/black_hole_detector.cpp",
+          "libraries/net/p2p/dial_scheduler.cpp",
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/node_impl_dialing.cpp",
+          "libraries/net/p2p/node.cpp",
+          "tests/quic_p2p/dialing_tests.cpp",
+          "tests/quic_p2p/dial_scheduler_tests.cpp"
+        ],
+        "tests": [ "test_forge_quic_p2p" ],
+        "donor_sources": [ "docs/donors/forge-p2p-address-resolution-v1.md" ],
+        "donor_cases": []
       }
     },
     {
@@ -758,24 +901,27 @@
       "owner": "net.p2p.node",
       "normal_activation": "node_async_start",
       "configuration":
-          "typed bootstrap entries, startup requirement, shared budget, timeout, parallelism and retry jitter",
+          "typed multiaddr bootstrap roots (at most 4096), startup requirement, shared budget, timeout, parallelism and retry jitter; listen remains concrete endpoint",
       "resource_ownership": "node lifecycle tracker, logical dial reservations and connection-manager protection",
-      "persistence": "learned endpoints flow through peer_store",
-      "maintenance": "bounded initial attempts and node-owned cancellable retry schedule",
+      "persistence": "peer_store credits canonical unexpanded bootstrap roots, not resolved DNS children; configured terminal peer constraints remain distinct from learned peers",
+      "maintenance": "bounded initial attempts and node-owned cancellable retry schedule; suffixless roots resolve anew without pinning the first learned identity; validated replacement preserves alias protection and cancels outside the mutex",
       "diagnostics": "phase, strict/degraded status, connected count and last bootstrap failure",
       "intended_disposition": "preserve_and_add_live_donor_bootstrap_profiles",
       "builtin_protocols": [],
       "capabilities": [],
       "evidence": {
-        "layers": [ "state_machine", "official_plugin" ],
+        "layers": [ "state_machine", "raw_node", "adversarial", "official_plugin" ],
         "source_paths": [
+          "libraries/net/p2p/include/forge/net/p2p/lifecycle.cppm",
           "libraries/net/p2p/bootstrap_service.cpp", "libraries/net/p2p/node_impl_lifecycle.cpp",
           "libraries/net/p2p/node_lifecycle.cpp", "plugins/p2p/node/plugin.cpp",
+          "plugins/p2p/node/config.cpp",
           "plugins/p2p/node/object_peer_state_adapter.cpp", "plugins/p2p/node/details/object_peer_state_adapter.hxx",
-          "plugins/p2p/node/details/p2p_state_schema.hxx"
+          "plugins/p2p/node/details/p2p_state_schema.hxx",
+          "tests/quic_p2p/node_bootstrap_addressing_tests.cpp", "tests/quic_p2p/p2p_lifecycle_tests.cpp"
         ],
         "tests": [ "test_forge_quic_p2p", "test_forge_plugins", "test_forge_plugins_db_store" ],
-        "donor_sources": [ "docs/donors/forge-p2p-node-lifecycle-v1.md" ],
+        "donor_sources": [ "docs/donors/forge-p2p-node-lifecycle-v1.md", "docs/donors/forge-p2p-address-resolution-v1.md" ],
         "donor_cases": [ "p2p.host_multi_transport_orchestration" ]
       }
     },

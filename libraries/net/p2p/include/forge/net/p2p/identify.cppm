@@ -11,6 +11,7 @@ module;
 export module forge.net.p2p.identify;
 
 import forge.multiformats.types;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.protocol;
 
@@ -51,7 +52,7 @@ struct document_presence {
       std::string protocol_version;
       std::string agent_version;
       std::vector<std::uint8_t> public_key;
-      std::vector<endpoint> listen_endpoints;
+      std::vector<forge::multiformats::multiaddr> listen_endpoints;
       std::optional<endpoint> observed_endpoint;
       std::vector<protocol_id> protocols;
       std::vector<std::uint8_t> signed_peer_record;

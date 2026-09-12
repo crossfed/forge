@@ -65,6 +65,7 @@ BOOST_AUTO_TEST_CASE(multicodec_constants_match_libp2p_foundation_codes) try {
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(sha2_512), 0x13);
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(libp2p_key), 0x72);
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(ip4), 0x04);
+   BOOST_CHECK_EQUAL(forge::multiformats::code_value(dnsaddr), 0x38);
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(udp), 0x0111);
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(quic), 0x01cc);
    BOOST_CHECK_EQUAL(forge::multiformats::code_value(quic_v1), 0x01cd);
@@ -142,6 +143,25 @@ BOOST_AUTO_TEST_CASE(multiaddr_roundtrips_dns_wss_peer_and_relay_circuit) try {
 }
 FORGE_LOG_AND_RETHROW();
 
+BOOST_AUTO_TEST_CASE(multiaddr_dnsaddr_matches_standard_variable_string_vectors) try {
+   const auto dnsaddr = forge::multiformats::multiaddr::parse("/dnsaddr/bootstrap.libp2p.io");
+   const auto expected_dnsaddr = forge::multiformats::bytes{
+       0x38, 0x13, 'b', 'o', 'o', 't', 's', 't', 'r', 'a', 'p', '.', 'l', 'i', 'b', 'p', '2', 'p', '.', 'i', 'o'};
+   const auto encoded_dnsaddr = dnsaddr.to_bytes();
+   BOOST_CHECK_EQUAL(dnsaddr.to_string(), "/dnsaddr/bootstrap.libp2p.io");
+   BOOST_CHECK_EQUAL_COLLECTIONS(encoded_dnsaddr.begin(), encoded_dnsaddr.end(), expected_dnsaddr.begin(),
+                                 expected_dnsaddr.end());
+   BOOST_CHECK_EQUAL(forge::multiformats::multiaddr::from_bytes(expected_dnsaddr).to_string(),
+                     "/dnsaddr/bootstrap.libp2p.io");
+
+   const auto peer = std::string{"QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC"};
+   const auto composed = "/dnsaddr/bootstrap.libp2p.io/p2p/" + peer;
+   const auto composed_address = forge::multiformats::multiaddr::parse(composed);
+   BOOST_CHECK_EQUAL(composed_address.to_string(), composed);
+   BOOST_CHECK_EQUAL(forge::multiformats::multiaddr::from_bytes(composed_address.to_bytes()).to_string(), composed);
+}
+FORGE_LOG_AND_RETHROW();
+
 BOOST_AUTO_TEST_CASE(multiaddr_encapsulates_and_decapsulates_like_libp2p) try {
    const auto base = forge::multiformats::multiaddr::parse("/ip4/1.2.3.4");
    const auto inner = forge::multiformats::multiaddr::parse("/tcp/80/ws");
@@ -169,6 +189,13 @@ BOOST_AUTO_TEST_CASE(multiaddr_rejects_malformed_donor_cases_with_typed_errors) 
                      forge::multiformats::exceptions::invalid_format);
    BOOST_CHECK_THROW((void)forge::multiformats::multiaddr::parse("/ip4/127.0.0.1/p2p/not-base58-0"),
                      forge::multiformats::exceptions::invalid_format);
+   BOOST_CHECK_THROW((void)forge::multiformats::multiaddr::parse("/dnsaddr/"),
+                     forge::multiformats::exceptions::invalid_format);
+   BOOST_CHECK_THROW((void)forge::multiformats::multiaddr::from_bytes(forge::multiformats::bytes{0x38, 0x00}),
+                     forge::multiformats::exceptions::invalid_format);
+   BOOST_CHECK_THROW(
+       (void)forge::multiformats::multiaddr::from_bytes(forge::multiformats::bytes{0x38, 0x03, 'a', '/', 'b'}),
+       forge::multiformats::exceptions::invalid_format);
    BOOST_CHECK_THROW((void)forge::multiformats::multiaddr::from_bytes(forge::multiformats::bytes{0x04, 0x7f}),
                      forge::multiformats::exceptions::invalid_format);
    BOOST_CHECK_THROW((void)forge::multiformats::multiaddr::from_bytes(forge::multiformats::bytes{0xff, 0xff, 0xff, 0xff}),

@@ -48,9 +48,11 @@ import forge.asio.gate;
 import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
+import forge.net.p2p.address_resolution;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identify;
+import forge.net.p2p.identity;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.lifecycle;
 import forge.net.p2p.negotiation;
@@ -58,6 +60,7 @@ import forge.net.p2p.peer_store;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.relay;
 import forge.net.p2p.resource_manager;
+import forge.multiformats.multiaddr;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
@@ -75,12 +78,10 @@ namespace {
 }
 
 [[nodiscard]] dht::peer lifecycle_dht_peer(const peer_store::record& record) {
-   auto endpoints = std::vector<endpoint>{};
+   auto endpoints = std::vector<forge::multiformats::multiaddr>{};
    endpoints.reserve(record.endpoints.size());
    for (const auto& item : record.endpoints) {
-      auto endpoint = item.endpoint;
-      endpoint.peer = record.peer;
-      endpoints.push_back(std::move(endpoint));
+      endpoints.push_back(item.address);
    }
    return dht::peer{
        .id = record.peer, .endpoints = std::move(endpoints), .connection = dht::connection_type::can_connect};
@@ -88,15 +89,57 @@ namespace {
 
 } // namespace
 
-void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty) {
+void validate_bootstrap(const std::vector<bootstrap_peer>& peers, bool require_nonempty,
+                        const address_resolution::policy& resolution, bool tcp_only) {
+   if (peers.size() > 4'096) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P bootstrap root count exceeds 4096");
+   }
    if (require_nonempty && peers.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                             "P2P bootstrap connection is required but no bootstrap peers are configured");
    }
    auto keys = std::set<std::string>{};
    for (const auto& peer : peers) {
-      if (peer.address.peer && !valid_peer_id(*peer.address.peer)) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P bootstrap peer id");
+      const auto& components = peer.address.components();
+      if (components.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "empty P2P bootstrap address");
+      }
+      if (peer.address.to_bytes().size() > resolution.bounds.max_multiaddr_size) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P bootstrap root exceeds DNS address size limit");
+      }
+      auto dnsaddr = false;
+      for (auto index = std::size_t{}; index < components.size(); ++index) {
+         const auto& component = components[index];
+         using code = forge::multiformats::protocol_code;
+         dnsaddr = dnsaddr || component.code == code::dnsaddr;
+         if (component.code == code::p2p_circuit || component.code == code::ws || component.code == code::wss ||
+             component.code == code::quic ||
+             (tcp_only && (component.code == code::udp || component.code == code::quic_v1))) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_options, "unsupported P2P bootstrap transport");
+         }
+         if (component.code == code::p2p) {
+            if (index + 1 != components.size()) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P bootstrap peer must be a terminal suffix");
+            }
+            try {
+               if (!valid_peer_id(peer_id::from_string(component.value))) {
+                  FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P bootstrap peer id");
+               }
+            } catch (...) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P bootstrap peer id");
+            }
+         }
+      }
+      if (!dnsaddr) {
+         auto concrete = std::optional<endpoint>{};
+         try {
+            concrete = parse_endpoint(peer.address.to_string());
+         } catch (...) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P bootstrap direct address");
+         }
+         if ((!concrete->is_direct_tcp() && !concrete->is_direct_quic()) || (tcp_only && !concrete->is_direct_tcp())) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid P2P bootstrap direct address");
+         }
       }
       if (!keys.insert(peer.address.to_string()).second) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "duplicate P2P bootstrap endpoint");
@@ -115,16 +158,15 @@ void node::impl::initialize_lifecycle() {
               if (!self) {
                  FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node no longer owns bootstrap state");
               }
-              const auto expected_peer = peer.address.peer;
-              const auto session = co_await self->connect_direct(std::move(peer.address),
+              auto roots = std::vector<forge::multiformats::multiaddr>{std::move(peer.address)};
+              const auto session = co_await self->connect_direct(std::move(roots),
                                                                  node::connect_options{
-                                                                     .expected_peer = expected_peer,
                                                                      .allow_relay = false,
                                                                      .timeout = timeout,
                                                                      .direct_attempt_timeout = timeout,
                                                                      .allow_hole_punch = false,
                                                                  },
-                                                                 nullptr, std::move(cancellation));
+                                                                 std::move(cancellation));
               co_return session->info.remote_peer;
            },
            .connected =
@@ -133,13 +175,15 @@ void node::impl::initialize_lifecycle() {
                   if (!self) {
                      return false;
                   }
-                  const auto endpoint = configured.address.to_string();
+                  const auto root_key = configured.address.to_string();
                   const auto lock = std::scoped_lock{self->mutex};
                   return std::ranges::any_of(self->sessions, [&](const auto& item) {
                      const auto& session = item.second;
                      return !session->closed && session->info.remote_peer == peer &&
-                            session->info.path == path::kind::direct && session->direct_endpoint &&
-                            session->direct_endpoint->to_string() == endpoint;
+                            session->info.path == path::kind::direct &&
+                            std::ranges::any_of(session->direct_roots, [&](const auto& root) {
+                               return root.to_string() == root_key;
+                            });
                   });
                },
            .protect =
@@ -191,9 +235,11 @@ void node::impl::request_lifecycle_stop() noexcept {
    {
       const auto lock = std::scoped_lock{mutex};
       peer_exchange_admission_closed = true;
+      session_admission_closed = true;
       peer_exchange_value.close();
       active_peer_exchange_operations.swap(peer_exchange_operations);
    }
+   request_dial_scheduler_stop();
    for (const auto& [_, operation] : active_peer_exchange_operations) {
       operation->cancellation.request_stop();
    }

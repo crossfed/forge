@@ -52,10 +52,12 @@ boost::asio::awaitable<stream> session::async_accept_stream() {
 }
 
 boost::asio::awaitable<void> session::async_close() {
-   if (!valid()) {
+   auto state = impl_;
+   if (!state || !state->model) {
       co_return;
    }
-   co_await impl_->model->async_close();
+   auto model = state->model;
+   co_await model->async_close();
 }
 
 void session::cancel() {

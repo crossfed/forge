@@ -80,7 +80,7 @@ test_provider(dht::key key, peer_id provider, std::chrono::system_clock::time_po
    return dht::record_store::provider_record{
        .key = std::move(key),
        .provider = std::move(provider),
-       .endpoints = {std::move(address)},
+       .endpoints = {address.to_multiaddr()},
        .provider_expires_at = provider_expires_at,
        .addresses_expires_at = addresses_expires_at,
    };

@@ -23,6 +23,9 @@ bounded snapshots of network state without depending on private node internals.
 - Package component: `plugins_p2p_diagnostics`
 - Plugin id: `forge.plugins.p2p.diagnostics`
 - Main API id: `forge.plugins.p2p.diagnostics`
+- Plugin version: `2.0.0`
+- Main API contract: `2.0`
+- Node diagnostics source dependency: `forge.plugins.p2p.node.diagnostics_source` (contract `2.0`)
 - Config section: `plugins.p2p.diagnostics`
 - Depends on plugin id: `forge.plugins.p2p.node`
 - Public modules:
@@ -71,7 +74,7 @@ import forge.plugins.p2p.diagnostics.api;
 import forge.plugins.p2p.diagnostics.plugin;
 
 auto diagnostics = context.apis().get<forge::plugins::p2p::diagnostics::api>(
-   {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1});
+   {.id = {"forge.plugins.p2p.diagnostics"}, .major = 2});
 
 auto network = diagnostics->network();
 auto resources = diagnostics->resources();
@@ -82,6 +85,13 @@ auto peers = diagnostics->peers({.only_connected = true, .limit = 100});
 registry.register_plugin(forge::plugins::p2p::node::descriptor());
 registry.register_plugin(forge::plugins::p2p::diagnostics::descriptor());
 ```
+
+## Migration From 1.x
+
+Diagnostics peer endpoint records now expose raw `multiaddr` through `.address`
+instead of a concrete transport endpoint. Request diagnostics API major `2` and
+provide node diagnostics source major `2`; there is no compatibility alias for
+the v1 record shape.
 
 ## Security And Boundaries
 

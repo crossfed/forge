@@ -4,6 +4,16 @@ add_library(
    identity_signature.cpp
    details/identity_signature.hxx
    endpoint.cpp
+   dns_address_expander.cpp
+   details/dns_address_expander.hxx
+   direct_attempt.cpp
+   details/direct_attempt.hxx
+   dial_ranker.cpp
+   details/dial_ranker.hxx
+   black_hole_detector.cpp
+   details/black_hole_detector.hxx
+   dial_scheduler.cpp
+   details/dial_scheduler.hxx
    private_network.cpp
    connection_gater.cpp
    connection_gate.cpp
@@ -104,6 +114,7 @@ add_library(
    node_impl_pubsub_inbound.cpp
    node_impl_streams.cpp
    node_impl_sessions.cpp
+   node_impl_dialing.cpp
    node_impl_relay.cpp
    node_impl_dht.cpp
    node_impl_dht_maintenance.cpp
@@ -197,5 +208,6 @@ target_link_libraries(
       forge_net_stcp
       forge_net_pnet
       forge_net_yamux
+      forge_net_dns
       Boost::asio
 )

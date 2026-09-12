@@ -33,6 +33,7 @@ enum class code : std::uint16_t {
    durability_uncertain = 17,
    record_rejected = 18,
    connection_rejected = 19,
+   temporary_failure = 20,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.net.p2p")
@@ -56,6 +57,7 @@ using sequence_exhausted = forge::exceptions::coded_exception<code, code::sequen
 using durability_uncertain = forge::exceptions::coded_exception<code, code::durability_uncertain>;
 using record_rejected = forge::exceptions::coded_exception<code, code::record_rejected>;
 using connection_rejected = forge::exceptions::coded_exception<code, code::connection_rejected>;
+using temporary_failure = forge::exceptions::coded_exception<code, code::temporary_failure>;
 
 [[nodiscard]] inline std::optional<code> code_of(const forge::exceptions::base& error) noexcept {
    const auto& value = error.code();

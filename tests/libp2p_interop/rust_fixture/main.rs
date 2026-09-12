@@ -2,18 +2,20 @@ use std::{
     collections::HashSet,
     error::Error,
     fs,
-    net::Ipv4Addr,
+    net::{Ipv4Addr, SocketAddr},
     num::NonZeroUsize,
     path::PathBuf,
     str::FromStr,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
+use hickory_resolver::config::{NameServerConfig, ResolveHosts};
+use hickory_resolver::proto::xfer::Protocol as DnsProtocol;
 use libp2p::kad::store::RecordStore;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, Transport, autonat,
@@ -23,13 +25,16 @@ use libp2p::{
     noise, ping,
     pnet::{PnetConfig, PreSharedKey},
     relay, rendezvous,
-    swarm::{NetworkBehaviour, SwarmEvent, behaviour::toggle::Toggle},
+    swarm::{NetworkBehaviour, SwarmEvent, behaviour::toggle::Toggle, dial_opts::DialOpts},
     tcp, tls, yamux,
 };
 use libp2p_stream as raw_stream;
 use rand::rngs::OsRng;
 use serde_json::json;
 
+mod provider;
+
+const KAD_PROTOCOL: &str = "/ipfs/kad/1.0.0";
 const PUBSUB_TOPIC: &str = "forge.pubsub.interop";
 const PUBSUB_PAYLOAD: &[u8] = b"forge-gossipsub-live";
 
@@ -50,12 +55,22 @@ struct Options {
     target_peer_id: String,
     payload: String,
     transport: String,
+    dns_server: Option<SocketAddr>,
+    tcp_upgrade_observation: Arc<Mutex<Option<TcpUpgradeObservation>>>,
     expected_messages: usize,
     pnet_key_file: PathBuf,
     pnet_fingerprint: String,
     pnet_control: String,
     pnet_correlation: String,
     features: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+struct TcpUpgradeObservation {
+    peer: PeerId,
+    remote_address: Multiaddr,
+    security: &'static str,
+    muxer: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -198,6 +213,13 @@ fn parse_args() -> Result<Options, Box<dyn Error>> {
             "--target-peer-id" => out.target_peer_id = value,
             "--payload" => out.payload = value,
             "--transport" => out.transport = value,
+            "--dns-server" => {
+                let address: SocketAddr = value.parse()?;
+                if address.port() == 0 {
+                    return Err("--dns-server port must be 1..65535".into());
+                }
+                out.dns_server = Some(address);
+            }
             "--expected-messages" => out.expected_messages = value.parse()?,
             "--pnet-key-file" => out.pnet_key_file = PathBuf::from(value),
             "--pnet-fingerprint" => out.pnet_fingerprint = value,
@@ -249,7 +271,7 @@ fn behaviour_for(
 ) -> Behaviour {
     let peer = key.public().to_peer_id();
     let private_network = opts.transport == "tcp-pnet";
-    let mut kad_config = kad::Config::new(StreamProtocol::new("/ipfs/kad/1.0.0"));
+    let mut kad_config = kad::Config::new(StreamProtocol::new(KAD_PROTOCOL));
     kad_config.set_query_timeout(Duration::from_secs(10));
     let mut kad_behaviour =
         kad::Behaviour::with_config(peer, kad::store::MemoryStore::new(peer), kad_config);
@@ -297,48 +319,129 @@ fn behaviour_for(
 async fn new_swarm(opts: &Options) -> Result<libp2p::Swarm<Behaviour>, Box<dyn Error>> {
     let transport = opts.transport.as_str();
     let key = identity::Keypair::generate_ed25519();
+    let resolver = opts.dns_server.map(|address| {
+        let mut config = libp2p::dns::ResolverConfig::new();
+        config.add_name_server(NameServerConfig::new(address, DnsProtocol::Udp));
+        config.add_name_server(NameServerConfig::new(address, DnsProtocol::Tcp));
+        let mut options = libp2p::dns::ResolverOpts::default();
+        options.use_hosts_file = ResolveHosts::Never;
+        (config, options)
+    });
     let mut swarm = match transport {
-        "quic" | "" => SwarmBuilder::with_existing_identity(key)
-            .with_tokio()
-            .with_quic()
-            .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|key, relay_client| behaviour_for(key, Some(relay_client), opts))?
-            .build(),
-        "tcp" => SwarmBuilder::with_existing_identity(key)
-            .with_tokio()
-            .with_tcp(
-                tcp::Config::default().nodelay(true),
-                noise::Config::new,
-                yamux::Config::default,
-            )?
-            .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|key, relay_client| behaviour_for(key, Some(relay_client), opts))?
-            .build(),
-        "tcp-tls" => SwarmBuilder::with_existing_identity(key)
-            .with_tokio()
-            .with_tcp(
-                tcp::Config::default().nodelay(true),
-                tls::Config::new,
-                yamux::Config::default,
-            )?
-            .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|key, relay_client| behaviour_for(key, Some(relay_client), opts))?
-            .build(),
+        "quic" | "" => {
+            let builder = SwarmBuilder::with_existing_identity(key)
+                .with_tokio()
+                .with_quic();
+            if let Some((config, options)) = resolver.clone() {
+                builder
+                    .with_dns_config(config, options)
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            } else {
+                builder
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            }
+        }
+        "tcp" => {
+            let observation = Arc::clone(&opts.tcp_upgrade_observation);
+            let expected_peer = if opts.command == "dial" {
+                Some(opts.peer_id.parse::<PeerId>()?)
+            } else {
+                None
+            };
+            let builder = SwarmBuilder::with_existing_identity(key)
+                .with_tokio()
+                .with_other_transport(move |key| {
+                    tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+                        .upgrade(Version::V1Lazy)
+                        .authenticate(noise::Config::new(key).expect("valid noise identity"))
+                        .multiplex(yamux::Config::default())
+                        .map(move |(peer, muxer), endpoint| {
+                            // This runs only after both upgrades, below the DNS wrapper.
+                            if expected_peer == Some(peer) && endpoint.is_dialer() {
+                                *observation.lock().expect("TCP upgrade observation lock") =
+                                    Some(TcpUpgradeObservation {
+                                        peer,
+                                        remote_address: endpoint.get_remote_address().clone(),
+                                        security: "/noise",
+                                        muxer: "/yamux/1.0.0",
+                                    });
+                            }
+                            (peer, muxer)
+                        })
+                })?;
+            if let Some((config, options)) = resolver.clone() {
+                builder
+                    .with_dns_config(config, options)
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            } else {
+                builder
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            }
+        }
+        "tcp-tls" => {
+            let builder = SwarmBuilder::with_existing_identity(key)
+                .with_tokio()
+                .with_tcp(
+                    tcp::Config::default().nodelay(true),
+                    tls::Config::new,
+                    yamux::Config::default,
+                )?;
+            if let Some((config, options)) = resolver.clone() {
+                builder
+                    .with_dns_config(config, options)
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            } else {
+                builder
+                    .with_relay_client(noise::Config::new, yamux::Config::default)?
+                    .with_behaviour(|key, relay_client| {
+                        behaviour_for(key, Some(relay_client), opts)
+                    })?
+                    .build()
+            }
+        }
         "tcp-pnet" if opts.pnet_key_file.as_os_str().is_empty() => {
-            SwarmBuilder::with_existing_identity(key)
+            let builder = SwarmBuilder::with_existing_identity(key)
                 .with_tokio()
                 .with_tcp(
                     tcp::Config::default().nodelay(true),
                     noise::Config::new,
                     yamux::Config::default,
-                )?
-                .with_behaviour(|key| behaviour_for(key, None, opts))?
-                .build()
+                )?;
+            if let Some((config, options)) = resolver.clone() {
+                builder
+                    .with_dns_config(config, options)
+                    .with_behaviour(|key| behaviour_for(key, None, opts))?
+                    .build()
+            } else {
+                builder
+                    .with_behaviour(|key| behaviour_for(key, None, opts))?
+                    .build()
+            }
         }
         "tcp-pnet" => {
             let text = fs::read_to_string(&opts.pnet_key_file)?;
             let psk = PreSharedKey::from_str(&text)?;
-            SwarmBuilder::with_existing_identity(key)
+            let builder = SwarmBuilder::with_existing_identity(key)
                 .with_tokio()
                 .with_other_transport(move |key| {
                     tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
@@ -346,9 +449,17 @@ async fn new_swarm(opts: &Options) -> Result<libp2p::Swarm<Behaviour>, Box<dyn E
                         .upgrade(Version::V1Lazy)
                         .authenticate(noise::Config::new(key).expect("valid noise identity"))
                         .multiplex(yamux::Config::default())
-                })?
-                .with_behaviour(|key| behaviour_for(key, None, opts))?
-                .build()
+                })?;
+            if let Some((config, options)) = resolver.clone() {
+                builder
+                    .with_dns_config(config, options)
+                    .with_behaviour(|key| behaviour_for(key, None, opts))?
+                    .build()
+            } else {
+                builder
+                    .with_behaviour(|key| behaviour_for(key, None, opts))?
+                    .build()
+            }
         }
         other => return Err(format!("unsupported transport {other}").into()),
     };
@@ -390,14 +501,6 @@ fn pnet_rejection(
             && observation.identify_streams == 0
             && observation.application_streams == 0
     })
-}
-
-fn dht_provider_key() -> kad::RecordKey {
-    kad::RecordKey::new(&[
-        0x12, 0x20, 0x2e, 0xaa, 0xd0, 0x06, 0x69, 0x42, 0x0a, 0xc7, 0x3a, 0x56, 0xd9, 0x80, 0xb7,
-        0x9d, 0xeb, 0x2d, 0x2e, 0x3f, 0xb6, 0x86, 0x6d, 0x1c, 0xac, 0x9e, 0x37, 0x3f, 0x5e, 0x5d,
-        0x4a, 0x62, 0xad, 0xf9,
-    ])
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -511,6 +614,11 @@ async fn reserve_relay_address(
                         return Err("initial relay reservation unexpectedly reported renewal=true".into());
                     }
                     progress.record_acceptance(renewal);
+                }
+                SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                    if listener_id == relay_listener_id =>
+                {
+                    return Err(format!("relay reservation listener closed: {error}").into());
                 }
                 other => {
                     eprintln!("rust relay reservation event: {other:?}");
@@ -991,49 +1099,6 @@ async fn wait_dht_hidden_peer(
                             .kad
                             .get_n_closest_peers(target_peer, NonZeroUsize::new(1).unwrap()),
                     );
-                }
-            }
-        }
-    }
-}
-
-async fn wait_dht_provide_find_provider(
-    swarm: &mut libp2p::Swarm<Behaviour>,
-    local_peer: PeerId,
-) -> Result<usize, Box<dyn Error>> {
-    let key = dht_provider_key();
-    let provide_id = swarm.behaviour_mut().kad.start_providing(key.clone())?;
-    let deadline = tokio::time::sleep(Duration::from_secs(30));
-    tokio::pin!(deadline);
-    let mut providing = false;
-    loop {
-        tokio::select! {
-            _ = &mut deadline => return Err("timed out waiting for Kademlia provider proof".into()),
-            event = swarm.select_next_some() => {
-                match event {
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        id,
-                        result: kad::QueryResult::StartProviding(result),
-                        ..
-                    })) if id == provide_id => {
-                        result?;
-                        providing = true;
-                        let _ = swarm.behaviour_mut().kad.get_providers(key.clone());
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        result: kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders { providers, .. })),
-                        ..
-                    })) if providing => {
-                        if providers.contains(&local_peer) {
-                            return Ok(providers.len());
-                        }
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
-                        result: kad::QueryResult::GetProviders(Err(error)),
-                        ..
-                    })) if providing => return Err(format!("Kademlia providers failed: {error:?}").into()),
-                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
-                    _ => {}
                 }
             }
         }
@@ -1825,9 +1890,23 @@ async fn listen(opts: Options) -> Result<(), Box<dyn Error>> {
 }
 
 async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
+    if opts.scenario == "dht_provide_find_provider" {
+        return provider::run(&opts).await;
+    }
     let mut swarm = new_swarm(&opts).await?;
     let remote_peer: PeerId = opts.peer_id.parse()?;
     let remote: Multiaddr = opts.addr.parse()?;
+    let dns_root = remote
+        .iter()
+        .any(|protocol| matches!(protocol, Protocol::Dnsaddr(_)));
+    if dns_root && opts.dns_server.is_none() {
+        return Err("DNSADDR fixture dial requires --dns-server".into());
+    }
+    if let Some(Protocol::P2p(peer)) = remote.iter().last()
+        && peer != remote_peer
+    {
+        return Err("address peer disagrees with --peer-id".into());
+    }
     let relay_transport = if opts.scenario == "relay_reserve" {
         match relay_transport_addr(remote.clone(), remote_peer) {
             Ok(address) => Some(address),
@@ -1853,7 +1932,14 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
     }
     let mut pnet_observation = PnetObservation::default();
-    if let Err(error) = swarm.dial(remote.clone()) {
+    let dial_options = if dns_root {
+        DialOpts::peer_id(remote_peer)
+            .addresses(vec![remote.clone()])
+            .build()
+    } else {
+        remote.clone().into()
+    };
+    if let Err(error) = swarm.dial(dial_options) {
         if opts.scenario == "pnet" && !opts.pnet_control.is_empty() {
             return write_json(
                 &opts.result_file,
@@ -1868,7 +1954,9 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
     let mut identify_count = 0usize;
     let mut identify_signed_record = false;
     let mut authenticated_remote_peer_id = None;
+    let mut connection_remote_addr = None;
     let mut negotiated_transport = None;
+    let mut tcp_upgrade_observation = None;
     while started.elapsed() < Duration::from_secs(20) {
         match swarm.select_next_some().await {
             SwarmEvent::ConnectionEstablished {
@@ -1880,7 +1968,18 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     pnet_observation.established_connections += 1;
                 }
                 authenticated_remote_peer_id = Some(peer_id.to_string());
+                connection_remote_addr = Some(endpoint.get_remote_address().to_string());
                 negotiated_transport = observed_quic_transport(&endpoint);
+                if dns_root && opts.transport == "tcp" {
+                    tcp_upgrade_observation = Some(
+                        opts.tcp_upgrade_observation
+                            .lock()
+                            .map_err(|_| "TCP upgrade observation lock poisoned")?
+                            .clone()
+                            .filter(|observed| observed.peer == peer_id)
+                            .ok_or("DNSADDR connection lacks the expected peer's TCP upgrade observation")?,
+                    );
+                }
                 swarm
                     .behaviour_mut()
                     .kad
@@ -1930,6 +2029,9 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     pnet_rejection(&opts, "dialer", &remote_peer.to_string(), pnet_observation),
                 );
             }
+            SwarmEvent::OutgoingConnectionError { error, .. } if dns_root => {
+                return Err(format!("DNSADDR dial failed: {error}").into());
+            }
             other => {
                 eprintln!("rust-dial event: {other:?}");
             }
@@ -1951,7 +2053,7 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
     }
     if matches!(
         opts.scenario.as_str(),
-        "dht_provide_find_provider" | "dht_pk_put_get" | "dht_ipns_put_get"
+        "dht_pk_put_get" | "dht_ipns_put_get"
     ) {
         wait_dht_remote_ready(&mut swarm, remote_peer).await?;
     }
@@ -1995,18 +2097,29 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                 opts.payload.as_bytes().to_vec()
             };
             let bytes = open_echo_stream_direct(&mut swarm, remote_peer, &payload).await?;
-            write_json(
-                &opts.result_file,
-                json!({
-                    "implementation": "rust",
-                    "role": "dialer",
-                    "scenario": opts.scenario,
-                    "status": "ok",
-                    "protocol": "/forge/interop/relay-echo/1",
-                    "payload_bytes": bytes,
-                    "echo_ok": true
-                }),
-            )?;
+            let mut result = json!({
+                "implementation": "rust",
+                "role": "dialer",
+                "scenario": opts.scenario,
+                "status": "ok",
+                "protocol": "/forge/interop/relay-echo/1",
+                "payload_bytes": bytes,
+                "echo_ok": true
+            });
+            if dns_root {
+                result["dns_input_address"] = json!(opts.addr);
+                result["dns_resolver_configured"] = json!(opts.dns_server.is_some());
+                result["expected_peer_id"] = json!(remote_peer.to_string());
+                result["authenticated_remote_peer_id"] = json!(authenticated_remote_peer_id);
+                result["connection_remote_addr"] = json!(connection_remote_addr);
+                if let Some(observed) = tcp_upgrade_observation {
+                    result["negotiated_transport"] = json!("tcp");
+                    result["negotiated_security"] = json!(observed.security);
+                    result["negotiated_muxer"] = json!(observed.muxer);
+                    result["connection_remote_addr"] = json!(observed.remote_address.to_string());
+                }
+            }
+            write_json(&opts.result_file, result)?;
             return Ok(());
         }
         "pnet" => {
@@ -2015,32 +2128,36 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
             }
             let bytes =
                 open_echo_stream_direct(&mut swarm, remote_peer, opts.payload.as_bytes()).await?;
-            write_json(
-                &opts.result_file,
-                json!({
-                    "implementation": "rust",
-                    "role": "dialer",
-                    "scenario": "pnet",
-                    "status": "ok",
-                    "protocol": "/forge/interop/relay-echo/1",
-                    "payload_bytes": bytes,
-                    "echo_ok": true,
-                    "protocol_count": identify_count,
-                    "signed_peer_record": identify_signed_record,
-                    "identify_observed": true,
-                    "negotiated_transport": "tcp",
-                    "negotiated_security": "/noise",
-                    "negotiated_muxer": "/yamux/1.0.0",
-                    "authenticated_remote_peer_id": authenticated_remote_peer_id,
-                    "autonat_v2_active": swarm.behaviour().autonat.is_enabled(),
-                    "relay_service_active": swarm.behaviour().relay.is_enabled(),
-                    "relay_client_active": swarm.behaviour().relay_client.is_enabled(),
-                    "dcutr_active": swarm.behaviour().dcutr.is_enabled(),
-                    "pnet_enabled": true,
-                    "negotiated_pnet": true,
-                    "pnet_fingerprint": opts.pnet_fingerprint
-                }),
-            )?;
+            let mut result = json!({
+                "implementation": "rust",
+                "role": "dialer",
+                "scenario": "pnet",
+                "status": "ok",
+                "protocol": "/forge/interop/relay-echo/1",
+                "payload_bytes": bytes,
+                "echo_ok": true,
+                "protocol_count": identify_count,
+                "signed_peer_record": identify_signed_record,
+                "identify_observed": true,
+                "negotiated_transport": "tcp",
+                "negotiated_security": "/noise",
+                "negotiated_muxer": "/yamux/1.0.0",
+                "authenticated_remote_peer_id": authenticated_remote_peer_id,
+                "autonat_v2_active": swarm.behaviour().autonat.is_enabled(),
+                "relay_service_active": swarm.behaviour().relay.is_enabled(),
+                "relay_client_active": swarm.behaviour().relay_client.is_enabled(),
+                "dcutr_active": swarm.behaviour().dcutr.is_enabled(),
+                "pnet_enabled": true,
+                "negotiated_pnet": true,
+                "pnet_fingerprint": opts.pnet_fingerprint
+            });
+            if dns_root {
+                result["dns_input_address"] = json!(opts.addr);
+                result["dns_resolver_configured"] = json!(opts.dns_server.is_some());
+                result["expected_peer_id"] = json!(remote_peer.to_string());
+                result["connection_remote_addr"] = json!(connection_remote_addr);
+            }
+            write_json(&opts.result_file, result)?;
             return Ok(());
         }
         "dcutr" => {
@@ -2086,21 +2203,6 @@ async fn dial(opts: Options) -> Result<(), Box<dyn Error>> {
                     "closest_peers": evidence.closest_peers,
                     "dht_queries_delta": 1,
                     "negotiated_protocol": "/ipfs/kad/1.0.0"
-                }),
-            )?;
-            return Ok(());
-        }
-        "dht_provide_find_provider" => {
-            let local_peer = *swarm.local_peer_id();
-            let count = wait_dht_provide_find_provider(&mut swarm, local_peer).await?;
-            write_json(
-                &opts.result_file,
-                json!({
-                    "implementation": "rust",
-                    "role": "dialer",
-                    "scenario": opts.scenario,
-                    "status": "ok",
-                    "provider_count": count
                 }),
             )?;
             return Ok(());
@@ -2240,7 +2342,7 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
     spawn_incoming_stream_echo(&mut swarm, "/forge/interop/relay-echo/1", None)?;
     let peer = *swarm.local_peer_id();
     let relay_addr: Multiaddr = opts.relay_addr.parse()?;
-    swarm.listen_on(relay_addr.clone().with(Protocol::P2pCircuit))?;
+    let relay_listener_id = swarm.listen_on(relay_addr.clone().with(Protocol::P2pCircuit))?;
     let started = Instant::now();
     let mut relay_addrs = Vec::new();
     let mut reservation = false;
@@ -2248,6 +2350,11 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
         let event = swarm.select_next_some().await;
         eprintln!("rust-destination event: {:?}", event);
         match event {
+            SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                if listener_id == relay_listener_id =>
+            {
+                return Err(format!("relay destination listener closed: {error}").into());
+            }
             SwarmEvent::NewListenAddr { address, .. } => {
                 swarm.add_external_address(address.clone());
                 if address.to_string().contains("p2p-circuit") {
@@ -2310,8 +2417,14 @@ async fn destination(opts: Options) -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => {
-                if let SwarmEvent::NewListenAddr { address, .. } = event {
-                    swarm.add_external_address(address);
+                match event {
+                    SwarmEvent::NewListenAddr { address, .. } => swarm.add_external_address(address),
+                    SwarmEvent::ListenerClosed { listener_id, reason: Err(error), .. }
+                        if listener_id == relay_listener_id =>
+                    {
+                        return Err(format!("relay destination listener closed: {error}").into());
+                    }
+                    _ => {}
                 }
             }
         }

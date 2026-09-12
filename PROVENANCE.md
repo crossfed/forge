@@ -210,6 +210,13 @@ items include:
   exposes libsodium headers, types or functions. The official release archive
   SHA-256 and complete 678-file tree manifest are recorded in
   `vendor/libsodium/MANIFEST.md`.
+- `vendor/c-ares`: the 532 unmodified upstream files from official c-ares
+  `1.34.8`, MIT, plus Forge's adjacent source manifest and checksum list.
+  Forge builds it only as the private static resolver backend for
+  `forge_net_dns`; no Forge public module exposes c-ares headers, types or
+  functions. The official release archive SHA-256, detached-signature key
+  fingerprint and complete 532-file tree manifest are recorded in
+  `vendor/c-ares/MANIFEST.md`.
 - Botan test fixture: the 139-byte XSalsa20 vector in
   `tests/crypto/test_symmetric.cpp` is copied only as a test fixture from
   Botan commit `9bce628ffbe90d1cb9242ae0efcbf3bc2fb0123d`,

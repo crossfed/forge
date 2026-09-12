@@ -40,6 +40,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <ranges>
 #include <sstream>
@@ -514,9 +515,40 @@ struct engine_stream::impl {
    bool closed = false;
    bool cancel_worker_started = false;
    forge::asio::notification cancel_requested;
+   // Owner-strand state is mirrored through atomics so callers can join a
+   // terminal recovery without reading the strand-owned booleans.
+   std::atomic_bool terminal_published = false;
+   std::atomic_bool terminal_cleanup_complete = false;
+   forge::asio::notification terminal_notification;
    std::vector<std::weak_ptr<asio::steady_timer>> read_waiters;
    std::vector<std::weak_ptr<asio::steady_timer>> write_waiters;
 };
+
+void publish_stream_terminal(const std::shared_ptr<engine_stream::impl>& stream) noexcept {
+   if (!stream) {
+      return;
+   }
+   stream->terminal_published.store(true, std::memory_order_release);
+   stream->terminal_notification.notify();
+}
+
+void finish_stream_terminal_cleanup(const std::shared_ptr<engine_stream::impl>& stream) noexcept {
+   if (!stream) {
+      return;
+   }
+   publish_stream_terminal(stream);
+   stream->terminal_cleanup_complete.store(true, std::memory_order_release);
+   stream->terminal_notification.notify();
+}
+
+boost::asio::awaitable<void> wait_for_stream_terminal_cleanup(const std::shared_ptr<engine_stream::impl>& stream) {
+   while (!stream->terminal_cleanup_complete.load(std::memory_order_acquire)) {
+      const auto observed = stream->terminal_notification.epoch();
+      if (!stream->terminal_cleanup_complete.load(std::memory_order_acquire)) {
+         (void)co_await stream->terminal_notification.async_wait(observed);
+      }
+   }
+}
 
 struct engine_connection_metrics_state {
    std::atomic<std::uint64_t> connections_opened{0};
@@ -742,6 +774,11 @@ struct engine_connection::impl {
    std::atomic_size_t background_jobs{0};
    bool drain_active = false;
    bool drain_requested = false;
+   // Owner-strand generations let a caller join the native drain pass it
+   // requested without waiting for unrelated future drain work to become idle.
+   std::uint64_t drain_request_generation = 0;
+   std::uint64_t drain_completed_generation = 0;
+   forge::asio::notification drain_completion_changed;
    bool udp_send_active = false;
    bool packet_processing_active = false;
    bool expiry_event_pending = false;
@@ -842,6 +879,14 @@ struct engine_connection::impl {
       }
       release_queued_stream_writes(stream);
       stream->reset = true;
+      publish_stream_terminal(stream);
+      if (test_failpoint) {
+         try {
+            static_cast<void>(test_failpoint("stream_reset_published"));
+         } catch (...) {
+            // Test instrumentation must not alter a noexcept reset transition.
+         }
+      }
       wake(stream->read_waiters);
       wake(stream->write_waiters);
       metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
@@ -851,6 +896,27 @@ struct engine_connection::impl {
          return false;
       }
       return should_drain;
+   }
+
+   boost::asio::awaitable<void>
+   async_reset_stream_after_close_failure(const std::shared_ptr<engine_stream::impl>& stream) {
+      assert(strand.running_in_this_thread());
+      if (!reset_stream_on_owner(stream)) {
+         // Another owner may have published reset before it finishes draining
+         // the native RESET_STREAM. Join that owner before reporting close.
+         if (test_failpoint) {
+            static_cast<void>(test_failpoint("stream_reset_before_terminal_join"));
+         }
+         co_await wait_for_stream_terminal_cleanup(stream);
+         co_return;
+      }
+      try {
+         co_await drain_send();
+      } catch (...) {
+         // reset_stream_on_owner has already made local terminal state visible.
+         // A later native send failure follows its existing fail_all path.
+      }
+      finish_stream_terminal_cleanup(stream);
    }
 
    void start_stream_cancel_worker(const std::shared_ptr<engine_stream::impl>& stream) {
@@ -879,11 +945,22 @@ struct engine_connection::impl {
                 if (!shared->reset_stream_on_owner(stream)) {
                    co_return;
                 }
+                if (shared->test_failpoint && shared->test_failpoint("stream_reset_after_publish_before_drain")) {
+                   // Test-only seam: retain the existing cancel worker between
+                   // reset publication and its native terminal drain.
+                   while (shared->test_failpoint("stream_reset_after_publish_before_drain_wait")) {
+                      auto timer = asio::steady_timer{shared->strand};
+                      timer.expires_after(std::chrono::milliseconds{1});
+                      auto ec = boost::system::error_code{};
+                      co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+                   }
+                }
                 try {
                    co_await shared->drain_send();
                 } catch (...) {
                    // Local stream reset is terminal; wire RESET_STREAM is best effort.
                 }
+                finish_stream_terminal_cleanup(stream);
              },
              asio::detached);
       } catch (...) {
@@ -904,6 +981,7 @@ struct engine_connection::impl {
          wake(stream->write_waiters);
          release_queued_stream_writes(stream);
          stream->cancel_requested.notify();
+         finish_stream_terminal_cleanup(stream);
       }
       update_active_stream_metrics();
    }
@@ -1061,6 +1139,7 @@ struct engine_connection::impl {
       wake(accept_stream_waiters);
       wake(open_stream_waiters);
       wake_and_clear_streams(true);
+      complete_drain_requests(drain_request_generation);
       {
          auto lock = std::scoped_lock{inbound_admission_mutex};
          inbound_admission.reset();
@@ -1084,6 +1163,7 @@ struct engine_connection::impl {
       wake(accept_stream_waiters);
       wake(open_stream_waiters);
       wake_and_clear_streams(false);
+      complete_drain_requests(drain_request_generation);
       {
          auto lock = std::scoped_lock{inbound_admission_mutex};
          inbound_admission.reset();
@@ -1393,6 +1473,7 @@ struct engine_connection::impl {
       if (error == NGTCP2_ERR_STREAM_NOT_FOUND) {
          stream->closed = true;
       }
+      finish_stream_terminal_cleanup(stream);
       wake(stream->write_waiters);
       update_active_stream_metrics();
    }
@@ -1428,12 +1509,39 @@ struct engine_connection::impl {
          }
          if (write.fin) {
             stream->local_write_closed = true;
+            finish_stream_terminal_cleanup(stream);
          }
          wake(write.waiters);
          stream->outbound.pop_front();
       }
       wake(stream->write_waiters);
       update_active_stream_metrics();
+   }
+
+   void complete_drain_requests(std::uint64_t generation) noexcept {
+      assert(strand.running_in_this_thread());
+      if (generation <= drain_completed_generation) {
+         return;
+      }
+      drain_completed_generation = generation;
+      drain_completion_changed.notify();
+   }
+
+   boost::asio::awaitable<void> wait_for_drain_requests(std::uint64_t generation) {
+      assert(strand.running_in_this_thread());
+      while (drain_completed_generation < generation) {
+         const auto observed = drain_completion_changed.epoch();
+         if (drain_completed_generation < generation) {
+            static_cast<void>(co_await drain_completion_changed.async_wait(observed));
+         }
+      }
+   }
+
+   void finish_active_drain() noexcept {
+      assert(strand.running_in_this_thread());
+      drain_active = false;
+      // A connection-level terminal state supersedes native stream draining.
+      complete_drain_requests(drain_request_generation);
    }
 
    boost::asio::awaitable<void> drain_send() {
@@ -1443,19 +1551,34 @@ struct engine_connection::impl {
          co_return;
       }
       if (drain_active) {
+         const auto generation = ++drain_request_generation;
          drain_requested = true;
+         if (test_failpoint) {
+            static_cast<void>(test_failpoint("drain_request_before_completion_wait"));
+         }
+         co_await wait_for_drain_requests(generation);
          co_return;
       }
 
       drain_active = true;
       auto clear = std::unique_ptr<void, void (*)(void*)>{
-          this, [](void* ptr) { static_cast<impl*>(ptr)->drain_active = false; }};
+          this, [](void* ptr) { static_cast<impl*>(ptr)->finish_active_drain(); }};
+      if (test_failpoint && test_failpoint("drain_after_owner_claim_before_native_write")) {
+         // Test-only seam: pause the existing drain owner after its claim.
+         while (test_failpoint("drain_after_owner_claim_before_native_write_wait")) {
+            auto timer = asio::steady_timer{strand};
+            timer.expires_after(std::chrono::milliseconds{1});
+            auto ec = boost::system::error_code{};
+            co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+         }
+      }
 
       do {
          if (closing || canceled || conn == nullptr) {
             break;
          }
          drain_requested = false;
+         const auto completed_generation = drain_request_generation;
          auto packets_this_drain = std::size_t{0};
          for (;;) {
             auto packet = std::array<std::uint8_t, max_udp_payload_size>{};
@@ -1538,6 +1661,7 @@ struct engine_connection::impl {
                break;
             }
          }
+         complete_drain_requests(completed_generation);
       } while (drain_requested && !closing && !canceled && conn != nullptr);
 
       clear.reset();
@@ -1882,6 +2006,7 @@ int stream_close_cb(ngtcp2_conn* conn, std::uint32_t, std::int64_t stream_id, st
       connection->streams.erase(it);
       connection->release_queued_stream_writes(stream);
       stream->closed = true;
+      finish_stream_terminal_cleanup(stream);
       stream->cancel_requested.notify();
       if (ngtcp2_is_bidi_stream(stream_id) && ngtcp2_conn_is_local_stream(conn, stream_id) == 0) {
          ngtcp2_conn_extend_max_streams_bidi(conn, 1);
@@ -2230,30 +2355,67 @@ boost::asio::awaitable<void> engine_stream::async_close() {
    if (!connection) {
       co_return;
    }
-   co_await asio::co_spawn(
-       connection->strand,
-       [connection, stream = impl_]() -> asio::awaitable<void> {
-          if (connection->closing || connection->canceled) {
-             co_return;
-          }
-          if (!stream->local_write_closed && !stream->reset && !stream->closed) {
-             if (!stream->fin_queued) {
-                stream->outbound.push_back(engine_stream::impl::pending_write{.fin = true});
-                stream->fin_queued = true;
+   co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+   auto primary_error = std::exception_ptr{};
+   try {
+      if (connection->test_failpoint && connection->test_failpoint("stream_close_before_owner_spawn")) {
+         throw std::bad_alloc{};
+      }
+      co_await asio::co_spawn(
+          connection->strand,
+          [connection, stream = impl_]() -> asio::awaitable<void> {
+             auto error = std::exception_ptr{};
+             try {
+                if (connection->test_failpoint && connection->test_failpoint("stream_close_before_state_check")) {
+                   throw std::bad_alloc{};
+                }
+                if (connection->closing || connection->canceled) {
+                   co_return;
+                }
+                if (!stream->local_write_closed && !stream->reset && !stream->closed) {
+                   if (!stream->fin_queued) {
+                      if (connection->test_failpoint && connection->test_failpoint("stream_close_before_fin")) {
+                         throw std::bad_alloc{};
+                      }
+                      stream->outbound.push_back(engine_stream::impl::pending_write{.fin = true});
+                      stream->fin_queued = true;
+                   }
+                   co_await connection->drain_send();
+                   while (!stream->local_write_closed && !stream->reset && !stream->closed && !connection->closing &&
+                          !connection->canceled) {
+                      auto timer = std::make_shared<asio::steady_timer>(connection->strand);
+                      timer->expires_after(std::chrono::minutes{10});
+                      stream->write_waiters.emplace_back(timer);
+                      auto ec = boost::system::error_code{};
+                      co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+                   }
+                   connection->update_active_stream_metrics();
+                }
+             } catch (...) {
+                error = std::current_exception();
              }
-             co_await connection->drain_send();
-             while (!stream->local_write_closed && !stream->reset && !stream->closed && !connection->closing &&
-                    !connection->canceled) {
-                auto timer = std::make_shared<asio::steady_timer>(connection->strand);
-                timer->expires_after(std::chrono::minutes{10});
-                stream->write_waiters.emplace_back(timer);
-                auto ec = boost::system::error_code{};
-                co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+             if (error) {
+                co_await connection->async_reset_stream_after_close_failure(stream);
+                std::rethrow_exception(error);
              }
-             connection->update_active_stream_metrics();
-          }
-       },
-       asio::use_awaitable);
+          },
+          asio::use_awaitable);
+   } catch (...) {
+      primary_error = std::current_exception();
+   }
+   if (primary_error) {
+      // The cancel worker is started before an engine stream is published.
+      // This non-throwing handoff also covers a failure starting co_spawn.
+      impl_->cancel_requested.notify();
+      co_await wait_for_stream_terminal_cleanup(impl_);
+      std::rethrow_exception(primary_error);
+   }
+   // A concurrent cancel worker may already own the native stream reset.
+   // Success is observable only after that owner publishes its terminal drain.
+   if (connection->test_failpoint) {
+      static_cast<void>(connection->test_failpoint("stream_close_before_terminal_join"));
+   }
+   co_await wait_for_stream_terminal_cleanup(impl_);
 }
 
 void engine_stream::cancel_write() {
@@ -2277,6 +2439,7 @@ void engine_stream::cancel_write() {
       }
       connection->release_queued_stream_writes(stream);
       stream->local_write_closed = true;
+      publish_stream_terminal(stream);
       wake(stream->write_waiters);
       connection->metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
       connection->update_active_stream_metrics();
@@ -2285,14 +2448,16 @@ void engine_stream::cancel_write() {
          return;
       }
       if (!should_drain) {
+         finish_stream_terminal_cleanup(stream);
          return;
       }
-      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+      connection->spawn_background([stream](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
          try {
             co_await value->drain_send();
          } catch (const engine_failure&) {
             value->fail_all();
          }
+         finish_stream_terminal_cleanup(stream);
       });
    });
 }
@@ -2404,12 +2569,7 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
              cancel_worker_failure = std::current_exception();
           }
           if (cancel_worker_failure) {
-             if (connection->reset_stream_on_owner(stream)) {
-                try {
-                   co_await connection->drain_send();
-                } catch (...) {
-                }
-             }
+             co_await connection->async_reset_stream_after_close_failure(stream);
              std::rethrow_exception(cancel_worker_failure);
           }
           co_await connection->drain_send();
@@ -2447,12 +2607,7 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
              cancel_worker_failure = std::current_exception();
           }
           if (cancel_worker_failure) {
-             if (connection->reset_stream_on_owner(stream)) {
-                try {
-                   co_await connection->drain_send();
-                } catch (...) {
-                }
-             }
+             co_await connection->async_reset_stream_after_close_failure(stream);
              std::rethrow_exception(cancel_worker_failure);
           }
           co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream)}};
@@ -2922,9 +3077,9 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
 
    auto connection_impl = std::make_shared<engine_connection::impl>(impl_->context, socket, local_endpoint,
                                                                     remote_endpoint.endpoint(), options.limits);
-   // The opaque client owner remains attached to the native UDP connection
-   // until engine cleanup; it is never interpreted by QUIC.
-   connection_impl->inbound_admission = std::move(options.connection_lifetime);
+   // Retain the opaque owner in this operation as well: fail_all() releases
+   // native admission before the asynchronous background-work join completes.
+   connection_impl->inbound_admission = options.connection_lifetime;
    connection_impl->self = connection_impl;
    connection_impl->test_failpoint = options.test_failpoint;
    connection_impl->metrics.connections_opened.store(1, std::memory_order_relaxed);
@@ -2937,32 +3092,10 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       auto lock = std::scoped_lock{active_connect->mutex};
       active_connect->connection = connection_impl;
    }
-   if (active_connect->canceled()) {
-      connect_timer->cancel();
-      co_await asio::co_spawn(
-          connection_impl->strand,
-          [connection_impl]() -> asio::awaitable<void> {
-             connection_impl->fail_all();
-             co_return;
-          },
-          asio::use_awaitable);
-      throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
-   }
-   if (active_connect->timed_out()) {
-      connect_timer->cancel();
-      co_await asio::co_spawn(
-          connection_impl->strand,
-          [connection_impl]() -> asio::awaitable<void> {
-             connection_impl->fail_all();
-             co_return;
-          },
-          asio::use_awaitable);
-      throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
-   }
-
    auto connect_error = std::exception_ptr{};
    auto handshake_limited_by_connect_deadline = false;
    try {
+      throw_if_terminal();
       co_await asio::co_spawn(
           connection_impl->strand,
           [&]() -> asio::awaitable<void> {
@@ -3031,6 +3164,7 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
           asio::use_awaitable);
       finish_connect_or_throw();
    } catch (const engine_failure& error) {
+      request_inherited_cancellation();
       if (active_connect->canceled()) {
          connect_error =
              std::make_exception_ptr(engine_failure{engine_error_kind::canceled, "QUIC client connect canceled"});
@@ -3047,11 +3181,15 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
    if (connect_error) {
       (void)active_connect->finish();
       connect_timer->cancel();
+      // The slot belongs to the old cancellation state; clear it before reset.
+      // Terminal cleanup must run even when cancellation caused the failure.
+      cancellation_slot_cleanup.reset();
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
       co_await asio::co_spawn(
           connection_impl->strand,
           [connection_impl]() -> asio::awaitable<void> {
              connection_impl->fail_all();
-             co_return;
+             co_await connection_impl->wait_background_idle();
           },
           asio::use_awaitable);
       std::rethrow_exception(connect_error);

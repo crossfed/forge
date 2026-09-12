@@ -13,6 +13,7 @@ module;
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -39,6 +40,8 @@ import forge.net.transport.exceptions;
 #include "details/session_impl.hxx"
 #include "details/session_impl_stream_state.hxx"
 #include "details/session_impl_stream_model.hxx"
+#include "details/session_close_failure.hxx"
+#include "details/session_start_failure.hxx"
 
 namespace forge::net::yamux {
 namespace {
@@ -147,6 +150,12 @@ boost::asio::awaitable<void> session::impl::ensure_started() {
          }
          switch (start_state_) {
          case start_state::idle:
+            // Do not race a pre-start cancellation into launching workers.
+            if (terminal_error_ || canceled_) {
+               start_error = terminal_error_ ? terminal_error_
+                                             : make_exception(exceptions::code::canceled, "yamux session canceled");
+               break;
+            }
             start_state_ = start_state::starting;
             owns_start = true;
             break;
@@ -170,6 +179,9 @@ boost::asio::awaitable<void> session::impl::ensure_started() {
       auto setup_error = std::exception_ptr{};
       auto stream_cancel_worker_started = false;
       try {
+         if (detail::consume_session_start_failure_for_test()) {
+            throw std::bad_alloc{};
+         }
          stream_cancel_worker_state_.store(
              (stream_cancel_publication_state_.load(std::memory_order_acquire) &
               stream_cancel_publication_closed) == 0
@@ -220,15 +232,69 @@ boost::asio::awaitable<void> session::impl::ensure_started() {
 }
 
 boost::asio::awaitable<void> session::impl::async_close() {
-   co_await ensure_started();
+   auto terminal_error = std::exception_ptr{};
+   auto workers_started = false;
+   auto locally_canceled = false;
+   {
+      auto lock = std::scoped_lock{mutex_};
+      terminal_error = terminal_error_;
+      workers_started = start_state_ != start_state::idle;
+      locally_canceled = canceled_;
+   }
+   if (locally_canceled) {
+      co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+      if (!start_close(detail::go_away_normal)) {
+         co_await wait_for_close();
+         co_return;
+      }
+      try {
+         // A prior cancellation may leave a reset writer blocked in lower I/O.
+         // Close the lower transport first, then join the Yamux workers it wakes.
+         co_await stream_.async_close();
+      } catch (...) {
+      }
+      if (workers_started) {
+         co_await wait_for_stream_cancel_loop();
+         co_await wait_for_read_loop();
+      }
+      finish_close(terminal_error);
+      std::rethrow_exception(terminal_error);
+   }
+
+   auto start_error = std::exception_ptr{};
+   try {
+      co_await ensure_started();
+   } catch (...) {
+      start_error = std::current_exception();
+   }
+   if (start_error) {
+      co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
+      if (start_close(detail::go_away_normal)) {
+         try {
+            // A failed worker start has only canceled the lower stream so far.
+            co_await stream_.async_close();
+         } catch (...) {
+         }
+         finish_close(start_error);
+      } else {
+         try {
+            co_await wait_for_close();
+         } catch (...) {
+         }
+      }
+      std::rethrow_exception(start_error);
+   }
    if (!start_close(detail::go_away_normal)) {
       co_await wait_for_close();
       co_return;
    }
+
    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
 
    auto error = std::exception_ptr{};
    auto deadline_timer = std::shared_ptr<boost::asio::steady_timer>{};
+   auto lower_close_started = false;
+   auto close_lower_after_error = false;
    try {
       auto executor = co_await boost::asio::this_coro::executor;
       const auto deadline = deadline_after(options_.close_timeout);
@@ -243,6 +309,10 @@ boost::asio::awaitable<void> session::impl::async_close() {
             (void)self->cancel_transport_noexcept();
          }
       });
+
+      if (detail::consume_session_close_failure_for_test()) {
+         throw std::bad_alloc{};
+      }
 
       request_stream_cancel_loop_stop();
       co_await wait_for_stream_cancel_loop();
@@ -271,6 +341,7 @@ boost::asio::awaitable<void> session::impl::async_close() {
          }
       }
       try {
+         lower_close_started = true;
          co_await stream_.async_close();
       } catch (...) {
       }
@@ -284,10 +355,20 @@ boost::asio::awaitable<void> session::impl::async_close() {
       error = std::current_exception();
       request_stream_cancel_loop_stop();
       (void)cancel_transport_noexcept();
+      close_lower_after_error = !lower_close_started;
    }
-   if (error && stream_cancel_worker_state_.load(std::memory_order_acquire) !=
-                    stream_cancel_worker_state::done) {
-      co_await wait_for_stream_cancel_loop();
+   if (close_lower_after_error) {
+      lower_close_started = true;
+      try {
+         co_await stream_.async_close();
+      } catch (...) {
+      }
+   }
+   if (error) {
+      if (stream_cancel_worker_state_.load(std::memory_order_acquire) != stream_cancel_worker_state::done) {
+         co_await wait_for_stream_cancel_loop();
+      }
+      co_await wait_for_read_loop();
    }
    if (deadline_timer) {
       cancel_timer_noexcept(*deadline_timer);
@@ -473,9 +554,7 @@ void session::impl::fail_session(exceptions::code value, const char* message) no
 void session::impl::wake_all_locked() {
    accept_notification_.notify();
    for (const auto& [_, state] : streams_) {
-      state->read_notification.notify();
-      state->window_notification.notify();
-      state->receive_credit_notification.notify();
+      notify_stream_waiters_locked(state);
    }
 }
 

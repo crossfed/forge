@@ -29,10 +29,12 @@ from runner import (
     forge_fixture_requirements,
     prepare_rust_fixture,
     require_dht_provider_evidence,
+    require_hidden_dht_find_peer_evidence,
     require_local_topology_evidence,
     require_supported_forge_build_profile,
     run_dial,
 )
+from test_provider_evidence import valid_hidden_find_peer_result, valid_result
 from promote_stage6_acceptance import (
     CANONICAL_ACCEPTANCE_MANIFEST,
     PROMOTION_DIRECTORY_PREFIX,
@@ -478,6 +480,33 @@ class InteropRunnerResultTest(unittest.TestCase):
             self.assertTrue(all(record["environment"]["CARGO_NET_OFFLINE"] == "true" for record in commands))
             self.assertTrue(all(record["environment"]["RUSTUP_OFFLINE"] == "true" for record in commands))
 
+    def test_prepare_rust_fixture_refreshes_source_without_following_links_or_discarding_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "source"
+            rust_fixture = source_dir / "rust_fixture"
+            (rust_fixture / "src").mkdir(parents=True)
+            (rust_fixture / "Cargo.toml").write_text("[package]\nname = 'fixture'\n")
+            (rust_fixture / "src/main.rs").write_text("fn main() {}\n")
+            work = root / "build/rust_fixture"
+            (work / "src").mkdir(parents=True)
+            (work / "src/stale_module.rs").write_text("stale\n")
+            (work / "target").mkdir()
+            (work / "target/cache-sentinel").write_text("keep\n")
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "sentinel").write_text("do not remove\n")
+            (work / "stale-link").symlink_to(outside, target_is_directory=True)
+
+            with patch("runner.run"):
+                prepare_rust_fixture(source_dir, root / "build", "/tools/cargo", {"PATH": "/tools"})
+
+            self.assertFalse((work / "src/stale_module.rs").exists())
+            self.assertEqual((work / "src/main.rs").read_text(), "fn main() {}\n")
+            self.assertEqual((work / "target/cache-sentinel").read_text(), "keep\n")
+            self.assertFalse((work / "stale-link").exists())
+            self.assertEqual((outside / "sentinel").read_text(), "do not remove\n")
+
     def test_registered_acceptance_pairs_require_tcp_identify(self) -> None:
         runner_pairs = registered_runner_acceptance_pairs(Path(__file__).with_name("runner.py"))
         identify_pair = ("tcp_noise/identify", "identify_native_tcp_yamux")
@@ -586,78 +615,18 @@ class InteropFixtureContractTest(unittest.TestCase):
                 forge_fixture_requirements(self.fixture_lock(profiles))
 
     def test_dht_provider_evidence_requires_correlated_provider_query(self) -> None:
-        require_dht_provider_evidence(
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "provider",
-                "address_count": 1,
-                "protocol_streams_opened_delta": 1,
-                "query_requests_delta": 1,
-                "negotiated_protocol": "/ipfs/kad/1.0.0",
-            },
-            "forge",
-        )
-        for result in ({}, {"provider_count": 0}, {"provider_count": -1}, {"provider_count": True}):
-            with self.subTest(result=result), self.assertRaises(RuntimeError):
-                require_dht_provider_evidence(result, "forge")
+        require_dht_provider_evidence(valid_result("forge"), "forge", "listener-peer")
+        invalid = valid_result("forge")
+        invalid["network_proof"]["api_lookup"]["returned_provider_peer"] = "wrong-provider"
+        with self.assertRaises(RuntimeError):
+            require_dht_provider_evidence(invalid, "forge", "listener-peer")
 
-        for result in (
-            {"provider_count": 1},
-            {"provider_count": 1, "provider_peer": "provider"},
-            {"provider_count": 1, "querier_peer": "querier"},
-            {"provider_count": 1, "provider_peer": "same", "querier_peer": "same"},
-            {"provider_count": 1, "provider_peer": "provider", "querier_peer": "querier"},
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "different",
-                "address_count": 1,
-                "protocol_streams_opened_delta": 1,
-                "negotiated_protocol": "/ipfs/kad/1.0.0",
-            },
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "provider",
-                "address_count": 0,
-                "protocol_streams_opened_delta": 1,
-                "negotiated_protocol": "/ipfs/kad/1.0.0",
-            },
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "provider",
-                "address_count": 1,
-                "protocol_streams_opened_delta": 0,
-                "negotiated_protocol": "/ipfs/kad/1.0.0",
-            },
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "provider",
-                "address_count": 1,
-                "protocol_streams_opened_delta": 1,
-                "negotiated_protocol": "/ipfs/kad/1.1.0",
-            },
-            {
-                "provider_count": 1,
-                "provider_peer": "provider",
-                "querier_peer": "querier",
-                "returned_provider_peer": "provider",
-                "address_count": 1,
-                "protocol_streams_opened_delta": 1,
-                "query_requests_delta": 0,
-                "negotiated_protocol": "/ipfs/kad/1.0.0",
-            },
-        ):
-            with self.subTest(result=result), self.assertRaises(RuntimeError):
-                require_dht_provider_evidence(result, "forge")
+    def test_hidden_dht_find_peer_evidence_requires_decoded_seed_reply(self) -> None:
+        require_hidden_dht_find_peer_evidence(valid_hidden_find_peer_result(), "seed-peer", "target-peer")
+        invalid = valid_hidden_find_peer_result()
+        invalid["find_peer_proof"]["wire_confirmation"]["returned_target_peer"] = "wrong-target"
+        with self.assertRaises(RuntimeError):
+            require_hidden_dht_find_peer_evidence(invalid, "seed-peer", "target-peer")
 
     def test_local_topology_evidence_is_fail_closed(self) -> None:
         require_local_topology_evidence(

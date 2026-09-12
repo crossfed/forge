@@ -2,8 +2,10 @@
 
 #include <atomic>
 #include <barrier>
+#include <chrono>
 #include <cstdint>
 #include <deque>
+#include <future>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -96,6 +98,9 @@ class fake_stream final : public forge::net::transport::detail::stream_concept {
       }
       open = false;
       ++close_count;
+      if (throw_after_close) {
+         throw std::runtime_error{"injected terminal close failure"};
+      }
       co_return;
    }
 
@@ -117,6 +122,7 @@ class fake_stream final : public forge::net::transport::detail::stream_concept {
    std::uint64_t close_count = 0;
    std::uint64_t cancel_count = 0;
    bool throw_on_cancel = false;
+   bool throw_after_close = false;
    bool open = true;
    std::barrier<>* close_entered = nullptr;
    std::barrier<>* close_release = nullptr;
@@ -607,6 +613,35 @@ BOOST_AUTO_TEST_CASE(transport_stream_foreign_request_cancel_interrupts_incomple
    BOOST_CHECK_NO_THROW(closed.get());
    value.request_cancel();
    BOOST_TEST(cancel_requests.load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(model->close_count == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(transport_stream_close_exception_is_a_shared_terminal_barrier) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto close_entered = std::barrier{2};
+   auto close_release = std::barrier{2};
+   auto model = std::make_shared<fake_stream>(48);
+   model->close_entered = &close_entered;
+   model->close_release = &close_release;
+   model->throw_after_close = true;
+   auto value = make_stream(model);
+
+   auto first = boost::asio::co_spawn(runtime.context(), value.async_close(), boost::asio::use_future);
+   close_entered.arrive_and_wait();
+   auto second = boost::asio::co_spawn(runtime.context(), value.async_close(), boost::asio::use_future);
+
+   BOOST_TEST(static_cast<int>(first.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+   BOOST_TEST(static_cast<int>(second.wait_for(std::chrono::milliseconds{0})) ==
+              static_cast<int>(std::future_status::timeout));
+   BOOST_TEST(model->open);
+   BOOST_TEST(model->close_count == 0U);
+
+   close_release.arrive_and_wait();
+   BOOST_CHECK_THROW(first.get(), std::runtime_error);
+   BOOST_CHECK_THROW(second.get(), std::runtime_error);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, value.async_close()), std::runtime_error);
+   BOOST_TEST(!model->open);
    BOOST_TEST(model->close_count == 1U);
 }
 

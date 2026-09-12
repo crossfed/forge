@@ -45,10 +45,12 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.hole_punch;
 import forge.net.p2p.identify;
@@ -249,13 +251,7 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
       stream_stop->request_stop();
    });
    const auto record_open_timeout = [&] {
-      if (session->direct_endpoint) {
-         store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                     endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-         increment_direct_failure();
-      } else {
-         record_direct_failure(peer);
-      }
+      record_direct_session_failure(session);
    };
    record_path_attempt(path::kind::direct);
    try {
@@ -319,13 +315,7 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
       session->closed = true;
       forget_session(session);
       if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
-         if (session->direct_endpoint) {
-            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-            increment_direct_failure();
-         } else {
-            record_direct_failure(peer);
-         }
+         record_direct_session_failure(session);
       }
       FORGE_THROW_CODE(kind, error.what());
    } catch (const boost::system::system_error& error) {
@@ -358,15 +348,36 @@ node::impl::open_protocol_direct_with_context(const peer_id& peer, const protoco
                                               std::chrono::milliseconds direct_attempt_timeout,
                                               std::shared_ptr<cancellation_latch> cancellation) {
    const auto started = std::chrono::steady_clock::now();
+   auto cached = session_for_path(peer, path::kind::direct);
+   return open_protocol_direct_owned(shared_from_this(), std::move(cached), peer, protocol, started,
+                                     timeout, max_direct_endpoints, direct_attempt_timeout,
+                                     std::move(cancellation));
+}
+
+boost::asio::awaitable<node::impl::opened_direct_stream>
+node::impl::open_protocol_direct_owned(std::shared_ptr<impl> self, std::shared_ptr<session_state> cached,
+                                       peer_id peer, protocol_id protocol,
+                                       std::chrono::steady_clock::time_point started,
+                                       std::chrono::milliseconds timeout, std::size_t max_direct_endpoints,
+                                       std::chrono::milliseconds direct_attempt_timeout,
+                                       std::shared_ptr<cancellation_latch> cancellation) {
    auto last_kind = std::optional<exceptions::code>{};
    auto last_message = std::string{};
-   for (std::size_t attempt = 0; attempt < max_direct_endpoints; ++attempt) {
+   // A stale cached connection gets one fresh bounded dial, not a nested
+   // max_direct_endpoints-squared set of transport attempts.
+   const auto acquisitions = cached ? 2U : 1U;
+   for (std::size_t attempt = 0; attempt < acquisitions; ++attempt) {
       const auto remaining = remaining_timeout(started, timeout, "P2P protocol open");
-      auto session =
-          co_await ensure_direct_session(peer, remaining, max_direct_endpoints, direct_attempt_timeout, cancellation);
-      const auto open_timeout = attempt_timeout(remaining, direct_attempt_timeout, "P2P protocol open direct attempt");
+      auto session = std::move(cached);
+      if (!session) {
+         session = co_await self->ensure_direct_session(
+             peer, remaining, max_direct_endpoints, direct_attempt_timeout, cancellation);
+      }
+      const auto open_timeout = attempt_timeout(
+          remaining_timeout(started, timeout, "P2P protocol open"),
+          direct_attempt_timeout, "P2P protocol open direct attempt");
       try {
-         auto selected = co_await open_protocol_on_direct_session(peer, protocol, session, open_timeout, cancellation);
+         auto selected = co_await self->open_protocol_on_direct_session(peer, protocol, session, open_timeout, cancellation);
          co_return opened_direct_stream{
              .stream = std::move(selected),
              .remote_endpoint = session->remote_endpoint,

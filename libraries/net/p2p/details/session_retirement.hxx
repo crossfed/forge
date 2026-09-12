@@ -15,7 +15,8 @@ class session_retirement {
       untracked,
    };
 
-   session_retirement() = default;
+   session_retirement();
+   ~session_retirement();
 
    session_retirement(const session_retirement&) = delete;
    session_retirement& operator=(const session_retirement&) = delete;
@@ -25,10 +26,15 @@ class session_retirement {
    [[nodiscard]] bool terminal() const noexcept;
 
    [[nodiscard]] close_start begin_close(bool allow_untracked) noexcept;
+   // Recheck begin_close after waking: another caller may already own the retry.
+   // Keep this object alive until the wait completes.
+   boost::asio::awaitable<void> async_wait_not_in_flight();
+   // Call only after native close, resource release and registry erasure.
    [[nodiscard]] bool complete_terminal(session_teardown::ticket& ticket) noexcept;
    void quarantine() noexcept;
 
  private:
+   forge::asio::notification changed_;
    mutable std::mutex mutex_;
    session_teardown::ticket ticket_;
    bool terminal_ = false;
