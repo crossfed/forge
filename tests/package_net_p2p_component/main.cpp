@@ -6,6 +6,13 @@ import forge.net.p2p.identity;
 import forge.net.p2p.ipns;
 import forge.net.p2p.provider_registration;
 import forge.net.p2p.topology;
+import forge.net.p2p.node;
+import forge.multiformats.multiaddr;
+
+static_assert(requires(forge::net::p2p::node& node, forge::multiformats::multiaddr address) {
+   node.async_connect(address);
+   node.async_connect(address, forge::net::p2p::node::connect_options{});
+});
 
 int main() {
    const auto id = forge::net::p2p::peer_id{};

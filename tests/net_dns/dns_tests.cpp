@@ -33,6 +33,8 @@
 #include <boost/asio/use_future.hpp>
 #include <boost/system/error_code.hpp>
 
+#include "../fixtures/local_dns_server.hxx"
+
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.net.dns.exceptions;
@@ -47,224 +49,87 @@ namespace asio = boost::asio;
 namespace dns = forge::net::dns;
 using bytes = std::vector<std::uint8_t>;
 using udp = asio::ip::udp;
+using forge::tests::dns::encoded_name;
+using forge::tests::dns::local_dns_server;
+using forge::tests::dns::make_failure_response;
+using forge::tests::dns::make_response;
+using forge::tests::dns::parse_question;
+using forge::tests::dns::response_answer;
 
-struct parsed_question {
-   std::uint16_t id = 0;
-   std::string name;
-   std::uint16_t type = 0;
-   std::size_t end = 0;
-};
-
-void append_u16(bytes& out, std::uint16_t value) {
-   out.push_back(static_cast<std::uint8_t>(value >> 8U));
-   out.push_back(static_cast<std::uint8_t>(value));
-}
-
-void append_u32(bytes& out, std::uint32_t value) {
-   out.push_back(static_cast<std::uint8_t>(value >> 24U));
-   out.push_back(static_cast<std::uint8_t>(value >> 16U));
-   out.push_back(static_cast<std::uint8_t>(value >> 8U));
-   out.push_back(static_cast<std::uint8_t>(value));
-}
-
-[[nodiscard]] std::optional<parsed_question> parse_question(const std::uint8_t* data, std::size_t size) {
-   if (size < 17) {
+[[nodiscard]] std::optional<bytes> response_for(const std::uint8_t* request, std::size_t size) {
+   const auto question = parse_question(request, size);
+   if (!question || question->name == "stall.test") {
       return std::nullopt;
    }
-   auto result = parsed_question{.id = static_cast<std::uint16_t>((data[0] << 8U) | data[1])};
-   auto offset = std::size_t{12};
-   while (offset < size) {
-      const auto label_size = data[offset++];
-      if (label_size == 0) {
-         break;
-      }
-      if ((label_size & 0xC0U) != 0 || label_size > size - offset) {
-         return std::nullopt;
-      }
-      if (!result.name.empty()) {
-         result.name.push_back('.');
-      }
-      result.name.append(reinterpret_cast<const char*>(data + offset), label_size);
-      offset += label_size;
+   if (question->name == "partial.test" && question->type == 28) {
+      return make_failure_response(request, *question, 2);
    }
-   if (offset + 4 > size) {
-      return std::nullopt;
-   }
-   result.type = static_cast<std::uint16_t>((data[offset] << 8U) | data[offset + 1]);
-   result.end = offset + 4;
-   return result;
-}
-
-[[nodiscard]] bytes encoded_name(std::string_view name) {
-   auto out = bytes{};
-   while (!name.empty()) {
-      const auto separator = name.find('.');
-      const auto label = name.substr(0, separator);
-      out.push_back(static_cast<std::uint8_t>(label.size()));
-      out.insert(out.end(), label.begin(), label.end());
-      if (separator == std::string_view::npos) {
-         break;
-      }
-      name.remove_prefix(separator + 1);
-   }
-   out.push_back(0);
-   return out;
-}
-
-struct response_answer {
-   std::uint16_t type = 0;
-   bytes value;
-   std::uint32_t ttl = 60;
-   std::string owner;
-};
-
-[[nodiscard]] bytes make_response(const std::uint8_t* request, const parsed_question& question,
-                                  const std::vector<response_answer>& answers) {
-   auto out = bytes{};
-   out.reserve(question.end + answers.size() * 32);
-   append_u16(out, question.id);
-   append_u16(out, 0x8180);
-   append_u16(out, 1);
-   append_u16(out, static_cast<std::uint16_t>(answers.size()));
-   append_u16(out, 0);
-   append_u16(out, 0);
-   out.insert(out.end(), request + 12, request + question.end);
-   for (const auto& answer : answers) {
-      if (answer.owner.empty()) {
-         append_u16(out, 0xC00C);
-      } else {
-         const auto owner = encoded_name(answer.owner);
-         out.insert(out.end(), owner.begin(), owner.end());
-      }
-      append_u16(out, answer.type);
-      append_u16(out, 1);
-      append_u32(out, answer.ttl);
-      append_u16(out, static_cast<std::uint16_t>(answer.value.size()));
-      out.insert(out.end(), answer.value.begin(), answer.value.end());
-   }
-   return out;
-}
-
-[[nodiscard]] bytes make_failure_response(const std::uint8_t* request, const parsed_question& question,
-                                           std::uint16_t response_code) {
-   auto out = make_response(request, question, {});
-   out[2] = static_cast<std::uint8_t>(out[2] | ((response_code >> 8U) & 0x0FU));
-   out[3] = static_cast<std::uint8_t>((out[3] & 0xF0U) | (response_code & 0x0FU));
-   return out;
-}
-
-class local_dns_server final {
- public:
-   explicit local_dns_server(boost::asio::io_context& context)
-       : socket_(context, udp::endpoint{asio::ip::address_v4::loopback(), 0}) {
-      receive();
+   if (question->name == "hard-failure.test" && question->type == 28) {
+      return make_failure_response(request, *question, 1);
    }
 
-   ~local_dns_server() {
-      auto ignored = boost::system::error_code{};
-      socket_.cancel(ignored);
-      socket_.close(ignored);
-   }
-
-   [[nodiscard]] std::uint16_t port() const {
-      return socket_.local_endpoint().port();
-   }
-
- private:
-   void receive() {
-      socket_.async_receive_from(asio::buffer(request_), peer_, [this](const boost::system::error_code& error,
-                                                                        std::size_t size) {
-         if (!error) {
-            if (const auto answer = response_for(request_.data(), size)) {
-               auto payload = std::make_shared<bytes>(*answer);
-               const auto peer = peer_;
-               socket_.async_send_to(asio::buffer(*payload), peer,
-                                     [payload](const boost::system::error_code&, std::size_t) {});
-            }
-            receive();
-         }
-      });
-   }
-
-   [[nodiscard]] std::optional<bytes> response_for(const std::uint8_t* request, std::size_t size) const {
-      const auto question = parse_question(request, size);
-      if (!question || question->name == "stall.test") {
-         return std::nullopt;
-      }
-      if (question->name == "partial.test" && question->type == 28) {
-         return make_failure_response(request, *question, 2);
-      }
-      if (question->name == "hard-failure.test" && question->type == 28) {
-         return make_failure_response(request, *question, 1);
-      }
-
-      auto answers = std::vector<response_answer>{};
-      if ((question->name == "a.test" || question->name == "dual.test" || question->name == "partial.test" ||
-           question->name == "hard-failure.test") &&
-          question->type == 1) {
-         answers.push_back({.type = 1, .value = {192, 0, 2, 7}});
-         if (question->name == "dual.test") {
-            answers.push_back({.type = 28, .value = {0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0,
-                                                     0,    0,    0,    0,    0, 0, 0, 2}});
-         }
-      } else if ((question->name == "aaaa.test" || question->name == "dual.test") && question->type == 28) {
+   auto answers = std::vector<response_answer>{};
+   if ((question->name == "a.test" || question->name == "dual.test" || question->name == "partial.test" ||
+        question->name == "hard-failure.test") &&
+       question->type == 1) {
+      answers.push_back({.type = 1, .value = {192, 0, 2, 7}});
+      if (question->name == "dual.test") {
          answers.push_back({.type = 28, .value = {0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0,
-                                                   0,    0,    0,    0,    0, 0, 0, 1}});
-         if (question->name == "dual.test") {
-            answers.push_back({.type = 1, .value = {192, 0, 2, 8}});
-         }
-      } else if (question->name == "txt.test" && question->type == 16) {
-         answers.push_back({.type = 16, .value = {3, 'f', 'o', 'o', 3, 'b', 'a', 'r'}});
-      } else if (question->name == "poison-a.test" && question->type == 1) {
-         answers.push_back({.type = 1, .value = {192, 0, 2, 20}, .owner = "unrelated.test"});
-      } else if (question->name == "poison-aaaa.test" && question->type == 28) {
-         answers.push_back({.type = 28,
-                            .value = {0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0,
-                                      0,    0,    0,    0,    0, 0, 0, 20},
-                            .owner = "unrelated.test"});
-      } else if (question->name == "poison-txt.test" && question->type == 16) {
-         answers.push_back({.type = 16, .value = {6, 'p', 'o', 'i', 's', 'o', 'n'}, .owner = "unrelated.test"});
-      } else if (question->name == "many.test" && question->type == 1) {
-         answers.push_back({.type = 1, .value = {192, 0, 2, 1}});
-         answers.push_back({.type = 1, .value = {192, 0, 2, 2}});
-      } else if (question->name == "cname.test" && question->type == 1) {
-         answers.push_back({.type = 5, .value = encoded_name("alias.test")});
-         answers.push_back({.type = 1, .value = {192, 0, 2, 9}});
-      } else if (question->name == "cname-chain.test" && question->type == 1) {
-         answers.push_back({.type = 5, .value = encoded_name("alias.cname-chain.test")});
-         answers.push_back({.type = 5,
-                            .value = encoded_name("terminal.cname-chain.test"),
-                            .owner = "alias.cname-chain.test"});
-         answers.push_back({.type = 1, .value = {192, 0, 2, 10}, .owner = "terminal.cname-chain.test"});
-         answers.push_back({.type = 1, .value = {192, 0, 2, 11}});
-         answers.push_back({.type = 1, .value = {192, 0, 2, 12}, .owner = "alias.cname-chain.test"});
-      } else if (question->name == "cname-conflict.test" && question->type == 1) {
-         answers.push_back({.type = 5, .value = encoded_name("first.cname-conflict.test")});
-         answers.push_back({.type = 5, .value = encoded_name("second.cname-conflict.test")});
-      } else if (question->name == "cname-cycle.test" && question->type == 1) {
-         answers.push_back({.type = 5, .value = encoded_name("alias.cname-cycle.test")});
-         answers.push_back({.type = 5,
-                            .value = encoded_name("cname-cycle.test"),
-                            .owner = "alias.cname-cycle.test"});
-      } else if (question->name == "cname-overflow.test" && question->type == 1) {
-         for (auto index = 0; index < 9; ++index) {
-            const auto suffix = std::to_string(index);
-            answers.push_back({.type = 5,
-                               .value = encoded_name("target-" + suffix + ".test"),
-                               .owner = "unrelated-" + suffix + ".test"});
-         }
-      } else if (question->name == "cname-bytes.test" && question->type == 1) {
-         answers.push_back({.type = 5,
-                            .value = encoded_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cname-bytes.test"),
-                            .owner = "unrelated-bytes.test"});
+                                               0,    0,    0,    0,    0, 0, 0, 2}});
       }
-      return make_response(request, *question, answers);
+   } else if ((question->name == "aaaa.test" || question->name == "dual.test") && question->type == 28) {
+      answers.push_back({.type = 28, .value = {0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0,
+                                            0,    0,    0,    0,    0, 0, 0, 1}});
+      if (question->name == "dual.test") {
+         answers.push_back({.type = 1, .value = {192, 0, 2, 8}});
+      }
+   } else if (question->name == "txt.test" && question->type == 16) {
+      answers.push_back({.type = 16, .value = {3, 'f', 'o', 'o', 3, 'b', 'a', 'r'}});
+   } else if (question->name == "poison-a.test" && question->type == 1) {
+      answers.push_back({.type = 1, .value = {192, 0, 2, 20}, .owner = "unrelated.test"});
+   } else if (question->name == "poison-aaaa.test" && question->type == 28) {
+      answers.push_back({.type = 28,
+                         .value = {0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0,
+                                   0,    0,    0,    0,    0, 0, 0, 20},
+                         .owner = "unrelated.test"});
+   } else if (question->name == "poison-txt.test" && question->type == 16) {
+      answers.push_back({.type = 16, .value = {6, 'p', 'o', 'i', 's', 'o', 'n'}, .owner = "unrelated.test"});
+   } else if (question->name == "many.test" && question->type == 1) {
+      answers.push_back({.type = 1, .value = {192, 0, 2, 1}});
+      answers.push_back({.type = 1, .value = {192, 0, 2, 2}});
+   } else if (question->name == "cname.test" && question->type == 1) {
+      answers.push_back({.type = 5, .value = encoded_name("alias.test")});
+      answers.push_back({.type = 1, .value = {192, 0, 2, 9}});
+   } else if (question->name == "cname-chain.test" && question->type == 1) {
+      answers.push_back({.type = 5, .value = encoded_name("alias.cname-chain.test")});
+      answers.push_back({.type = 5,
+                         .value = encoded_name("terminal.cname-chain.test"),
+                         .owner = "alias.cname-chain.test"});
+      answers.push_back({.type = 1, .value = {192, 0, 2, 10}, .owner = "terminal.cname-chain.test"});
+      answers.push_back({.type = 1, .value = {192, 0, 2, 11}});
+      answers.push_back({.type = 1, .value = {192, 0, 2, 12}, .owner = "alias.cname-chain.test"});
+   } else if (question->name == "cname-conflict.test" && question->type == 1) {
+      answers.push_back({.type = 5, .value = encoded_name("first.cname-conflict.test")});
+      answers.push_back({.type = 5, .value = encoded_name("second.cname-conflict.test")});
+   } else if (question->name == "cname-cycle.test" && question->type == 1) {
+      answers.push_back({.type = 5, .value = encoded_name("alias.cname-cycle.test")});
+      answers.push_back({.type = 5,
+                         .value = encoded_name("cname-cycle.test"),
+                         .owner = "alias.cname-cycle.test"});
+   } else if (question->name == "cname-overflow.test" && question->type == 1) {
+      for (auto index = 0; index < 9; ++index) {
+         const auto suffix = std::to_string(index);
+         answers.push_back({.type = 5,
+                            .value = encoded_name("target-" + suffix + ".test"),
+                            .owner = "unrelated-" + suffix + ".test"});
+      }
+   } else if (question->name == "cname-bytes.test" && question->type == 1) {
+      answers.push_back({.type = 5,
+                         .value = encoded_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cname-bytes.test"),
+                         .owner = "unrelated-bytes.test"});
    }
-
-   udp::socket socket_;
-   std::array<std::uint8_t, 512> request_{};
-   udp::endpoint peer_;
-};
+   return make_response(request, *question, answers);
+}
 
 [[nodiscard]] dns::resolver make_resolver(forge::asio::runtime& runtime, const local_dns_server& server,
                                            std::size_t max_in_flight = 16) {
@@ -310,7 +175,7 @@ boost::asio::awaitable<void> wait_for_flag(const std::atomic_bool& flag) {
 
 BOOST_AUTO_TEST_CASE(resolves_typed_a_aaaa_and_txt_records) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    const auto a = forge::asio::blocking::run(
@@ -346,9 +211,67 @@ BOOST_AUTO_TEST_CASE(resolves_typed_a_aaaa_and_txt_records) {
    forge::asio::blocking::run(runtime, resolver.async_close());
 }
 
+BOOST_AUTO_TEST_CASE(local_dns_server_close_and_destruction_join_in_flight_handler) {
+   for (const auto destroy : {false, true}) {
+      auto entered = std::make_shared<std::promise<void>>();
+      auto entered_future = entered->get_future();
+      auto release = std::promise<void>{};
+      auto released = release.get_future().share();
+      auto handler_released = std::make_shared<std::atomic_bool>(false);
+      auto lifetime = std::make_shared<int>(0);
+      auto weak_lifetime = std::weak_ptr<int>{lifetime};
+      auto server = std::make_unique<local_dns_server>(
+          [entered, released, handler_released, lifetime](const std::uint8_t* request,
+                                                         std::size_t size) -> std::optional<bytes> {
+             entered->set_value();
+             handler_released->store(released.wait_for(std::chrono::seconds{5}) == std::future_status::ready,
+                                     std::memory_order_release);
+             return response_for(request, size);
+          });
+      lifetime.reset();
+      auto context = asio::io_context{};
+      auto client = udp::socket{context, udp::endpoint{asio::ip::address_v4::loopback(), 0}};
+      auto query = bytes{0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0};
+      const auto name = encoded_name("a.test");
+      query.insert(query.end(), name.begin(), name.end());
+      query.insert(query.end(), {0, 1, 0, 1});
+      client.send_to(asio::buffer(query), udp::endpoint{asio::ip::address_v4::loopback(), server->port()});
+      const auto handler_entered = entered_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready;
+
+      auto closing = std::promise<void>{};
+      auto closing_future = closing.get_future();
+      auto closed = std::promise<void>{};
+      auto closed_future = closed.get_future();
+      auto closer = std::thread{[server = std::move(server), destroy, closing = std::move(closing),
+                                 closed = std::move(closed)]() mutable {
+         closing.set_value();
+         try {
+            if (!destroy) {
+               server->close();
+               server->close();
+            }
+            server.reset();
+            closed.set_value();
+         } catch (...) {
+            closed.set_exception(std::current_exception());
+         }
+      }};
+      closing_future.wait();
+      const auto close_blocked = closed_future.wait_for(std::chrono::milliseconds{20}) == std::future_status::timeout;
+      release.set_value();
+      closer.join();
+
+      BOOST_TEST(handler_entered);
+      BOOST_TEST(close_blocked);
+      BOOST_TEST(handler_released->load(std::memory_order_acquire));
+      BOOST_CHECK_NO_THROW(closed_future.get());
+      BOOST_TEST(weak_lifetime.expired());
+   }
+}
+
 BOOST_AUTO_TEST_CASE(fails_closed_when_local_dns_response_exceeds_limits) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    auto answer_limit = dns::query_options{};
@@ -390,7 +313,7 @@ BOOST_AUTO_TEST_CASE(fails_closed_when_local_dns_response_exceeds_limits) {
 
 BOOST_AUTO_TEST_CASE(address_family_codec_failure_is_hard_even_when_the_other_family_is_usable) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    BOOST_CHECK_EXCEPTION(
@@ -402,7 +325,7 @@ BOOST_AUTO_TEST_CASE(address_family_codec_failure_is_hard_even_when_the_other_fa
 
 BOOST_AUTO_TEST_CASE(cname_preflight_rejects_unrelated_count_and_bytes_before_materialization) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    BOOST_CHECK_EXCEPTION(
@@ -425,7 +348,7 @@ BOOST_AUTO_TEST_CASE(cname_preflight_rejects_unrelated_count_and_bytes_before_ma
 
 BOOST_AUTO_TEST_CASE(rejects_new_operations_when_max_in_flight_is_reached) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server, 1);
    auto completion = std::make_shared<std::atomic_bool>(false);
 
@@ -450,7 +373,7 @@ BOOST_AUTO_TEST_CASE(rejects_new_operations_when_max_in_flight_is_reached) {
 
 BOOST_AUTO_TEST_CASE(rejects_synchronous_invalid_queries_without_leaking_registration) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    BOOST_CHECK_EXCEPTION(forge::asio::blocking::run(
@@ -467,7 +390,7 @@ BOOST_AUTO_TEST_CASE(rejects_synchronous_invalid_queries_without_leaking_registr
 
 BOOST_AUTO_TEST_CASE(cares_synchronous_name_rejection_drains_registered_callback_and_recovers) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server, 1);
 
    // `a..b` passes the product's non-empty input gate but c-ares rejects it while submitting the query.
@@ -485,7 +408,7 @@ BOOST_AUTO_TEST_CASE(cares_synchronous_name_rejection_drains_registered_callback
 
 BOOST_AUTO_TEST_CASE(rejects_unreachable_rr_owners_and_only_uses_terminal_cname_owner) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    BOOST_CHECK_EXCEPTION(
@@ -550,7 +473,7 @@ BOOST_AUTO_TEST_CASE(validates_link_local_nameserver_scope_and_formats_cares_csv
 
 BOOST_AUTO_TEST_CASE(external_stop_racing_operation_retire_is_repeatable) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server, 1);
 
    for (auto attempt = 0; attempt < 16; ++attempt) {
@@ -592,7 +515,7 @@ BOOST_AUTO_TEST_CASE(external_stop_racing_operation_retire_is_repeatable) {
 
 BOOST_AUTO_TEST_CASE(canceled_async_close_waiter_still_drains_stalled_operation) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
    auto query_done = std::make_shared<std::atomic_bool>(false);
    asio::co_spawn(
@@ -618,7 +541,7 @@ BOOST_AUTO_TEST_CASE(canceled_async_close_waiter_still_drains_stalled_operation)
 
 BOOST_AUTO_TEST_CASE(maps_conflicting_cname_chain_to_codec_error) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
    auto resolver = make_resolver(runtime, server);
 
    BOOST_CHECK_EXCEPTION(
@@ -630,7 +553,7 @@ BOOST_AUTO_TEST_CASE(maps_conflicting_cname_chain_to_codec_error) {
 
 BOOST_AUTO_TEST_CASE(cancellation_deadline_and_close_have_distinct_terminal_errors) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
 
    {
       auto resolver = make_resolver(runtime, server);
@@ -722,7 +645,7 @@ BOOST_AUTO_TEST_CASE(cancellation_deadline_and_close_have_distinct_terminal_erro
 
 BOOST_AUTO_TEST_CASE(owns_resolver_state_across_move_and_destruction_before_await) {
    auto runtime = forge::asio::runtime{};
-   auto server = local_dns_server{runtime.context()};
+   auto server = local_dns_server{response_for};
 
    auto first = make_resolver(runtime, server);
    auto resolver = dns::resolver{std::move(first)};

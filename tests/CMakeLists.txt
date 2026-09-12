@@ -1062,6 +1062,8 @@ add_test(NAME test_forge_http_websocket COMMAND test_forge_http_websocket WORKIN
 add_executable(
    test_forge_quic_p2p
    unit/main.cpp
+   fixtures/local_dns_server.cpp
+   fixtures/local_dns_server.hxx
    quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/dht_record_store_fixture.cpp
    quic_p2p/dht_record_store_tests.cpp
@@ -1116,6 +1118,8 @@ add_test(NAME test_forge_net_pnet COMMAND test_forge_net_pnet WORKING_DIRECTORY 
 add_executable(
    test_forge_net_dns
    unit/main.cpp
+   fixtures/local_dns_server.cpp
+   fixtures/local_dns_server.hxx
    net_dns/dns_tests.cpp
    net_dns/resolver_socket_registry_tests.cpp
 )

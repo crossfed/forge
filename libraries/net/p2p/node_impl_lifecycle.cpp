@@ -123,7 +123,7 @@ void node::impl::initialize_lifecycle() {
                                                                      .direct_attempt_timeout = timeout,
                                                                      .allow_hole_punch = false,
                                                                  },
-                                                                 nullptr, std::move(cancellation));
+                                                                 std::move(cancellation));
               co_return session->info.remote_peer;
            },
            .connected =
@@ -137,8 +137,10 @@ void node::impl::initialize_lifecycle() {
                   return std::ranges::any_of(self->sessions, [&](const auto& item) {
                      const auto& session = item.second;
                      return !session->closed && session->info.remote_peer == peer &&
-                            session->info.path == path::kind::direct && session->direct_endpoint &&
-                            session->direct_endpoint->to_string() == endpoint;
+                            session->info.path == path::kind::direct &&
+                            std::ranges::any_of(session->direct_roots, [&](const auto& root) {
+                               return root.to_string() == endpoint;
+                            });
                   });
                },
            .protect =
@@ -190,6 +192,7 @@ void node::impl::request_lifecycle_stop() noexcept {
    {
       const auto lock = std::scoped_lock{mutex};
       peer_exchange_admission_closed = true;
+      session_admission_closed = true;
       peer_exchange_value.close();
       active_peer_exchange_operations.swap(peer_exchange_operations);
    }

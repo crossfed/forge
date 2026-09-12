@@ -65,6 +65,7 @@ class dial_script final {
       wait_for_release_then_attributable_failure,
       delayed_progress_then_attributable_failure,
       terminal_rejection,
+      address_rejection,
    };
 
    struct start_event {
@@ -75,6 +76,7 @@ class dial_script final {
    };
 
    std::map<std::string, dns::address_response> address_responses;
+   std::map<std::string, dns::text_response> text_responses;
    std::set<std::string> address_not_found;
    std::map<std::string, behavior> behaviors;
    bool block_discards = false;
@@ -120,7 +122,10 @@ class dial_script final {
    }
 
    [[nodiscard]] boost::asio::awaitable<dns::text_response>
-   resolve_txt(std::string, dns::query_options, std::stop_token) {
+   resolve_txt(std::string name, dns::query_options, std::stop_token) {
+      if (const auto found = text_responses.find(name); found != text_responses.end()) {
+         co_return found->second;
+      }
       co_return dns::text_response{};
    }
 
@@ -178,6 +183,9 @@ class dial_script final {
       if (selected == behavior::terminal_rejection) {
          FORGE_THROW_EXCEPTION(p2p::exceptions::backpressure_rejected,
                                "scripted terminal direct attempt rejection");
+      }
+      if (selected == behavior::address_rejection) {
+         FORGE_THROW_EXCEPTION(p2p::exceptions::connection_rejected, "scripted address gater rejection");
       }
       FORGE_THROW_EXCEPTION(p2p::exceptions::peer_not_found, "scripted attributable direct attempt failure");
    }
@@ -458,6 +466,15 @@ class dial_script final {
    return result;
 }
 
+[[nodiscard]] dns::text_response dnsaddr_records(std::initializer_list<std::string_view> values) {
+   auto result = dns::text_response{};
+   for (const auto value : values) {
+      const auto record = "dnsaddr=" + std::string{value};
+      result.answers.push_back({.value = {record.begin(), record.end()}, .ttl = std::chrono::seconds{60}});
+   }
+   return result;
+}
+
 [[nodiscard]] p2p::detail::dial_scheduler::operation_callbacks callbacks_for(const std::shared_ptr<dial_script>& script) {
    return {
        .resolve_addresses =
@@ -519,6 +536,226 @@ class dial_script final {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(dial_scheduler_tests)
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_bounds_actual_launches_and_preserves_unlaunched_root_attribution) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->address_responses.emplace("capped.test", addresses({"2400::1", "8.8.8.9"}));
+   script->address_responses.emplace("exhausted.test", addresses({"8.8.8.8"}));
+   script->behaviors.emplace("/ip6/2400::1/udp/4001/quic-v1", dial_script::behavior::attributable_failure);
+   script->behaviors.emplace("/ip4/8.8.8.8/udp/4001/quic-v1",
+                             dial_script::behavior::wait_for_release_then_attributable_failure);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 4}};
+   auto request = request_for(std::vector<std::string>{"/dns/capped.test/udp/4001/quic-v1",
+                                                       "/dns/exhausted.test/udp/4001/quic-v1"},
+                              std::chrono::seconds{5});
+   request.max_attempts = 2;
+   auto result = boost::asio::co_spawn(runtime.context().get_executor(),
+                                     scheduler.async_dial(std::move(request), callbacks_for(script)),
+                                     boost::asio::use_future);
+   BOOST_REQUIRE(script->wait_for_starts(2));
+   BOOST_CHECK(result.wait_for(std::chrono::milliseconds{30}) == std::future_status::timeout);
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+   script->release_starts();
+   BOOST_REQUIRE(result.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+   BOOST_CHECK_EXCEPTION(result.get(), forge::exceptions::base, [](const auto& error) {
+      return p2p::exceptions::code_of(error) == p2p::exceptions::code::peer_not_found;
+   });
+   BOOST_TEST(script->starts().size() == 2U);
+   BOOST_TEST(script->finished_attempts() == 2U);
+   BOOST_TEST(script->active_attempts() == 0U);
+   BOOST_TEST(script->terminal_root_observations() == 1U);
+   const auto outcomes = script->terminal_root_outcomes();
+   BOOST_REQUIRE_EQUAL(outcomes.size(), 2U);
+   BOOST_CHECK(outcomes[0].outcome == p2p::dialing::outcome::neutral);
+   BOOST_CHECK(outcomes[1].outcome == p2p::dialing::outcome::failure);
+   BOOST_TEST(scheduler.black_hole_status().udp.outcomes == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_rejects_attempt_limits_outside_the_positive_bound) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {}};
+   BOOST_TEST(p2p::detail::dial_scheduler::request{}.max_attempts == 100U);
+   for (const auto limit : {std::size_t{0}, std::size_t{101}}) {
+      auto request = request_for("/ip4/8.8.8.8/tcp/4001", std::chrono::seconds{1});
+      request.max_attempts = limit;
+      BOOST_CHECK_EXCEPTION(
+          forge::asio::blocking::run(runtime, scheduler.async_dial(std::move(request), callbacks_for(script))),
+          forge::exceptions::base, [](const auto& error) {
+             return p2p::exceptions::code_of(error) == p2p::exceptions::code::invalid_options;
+          });
+   }
+   BOOST_TEST(script->starts().empty());
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_tcp_only_filters_mixed_dnsaddr_before_detectors_and_launch_budget) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->text_responses.emplace("_dnsaddr.mixed.test", dnsaddr_records({
+       "/ip6/2400::1/udp/4001/quic-v1", "/ip4/8.8.8.8/tcp/4001"}));
+   script->text_responses.emplace("_dnsaddr.quic-only.test", dnsaddr_records({"/ip6/2400::2/udp/4001/quic-v1"}));
+   script->behaviors.emplace("/ip6/2400::1/udp/4001/quic-v1", dial_script::behavior::terminal_rejection);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {}};
+   auto request = request_for(std::vector<std::string>{"/dnsaddr/mixed.test", "/dnsaddr/quic-only.test"},
+                              std::chrono::seconds{1});
+   request.max_attempts = 1;
+   request.tcp_only = true;
+   auto result = forge::asio::blocking::run(runtime, scheduler.async_dial(std::move(request), callbacks_for(script)));
+   BOOST_TEST(result.winner.to_string() == "/ip4/8.8.8.8/tcp/4001");
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 1U);
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 2U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::success);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::neutral);
+   BOOST_TEST(scheduler.black_hole_status().udp.peer_requests == 0U);
+   BOOST_TEST(scheduler.black_hole_status().ipv6.peer_requests == 0U);
+   BOOST_TEST(scheduler.black_hole_status().udp.outcomes == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_tcp_only_rejects_no_eligible_target_without_attempts) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->text_responses.emplace("_dnsaddr.no-tcp.test", dnsaddr_records({"/ip6/2400::1/udp/4001/quic-v1"}));
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {}};
+   auto request = request_for("/dnsaddr/no-tcp.test", std::chrono::seconds{1});
+   request.tcp_only = true;
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(runtime, scheduler.async_dial(std::move(request), callbacks_for(script))),
+       forge::exceptions::base, [](const auto& error) {
+          return p2p::exceptions::code_of(error) == p2p::exceptions::code::peer_not_found;
+       });
+   BOOST_TEST(script->starts().empty());
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+   BOOST_TEST(scheduler.black_hole_status().udp.peer_requests == 0U);
+   BOOST_TEST(scheduler.black_hole_status().ipv6.peer_requests == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_prepare_peer_runs_once_with_inferred_identity_before_attempts) {
+   const auto expected = p2p::peer_id::from_string("QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC");
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   const auto first = "/ip6/2400::1/tcp/4001/p2p/" + expected.to_string();
+   const auto second = "/ip4/8.8.8.8/tcp/4001/p2p/" + expected.to_string();
+   script->text_responses.emplace("_dnsaddr.prepared.test", dnsaddr_records({first, second}));
+   script->behaviors.emplace(first, dial_script::behavior::attributable_failure);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+   auto calls = std::size_t{};
+   auto prepared_peer = std::optional<p2p::peer_id>{};
+   auto starts_before_prepare = std::size_t{};
+   auto callbacks = callbacks_for(script);
+   callbacks.prepare_peer = [&](const std::optional<p2p::peer_id>& peer) {
+      ++calls;
+      prepared_peer = peer;
+      starts_before_prepare = script->starts().size();
+   };
+   static_cast<void>(forge::asio::blocking::run(
+       runtime, scheduler.async_dial(request_for("/dnsaddr/prepared.test/p2p/" + expected.to_string(),
+                                                 std::chrono::seconds{1}), std::move(callbacks))));
+   BOOST_TEST(calls == 1U);
+   BOOST_TEST(starts_before_prepare == 0U);
+   BOOST_REQUIRE(prepared_peer.has_value());
+   BOOST_TEST(prepared_peer->to_string() == expected.to_string());
+   const auto starts = script->starts();
+   BOOST_REQUIRE_EQUAL(starts.size(), 2U);
+   for (const auto& start : starts) {
+      BOOST_REQUIRE(start.expected_peer.has_value());
+      BOOST_TEST(start.expected_peer->to_string() == expected.to_string());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_prepare_peer_rejection_is_terminal_without_attempts) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {}};
+   auto callbacks = callbacks_for(script);
+   auto calls = std::size_t{};
+   auto anonymous = false;
+   callbacks.prepare_peer = [&](const std::optional<p2p::peer_id>& peer) {
+      ++calls;
+      anonymous = !peer.has_value();
+      FORGE_THROW_EXCEPTION(p2p::exceptions::connection_rejected, "scripted logical peer rejection");
+   };
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(runtime, scheduler.async_dial(
+           request_for(std::vector<std::string>{"/ip6/2400::1/tcp/4001", "/ip4/8.8.8.8/tcp/4001"},
+                       std::chrono::seconds{1}), std::move(callbacks))),
+       forge::exceptions::base, [](const auto& error) {
+          return p2p::exceptions::code_of(error) == p2p::exceptions::code::connection_rejected;
+       });
+   BOOST_TEST(calls == 1U);
+   BOOST_TEST(anonymous);
+   BOOST_TEST(script->starts().empty());
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+   forge::asio::blocking::run(runtime, scheduler.async_close());
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_rechecks_stop_and_owner_after_prepare_peer) {
+   for (const auto mode : {0, 1, 2}) {
+      auto runtime = forge::asio::runtime{};
+      auto script = std::make_shared<dial_script>();
+      auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {}};
+      auto stop = std::stop_source{};
+      auto calls = std::size_t{};
+      auto callbacks = callbacks_for(script);
+      callbacks.prepare_peer = [&](const std::optional<p2p::peer_id>&) {
+         ++calls;
+         if (mode == 0) {
+            static_cast<void>(stop.request_stop());
+         } else if (mode == 1) {
+            script->owner_stopping.store(true, std::memory_order_release);
+         } else {
+            scheduler.request_stop();
+         }
+      };
+      BOOST_CHECK_EXCEPTION(
+          forge::asio::blocking::run(runtime, scheduler.async_dial(
+              request_for("/ip4/8.8.8.8/tcp/4001", std::chrono::seconds{1}, {}, stop.get_token()),
+              std::move(callbacks))),
+          forge::exceptions::base, [mode](const auto& error) {
+             return p2p::exceptions::code_of(error) ==
+                    (mode == 0 ? p2p::exceptions::code::canceled : p2p::exceptions::code::closed);
+          });
+      BOOST_TEST(calls == 1U);
+      BOOST_TEST(script->starts().empty());
+      BOOST_TEST(script->terminal_root_observations() == 0U);
+      forge::asio::blocking::run(runtime, scheduler.async_close());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_address_gater_rejection_allows_sibling_without_detector_penalty) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->behaviors.emplace("/ip6/2400::1/udp/4001/quic-v1", dial_script::behavior::address_rejection);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+   auto result = forge::asio::blocking::run(runtime, scheduler.async_dial(
+       request_for(std::vector<std::string>{"/ip6/2400::1/udp/4001/quic-v1", "/ip4/8.8.8.8/udp/4001/quic-v1"},
+                   std::chrono::seconds{1}), callbacks_for(script)));
+   BOOST_REQUIRE_EQUAL(script->starts().size(), 2U);
+   BOOST_REQUIRE_EQUAL(result.root_outcomes.size(), 2U);
+   BOOST_CHECK(result.root_outcomes[0].outcome == p2p::dialing::outcome::neutral);
+   BOOST_CHECK(result.root_outcomes[1].outcome == p2p::dialing::outcome::success);
+   BOOST_TEST(scheduler.black_hole_status().udp.outcomes == 1U);
+   BOOST_TEST(scheduler.black_hole_status().ipv6.outcomes == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(dial_scheduler_all_address_gater_rejections_preserve_typed_error) {
+   auto runtime = forge::asio::runtime{};
+   auto script = std::make_shared<dial_script>();
+   script->behaviors.emplace("/ip6/2400::1/udp/4001/quic-v1", dial_script::behavior::address_rejection);
+   script->behaviors.emplace("/ip4/8.8.8.8/udp/4001/quic-v1", dial_script::behavior::address_rejection);
+   auto scheduler = p2p::detail::dial_scheduler{runtime.context().get_executor(), {.max_concurrent_attempts = 1}};
+   BOOST_CHECK_EXCEPTION(
+       forge::asio::blocking::run(runtime, scheduler.async_dial(
+           request_for(std::vector<std::string>{"/ip6/2400::1/udp/4001/quic-v1", "/ip4/8.8.8.8/udp/4001/quic-v1"},
+                       std::chrono::seconds{1}), callbacks_for(script))),
+       forge::exceptions::base, [](const auto& error) {
+          return p2p::exceptions::code_of(error) == p2p::exceptions::code::connection_rejected;
+       });
+   BOOST_TEST(script->starts().size() == 2U);
+   BOOST_TEST(script->terminal_root_observations() == 0U);
+   BOOST_TEST(scheduler.black_hole_status().udp.outcomes == 0U);
+   BOOST_TEST(scheduler.black_hole_status().ipv6.outcomes == 0U);
+}
 
 BOOST_AUTO_TEST_CASE(dial_scheduler_expands_ranks_and_records_attributable_feedback) {
    auto runtime = forge::asio::runtime{};
@@ -979,6 +1216,7 @@ BOOST_AUTO_TEST_CASE(dial_scheduler_neutral_failures_do_not_feed_detectors_or_st
           return p2p::exceptions::code_of(error) == p2p::exceptions::code::backpressure_rejected;
        });
    BOOST_TEST(terminal_script->starts().size() == 1U);
+   BOOST_TEST(terminal_script->terminal_root_observations() == 0U);
    BOOST_TEST(terminal_scheduler.black_hole_status().udp.outcomes == 0U);
    BOOST_TEST(terminal_scheduler.black_hole_status().ipv6.outcomes == 0U);
 

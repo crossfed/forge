@@ -20,6 +20,7 @@ import forge.asio.runtime;
 import forge.net.dns.types;
 import forge.net.p2p.address_resolution;
 import forge.net.p2p.dht;
+import forge.multiformats.multiaddr;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.connection_gater;
 import forge.net.p2p.dialing;
@@ -173,6 +174,8 @@ class node {
    boost::asio::awaitable<void> async_hydrate_peer_state();
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint);
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint, connect_options options);
+   boost::asio::awaitable<session_info> async_connect(forge::multiformats::multiaddr address);
+   boost::asio::awaitable<session_info> async_connect(forge::multiformats::multiaddr address, connect_options options);
    boost::asio::awaitable<void> async_request_peer_exchange(peer_id peer);
    boost::asio::awaitable<reachability::state> async_probe_reachability(peer_id observer);
    boost::asio::awaitable<relay::reservation::info> async_reserve_relay(peer_id relay_peer);

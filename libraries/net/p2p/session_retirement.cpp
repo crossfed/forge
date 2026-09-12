@@ -12,9 +12,15 @@ module;
 
 module forge.net.p2p.node;
 
+import forge.asio.notification;
+
 #include "details/session_retirement.hxx"
 
 namespace forge::net::p2p::detail {
+
+session_retirement::session_retirement() = default;
+
+session_retirement::~session_retirement() = default;
 
 bool session_retirement::track(session_teardown::ticket ticket) noexcept {
    if (!ticket.active()) {
@@ -56,6 +62,22 @@ session_retirement::close_start session_retirement::begin_close(bool allow_untra
    return close_start::started;
 }
 
+boost::asio::awaitable<void> session_retirement::async_wait_not_in_flight() {
+   for (;;) {
+      auto observed = forge::asio::notification::epoch_type{};
+      {
+         const auto lock = std::scoped_lock{mutex_};
+         // Sample before releasing the predicate lock so a transition before
+         // async_wait subscribes is retained by the notification epoch.
+         observed = changed_.epoch();
+         if (!close_in_flight_) {
+            co_return;
+         }
+      }
+      co_await changed_.async_wait(observed);
+   }
+}
+
 bool session_retirement::complete_terminal(session_teardown::ticket& ticket) noexcept {
    {
       const auto lock = std::scoped_lock{mutex_};
@@ -66,6 +88,7 @@ bool session_retirement::complete_terminal(session_teardown::ticket& ticket) noe
       close_in_flight_ = false;
       ticket = std::move(ticket_);
    }
+   changed_.notify();
    return true;
 }
 
@@ -80,6 +103,7 @@ void session_retirement::quarantine() noexcept {
       ticket = std::move(ticket_);
    }
    ticket.release();
+   changed_.notify();
 }
 
 } // namespace forge::net::p2p::detail

@@ -190,18 +190,19 @@ root_outcomes_for(const std::vector<source_root>& roots, const std::vector<dial_
    return result;
 }
 
-[[nodiscard]] bool has_complete_attributable_exhaustion(const std::vector<dial_plan_item>& plan,
-                                                        const std::vector<bool>& launched,
-                                                        const std::vector<bool>& attributable_failures) noexcept {
-   if (plan.empty()) {
-      return false;
-   }
-   for (auto index = std::size_t{}; index < plan.size(); ++index) {
-      if (!launched[index] || !attributable_failures[index]) {
+[[nodiscard]] bool has_attributable_exhaustion(const std::vector<bool>& launched,
+                                              const std::vector<bool>& attributable_failures) noexcept {
+   auto any_launched = false;
+   for (auto index = std::size_t{}; index < launched.size(); ++index) {
+      if (!launched[index]) {
+         continue;
+      }
+      any_launched = true;
+      if (!attributable_failures[index]) {
          return false;
       }
    }
-   return true;
+   return any_launched;
 }
 
 } // namespace
@@ -477,6 +478,10 @@ void dial_scheduler::validate_policy(const policy& value) {
 }
 
 void dial_scheduler::validate_request(const request& value) {
+   if (value.max_attempts == 0 || value.max_attempts > request{}.max_attempts) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "P2P direct dial scheduler attempt count exceeds its positive bound");
+   }
    if (value.roots.empty() || value.logical_deadline == clock::time_point::max() ||
        value.attempt_timeout <= std::chrono::milliseconds::zero()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
@@ -568,7 +573,7 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    if (is_canceled(value.stop)) {
       throw_canceled();
    }
-   if (operation->stop_requested()) {
+   if (operation->stop_requested() || callback_set->is_owner_stopping()) {
       throw_closed();
    }
 
@@ -587,14 +592,28 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    if (clock::now() >= value.logical_deadline) {
       throw_timeout();
    }
-   if (operation->stop_requested()) {
+   if (operation->stop_requested() || callback_set->is_owner_stopping()) {
       throw_closed();
+   }
+   if (callback_set->prepare_peer) {
+      callback_set->prepare_peer(expansion.expected_peer);
+   }
+   if (is_canceled(value.stop)) {
+      throw_canceled();
+   }
+   if (operation->stop_requested() || callback_set->is_owner_stopping()) {
+      throw_closed();
+   }
+   if (clock::now() >= value.logical_deadline) {
+      throw_timeout();
    }
 
    auto concrete = std::vector<endpoint>{};
    concrete.reserve(expansion.targets.size());
    for (const auto& target : expansion.targets) {
-      concrete.push_back(target.concrete);
+      if (!value.tcp_only || target.concrete.is_direct_tcp()) {
+         concrete.push_back(target.concrete);
+      }
    }
    auto filtered = owner->black_holes_.filter_peer_dial(std::move(concrete));
    auto plan = owner->ranker_.rank(allowed_targets(std::move(expansion.targets), std::move(filtered.allowed)));
@@ -615,6 +634,8 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    auto terminal_error = std::exception_ptr{};
    auto best_error = std::exception_ptr{};
    auto best_error_index = (std::numeric_limits<std::size_t>::max)();
+   auto rejection_error = std::exception_ptr{};
+   auto rejection_error_index = (std::numeric_limits<std::size_t>::max)();
    auto pending_discards = std::vector<direct_attempt>{};
    // Every successful worker can leave one unpublished attempt, including a
    // selected winner that becomes unusable during terminal cleanup.
@@ -679,7 +700,8 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
 
    try {
       while (!winner && !terminal_error) {
-         if (is_canceled(value.stop) || operation->stop_requested() || clock::now() >= value.logical_deadline) {
+         if (is_canceled(value.stop) || operation->stop_requested() || callback_set->is_owner_stopping() ||
+             clock::now() >= value.logical_deadline) {
             operation->request_stop();
             break;
          }
@@ -721,6 +743,16 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
                }
                continue;
             }
+            if (!stopping && failure_code(completion->error) == exceptions::code::connection_rejected) {
+               // Explicit connection rejection is candidate-local. Resource
+               // admission and other local errors still terminate the operation.
+               launch_early = operation->active() == 0;
+               if (!rejection_error || completion->plan_index < rejection_error_index) {
+                  rejection_error = std::move(completion->error);
+                  rejection_error_index = completion->plan_index;
+               }
+               continue;
+            }
             if (!stopping && !terminal_error) {
                terminal_error = std::move(completion->error);
                if (!first_error) {
@@ -736,24 +768,29 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
          const auto now = clock::now();
          const auto hold_until = operation->tcp_handshake_hold_until();
          const auto eligible = next_planned(now, launch_early);
-         if (eligible && operation->active() < owner->policy_.max_concurrent_attempts && now >= hold_until) {
+         const auto launch_limit_reached = launched_count >= value.max_attempts || launched_count == plan.size();
+         if (!launch_limit_reached && eligible && operation->active() < owner->policy_.max_concurrent_attempts &&
+             now >= hold_until) {
             launch(*eligible);
             launch_early = false;
             continue;
          }
 
-         if (operation->active() == 0 && launched_count == plan.size()) {
+         if (operation->active() == 0 && launch_limit_reached) {
+            if (operation->has_completion()) {
+               continue;
+            }
             break;
          }
 
          auto wake_at = value.logical_deadline;
-         if (operation->active() < owner->policy_.max_concurrent_attempts) {
+         if (!launch_limit_reached && operation->active() < owner->policy_.max_concurrent_attempts) {
             if (const auto scheduled = next_scheduled()) {
                wake_at = std::min(wake_at, std::max(*scheduled, hold_until));
             }
          }
          const auto observed = wakeup->epoch();
-         if (operation->has_completion() || (operation->active() == 0 && launched_count == plan.size())) {
+         if (operation->has_completion() || (operation->active() == 0 && launch_limit_reached)) {
             continue;
          }
          auto wait_error = std::exception_ptr{};
@@ -892,9 +929,11 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
 
    const auto terminal_attributable_exhaustion =
        !winner && !first_error && !canceled && !timed_out && !closed && static_cast<bool>(best_error) &&
-       has_complete_attributable_exhaustion(plan, launched, attributable_failures);
+       has_attributable_exhaustion(launched, attributable_failures);
    if (terminal_attributable_exhaustion) {
       try {
+         // A launch cap can leave plan entries untouched; root attribution must
+         // still inspect those entries before crediting any root failure.
          callback_set->observe_terminal_root_outcomes(
              root_outcomes_for(expansion.roots, plan, launched, attributable_failures, std::nullopt));
       } catch (...) {
@@ -947,6 +986,9 @@ dial_scheduler::async_dial_owned(std::shared_ptr<owner> owner, request value, op
    }
    if (best_error) {
       std::rethrow_exception(best_error);
+   }
+   if (rejection_error) {
+      std::rethrow_exception(rejection_error);
    }
    throw_no_endpoint();
 }

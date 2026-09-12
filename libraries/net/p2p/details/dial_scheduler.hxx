@@ -59,6 +59,9 @@ class dial_scheduler final {
       clock::time_point logical_deadline = clock::time_point::max();
       std::chrono::milliseconds attempt_timeout{10'000};
       std::stop_token stop;
+      // Launch budget in [1, 100]; unlaunched plan entries remain neutral.
+      std::size_t max_attempts = 100;
+      bool tcp_only = false;
    };
 
    using address_lookup = boost::compat::move_only_function<boost::asio::awaitable<forge::net::dns::address_response>(
@@ -83,6 +86,8 @@ class dial_scheduler final {
       attempt_discard discard_attempt;
       owner_stopping is_owner_stopping;
       terminal_root_observer observe_terminal_root_outcomes;
+      // Optional synchronous admission after identity inference; throwing prevents all attempts.
+      boost::compat::move_only_function<void(const std::optional<peer_id>&)> prepare_peer;
    };
 
    dial_scheduler(boost::asio::any_io_executor executor, policy policy_value,

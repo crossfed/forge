@@ -44,6 +44,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.exceptions;
 import forge.net.p2p.dht;

@@ -12,6 +12,7 @@ module;
 export module forge.net.p2p.diagnostics;
 
 import forge.net.p2p.discovery;
+import forge.net.p2p.dialing;
 import forge.net.p2p.dht;
 import forge.net.p2p.dht.record_store;
 import forge.net.p2p.endpoint;
@@ -241,6 +242,7 @@ struct diagnostics {
       lifecycle_status lifecycle;
       resource_manager::limits effective_limits;
       topology_state topology;
+      dialing::black_hole_status black_holes;
    };
 };
 
@@ -292,4 +294,4 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::topology_state, (),
                        observations, active_operations, waiting_refreshes, completed_refreshes, failed_refreshes))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
                       (network, metrics, resources, pubsub, connections, peers, sessions, persistence, dht_profiles,
-                       lifecycle, effective_limits, topology))
+                       lifecycle, effective_limits, topology, black_holes))

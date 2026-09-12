@@ -362,6 +362,29 @@ proved across donor implementations rather than inferred from raw Yamux tests.
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint
 compatibility convenience for older single-listen consumers.
 
+### Direct Dial Resolution
+
+`async_connect(multiaddr, connect_options)` accepts raw DNS carriers, including
+`/dnsaddr`; the existing endpoint overload uses the same node-owned scheduler.
+The node expands a batch of peer addresses under one logical deadline and one
+dial reservation, then starts bounded, ranked TCP/QUIC attempts. The attempt
+limit counts native launches, not DNS roots. Private-network dials filter to TCP
+before ranking, so an ineligible QUIC record does not hide an eligible TCP record.
+Peer gating follows resolved identity inference; address gating runs on each
+concrete candidate before native transport admission.
+
+Only the authenticated winner enters the node session registry, after all
+losers have completed native cleanup. Stop seals session admission before
+draining the scheduler. A failed publication retires the exact session and
+waits for its native close and reservation-release barrier.
+
+Peer-store success and failure feedback retain the original address roots;
+temporary DNS answers do not replace those roots. A root fails only when all
+its eligible planned children were launched and failed attributably. Global
+deadline, caller cancellation, filtered/unlaunched candidates and canceled
+losers remain neutral. A cached DNS-child stream failure alone is not evidence
+that fresh resolution of its root would fail.
+
 ### Peer And DHT Record Persistence
 
 The low-level node requires `peer_store::persistence` outside explicit insecure

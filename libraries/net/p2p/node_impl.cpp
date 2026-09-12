@@ -60,6 +60,7 @@ import forge.multiformats.multiaddr;
 import forge.net.dns.resolver;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
+import forge.net.p2p.dialing;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.envelope;
 import forge.net.p2p.hole_punch;
@@ -597,6 +598,10 @@ void node::impl::request_dial_scheduler_stop() noexcept {
 
 boost::asio::awaitable<void> node::impl::async_close_dial_scheduler() {
    co_await dial_scheduler->async_close();
+}
+
+dialing::black_hole_status node::impl::dial_black_hole_status() const {
+   return dial_scheduler->black_hole_status();
 }
 
 bool node::impl::private_network_enabled() const noexcept {

@@ -48,6 +48,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
@@ -167,7 +168,6 @@ void node::impl::increment_pubsub_duplicate() {
 
 void node::impl::increment_pubsub_invalid(const peer_id& peer) {
    auto offender = std::shared_ptr<session_state>{};
-   auto endpoint = std::optional<forge::net::p2p::endpoint>{};
    const auto malformed_transition =
        resources.record_malformed(resource_manager::scope{.peer = peer, .protocol = builtins::meshsub_v11});
    {
@@ -182,9 +182,6 @@ void node::impl::increment_pubsub_invalid(const peer_id& peer) {
                offender = session;
             }
          }
-         if (offender) {
-            endpoint = offender->direct_endpoint;
-         }
       }
    }
    if (malformed_transition != resource_manager::transition_result::accepted &&
@@ -192,10 +189,7 @@ void node::impl::increment_pubsub_invalid(const peer_id& peer) {
       FORGE_THROW_EXCEPTION(exceptions::internal, "P2P malformed-message resource transition failed");
    }
    if (offender) {
-      if (endpoint) {
-         store.mark_address_failure(peer, endpoint->to_multiaddr(), path::kind::direct,
-                                    endpoint_backoff_until(peer, *endpoint, path::kind::direct));
-      }
+      record_direct_session_failure(offender);
       forget_session(offender);
       detail::request_session_cancel(offender->connection);
    }

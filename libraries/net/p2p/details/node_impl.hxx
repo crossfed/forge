@@ -90,6 +90,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       // Keeps the native socket descriptor reservation through security handoff.
       std::shared_ptr<void> native_lifetime;
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
+      std::vector<forge::multiformats::multiaddr> direct_roots;
       std::optional<forge::net::p2p::endpoint> remote_endpoint;
       connection_manager::direction direction = connection_manager::direction::outbound;
       std::string identify_error;
@@ -274,6 +275,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::metrics_snapshot metrics_value;
    std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
+   bool session_admission_closed = false;
    bool peer_exchange_admission_closed = false;
    bool peer_state_hydrated = false;
 
@@ -288,6 +290,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void request_lifecycle_stop() noexcept;
    void request_dial_scheduler_stop() noexcept;
    boost::asio::awaitable<void> async_close_dial_scheduler();
+   [[nodiscard]] dialing::black_hole_status dial_black_hole_status() const;
    boost::asio::awaitable<lifecycle_status> async_start_lifecycle();
    boost::asio::awaitable<void> async_hydrate_peer_state();
    void listen(forge::net::p2p::endpoint endpoint);
@@ -348,7 +351,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
    identify_peer_for_discovery(const peer_id& peer, discovery::source source, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<void> remember_session(std::shared_ptr<session_state> session,
-                                                 connection_manager::direction direction);
+                                                 connection_manager::direction direction,
+                                                 std::function<void()> before_publish = {});
 
    void refresh_connection_scores();
    [[nodiscard]] connection_manager::snapshot topology_sessions() const;
@@ -466,9 +470,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void record_direct_failure(const peer_id& peer);
 
    void increment_direct_failure();
+   void record_direct_session_failure(const std::shared_ptr<session_state>& session);
 
    [[nodiscard]] std::chrono::system_clock::time_point
    endpoint_backoff_until(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind) const;
+
+   [[nodiscard]] std::chrono::system_clock::time_point
+   endpoint_backoff_until(const peer_id& peer, const forge::multiformats::multiaddr& address, path::kind kind) const;
 
    void record_relay_failure();
 
@@ -557,12 +565,22 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> async_discard_session(const std::shared_ptr<session_state>& session);
 
-   boost::asio::awaitable<std::shared_ptr<session_state>> commit_direct_attempt(detail::direct_attempt attempt);
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   commit_direct_attempt(detail::direct_attempt attempt, std::vector<forge::multiformats::multiaddr> roots,
+                         std::chrono::steady_clock::time_point deadline,
+                         std::shared_ptr<cancellation_latch> cancellation);
 
    boost::asio::awaitable<std::shared_ptr<session_state>>
    connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value,
-                  resource_manager::dial_reservation* dial = nullptr,
                   std::shared_ptr<cancellation_latch> cancellation = {});
+
+   boost::asio::awaitable<std::shared_ptr<session_state>>
+   connect_direct(std::vector<forge::multiformats::multiaddr> roots, node::connect_options connect_options_value,
+                  std::shared_ptr<cancellation_latch> cancellation = {});
+
+   static boost::asio::awaitable<node::session_info>
+   async_connect_owned(std::shared_ptr<impl> self, forge::multiformats::multiaddr address,
+                       node::connect_options value);
 
    boost::asio::awaitable<std::shared_ptr<session_state>> ensure_direct_session(
        const peer_id& peer, std::chrono::milliseconds timeout = node::connect_options{}.timeout,
@@ -641,7 +659,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                                   forge::net::transport::stream stream,
                                                                   resource_manager::stream_reservation reservation);
 
-   void launch_session_accept_loop(std::shared_ptr<session_state> session);
+   bool launch_session_accept_loop(std::shared_ptr<session_state> session);
 
    boost::asio::awaitable<void> handle_incoming_stream(std::shared_ptr<session_state> session,
                                                        forge::net::transport::stream raw,

@@ -6,6 +6,7 @@ module;
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
@@ -894,6 +895,11 @@ BOOST_AUTO_TEST_CASE(p2p_session_retirement_transfers_active_map_node_without_re
 }
 
 BOOST_AUTO_TEST_CASE(p2p_session_retirement_releases_terminal_tracking_once) {
+   static_assert(noexcept(std::declval<detail::session_retirement&>().begin_close(false)));
+   static_assert(noexcept(std::declval<detail::session_retirement&>().complete_terminal(
+       std::declval<detail::session_teardown::ticket&>())));
+   static_assert(noexcept(std::declval<detail::session_retirement&>().quarantine()));
+
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto teardown = detail::session_teardown{runtime.context().get_executor()};
    auto retirement = detail::session_retirement{};
@@ -939,6 +945,177 @@ BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantines_untracked_close_without_
    retirement.quarantine();
    BOOST_TEST(static_cast<int>(retirement.begin_close(false)) ==
               static_cast<int>(detail::session_retirement::close_start::untracked));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_wait_observes_completion_before_subscription) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::in_flight);
+   // Creating an awaitable does not run its body. Completion in this gap must
+   // remain observable even though no notification subscriber exists yet.
+   auto wait = retirement.async_wait_not_in_flight();
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   auto completed = boost::asio::co_spawn(context, std::move(wait), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(completed.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(completed.get());
+   BOOST_CHECK(retirement.begin_close(true) == close_start::terminal);
+
+   context.restart();
+   auto late = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(late.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(late.get());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_parallel_waiters_observe_cleanup_barrier) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   BOOST_REQUIRE(retirement.begin_close(true) == detail::session_retirement::close_start::started);
+
+   auto native_closed = false;
+   auto resources_released = false;
+   auto registry_erased = false;
+   auto wait = [&]() -> boost::asio::awaitable<bool> {
+      co_await retirement.async_wait_not_in_flight();
+      co_return retirement.terminal() && native_closed && resources_released && registry_erased;
+   };
+   auto waiters = std::vector<std::future<bool>>{};
+   for (auto index = 0; index < 8; ++index) {
+      waiters.push_back(boost::asio::co_spawn(context, wait(), boost::asio::use_future));
+   }
+   context.poll();
+   native_closed = true;
+   resources_released = true;
+   registry_erased = true;
+   context.poll();
+   for (auto& waiter : waiters) {
+      BOOST_CHECK(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   }
+
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   context.poll();
+   for (auto& waiter : waiters) {
+      BOOST_REQUIRE(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+      BOOST_TEST(waiter.get());
+   }
+   BOOST_TEST(!retirement.complete_terminal(ticket));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_wait_observes_quarantine_before_subscription) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::in_flight);
+   auto wait = retirement.async_wait_not_in_flight();
+   retirement.quarantine();
+   auto completed = boost::asio::co_spawn(context, std::move(wait), boost::asio::use_future);
+   context.poll();
+   BOOST_REQUIRE(completed.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(completed.get());
+   BOOST_TEST(!retirement.terminal());
+   BOOST_CHECK(retirement.begin_close(true) == close_start::started);
+   BOOST_CHECK(retirement.begin_close(true) == close_start::in_flight);
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_TEST(retirement.complete_terminal(ticket));
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_wakes_subscribers_and_rechecks_new_owner) {
+   auto context = boost::asio::io_context{};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   auto first = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   BOOST_CHECK(first.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   retirement.quarantine();
+   context.poll();
+   BOOST_REQUIRE(first.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(first.get());
+   BOOST_TEST(!retirement.terminal());
+
+   context.restart();
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   auto second = boost::asio::co_spawn(context, retirement.async_wait_not_in_flight(), boost::asio::use_future);
+   context.poll();
+   retirement.quarantine();
+   // A new owner can win before an already notified coroutine resumes.
+   BOOST_REQUIRE(retirement.begin_close(true) == close_start::started);
+   context.poll();
+   BOOST_CHECK(second.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   auto ticket = detail::session_teardown::ticket{};
+   BOOST_REQUIRE(retirement.complete_terminal(ticket));
+   context.poll();
+   BOOST_REQUIRE(second.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
+   BOOST_CHECK_NO_THROW(second.get());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_retirement_quarantine_wakes_parallel_retries_with_one_owner) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto retirement = detail::session_retirement{};
+   using close_start = detail::session_retirement::close_start;
+   BOOST_REQUIRE(retirement.track(teardown.track()));
+   BOOST_REQUIRE(retirement.begin_close(false) == close_start::started);
+
+   auto entered = std::atomic_size_t{0};
+   auto owners = std::atomic_size_t{0};
+   auto finish_retry = forge::asio::notification{};
+   auto retry = [&]() -> boost::asio::awaitable<bool> {
+      entered.fetch_add(1, std::memory_order_release);
+      for (;;) {
+         const auto start = retirement.begin_close(true);
+         if (start == close_start::in_flight) {
+            co_await retirement.async_wait_not_in_flight();
+            continue;
+         }
+         if (start == close_start::terminal) {
+            co_return true;
+         }
+         if (start != close_start::started) {
+            co_return false;
+         }
+         owners.fetch_add(1, std::memory_order_release);
+         co_await finish_retry.async_wait(0);
+         auto ticket = detail::session_teardown::ticket{};
+         co_return retirement.complete_terminal(ticket);
+      }
+   };
+   auto waiters = std::vector<std::future<bool>>{};
+   for (auto index = 0; index < 8; ++index) {
+      waiters.push_back(boost::asio::co_spawn(runtime.context(), retry(), boost::asio::use_future));
+   }
+   const auto all_entered = wait_for_count(entered, 8);
+   retirement.quarantine();
+   const auto retry_started = wait_for_count(owners, 1);
+   BOOST_TEST(all_entered);
+   BOOST_TEST(retry_started);
+   BOOST_TEST(!retirement.tracked());
+   BOOST_TEST(!retirement.terminal());
+   for (auto& waiter : waiters) {
+      BOOST_CHECK(waiter.wait_for(std::chrono::seconds{0}) == std::future_status::timeout);
+   }
+   finish_retry.notify();
+   auto all_ready = true;
+   for (auto& waiter : waiters) {
+      if (waiter.wait_for(std::chrono::seconds{2}) != std::future_status::ready) {
+         all_ready = false;
+      }
+   }
+   // A lost-wakeup failure must not leave workers accessing destroyed locals.
+   runtime.stop();
+   BOOST_REQUIRE(all_ready);
+   for (auto& waiter : waiters) {
+      BOOST_TEST(waiter.get());
+   }
+   BOOST_TEST(owners.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(retirement.terminal());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_staged_attempt_close_error_releases_resources_after_terminal_barrier) {

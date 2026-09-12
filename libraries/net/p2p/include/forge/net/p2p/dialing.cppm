@@ -1,5 +1,7 @@
 module;
 
+#include <boost/describe.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -55,5 +57,10 @@ struct dialing {
       black_hole_counter_status ipv6;
    };
 };
+
+BOOST_DESCRIBE_ENUM(dialing::black_hole_state, probing, allowed, blocked)
+BOOST_DESCRIBE_STRUCT(dialing::black_hole_counter_status, (),
+                      (enabled, state, peer_requests, outcomes, successes, next_probe_after))
+BOOST_DESCRIBE_STRUCT(dialing::black_hole_status, (), (udp, ipv6))
 
 } // namespace forge::net::p2p

@@ -45,6 +45,7 @@ module forge.net.p2p.node;
 
 import forge.exceptions;
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -250,13 +251,7 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
       stream_stop->request_stop();
    });
    const auto record_open_timeout = [&] {
-      if (session->direct_endpoint) {
-         store.mark_address_failure(peer, session->direct_endpoint->to_multiaddr(), path::kind::direct,
-                                    endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-         increment_direct_failure();
-      } else {
-         record_direct_failure(peer);
-      }
+      record_direct_session_failure(session);
    };
    record_path_attempt(path::kind::direct);
    try {
@@ -320,13 +315,7 @@ boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_on_dir
       session->closed = true;
       forget_session(session);
       if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
-         if (session->direct_endpoint) {
-            store.mark_address_failure(peer, session->direct_endpoint->to_multiaddr(), path::kind::direct,
-                                       endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-            increment_direct_failure();
-         } else {
-            record_direct_failure(peer);
-         }
+         record_direct_session_failure(session);
       }
       FORGE_THROW_CODE(kind, error.what());
    } catch (const boost::system::system_error& error) {
@@ -361,11 +350,20 @@ node::impl::open_protocol_direct_with_context(const peer_id& peer, const protoco
    const auto started = std::chrono::steady_clock::now();
    auto last_kind = std::optional<exceptions::code>{};
    auto last_message = std::string{};
-   for (std::size_t attempt = 0; attempt < max_direct_endpoints; ++attempt) {
+   // A stale cached connection gets one fresh bounded dial, not a nested
+   // max_direct_endpoints-squared set of transport attempts.
+   auto cached = session_for_path(peer, path::kind::direct);
+   const auto acquisitions = cached ? 2U : 1U;
+   for (std::size_t attempt = 0; attempt < acquisitions; ++attempt) {
       const auto remaining = remaining_timeout(started, timeout, "P2P protocol open");
-      auto session =
-          co_await ensure_direct_session(peer, remaining, max_direct_endpoints, direct_attempt_timeout, cancellation);
-      const auto open_timeout = attempt_timeout(remaining, direct_attempt_timeout, "P2P protocol open direct attempt");
+      auto session = std::move(cached);
+      if (!session) {
+         session = co_await ensure_direct_session(
+             peer, remaining, max_direct_endpoints, direct_attempt_timeout, cancellation);
+      }
+      const auto open_timeout = attempt_timeout(
+          remaining_timeout(started, timeout, "P2P protocol open"),
+          direct_attempt_timeout, "P2P protocol open direct attempt");
       try {
          auto selected = co_await open_protocol_on_direct_session(peer, protocol, session, open_timeout, cancellation);
          co_return opened_direct_stream{

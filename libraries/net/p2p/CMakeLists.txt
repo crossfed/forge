@@ -114,6 +114,7 @@ add_library(
    node_impl_pubsub_inbound.cpp
    node_impl_streams.cpp
    node_impl_sessions.cpp
+   node_impl_dialing.cpp
    node_impl_relay.cpp
    node_impl_dht.cpp
    node_impl_dht_maintenance.cpp

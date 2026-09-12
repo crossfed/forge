@@ -3881,6 +3881,13 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
 
    const auto snapshot = diagnostics->snapshot();
    BOOST_TEST(snapshot.network.local_peer.to_string() == client_p2p->local_peer().to_string());
+   BOOST_TEST(snapshot.black_holes.udp.enabled);
+   BOOST_TEST(snapshot.black_holes.ipv6.enabled);
+   BOOST_TEST(snapshot.black_holes.udp.peer_requests == 0U);
+   BOOST_TEST(snapshot.black_holes.ipv6.peer_requests == 0U);
+   const auto bounded_snapshot = diagnostics->snapshot(forge::net::p2p::diagnostics::options{.max_peers = 0});
+   BOOST_TEST(bounded_snapshot.black_holes.udp.enabled == snapshot.black_holes.udp.enabled);
+   BOOST_TEST(bounded_snapshot.black_holes.ipv6.enabled == snapshot.black_holes.ipv6.enabled);
    BOOST_TEST(snapshot.metrics.active_sessions >= 1U);
    BOOST_TEST(snapshot.resources.system.outbound_connections >= 1U);
    BOOST_REQUIRE(!snapshot.sessions.empty());

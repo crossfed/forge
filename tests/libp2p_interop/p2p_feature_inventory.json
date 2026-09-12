@@ -54,10 +54,12 @@
   "public_surface_snapshots": {
     "net.p2p.node": {
       "owner": "net.p2p.node",
-      "module_count": 28,
+      "module_count": 30,
       "modules": [
+        "forge.net.p2p.address_resolution",
         "forge.net.p2p.connection_gater", "forge.net.p2p.dht",        "forge.net.p2p.dht.record_store",
         "forge.net.p2p.diagnostics",
+        "forge.net.p2p.dialing",
         "forge.net.p2p.discovery",  "forge.net.p2p.endpoint",         "forge.net.p2p.envelope",
         "forge.net.p2p.exceptions", "forge.net.p2p.hole_punch",       "forge.net.p2p.identify",
         "forge.net.p2p.identity",   "forge.net.p2p.ipns",             "forge.net.p2p.lifecycle",
@@ -69,6 +71,7 @@
       ],
       "headers": [],
       "module_features": {
+        "forge.net.p2p.address_resolution": [ "resource.dials", "state.peer_store" ],
         "forge.net.p2p.connection_gater": [ "security.connection_gater" ],
         "forge.net.p2p.dht": [ "protocol.kademlia", "state.kademlia_routing_table" ],
         "forge.net.p2p.dht.record_store": [ "protocol.kademlia" ],
@@ -79,6 +82,7 @@
         "forge.net.p2p.discovery": [
           "protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "protocol.relay", "lifecycle.discovery"
         ],
+        "forge.net.p2p.dialing": [ "resource.dials", "transport.direct_quic", "transport.tcp_yamux" ],
         "forge.net.p2p.endpoint": [ "transport.direct_quic", "transport.tcp_yamux" ],
         "forge.net.p2p.envelope": [ "identity.secure_transport_authentication", "protocol.relay" ],
         "forge.net.p2p.exceptions": [
@@ -165,7 +169,7 @@
         ]
       },
       "header_features": {},
-      "sha256": "d99ae81810a650dc06ca746fa9b84c635cb73c06ddba0a0db9d84905f5009df3",
+      "sha256": "64f3a6ccd565d99c0fb3faea4ad6986566e1484b280e681b2059f01a868bbd42",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -212,7 +216,7 @@
         "forge.plugins.p2p.node.types": [ "plugin.node" ]
       },
       "header_features": {},
-      "sha256": "62fae922193a4f6cdcf2fa6b16a12bd65a7be897fe739f2c6d52d883574a09b3",
+      "sha256": "aa4e6b99d7843a3392de3e92c4a6bc04545411e43d9284353192e580fd2a9195",
       "feature_ids": [ "plugin.node" ]
     },
     "plugin.p2p.resolver": {
@@ -271,7 +275,7 @@
         "forge.plugins.p2p.diagnostics.types": [ "plugin.diagnostics" ]
       },
       "header_features": {},
-      "sha256": "003937279e6c1660d27a9bf6d402bba070adb308e10d42c6dbea6a7b53444542",
+      "sha256": "7853971093c78a8855410568e8a6850826b7c216729588621f00e1397a942cad",
       "feature_ids": [ "plugin.diagnostics" ]
     }
   },

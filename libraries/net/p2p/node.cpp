@@ -47,6 +47,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.gate;
+import forge.asio.notification;
 import forge.crypto.symmetric.chacha20_poly1305;
 import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
@@ -520,6 +521,8 @@ node::metrics_snapshot node::metrics() const {
 }
 
 forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagnostics::options options) const {
+   // Snapshot the detector under its own lock before entering the node mutex.
+   const auto black_holes = impl_->dial_black_hole_status();
    const auto persistence = impl_->store.persistence_state();
    const auto lifecycle = lifecycle_state();
    const auto retained_identify_attempts = impl_->identify_service.retained();
@@ -581,6 +584,7 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
        .stopped = impl_->stopped,
    };
    out.lifecycle = lifecycle;
+   out.black_holes = black_holes;
    out.effective_limits = impl_->resources.configured_limits();
    out.metrics = impl_->metrics_value;
    out.metrics.gater_peer_dial_rejections = impl_->connection_gate->denied(detail::connection_gater_stage::peer_dial);
@@ -745,21 +749,17 @@ boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::
 
 boost::asio::awaitable<node::session_info> node::async_connect(forge::net::p2p::endpoint endpoint,
                                                                node::connect_options options) {
-   validate_operation_timeout(options.timeout, "P2P connect timeout");
-   auto self = impl_;
-   self->require_private_direct_tcp(endpoint, "connect");
-   if (self->private_network_enabled()) {
-      if (options.relay_peer) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options,
-                               "P2P private-network connect does not permit a relay peer");
-      }
-      options.allow_relay = false;
-      options.allow_hole_punch = false;
-   }
-   self->record_path_attempt(path::kind::direct);
-   auto session = co_await self->connect_direct(std::move(endpoint), std::move(options));
-   co_await self->identify_session(session);
-   co_return self->session_info_for(session);
+   impl_->require_private_direct_tcp(endpoint, "connect");
+   return async_connect(endpoint.to_multiaddr(), std::move(options));
+}
+
+boost::asio::awaitable<node::session_info> node::async_connect(forge::multiformats::multiaddr address) {
+   return async_connect(std::move(address), connect_options{});
+}
+
+boost::asio::awaitable<node::session_info> node::async_connect(forge::multiformats::multiaddr address,
+                                                               node::connect_options options) {
+   return impl::async_connect_owned(impl_, std::move(address), std::move(options));
 }
 
 boost::asio::awaitable<void> node::async_request_peer_exchange(peer_id peer) {
